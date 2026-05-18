@@ -20,6 +20,9 @@ package com.aresstack.windirectml.runtime.kernels;
  *       {@code -Dwindirectml.directml.dll=...} ein neueres
  *       Microsoft.AI.DirectML-Redistributable einhängen.
  *       GPU-getestet</li>
+ *   <li>{@link SoftmaxKernel} – ✅ {@link DirectMlSoftmaxKernel}
+ *       ({@code DML_OPERATOR_ACTIVATION_SOFTMAX}, Enum-ID 48, FL 2.0),
+ *       läuft auf jeder ausgelieferten {@code DirectML.dll}. GPU-getestet</li>
  *   <li>{@link AttentionKernel} – ⏳ nächster Sprint</li>
  *   <li>{@link MeanPoolingKernel} – ⏳ Encoder-Pflicht</li>
  *   <li>{@link L2NormalizeKernel} – ⏳ Encoder-Pflicht</li>
@@ -39,6 +42,12 @@ public interface KernelRegistry {
     LayerNormKernel layerNorm();
 
     GeluKernel gelu();
+
+    /**
+     * Row-wise Softmax über die innerste Tensor-Achse. Baustein für
+     * {@link AttentionKernel} sowie für Reranker-Logit-Heads.
+     */
+    SoftmaxKernel softmax();
 
     AttentionKernel attention();
 

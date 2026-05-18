@@ -187,8 +187,9 @@ public final class DirectMlGeluKernel implements GeluKernel, AutoCloseable {
                 DirectMlBindings.bindOutputs(bt, 1, outArr);
             }
 
+            MemorySegment initTmp = MemorySegment.NULL;
             if (initTempSize > 0) {
-                MemorySegment initTmp = D3D12Bindings.createDefaultBuffer(dev, initTempSize, arena);
+                initTmp = D3D12Bindings.createDefaultBuffer(dev, initTempSize, arena);
                 MemorySegment bb = DirectMlBindings.allocBufferBinding(arena, initTmp, 0, initTempSize);
                 MemorySegment bd = DirectMlBindings.allocBindingDesc(arena,
                         DirectMlBindings.DML_BINDING_TYPE_BUFFER, bb);
@@ -207,6 +208,7 @@ public final class DirectMlGeluKernel implements GeluKernel, AutoCloseable {
             } finally {
                 if (cl != null) DxgiBindings.release(cl);
                 DxgiBindings.release(alloc);
+                if (!initTmp.equals(MemorySegment.NULL)) DxgiBindings.release(initTmp);
             }
         } finally {
             DxgiBindings.release(bt);

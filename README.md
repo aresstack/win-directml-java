@@ -231,6 +231,6 @@ related vs. unrelated sentences.
     `DirectMlMiniLmEncoder.embed(t)` cosine > 0.99.
 11. ⏳ E5 and JinaBERT encoders on the same runtime core.
 12. ⏳ Reranker encoder support.
-12. ⏳ Additional decoder LLM families after the encoder path is stable.
+13. ⏳ Additional decoder LLM families after the encoder path is stable.
 
 Issue backlog: [`win-directml-java-issues.md`](win-directml-java-issues.md).
