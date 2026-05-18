@@ -19,11 +19,17 @@ import java.nio.FloatBuffer;
  * {@code UNORDERED_ACCESS}-Flag, sodass DirectML-Operatoren den Buffer
  * direkt als Tensor-Backing verwenden können.
  * <p>
- * Upload/Download laufen über die bestehenden, von der Phi-3- und
- * MNIST-Pipeline genutzten Helfer
- * {@link D3D12Bindings#uploadFloats(MemorySegment, MemorySegment, MemorySegment, float[], Arena)}
- * bzw.
- * {@link D3D12Bindings#readbackFloats(MemorySegment, MemorySegment, MemorySegment, int, Arena)}.
+ * <b>Resource-State-Invariante:</b> Direkt nach jeder Public-Operation
+ * ({@link #upload(CpuTensor)}, {@link #download(CpuTensor)}) ist die
+ * D3D12-Resource im Zustand {@code D3D12_RESOURCE_STATE_UNORDERED_ACCESS} –
+ * dem Steady-State, in dem DirectML-Kernel binden. Frisch allokierte Buffer
+ * starten im Zustand {@code COMMON}; der erste {@code upload()} transitioniert
+ * von dort nach {@code UAV}.
+ * <p>
+ * Upload/Download laufen über die expliziten Helfer
+ * {@link D3D12Bindings#uploadFloatsExplicit} bzw.
+ * {@link D3D12Bindings#readbackFloatsExplicit}, damit der Debug Layer beim
+ * ersten echten Kernel-Dispatch nicht über implizite Promotion stolpert.
  * <p>
  * Aktuell wird nur {@link TensorDataType#FLOAT32} produktiv unterstützt;
  * weitere Datentypen folgen, sobald die Kernel sie benötigen.
@@ -38,6 +44,8 @@ public final class DefaultGpuBuffer implements GpuBuffer {
     private final long sizeInBytes;
     private final BufferUsage usage;
 
+    /** Aktueller D3D12-Resource-State. Wird von upload/download fortgeschrieben. */
+    private int currentState;
     private boolean closed = false;
 
     DefaultGpuBuffer(MemorySegment device,
@@ -50,6 +58,7 @@ public final class DefaultGpuBuffer implements GpuBuffer {
         this.resource = resource;
         this.sizeInBytes = sizeInBytes;
         this.usage = usage;
+        this.currentState = D3D12Bindings.D3D12_RESOURCE_STATE_COMMON;
     }
 
     /**
@@ -91,7 +100,14 @@ public final class DefaultGpuBuffer implements GpuBuffer {
         }
         float[] floats = toFloatArray(source.data(), (int) source.shape().elementCount());
         try (Arena scratch = Arena.ofConfined()) {
-            D3D12Bindings.uploadFloats(device, queue, resource, floats, scratch);
+            // Explicit transitions: currentState → COPY_DEST → UAV. After upload we
+            // park the resource in UAV, the steady-state for DirectML dispatches.
+            D3D12Bindings.uploadFloatsExplicit(
+                    device, queue, resource, floats,
+                    currentState,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    scratch);
+            currentState = D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
         } catch (WindowsNativeException e) {
             throw new RuntimeException("DefaultGpuBuffer.upload failed", e);
         }
@@ -111,7 +127,14 @@ public final class DefaultGpuBuffer implements GpuBuffer {
         }
         int n = (int) destination.shape().elementCount();
         try (Arena scratch = Arena.ofConfined()) {
-            float[] out = D3D12Bindings.readbackFloats(device, queue, resource, n, scratch);
+            // Explicit transitions: currentState → COPY_SOURCE → UAV. After download
+            // the buffer remains in UAV so a subsequent kernel can re-use it.
+            float[] out = D3D12Bindings.readbackFloatsExplicit(
+                    device, queue, resource, n,
+                    currentState,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    scratch);
+            currentState = D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
             ByteBuffer data = destination.data();
             data.order(ByteOrder.LITTLE_ENDIAN);
             FloatBuffer view = data.duplicate().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
@@ -120,6 +143,25 @@ public final class DefaultGpuBuffer implements GpuBuffer {
         } catch (WindowsNativeException e) {
             throw new RuntimeException("DefaultGpuBuffer.download failed", e);
         }
+    }
+
+    /**
+     * Aktuell bekannter D3D12-Resource-State dieses Buffers.
+     * <p>
+     * Kernel-Implementierungen, die den Buffer direkt einbinden, sollten diesen
+     * Wert als Ausgangspunkt für eigene Barriers nutzen.
+     */
+    public int currentResourceState() {
+        return currentState;
+    }
+
+    /**
+     * Setze den aktuellen D3D12-Resource-State extern. Wird von Kernel-Code
+     * verwendet, der den Buffer in einem eigenen Command-List-Recording
+     * weiter transitioniert.
+     */
+    public void setCurrentResourceState(int state) {
+        this.currentState = state;
     }
 
     @Override

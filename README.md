@@ -49,7 +49,7 @@ directml-sidecar           JSON-RPC 2.0 sidecar entry point + dispatcher + handl
 | JSON-RPC protocol                                                | ✅ formalized (`directml-sidecar/PROTOCOL.md`)                                  |
 | `health`, `summarize`, `shutdown`, `cancel`                      | ✅ wired                                                                        |
 | `embed`                                                          | ✅ wired – CPU reference `MiniLM` encoder returns real 384-dim vectors          |
-| Runtime-Core API (D3D12/DML context, Tensor, GpuBuffer, Kernels) | ✅ interfaces extracted (`runtime/` package), DirectML kernel impls pending     |
+| Runtime-Core API (D3D12/DML context, Tensor, GpuBuffer, Kernels) | 🟡 `DirectMlContextImpl` + `DefaultGpuBuffer` live (roundtrip-tested on real GPU); DirectML kernel impls pending |
 | SafetensorsReader                                                | ✅ implemented + tested (F32/F16/BF16/I64/I32/I8/U8, lenient on unknown dtypes) |
 | WordPieceTokenizer                                               | ✅ implemented + tested (BERT-uncased family)                                   |
 | Mean Pooling + L2                                                | ✅ CPU reference impl + tests                                                   |
@@ -122,10 +122,14 @@ related vs. unrelated sentences.
 1. ✅ Phi-3 summarizer sidecar.
 2. ✅ Stable JSON-RPC 2.0 protocol over stdin/stdout.
 3. ✅ CPU reference encoder for `all-MiniLM-L6-v2` (validated via cosine reference tests).
-4. ⏳ Migrate MiniLM forward pass to DirectML kernels (`LinearKernel`, `LayerNormKernel`, `GeluKernel`,
-   `AttentionKernel`).
-5. ⏳ E5 and JinaBERT encoders on the same runtime core.
-6. ⏳ Reranker encoder support.
-7. ⏳ Additional decoder LLM families after the encoder path is stable.
+4. ✅ Concrete `DirectMlContextImpl` + `DefaultGpuBuffer` with explicit D3D12 state machine
+   (`COMMON → COPY_DEST → UAV → COPY_SOURCE → UAV`), validated by GPU upload/download roundtrip test.
+5. ⏳ `DirectMlLinearKernel` (DML_GEMM_OPERATOR_DESC) – first real DirectML operator.
+6. ⏳ Migrate MiniLM forward pass to DirectML kernels (`LayerNormKernel`, `GeluKernel`,
+   `AttentionKernel`); reference test `CpuMiniLmEncoder.embed(t)` vs. `DirectMlMiniLmEncoder.embed(t)`
+   cosine > 0.99.
+7. ⏳ E5 and JinaBERT encoders on the same runtime core.
+8. ⏳ Reranker encoder support.
+9. ⏳ Additional decoder LLM families after the encoder path is stable.
 
 Issue backlog: [`win-directml-java-issues.md`](win-directml-java-issues.md).

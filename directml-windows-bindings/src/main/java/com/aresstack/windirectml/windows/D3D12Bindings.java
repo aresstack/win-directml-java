@@ -592,12 +592,45 @@ public final class D3D12Bindings {
 
     /**
      * Upload float data from CPU to a GPU default-heap buffer via an upload buffer.
-     * All intermediate resources (upload buffer, command allocator, command list)
-     * are released even if an error occurs.
+     * <p>
+     * Backwards-compatible legacy entry point used by the Phi-3 GPU pipeline.
+     * The destination is assumed to be in {@code COMMON} state on entry; it
+     * decays back to {@code COMMON} after the copy (no explicit transition
+     * to {@code UNORDERED_ACCESS}). New code should use
+     * {@link #uploadFloatsExplicit(MemorySegment, MemorySegment, MemorySegment, float[], int, int, Arena)}
+     * which makes the resource-state transitions explicit.
      */
     public static void uploadFloats(MemorySegment device, MemorySegment queue,
                                      MemorySegment dstResource, float[] data,
                                      Arena arena) throws WindowsNativeException {
+        uploadFloatsInternal(device, queue, dstResource, data,
+                /*stateBefore*/ -1, /*stateAfter*/ -1, arena);
+    }
+
+    /**
+     * Upload float data to {@code dstResource} with explicit resource-state
+     * transitions around the copy.
+     * <p>
+     * Lifecycle recorded on the command list:
+     * <pre>
+     *   stateBefore → COPY_DEST     (only if stateBefore != COPY_DEST)
+     *   CopyBufferRegion(upload → dst)
+     *   COPY_DEST → stateAfter      (only if stateAfter != COPY_DEST)
+     * </pre>
+     * Pass {@code -1} for {@code stateBefore} / {@code stateAfter} to skip the
+     * respective transition (legacy / implicit-promotion path).
+     */
+    public static void uploadFloatsExplicit(MemorySegment device, MemorySegment queue,
+                                             MemorySegment dstResource, float[] data,
+                                             int stateBefore, int stateAfter,
+                                             Arena arena) throws WindowsNativeException {
+        uploadFloatsInternal(device, queue, dstResource, data, stateBefore, stateAfter, arena);
+    }
+
+    private static void uploadFloatsInternal(MemorySegment device, MemorySegment queue,
+                                              MemorySegment dstResource, float[] data,
+                                              int stateBefore, int stateAfter,
+                                              Arena arena) throws WindowsNativeException {
         long sizeBytes = (long) data.length * Float.BYTES;
         MemorySegment uploadBuf = createUploadBuffer(device, sizeBytes, arena);
         MemorySegment allocator = null;
@@ -609,10 +642,16 @@ public final class D3D12Bindings {
             MemorySegment.copy(data, 0, mapped, ValueLayout.JAVA_FLOAT, 0, data.length);
             unmapResource(uploadBuf);
 
-            // Record copy command
+            // Record copy command (with optional explicit barriers)
             allocator = createCommandAllocator(device, D3D12_COMMAND_LIST_TYPE_DIRECT, arena);
             cmdList = createCommandList(device, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, arena);
+            if (stateBefore >= 0 && stateBefore != D3D12_RESOURCE_STATE_COPY_DEST) {
+                transitionBarrier(cmdList, dstResource, stateBefore, D3D12_RESOURCE_STATE_COPY_DEST, arena);
+            }
             copyBufferRegion(cmdList, dstResource, 0, uploadBuf, 0, sizeBytes);
+            if (stateAfter >= 0 && stateAfter != D3D12_RESOURCE_STATE_COPY_DEST) {
+                transitionBarrier(cmdList, dstResource, D3D12_RESOURCE_STATE_COPY_DEST, stateAfter, arena);
+            }
             executeAndWait(device, queue, cmdList, arena);
         } finally {
             if (cmdList != null) DxgiBindings.release(cmdList);
@@ -623,11 +662,42 @@ public final class D3D12Bindings {
 
     /**
      * Read float data from a GPU default-heap buffer to CPU via a readback buffer.
-     * All intermediate resources are released even if an error occurs.
+     * <p>
+     * Backwards-compatible legacy entry point. Assumes the source is in
+     * {@code UNORDERED_ACCESS} on entry and leaves it in {@code UNORDERED_ACCESS}.
+     * New code should use {@link #readbackFloatsExplicit}.
      */
     public static float[] readbackFloats(MemorySegment device, MemorySegment queue,
                                           MemorySegment srcResource, int numFloats,
                                           Arena arena) throws WindowsNativeException {
+        return readbackFloatsInternal(device, queue, srcResource, numFloats,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS, arena);
+    }
+
+    /**
+     * Read float data from {@code srcResource} with explicit resource-state
+     * transitions around the copy.
+     * <p>
+     * Lifecycle recorded on the command list:
+     * <pre>
+     *   stateBefore → COPY_SOURCE     (only if stateBefore != COPY_SOURCE)
+     *   CopyBufferRegion(src → readback)
+     *   COPY_SOURCE → stateAfter      (only if stateAfter != COPY_SOURCE)
+     * </pre>
+     */
+    public static float[] readbackFloatsExplicit(MemorySegment device, MemorySegment queue,
+                                                  MemorySegment srcResource, int numFloats,
+                                                  int stateBefore, int stateAfter,
+                                                  Arena arena) throws WindowsNativeException {
+        return readbackFloatsInternal(device, queue, srcResource, numFloats,
+                stateBefore, stateAfter, arena);
+    }
+
+    private static float[] readbackFloatsInternal(MemorySegment device, MemorySegment queue,
+                                                   MemorySegment srcResource, int numFloats,
+                                                   int stateBefore, int stateAfter,
+                                                   Arena arena) throws WindowsNativeException {
         long sizeBytes = (long) numFloats * Float.BYTES;
         MemorySegment readbackBuf = createReadbackBuffer(device, sizeBytes, arena);
         MemorySegment allocator = null;
@@ -637,11 +707,15 @@ public final class D3D12Bindings {
             allocator = createCommandAllocator(device, D3D12_COMMAND_LIST_TYPE_DIRECT, arena);
             cmdList = createCommandList(device, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, arena);
 
-            transitionBarrier(cmdList, srcResource,
-                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE, arena);
+            if (stateBefore >= 0 && stateBefore != D3D12_RESOURCE_STATE_COPY_SOURCE) {
+                transitionBarrier(cmdList, srcResource,
+                        stateBefore, D3D12_RESOURCE_STATE_COPY_SOURCE, arena);
+            }
             copyBufferRegion(cmdList, readbackBuf, 0, srcResource, 0, sizeBytes);
-            transitionBarrier(cmdList, srcResource,
-                    D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, arena);
+            if (stateAfter >= 0 && stateAfter != D3D12_RESOURCE_STATE_COPY_SOURCE) {
+                transitionBarrier(cmdList, srcResource,
+                        D3D12_RESOURCE_STATE_COPY_SOURCE, stateAfter, arena);
+            }
             executeAndWait(device, queue, cmdList, arena);
 
             MemorySegment mapped = mapResource(readbackBuf, arena);
