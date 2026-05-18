@@ -39,6 +39,8 @@ public final class DirectMlBindings {
     public static final int DML_OPERATOR_BATCH_NORMALIZATION   = 29;
     public static final int DML_OPERATOR_ACTIVATION_RELU       = 44;
     public static final int DML_OPERATOR_CONVOLUTION            = 53;
+    public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION  = 39;
+    public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION1 = 50;
     public static final int DML_OPERATOR_GEMM                   = 54;
     public static final int DML_OPERATOR_MAX_POOLING             = 58;
 

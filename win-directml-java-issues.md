@@ -932,3 +932,34 @@ Danach beginnt die Encoder-Schiene:
 17. Mean Pooling und L2-Normalisierung implementieren
 18. embed-Methode im Sidecar anbinden
 ```
+---
+## Offen: DirectMlLayerNormKernel – CreateOperator gibt E_INVALIDARG
+**Status:** WIP. Kernel-Gerüst (Konstruktor, Operator-Compile, Binding-Table,
+Dispatch, Initializer-Pass) ist vollständig, Test ist mit `@Disabled`
+markiert.
+**Beobachtung:** `IDMLDevice::CreateOperator` lehnt das aktuelle
+`DML_MEAN_VARIANCE_NORMALIZATION_OPERATOR_DESC`/`...1_DESC` mit
+`HRESULT 0x80070057 (E_INVALIDARG)` ab – sowohl für rank-2 `[M,H]` mit
+Axes=[1] als auch rank-4 Layouts `[M,1,1,H]`/`[M,1,H,1]` mit
+CrossChannel=TRUE/FALSE. Scale/Bias als NULL oder als `[1,1,1,H]` ändert
+nichts. `DML_OPERATOR_GEMM` auf demselben Stack funktioniert einwandfrei
+(siehe `DirectMlLinearKernelTest`).
+**Vermutete Ursachen:**
+1. Feld-Layout des Operator-Desc-Structs ist subtil falsch (z. B. `BOOL`
+   = 4 Bytes vs Padding-Annahmen).
+2. DML-Version dieses Treibers unterstützt MVN1 nicht (Operator-ID 50);
+   MVN0 (ID 39) wird zwar als `E_INVALIDARG` abgewiesen, könnte aber an
+   Scale/Bias-Shape-Regeln scheitern.
+3. `DML_BUFFER_TENSOR_DESC.TotalTensorSizeInBytes` muss auf 4-Byte- und
+   gleichzeitig auf physisch zusammenhängende Stride-Berechnung passen.
+**Nächste Schritte:**
+1. `D3D12Bindings.createDebugDevice` einbinden und `DML_CREATE_DEVICE_FLAG_DEBUG`
+   im DML-Init-Pfad aktivieren, damit der DML-Debug-Layer die genaue Feld-
+   Validierungsmeldung in `OutputDebugString` schreibt.
+2. Cross-Check gegen das offizielle `DirectMLHelloWorld`-Sample
+   (Microsoft DirectML samples) – speziell wie dort MVN/LayerNorm gebaut wird.
+3. Falls Treiber MVN1 nicht kennt: LayerNorm als Komposition von
+   `REDUCE_MEAN` + `SUBTRACT` + `REDUCE_VARIANCE` + `RSQRT` +
+   `MULTIPLY` + `ADD` bauen.
+Solange der Fehler offen ist, kann der Encoder-Pfad LayerNorm als CPU-Fallback
+führen.

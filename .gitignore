@@ -24,3 +24,5 @@ application.yml
 
 # Downloaded models (use scripts/download-minilm.ps1 to fetch)
 model/all-MiniLM-L6-v2/
+
+.commitmsg.tmp
