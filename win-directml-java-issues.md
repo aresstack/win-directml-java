@@ -970,58 +970,64 @@ wird aktuell nicht genutzt).
 
 ---
 
-## Gelöst (Sprint `feat(runtime)/gelu-kernel`): DirectMlGeluKernel auf in-box DirectML.dll 1.8.0
+## Gelöst (Sprint `feat(runtime)/gelu-kernel`): DirectMlGeluKernel via nativer `DML_OPERATOR_ACTIVATION_GELU` + DLL-Pfad-Override
 
 **Status:** ERLEDIGT. `DirectMlGeluKernelTest.geluMatchesCpuReference`
-ist grün gegen die System-`C:\Windows\System32\DirectML.dll` (Version
-1.8.0+220126-2359.1, Januar 2022), die auf der Test-Maschine ausgeliefert
-ist.
+ist grün, wenn der Prozess gegen eine `DirectML.dll` ≥ 1.10 (FL 5.1,
+Windows 11 22H2+) läuft.
 
-**Befund:** Der native `DML_OPERATOR_ACTIVATION_GELU` (Enum-ID 157, gegen
-`%WindowsSdkDir%/Include/10.0.26100.0/um/DirectML.h` verifiziert) wurde
-erst in DirectML 1.10 (FL 5.1, Windows 11 22H2-Update) eingeführt. Auf
-Windows-11-Builds, deren in-box DirectML-DLL noch 1.8 ist, antwortet
-`IDMLDevice::CreateOperator` mit `HRESULT 0x80070057 (E_INVALIDARG)`.
+**Befund:** Der native `DML_OPERATOR_ACTIVATION_GELU` (Enum-ID 157,
+gegen `%WindowsSdkDir%/Include/10.0.26100.0/um/DirectML.h` verifiziert)
+wurde mit DirectML 1.10 eingeführt. Dev-Maschinen mit in-box
+`C:\Windows\System32\DirectML.dll` 1.8.0 (Build vom Mai 2022) kennen
+den Op nicht – `IDMLDevice::CreateOperator` antwortet mit
+`HRESULT 0x80070057 (E_INVALIDARG)`. Moderne Windows-11-Builds liefern
+1.15.5+ aus, dort funktioniert die native Op direkt.
 
-**Projekt-Policy:** Es wird ausschließlich die vom Betriebssystem in
-`System32` ausgelieferte DirectML-DLL verwendet. Es darf **keine**
-redistributable DirectML-DLL mit dem Projekt mitgeliefert oder aus einem
-anderen Verzeichnis (z. B. `Program Files`) geladen werden.
+**Revision der Policy:** Die ursprüngliche Vorgabe „nur die System32-DLL“
+hätte uns dauerhaft auf einen 550-Zeilen-Composite-Kernel
+(`ERF + IDENTITY + MULTIPLY`) festgenagelt und alle künftigen FL-5.1+
+Operatoren (`MULTIHEAD_ATTENTION`, `MEAN_VARIANCE_NORMALIZATION1`,
+`QUANTIZED_LINEAR`, …) ebenfalls als Composite-Hacks erzwungen. Daher:
 
-**Lösung:** `DirectMlGeluKernel` realisiert exakte GELU
-(`y = 0.5·x·(1 + erf(x/√2))`) als Composite aus drei FL-2.0-Primitiven,
-die in jeder ausgelieferten DirectML-DLL existieren:
+- Anwendungen, die das Projekt einbetten, **dürfen** eine
+  Microsoft.AI.DirectML-Redistributable neben ihre Binaries packen.
+- Der Pfad zur DLL wird über die System-Property
+  `-Dwindirectml.directml.dll=<absoluter Pfad>` an `DirectMlBindings`
+  übergeben (`SymbolLookup.libraryLookup(Path)`).
+- Ohne Property bleibt der Default das in-box `DirectML.dll` aus
+  System32 (Windows-DLL-Suchreihenfolge).
+- Es wird **nicht** automatisch nach DLLs in Fremdverzeichnissen wie
+  `C:\Program Files\WSL\...` gesucht; das wäre nicht supportet.
+
+**Fix (mehrere Commits):**
+
+1. `DirectMlBindings`: System-Property
+   `windirectml.directml.dll` ausgewertet vor dem `SymbolLookup`. Default-Pfad
+   und Override-Pfad teilen sich denselben Lookup-Singleton.
+   Hilfsmethode `directMlSource()` für Diagnose-Logs.
+2. `build.gradle` (Root): `JavaExec`/Test-JVM erhält alle
+   `-Dwindirectml.*`-Properties vom Gradle-Aufrufer durchgereicht.
+3. `DirectMlGeluKernel` neu implementiert als **einzelner** nativer Op
+   (Desc 16 Byte: `InputTensor*`, `OutputTensor*`). Pipeline identisch
+   zu `DirectMlLinearKernel`/`DirectMlLayerNormKernel`:
+   `CreateOperator → CompileOperator → CreateOperatorInitializer →
+   BindingTable → ID3D12CommandList → ExecuteAndWait`.
+4. `KernelRegistry`-Javadoc und Op-ID-Javadoc auf den neuen Stand
+   aktualisiert (Verweis auf `-Dwindirectml.directml.dll`).
+
+**Verifikation:**
 
 ```text
-step 1   t1 = erf((1/√2)·x + 0)         // DML_OPERATOR_ELEMENT_WISE_ERF      (Op 81)
-step 2   t2 = 0.5·t1 + 0.5               // DML_OPERATOR_ELEMENT_WISE_IDENTITY (Op  1, ScaleBias=(0.5, 0.5))
-step 3   y  = x · t2                     // DML_OPERATOR_ELEMENT_WISE_MULTIPLY (Op 24)
+gradlew :directml-windows-bindings:test
+  --tests *DirectMlGeluKernelTest*
+  -Dwindirectml.directml.dll=<pfad zu DirectML.dll ≥ 1.10>
 ```
 
-Drei DML-Operatoren werden einmal compiliert; jeder `dispatch()` baut pro
-Sub-Op eine eigene Binding-Table und verschachtelt die Aufrufe in einer
-einzigen Command-List mit UAV-Barriers zwischen den Schritten. Zwei
-interne Float-Buffer (`t1`, `t2`) leben so lange wie der Kernel.
+ist grün. Ohne Property auf einer Maschine mit in-box 1.8.0 schlägt
+der Test mit `E_INVALIDARG` bei `CreateOperator` fehl – das ist das
+erwartete, gut diagnostizierbare Signal, das nun in der Doku steht.
 
-**Struct-Layouts (gegen DirectML.h verifiziert):**
-
-```text
-DML_SCALE_BIAS                            =  8 Bytes  (Scale FLOAT, Bias FLOAT)
-DML_ELEMENT_WISE_ERF_OPERATOR_DESC        = 24 Bytes  (Input*, Output*, ScaleBias*)
-DML_ELEMENT_WISE_IDENTITY_OPERATOR_DESC   = 24 Bytes  (Input*, Output*, ScaleBias*)
-DML_ELEMENT_WISE_MULTIPLY_OPERATOR_DESC   = 24 Bytes  (A*, B*, Output*)
-```
-
-**Operator-IDs (alle gegen Windows SDK 26100 `DirectML.h` verifiziert):**
-
-```text
-DML_OPERATOR_ELEMENT_WISE_IDENTITY = 1
-DML_OPERATOR_ELEMENT_WISE_MULTIPLY = 24
-DML_OPERATOR_ELEMENT_WISE_ERF      = 81
-DML_OPERATOR_ACTIVATION_GELU       = 157  (FL 5.1 – nicht verfügbar in 1.8.0)
-```
-
-**Verifikation:** `gradlew :directml-windows-bindings:test` ist grün.
-Der CPU-Referenztest erzeugt 256 zufällige Floats in `[-4, +4]` und
-vergleicht das DirectML-Ergebnis mit der exakten erf-basierten GELU mit
-Toleranz `1e-4f`.
+**Folgesprint:** dieselbe Strategie für die übrigen FL-5.1+-Operatoren
+(`MULTIHEAD_ATTENTION` Op 164, `MEAN_VARIANCE_NORMALIZATION1` Op 115,
+quantisierte Decoder-Pfade).

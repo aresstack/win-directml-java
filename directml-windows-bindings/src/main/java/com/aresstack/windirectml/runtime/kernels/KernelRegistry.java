@@ -14,8 +14,11 @@ package com.aresstack.windirectml.runtime.kernels;
  *   <li>{@link LayerNormKernel} – ✅ {@link DirectMlLayerNormKernel}
  *       ({@code DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION}, MVN0), GPU-getestet</li>
  *   <li>{@link GeluKernel} – ✅ {@link DirectMlGeluKernel}
- *       (komponiert aus FL-2.0-Primitiven ERF + IDENTITY + MULTIPLY,
- *       läuft auf jeder in-box {@code C:\Windows\System32\DirectML.dll}),
+ *       ({@code DML_OPERATOR_ACTIVATION_GELU}, Enum-ID 157, FL 5.1),
+ *       benötigt {@code DirectML.dll} ≥ 1.10 – auf älteren in-box
+ *       DLLs (1.8.0, Windows 11 RTM) per
+ *       {@code -Dwindirectml.directml.dll=...} ein neueres
+ *       Microsoft.AI.DirectML-Redistributable einhängen.
  *       GPU-getestet</li>
  *   <li>{@link AttentionKernel} – ⏳ nächster Sprint</li>
  *   <li>{@link MeanPoolingKernel} – ⏳ Encoder-Pflicht</li>

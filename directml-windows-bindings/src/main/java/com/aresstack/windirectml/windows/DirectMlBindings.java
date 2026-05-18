@@ -64,13 +64,10 @@ public final class DirectMlBindings {
     /**
      * Native exact GELU ({@code 0.5·x·(1+erf(x/√2))}). Requires
      * DML_FEATURE_LEVEL_5_1, i.e. an in-box {@code DirectML.dll} ≥ 1.10
-     * (Windows 11 22H2-Update). On older Windows 11 builds the shipping
-     * system DLL is 1.8.0 and does not know this op – {@code CreateOperator}
-     * returns {@code E_INVALIDARG}. The production {@code DirectMlGeluKernel}
-     * therefore does <b>not</b> use this op directly; it is composed from
-     * ERF + IDENTITY + MULTIPLY (all FL 2.0 primitives present in every
-     * Windows 11 system DLL). The constant is kept for documentation and
-     * for a future fast-path on newer in-box runtimes.
+     * (Windows 11 22H2-Update, May 2022). Modern Windows 11 builds ship
+     * 1.15.5+ which covers this op. Used directly by
+     * {@code DirectMlGeluKernel}; on hosts whose in-box DLL is older,
+     * point {@link #SYS_PROP_DIRECTML_DLL} at a bundled redistributable.
      */
     public static final int DML_OPERATOR_ACTIVATION_GELU = 157;
     /**
@@ -120,15 +117,68 @@ public final class DirectMlBindings {
             FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
                     ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS);
 
+    /**
+     * System property name for an optional absolute path to a
+     * {@code DirectML.dll}. When unset (the default), the binding loads the
+     * in-box {@code C:\Windows\System32\DirectML.dll} via the standard
+     * Windows DLL search order.
+     * <p>
+     * Use this to point at a Microsoft.AI.DirectML redistributable that you
+     * ship next to your application (e.g. {@code app/native/DirectML.dll}).
+     * The classic dev-machine in-box DLL ships as version 1.8.0 (May 2022)
+     * which predates GELU (FL 5.1). On a modern Windows 11 build the in-box
+     * DLL is 1.15.5+ which has every operator we currently use.
+     * <p>
+     * <b>Policy:</b> only forward-compatible redistributables that the
+     * <em>application</em> bundles deliberately should be referenced here.
+     * Never point this at a DLL that some other application installed in
+     * an arbitrary location (e.g. {@code C:\Program Files\WSL\...}).
+     */
+    public static final String SYS_PROP_DIRECTML_DLL = "windirectml.directml.dll";
+
     private static volatile MethodHandle dmlCreateDeviceHandle;
+    private static volatile SymbolLookup dmlSymbolLookup;
+    private static volatile String dmlSourceLabel; // for logging
+
+    /**
+     * Resolve the {@code DirectML.dll} {@link SymbolLookup} once. Honours
+     * the {@link #SYS_PROP_DIRECTML_DLL} system property when set, falls
+     * back to the in-box system DLL otherwise.
+     */
+    private static SymbolLookup getDmlSymbolLookup() {
+        if (dmlSymbolLookup == null) {
+            synchronized (DirectMlBindings.class) {
+                if (dmlSymbolLookup == null) {
+                    String override = System.getProperty(SYS_PROP_DIRECTML_DLL);
+                    if (override != null && !override.isBlank()) {
+                        java.nio.file.Path p = java.nio.file.Path.of(override.trim());
+                        log.info("Loading DirectML from -D{}={}", SYS_PROP_DIRECTML_DLL, p);
+                        dmlSymbolLookup = SymbolLookup.libraryLookup(p, Arena.global());
+                        dmlSourceLabel = p.toString();
+                    } else {
+                        log.info("Loading in-box DirectML.dll (System32) via default DLL search order");
+                        dmlSymbolLookup = SymbolLookup.libraryLookup("DirectML.dll", Arena.global());
+                        dmlSourceLabel = "DirectML.dll (system)";
+                    }
+                }
+            }
+        }
+        return dmlSymbolLookup;
+    }
+
+    /** @return human-readable description of where DirectML.dll was loaded from. */
+    public static String directMlSource() {
+        getDmlSymbolLookup();
+        return dmlSourceLabel;
+    }
 
     private static MethodHandle getDmlCreateDeviceHandle() {
         if (dmlCreateDeviceHandle == null) {
             synchronized (DirectMlBindings.class) {
                 if (dmlCreateDeviceHandle == null) {
-                    SymbolLookup dml = SymbolLookup.libraryLookup("DirectML.dll", Arena.global());
+                    SymbolLookup dml = getDmlSymbolLookup();
                     MemorySegment addr = dml.find("DMLCreateDevice")
-                            .orElseThrow(() -> new UnsatisfiedLinkError("DMLCreateDevice not found"));
+                            .orElseThrow(() -> new UnsatisfiedLinkError("DMLCreateDevice not found in " + dmlSourceLabel));
                     dmlCreateDeviceHandle = Linker.nativeLinker()
                             .downcallHandle(addr, DML_CREATE_DEVICE_DESC);
                 }

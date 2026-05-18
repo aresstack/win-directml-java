@@ -38,6 +38,13 @@ subprojects {
 
     tasks.withType(JavaExec).configureEach {
         jvmArgs '--enable-preview', '--enable-native-access=ALL-UNNAMED'
+        // Forward -Dwindirectml.* system properties (e.g. windirectml.debug,
+        // windirectml.directml.dll) from the Gradle invocation into the JVM.
+        System.getProperties().each { k, v ->
+            if (k.toString().startsWith('windirectml.')) {
+                systemProperty(k.toString(), v.toString())
+            }
+        }
     }
 
     dependencies {
