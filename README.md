@@ -208,6 +208,20 @@ Then `embed("…")` returns a real 384-dim, L2-normalised vector. Reference test
 in `EmbeddingReferenceTest` validate cosine separation between semantically
 related vs. unrelated sentences.
 
+### Backend selection
+
+The sidecar picks between CPU and DirectML encoder via `-Dembed.backend`:
+
+```powershell
+./gradlew.bat :directml-sidecar:run -Dembed.backend=auto       # default: try DirectML, fall back to CPU with warn log
+./gradlew.bat :directml-sidecar:run -Dembed.backend=directml   # force DirectMlMiniLmEncoder; exit code 3 if unavailable
+./gradlew.bat :directml-sidecar:run -Dembed.backend=cpu        # force CpuMiniLmEncoder (reference / debug path)
+```
+
+The active backend is reported in the `health` response as `embeddingBackend`
+(`cpu`, `directml`, `none`, or `error`) together with `embeddingReady`.
+Auto-mode fallback warnings show up as `lastError` in `health`.
+
 ## Roadmap
 
 1. ✅ Phi-3 summarizer sidecar.

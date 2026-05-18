@@ -2,6 +2,7 @@ package com.aresstack.windirectml.sidecar;
 
 import com.aresstack.windirectml.encoder.EmbeddingModel;
 import com.aresstack.windirectml.encoder.minilm.CpuMiniLmEncoder;
+import com.aresstack.windirectml.encoder.minilm.DirectMlMiniLmEncoder;
 import com.aresstack.windirectml.inference.Phi3InferenceEngine;
 import com.aresstack.windirectml.inference.Phi3Summarizer;
 import com.aresstack.windirectml.inference.Summarizer;
@@ -99,10 +100,28 @@ public final class DirectMlPhi3Sidecar {
 
     /**
      * Register an {@link EmbeddingModel} so that {@code embed} returns real vectors.
+     * The backend name is reported as {@code "custom"} in {@code health}.
      */
     public DirectMlPhi3Sidecar withEmbeddingModel(EmbeddingModel model) {
+        return withEmbeddingBackend("custom", model);
+    }
+
+    /**
+     * Register an {@link EmbeddingModel} with an explicit backend name
+     * ({@code "cpu"}, {@code "directml"}, …) used in {@code health}.
+     */
+    public DirectMlPhi3Sidecar withEmbeddingBackend(String backendName, EmbeddingModel model) {
         this.embeddingModel.set(model);
+        status.setEmbeddingBackend(model != null ? backendName : null);
+        status.setEmbeddingReady(model != null && model.isReady());
         return this;
+    }
+
+    /**
+     * Test-only accessor for the mutable status object.
+     */
+    SidecarStatus statusForTesting() {
+        return status;
     }
 
     // ── Entry point ──────────────────────────────────────────────────────
@@ -115,16 +134,47 @@ public final class DirectMlPhi3Sidecar {
         DirectMlPhi3Sidecar sidecar = new DirectMlPhi3Sidecar(
                 System.in, System.out, modelDir, backend, maxTokens, true);
 
-        // Optional: MiniLM-Encoder auto-detect.
+        // Optional: MiniLM-Encoder mit -Dembed.backend=cpu|directml|auto.
         Path minilmDir = resolveMiniLmDir();
         if (minilmDir != null) {
+            EmbeddingBackendSelector.Mode mode;
             try {
-                log.info("Found MiniLM model at {}, loading CPU encoder", minilmDir);
-                CpuMiniLmEncoder encoder = CpuMiniLmEncoder.load(minilmDir);
-                sidecar.withEmbeddingModel(encoder);
-            } catch (Exception e) {
-                log.warn("MiniLM model present but failed to load: {}", e.getMessage());
+                mode = EmbeddingBackendSelector.Mode.parse(System.getProperty("embed.backend"));
+            } catch (IllegalArgumentException e) {
+                log.error("Invalid -Dembed.backend value: {}", e.getMessage());
+                System.exit(2);
+                return;
             }
+            log.info("MiniLM model present at {} – selecting embedding backend (mode={})",
+                    minilmDir, mode.token());
+            EmbeddingBackendSelector selector = new EmbeddingBackendSelector(
+                    CpuMiniLmEncoder::load,
+                    DirectMlMiniLmEncoder::load);
+            try {
+                EmbeddingBackendSelector.Selection sel = selector.select(mode, minilmDir);
+                sidecar.withEmbeddingBackend(sel.backend(), sel.model());
+                if (sel.fallback()) {
+                    sidecar.status.setLastError(sel.warning());
+                }
+                log.info("Embedding backend ready: {} (fallback={})", sel.backend(), sel.fallback());
+            } catch (RuntimeException e) {
+                // CPU forced or DirectML forced ⇒ visible failure: log and continue
+                // without an embedding encoder so summarize/health still work.
+                log.error("Embedding backend initialisation failed: {}", e.getMessage(), e);
+                sidecar.status.setEmbeddingBackend("error");
+                sidecar.status.setEmbeddingReady(false);
+                sidecar.status.setLastError("embed.backend=" + mode.token()
+                        + " failed: " + e.getMessage());
+                if (mode == EmbeddingBackendSelector.Mode.DIRECTML
+                        || mode == EmbeddingBackendSelector.Mode.CPU) {
+                    // Forced mode failed visibly. Exit so a supervising parent
+                    // can detect it instead of silently serving a degraded sidecar.
+                    System.exit(3);
+                    return;
+                }
+            }
+        } else {
+            log.info("No MiniLM model directory found – embed handler will report not-implemented");
         }
 
         int exitCode = sidecar.run();
@@ -269,6 +319,8 @@ public final class DirectMlPhi3Sidecar {
         m.put("backend", backend);
         m.put("modelDir", modelDir.toString());
         m.put("autoLoadModel", autoLoadModel);
+        m.put("embeddingBackend",
+                status.getEmbeddingBackend() != null ? status.getEmbeddingBackend() : "none");
         return m;
     }
 }

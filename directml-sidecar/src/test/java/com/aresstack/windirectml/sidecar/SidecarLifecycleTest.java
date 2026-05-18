@@ -1,5 +1,9 @@
 package com.aresstack.windirectml.sidecar;
 
+import com.aresstack.windirectml.encoder.EmbeddingException;
+import com.aresstack.windirectml.encoder.EmbeddingModel;
+import com.aresstack.windirectml.encoder.EmbeddingRequest;
+import com.aresstack.windirectml.encoder.EmbeddingVector;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.Summarizer;
 import com.aresstack.windirectml.inference.Summary;
@@ -14,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -56,11 +61,17 @@ class SidecarLifecycleTest {
     }
 
     private List<JsonNode> runWith(String input) throws Exception {
+        return runWith(input, sidecar -> {
+        });
+    }
+
+    private List<JsonNode> runWith(String input, Consumer<DirectMlPhi3Sidecar> configure) throws Exception {
         ByteArrayInputStream in = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8));
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DirectMlPhi3Sidecar sidecar = new DirectMlPhi3Sidecar(
                 in, out, Path.of("nonexistent"), "cpu", 128, false)
                 .withSummarizer(new StubSummarizer(true));
+        configure.accept(sidecar);
         int exit = sidecar.run();
         assertEquals(0, exit);
 
@@ -71,6 +82,29 @@ class SidecarLifecycleTest {
             messages.add(mapper.readTree(line));
         }
         return messages;
+    }
+
+    private static final class StubEmbeddingModel implements EmbeddingModel {
+        private final String tag;
+
+        StubEmbeddingModel(String tag) {
+            this.tag = tag;
+        }
+
+        @Override
+        public boolean isReady() {
+            return true;
+        }
+
+        @Override
+        public int dimension() {
+            return 4;
+        }
+
+        @Override
+        public EmbeddingVector embed(EmbeddingRequest r) throws EmbeddingException {
+            return new EmbeddingVector(new float[]{1f, 0f, 0f, 0f}, 4, tag, r.normalize());
+        }
     }
 
     @Test
@@ -153,6 +187,72 @@ class SidecarLifecycleTest {
 
         JsonNode resp = msgs.get(1);
         assertEquals(-32005, resp.get("error").get("code").asInt());
+    }
+
+    @Test
+    void healthReportsEmbeddingBackendNoneWhenNoEncoderRegistered() throws Exception {
+        String input = """
+                {"jsonrpc":"2.0","id":"h","method":"health"}
+                {"jsonrpc":"2.0","id":"x","method":"shutdown"}
+                """;
+        List<JsonNode> msgs = runWith(input);
+        JsonNode result = msgs.get(1).path("result");
+        assertEquals("none", result.path("embeddingBackend").asText());
+        assertEquals(false, result.path("embeddingReady").asBoolean());
+    }
+
+    @Test
+    void healthReportsCpuEmbeddingBackendWhenForced() throws Exception {
+        String input = """
+                {"jsonrpc":"2.0","id":"h","method":"health"}
+                {"jsonrpc":"2.0","id":"e","method":"embed","params":{"text":"hi"}}
+                {"jsonrpc":"2.0","id":"x","method":"shutdown"}
+                """;
+        List<JsonNode> msgs = runWith(input,
+                s -> s.withEmbeddingBackend("cpu", new StubEmbeddingModel("cpu")));
+
+        JsonNode health = msgs.get(1).path("result");
+        assertEquals("cpu", health.path("embeddingBackend").asText());
+        assertTrue(health.path("embeddingReady").asBoolean());
+
+        JsonNode embed = msgs.get(2).path("result");
+        assertEquals(4, embed.path("dimension").asInt());
+        assertEquals("cpu", embed.path("model").asText());
+    }
+
+    @Test
+    void healthReportsDirectMlEmbeddingBackendWhenForced() throws Exception {
+        String input = """
+                {"jsonrpc":"2.0","id":"h","method":"health"}
+                {"jsonrpc":"2.0","id":"x","method":"shutdown"}
+                """;
+        List<JsonNode> msgs = runWith(input,
+                s -> s.withEmbeddingBackend("directml", new StubEmbeddingModel("directml")));
+        JsonNode result = msgs.get(1).path("result");
+        assertEquals("directml", result.path("embeddingBackend").asText());
+        assertTrue(result.path("embeddingReady").asBoolean());
+    }
+
+    @Test
+    void autoFallbackResultIsObservableInHealth() throws Exception {
+        // Simulate what main() does when EmbeddingBackendSelector returns
+        // a fallback Selection: register CPU encoder, expose warning.
+        String input = """
+                {"jsonrpc":"2.0","id":"h","method":"health"}
+                {"jsonrpc":"2.0","id":"x","method":"shutdown"}
+                """;
+        List<JsonNode> msgs = runWith(input, s -> {
+            s.withEmbeddingBackend("cpu", new StubEmbeddingModel("cpu"));
+            // emulate selector having reported a fallback warning
+            // by setting lastError; the production code in main() does the same.
+            s.statusForTesting().setLastError(
+                    "embed.backend=auto: DirectML unavailable, falling back to CPU");
+        });
+        JsonNode result = msgs.get(1).path("result");
+        assertEquals("cpu", result.path("embeddingBackend").asText());
+        assertTrue(result.path("embeddingReady").asBoolean());
+        assertNotNull(result.get("lastError"));
+        assertTrue(result.path("lastError").asText().contains("auto"));
     }
 
     @Test

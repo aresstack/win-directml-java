@@ -166,8 +166,54 @@ Response:
 
 ### `embed`
 
-Platzhalter; gibt `-32005 Not implemented` zurück, solange die
-Encoder-Runtime (MiniLM, E5, JinaBERT) nicht aktiv ist.
+Wenn ein MiniLM-Modell unter `model/all-MiniLM-L6-v2/` (oder via
+`-Dminilm.modelDir=<path>`) gefunden wird, lädt der Sidecar einen
+Embedding-Encoder. Welche Variante geladen wird, steuert das
+Systemproperty `-Dembed.backend`:
+
+| Modus                            | Verhalten                                                                                                                                                                                   |
+|----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-Dembed.backend=cpu`            | `CpuMiniLmEncoder` erzwingen. Fehler beim Laden ⇒ Sidecar beendet sich mit Exit-Code `3` (sichtbarer Fehler).                                                                               |
+| `-Dembed.backend=directml`       | `DirectMlMiniLmEncoder` erzwingen. Wenn DirectML nicht verfügbar ist (kein Windows/D3D12, keine kompatible Karte), beendet sich der Sidecar mit Exit-Code `3`. **Keinen** stillen Fallback. |
+| `-Dembed.backend=auto` (Default) | Erst DirectML versuchen, bei Fehler sauber auf CPU zurückfallen. Die Fallback-Warnung wird auf `stderr`/Log geschrieben und ist als `lastError` im `health`-Result sichtbar.                |
+
+Der aktiv geladene Backend-Name wird in `health` ausgegeben:
+
+```json
+{
+  "embeddingBackend": "directml",   // oder "cpu" / "none" / "error"
+  "embeddingReady": true
+}
+```
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "e1",
+  "method": "embed",
+  "params": { "text": "...", "normalize": true, "prefix": null }
+}
+```
+
+Response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "e1",
+  "result": {
+    "vector": [0.012, -0.083, ...],
+    "dimension": 384,
+    "model": "all-MiniLM-L6-v2",
+    "normalized": true
+  }
+}
+```
+
+Solange kein MiniLM-Modell gefunden wird, antwortet `embed` mit
+`-32005 Not implemented`.
 
 ### `shutdown`
 

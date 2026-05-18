@@ -16,6 +16,13 @@ public final class SidecarStatus {
     private volatile String mode;
     private volatile String lastError;
 
+    /**
+     * Aktiver Embedding-Backend-Name ({@code "cpu"}, {@code "directml"},
+     * {@code "custom"} oder {@code null} = keiner registriert).
+     */
+    private volatile String embeddingBackend;
+    private volatile boolean embeddingReady = false;
+
     public boolean isReady() {
         return modelLoaded && !shuttingDown;
     }
@@ -58,6 +65,22 @@ public final class SidecarStatus {
 
     public void setLastError(String lastError) {
         this.lastError = lastError;
+    }
+
+    public String getEmbeddingBackend() {
+        return embeddingBackend;
+    }
+
+    public void setEmbeddingBackend(String embeddingBackend) {
+        this.embeddingBackend = embeddingBackend;
+    }
+
+    public boolean isEmbeddingReady() {
+        return embeddingReady;
+    }
+
+    public void setEmbeddingReady(boolean embeddingReady) {
+        this.embeddingReady = embeddingReady;
     }
 }
 
