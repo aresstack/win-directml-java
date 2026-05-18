@@ -1,7 +1,9 @@
 package com.aresstack.windirectml.sidecar;
 
+import com.aresstack.windirectml.encoder.EmbeddingModel;
 import com.aresstack.windirectml.inference.Phi3InferenceEngine;
 import com.aresstack.windirectml.inference.Phi3Summarizer;
+import com.aresstack.windirectml.inference.Summarizer;
 import com.aresstack.windirectml.sidecar.handlers.CancelHandler;
 import com.aresstack.windirectml.sidecar.handlers.EmbedHandler;
 import com.aresstack.windirectml.sidecar.handlers.HealthHandler;
@@ -27,6 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Java-21 DirectML Phi-3 sidecar – JSON-RPC 2.0 over stdin/stdout.
@@ -40,9 +43,6 @@ import java.util.Map;
  * </ul>
  * <b>Initial methods:</b> {@code health}, {@code summarize}, {@code embed},
  * {@code shutdown}, {@code cancel}.
- * <p>
- * The model is loaded asynchronously on a background thread so {@code health}
- * is answerable immediately after process start.
  */
 public final class DirectMlPhi3Sidecar {
 
@@ -53,20 +53,55 @@ public final class DirectMlPhi3Sidecar {
     private final Path modelDir;
     private final String backend;
     private final int defaultMaxTokens;
+    private final boolean autoLoadModel;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final SidecarStatus status = new SidecarStatus();
     private final SidecarCommandDispatcher dispatcher = new SidecarCommandDispatcher();
+    private final AtomicReference<EmbeddingModel> embeddingModel = new AtomicReference<>();
 
-    private Phi3Summarizer summarizer;
+    private Phi3Summarizer ownedSummarizer;
+    private Summarizer summarizer;
 
+    /**
+     * Production constructor: own and load the Phi-3 summarizer on a background thread.
+     */
     public DirectMlPhi3Sidecar(InputStream in, OutputStream out, Path modelDir,
                                String backend, int defaultMaxTokens) {
+        this(in, out, modelDir, backend, defaultMaxTokens, true);
+    }
+
+    /**
+     * Test constructor: skip model load, use stub or pre-built {@link Summarizer}.
+     */
+    public DirectMlPhi3Sidecar(InputStream in, OutputStream out, Path modelDir,
+                               String backend, int defaultMaxTokens, boolean autoLoadModel) {
         this.in = in;
         this.out = out;
         this.modelDir = modelDir;
         this.backend = backend != null ? backend : "auto";
         this.defaultMaxTokens = defaultMaxTokens > 0 ? defaultMaxTokens : 512;
+        this.autoLoadModel = autoLoadModel;
+    }
+
+    /**
+     * Inject a pre-built summarizer instead of constructing one. Useful for tests.
+     */
+    public DirectMlPhi3Sidecar withSummarizer(Summarizer external) {
+        this.summarizer = external;
+        if (external != null && external.isReady()) {
+            status.setModelLoaded(true);
+            status.setMode("injected");
+        }
+        return this;
+    }
+
+    /**
+     * Register an {@link EmbeddingModel} so that {@code embed} returns real vectors.
+     */
+    public DirectMlPhi3Sidecar withEmbeddingModel(EmbeddingModel model) {
+        this.embeddingModel.set(model);
+        return this;
     }
 
     // ── Entry point ──────────────────────────────────────────────────────
@@ -77,7 +112,7 @@ public final class DirectMlPhi3Sidecar {
         int maxTokens = Integer.getInteger("phi3.maxTokens", 512);
 
         DirectMlPhi3Sidecar sidecar = new DirectMlPhi3Sidecar(
-                System.in, System.out, modelDir, backend, maxTokens);
+                System.in, System.out, modelDir, backend, maxTokens, true);
         int exitCode = sidecar.run();
         System.exit(exitCode);
     }
@@ -98,24 +133,26 @@ public final class DirectMlPhi3Sidecar {
     // ── Main loop ────────────────────────────────────────────────────────
 
     public int run() {
-        log.info("DirectMlPhi3Sidecar starting (modelDir={}, backend={})", modelDir, backend);
+        log.info("DirectMlPhi3Sidecar starting (modelDir={}, backend={}, autoLoad={})",
+                modelDir, backend, autoLoadModel);
 
         try (JsonRpcMessageReader reader = new JsonRpcMessageReader(in, mapper);
              JsonRpcMessageWriter writer = new JsonRpcMessageWriter(out, mapper)) {
 
-            // Register protocol handlers BEFORE model load so health works immediately.
-            summarizer = new Phi3Summarizer(modelDir, defaultMaxTokens, backend);
+            if (summarizer == null && autoLoadModel) {
+                ownedSummarizer = new Phi3Summarizer(modelDir, defaultMaxTokens, backend);
+                summarizer = ownedSummarizer;
+            }
             registerHandlers();
 
-            // Kick off async model load.
-            Thread loader = new Thread(() -> loadModel(writer), "phi3-model-loader");
-            loader.setDaemon(true);
-            loader.start();
+            if (autoLoadModel && ownedSummarizer != null) {
+                Thread loader = new Thread(() -> loadModel(writer), "phi3-model-loader");
+                loader.setDaemon(true);
+                loader.start();
+            }
 
-            // Emit "started" notification right away.
             writer.writeNotification(JsonRpcNotification.of("sidecar.started", started()));
 
-            // Dispatch loop.
             RawLine raw;
             while (!status.isShuttingDown() && (raw = reader.readNext()) != null) {
                 if (raw.hasError()) {
@@ -137,10 +174,9 @@ public final class DirectMlPhi3Sidecar {
             log.error("Sidecar IO error", e);
             return 1;
         } finally {
-            if (summarizer != null) {
+            if (ownedSummarizer != null) {
                 try {
-                    summarizer.shutdown();
-                } catch (Exception e) {
+                    ownedSummarizer.shutdown(); } catch (Exception e) {
                     log.warn("Error during summarizer shutdown: {}", e.getMessage());
                 }
             }
@@ -150,8 +186,15 @@ public final class DirectMlPhi3Sidecar {
 
     private void registerHandlers() {
         dispatcher.register("health", new HealthHandler(status));
-        dispatcher.register("summarize", new SummarizeHandler(summarizer, status));
-        dispatcher.register("embed", new EmbedHandler());
+        if (summarizer != null) {
+            dispatcher.register("summarize", new SummarizeHandler(summarizer, status));
+        } else {
+            dispatcher.register("summarize", params -> {
+                throw new com.aresstack.windirectml.sidecar.jsonrpc.JsonRpcMethodException(
+                        JsonRpcErrorCode.MODEL_NOT_READY, "Summarizer not configured");
+            });
+        }
+        dispatcher.register("embed", new EmbedHandler(embeddingModel::get, status));
         dispatcher.register("shutdown", new ShutdownHandler(status));
         dispatcher.register("cancel", new CancelHandler());
     }
@@ -168,7 +211,7 @@ public final class DirectMlPhi3Sidecar {
                 return;
             }
             long t0 = System.currentTimeMillis();
-            summarizer.initialize();
+            ownedSummarizer.initialize();
             long elapsed = System.currentTimeMillis() - t0;
             status.setModelLoaded(true);
             status.setMode("phi-3 (" + backend + ")");
@@ -193,7 +236,7 @@ public final class DirectMlPhi3Sidecar {
         m.put("methods", new String[]{"health", "summarize", "embed", "shutdown", "cancel"});
         m.put("backend", backend);
         m.put("modelDir", modelDir.toString());
+        m.put("autoLoadModel", autoLoadModel);
         return m;
     }
 }
-

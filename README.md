@@ -41,13 +41,20 @@ directml-sidecar           JSON-RPC 2.0 sidecar entry point + dispatcher + handl
 
 ## Status
 
-| Area                                        | Status |
-|---------------------------------------------|--------|
-| Phi-3 summarizer                            | ✅ working (CPU + DirectML hybrid) |
-| JSON-RPC protocol                           | ✅ formalized (`directml-sidecar/PROTOCOL.md`) |
-| `health`, `summarize`, `shutdown`, `cancel` | ✅ wired |
-| `embed`                                     | ⏳ stub (`-32005 Not implemented`) until encoder runtime lands |
-| MiniLM encoder                              | ⏳ architecture descriptor only |
+| Area                                                             | Status                                                                               |
+|------------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| Phi-3 summarizer                                                 | ✅ working (CPU + DirectML hybrid)                                                    |
+| JSON-RPC protocol                                                | ✅ formalized (`directml-sidecar/PROTOCOL.md`)                                        |
+| `health`, `summarize`, `shutdown`, `cancel`                      | ✅ wired                                                                              |
+| `embed`                                                          | ⚙️ provider hook wired; returns `-32005 Not implemented` until encoder runtime lands |
+| Runtime-Core API (D3D12/DML context, Tensor, GpuBuffer, Kernels) | ✅ interfaces extracted (`runtime/` package)                                          |
+| SafetensorsReader                                                | ✅ implemented + tested                                                               |
+| WordPieceTokenizer                                               | ✅ implemented + tested (BERT-uncased family)                                         |
+| Mean Pooling + L2                                                | ✅ CPU reference impl + tests                                                         |
+| MiniLM encoder runtime                                           | ⏳ descriptor only; weight loading + transformer compute pending                      |
+| Sidecar lifecycle tests                                          | ✅ end-to-end via piped streams                                                       |
+| Phi-3 benchmark harness                                          | ✅ runnable (`Phi3Benchmark`)                                                         |
+| E5 / Reranker / further decoders                                 | 📄 concept docs in `docs/`                                                           |
 
 ## Requirements
 

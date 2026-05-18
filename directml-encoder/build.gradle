@@ -1,5 +1,5 @@
 dependencies {
     api project(':directml-config')
     implementation project(':directml-windows-bindings')
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
 }
-

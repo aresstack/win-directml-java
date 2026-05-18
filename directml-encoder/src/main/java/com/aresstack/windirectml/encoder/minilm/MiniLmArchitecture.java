@@ -57,12 +57,24 @@ public final class MiniLmArchitecture implements EncoderArchitecture {
 
     public static final String NAME = "sentence-transformers/all-MiniLM-L6-v2";
 
+    private final MiniLmConfig config;
+
+    public MiniLmArchitecture() {
+        this(MiniLmConfig.defaults());
+    }
+
+    public MiniLmArchitecture(MiniLmConfig config) {
+        this.config = config;
+    }
+
+    public MiniLmConfig config() { return config; }
+
     @Override public String name() { return NAME; }
-    @Override public int hiddenSize() { return 384; }
-    @Override public int numLayers() { return 6; }
-    @Override public int numAttentionHeads() { return 12; }
-    @Override public int maxSequenceLength() { return 512; }
-    @Override public int outputDimension() { return 384; }
+    @Override public int hiddenSize() { return config.hiddenSize(); }
+    @Override public int numLayers() { return config.numLayers(); }
+    @Override public int numAttentionHeads() { return config.numAttentionHeads(); }
+    @Override public int maxSequenceLength() { return config.maxPositionEmbeddings(); }
+    @Override public int outputDimension() { return config.outputDimension(); }
     @Override public PoolingStrategy poolingStrategy() { return PoolingStrategy.MEAN; }
     @Override public boolean l2NormalizeByDefault() { return true; }
 
@@ -70,7 +82,6 @@ public final class MiniLmArchitecture implements EncoderArchitecture {
     public EncoderWeights loadWeights(Path modelDir) throws EmbeddingException {
         throw new EmbeddingException(
                 "MiniLmArchitecture.loadWeights not implemented yet. "
-                        + "Pending: safetensors reader (issue 16) and DirectML runtime core (issues 11–13).");
+                        + "Pending: safetensors reader (issue 16 done) + DirectML runtime core (issues 11–13).");
     }
 }
-
