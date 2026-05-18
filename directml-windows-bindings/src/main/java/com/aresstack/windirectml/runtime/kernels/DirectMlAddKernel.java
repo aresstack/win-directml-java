@@ -19,68 +19,25 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 
 /**
- * Pure data-layout kernel: reorders elements between the BERT/MiniLM "head"
- * layouts {@code [S, H, D]} and {@code [H, S, D]} (with implicit leading
- * batch dimension {@code 1}).
+ * Element-wise sum {@code y = a + b} via {@code DML_OPERATOR_ELEMENT_WISE_ADD}
+ * (op 4, FL 1.0).
  * <p>
- * <b>Why this kernel exists.</b> MiniLM's Linear projections produce
- * {@code Q, K, V} as flat {@code [S, hidden] = [S, H·D]}, which is the
- * <i>"sequence-major"</i> layout {@code [S, H, D]}. The
- * {@link DirectMlAttentionKernel}, on the other hand, expects the
- * <i>"head-major"</i> layout {@code [B, H, S, D]} so that the batched
- * GEMMs treat {@code (B, H)} as the batch axes. The two layouts are
- * <b>not</b> the same memory; this kernel converts between them.
+ * Both inputs must be the same flat element count; shapes are flattened to
+ * {@code [1, 1, 1, N]}. Output may alias either input (DirectML allows the
+ * in-place case via the same UAV buffer for {@code a} and {@code y}).
  * <p>
- * <b>How the conversion works.</b> Implemented as a single
- * {@code DML_OPERATOR_ELEMENT_WISE_IDENTITY} (op 1, FL 1.0) where the
- * <i>input</i> tensor description carries non-default strides describing
- * how to read the logical shape from the source's physical layout, and
- * the output description is plain contiguous. DirectML's identity then
- * copies element-by-element using the strided view, materialising the
- * permutation. This is the canonical, dependency-free DirectML transpose
- * pattern – it runs on every shipped {@code DirectML.dll}, including the
- * Windows-11-RTM in-box 1.8.0.
- * <p>
- * <b>Direction.</b> Two factory methods cover the two MiniLM directions:
- * <ul>
- *   <li>{@link #seqMajorToHeadMajor(DirectMlContextImpl, int, int, int)} –
- *       used before attention to split {@code [S, H·D] → [1, H, S, D]}</li>
- *   <li>{@link #headMajorToSeqMajor(DirectMlContextImpl, int, int, int)} –
- *       used after attention to merge {@code [1, H, S, D] → [S, H·D]}</li>
- * </ul>
- * Both directions use the same Identity-with-strides recipe; only the
- * stride values differ.
- * <p>
- * <b>Layout contract (precise).</b>
- * The logical shape exposed to DirectML is always 4-D
- * {@code [1, dim1, dim2, D]}; the stride array maps that logical index
- * onto the physical buffer. For batch {@code B = 1} the outer stride is
- * irrelevant – we use the total element count which is the natural value.
- * <pre>
- * forward  (seq-major → head-major): in [1, H, S, D] strides [S·H·D, D, H·D, 1] · out [1, H, S, D] contiguous
- * backward (head-major → seq-major): in [1, S, H, D] strides [S·H·D, D, S·D, 1] · out [1, S, H, D] contiguous
- * </pre>
- * The two stride vectors are exact inverses – applying both back-to-back
- * is the identity on the data (verified by the round-trip unit test).
+ * Primary use case in this project: BERT/MiniLM residual connections
+ * ({@code x = x + attnOut} and {@code x = x + mlpOut}). The
+ * {@link DirectMlAttentionKernel} also embeds an ADD internally for the
+ * mask, but that one uses broadcast strides and is not reusable for the
+ * residual path.
  */
-public final class DirectMlHeadLayoutKernel implements AutoCloseable {
+public final class DirectMlAddKernel implements AutoCloseable {
 
-    private static final Logger log = LoggerFactory.getLogger(DirectMlHeadLayoutKernel.class);
-
-    /** Conversion direction enum (purely informational, used for log lines and validation). */
-    public enum Direction {
-        /** {@code [S, H·D]} (a.k.a. {@code [S, H, D]} contiguous) → {@code [1, H, S, D]}. */
-        SEQ_TO_HEAD,
-        /** {@code [1, H, S, D]} → {@code [S, H·D]}. */
-        HEAD_TO_SEQ
-    }
+    private static final Logger log = LoggerFactory.getLogger(DirectMlAddKernel.class);
 
     private final WindowsBindings wb;
-    private final int seq;
-    private final int heads;
-    private final int headDim;
     private final int elementCount;
-    private final Direction direction;
     private final Arena arena;
 
     private final MemorySegment compiled;
@@ -94,67 +51,36 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
 
     private boolean closed = false;
 
-    public static DirectMlHeadLayoutKernel seqMajorToHeadMajor(
-            DirectMlContextImpl ctx, int seq, int heads, int headDim) throws DirectMlRuntimeException {
-        return new DirectMlHeadLayoutKernel(ctx, seq, heads, headDim, Direction.SEQ_TO_HEAD);
-    }
-
-    public static DirectMlHeadLayoutKernel headMajorToSeqMajor(
-            DirectMlContextImpl ctx, int seq, int heads, int headDim) throws DirectMlRuntimeException {
-        return new DirectMlHeadLayoutKernel(ctx, seq, heads, headDim, Direction.HEAD_TO_SEQ);
-    }
-
-    private DirectMlHeadLayoutKernel(DirectMlContextImpl ctx, int seq, int heads, int headDim,
-                                     Direction direction) throws DirectMlRuntimeException {
+    public DirectMlAddKernel(DirectMlContextImpl ctx, int elementCount)
+            throws DirectMlRuntimeException {
         if (ctx == null || !ctx.isReady()) {
             throw new DirectMlRuntimeException("Context not ready");
         }
-        if (seq <= 0 || heads <= 0 || headDim <= 0) {
-            throw new IllegalArgumentException("seq, heads, headDim must be > 0");
+        if (elementCount <= 0) {
+            throw new IllegalArgumentException("elementCount must be > 0");
         }
         this.wb = ctx.bindings();
         if (!wb.hasDirectMl()) {
             throw new DirectMlRuntimeException("Context has no DirectML device");
         }
-        this.seq = seq;
-        this.heads = heads;
-        this.headDim = headDim;
-        this.elementCount = seq * heads * headDim;
-        this.direction = direction;
+        this.elementCount = elementCount;
         this.arena = Arena.ofShared();
 
         try {
-            final int S = seq, H = heads, D = headDim;
-            final long totalBytes = (long) elementCount * Float.BYTES;
-            int[] logicalSizes;
-            int[] inputStrides;
+            int[] shape = {1, 1, 1, elementCount};
+            long totalBytes = (long) elementCount * Float.BYTES;
+            MemorySegment aDesc = bufferTensorDesc(shape, null, totalBytes);
+            MemorySegment bDesc = bufferTensorDesc(shape, null, totalBytes);
+            MemorySegment yDesc = bufferTensorDesc(shape, null, totalBytes);
 
-            if (direction == Direction.SEQ_TO_HEAD) {
-                // Input physically [S, H, D]: element (h, s, d) at offset s·H·D + h·D + d.
-                // Logical shape exposed to DML mirrors the OUTPUT layout [1, H, S, D].
-                logicalSizes = new int[]{1, H, S, D};
-                inputStrides = new int[]{S * H * D, D, H * D, 1};
-            } else {
-                // Input physically [H, S, D]: element (s, h, d) at offset h·S·D + s·D + d.
-                // Logical shape exposed to DML mirrors the OUTPUT layout [1, S, H, D].
-                logicalSizes = new int[]{1, S, H, D};
-                inputStrides = new int[]{S * H * D, D, S * D, 1};
-            }
-
-            MemorySegment inDesc = bufferTensorDesc(logicalSizes, inputStrides, totalBytes);
-            MemorySegment outDesc = bufferTensorDesc(logicalSizes, null, totalBytes);
-
-            // DML_ELEMENT_WISE_IDENTITY_OPERATOR_DESC (24 bytes):
-            //   const DML_TENSOR_DESC* InputTensor;   // off  0
-            //   const DML_TENSOR_DESC* OutputTensor;  // off  8
-            //   const DML_SCALE_BIAS*  ScaleBias;     // off 16 (NULL = none)
+            // DML_ELEMENT_WISE_ADD_OPERATOR_DESC: A, B, Output (24 bytes)
             MemorySegment desc = arena.allocate(24, 8);
-            desc.set(ValueLayout.ADDRESS, 0, inDesc);
-            desc.set(ValueLayout.ADDRESS, 8, outDesc);
-            desc.set(ValueLayout.ADDRESS, 16, MemorySegment.NULL);
+            desc.set(ValueLayout.ADDRESS, 0, aDesc);
+            desc.set(ValueLayout.ADDRESS, 8, bDesc);
+            desc.set(ValueLayout.ADDRESS, 16, yDesc);
 
             MemorySegment opDesc = DirectMlBindings.allocOperatorDesc(arena,
-                    DirectMlBindings.DML_OPERATOR_ELEMENT_WISE_IDENTITY, desc);
+                    DirectMlBindings.DML_OPERATOR_ELEMENT_WISE_ADD, desc);
 
             MemorySegment dml = wb.getDmlDevice();
             MemorySegment op = DirectMlBindings.createOperator(dml, opDesc, arena);
@@ -180,18 +106,16 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
                 initializeOperator();
             }
 
-            log.info("DirectMlHeadLayoutKernel ready: dir={}, S={}, H={}, D={}, desc={}, temp={}B, persist={}B",
-                    direction, S, H, D, descriptorCount, tempSize, persistSize);
+            log.info("DirectMlAddKernel ready: N={}, desc={}, temp={}B, persist={}B",
+                    elementCount, descriptorCount, tempSize, persistSize);
         } catch (WindowsNativeException e) {
             String dbg = formatDebugMessages(wb);
             arena.close();
-            throw new DirectMlRuntimeException(
-                    "Failed to build DirectMlHeadLayoutKernel" + dbg, e);
+            throw new DirectMlRuntimeException("Failed to build DirectMlAddKernel" + dbg, e);
         } catch (RuntimeException e) {
             String dbg = formatDebugMessages(wb);
             arena.close();
-            throw new DirectMlRuntimeException(
-                    "Failed to build DirectMlHeadLayoutKernel" + dbg, e);
+            throw new DirectMlRuntimeException("Failed to build DirectMlAddKernel" + dbg, e);
         }
     }
 
@@ -258,12 +182,15 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
         }
     }
 
-    public void dispatch(DirectMlTensor x, DirectMlTensor y) throws DirectMlRuntimeException {
+    public void dispatch(DirectMlTensor a, DirectMlTensor b, DirectMlTensor y)
+            throws DirectMlRuntimeException {
         ensureOpen();
-        validate(x, "x");
+        validate(a, "a");
+        validate(b, "b");
         validate(y, "y");
 
-        DefaultGpuBuffer xb = unwrap(x.buffer(), "x");
+        DefaultGpuBuffer ab = unwrap(a.buffer(), "a");
+        DefaultGpuBuffer bb_ = unwrap(b.buffer(), "b");
         DefaultGpuBuffer yb = unwrap(y.buffer(), "y");
 
         MemorySegment dml = wb.getDmlDevice();
@@ -277,9 +204,10 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
                     cpuStart, gpuStart, descriptorCount);
             MemorySegment bt = DirectMlBindings.createBindingTable(dml, btDesc, scratch);
             try {
-                MemorySegment inputs = scratch.allocate(16, 8);
-                setBufferBinding(scratch, inputs, 0, xb.resource(), (long) elementCount * Float.BYTES);
-                DirectMlBindings.bindInputs(bt, 1, inputs);
+                MemorySegment inputs = scratch.allocate(16L * 2, 8);
+                setBufferBinding(scratch, inputs, 0, ab.resource(), (long) elementCount * Float.BYTES);
+                setBufferBinding(scratch, inputs, 1, bb_.resource(), (long) elementCount * Float.BYTES);
+                DirectMlBindings.bindInputs(bt, 2, inputs);
 
                 MemorySegment outputs = scratch.allocate(16, 8);
                 setBufferBinding(scratch, outputs, 0, yb.resource(), (long) elementCount * Float.BYTES);
@@ -306,7 +234,8 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
                 try {
                     cl = D3D12Bindings.createCommandList(dev,
                             D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
-                    transitionToUav(cl, xb, scratch);
+                    transitionToUav(cl, ab, scratch);
+                    transitionToUav(cl, bb_, scratch);
                     transitionToUav(cl, yb, scratch);
                     D3D12Bindings.setDescriptorHeaps(cl, descriptorHeap, scratch);
                     DirectMlBindings.recordDispatch(cmdRecorder, cl, compiled, bt);
@@ -320,7 +249,7 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
             }
         } catch (WindowsNativeException e) {
             throw new DirectMlRuntimeException(
-                    "DirectMlHeadLayoutKernel.dispatch failed" + formatDebugMessages(wb), e);
+                    "DirectMlAddKernel.dispatch failed" + formatDebugMessages(wb), e);
         }
     }
 
@@ -340,8 +269,6 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
         arena.close();
     }
 
-    // ── helpers ─────────────────────────────────────────────────────────
-
     private static void transitionToUav(MemorySegment cl, DefaultGpuBuffer buf, Arena scratch) {
         int state = buf.currentResourceState();
         if (state != D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
@@ -352,7 +279,7 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
     }
 
     private void ensureOpen() throws DirectMlRuntimeException {
-        if (closed) throw new DirectMlRuntimeException("DirectMlHeadLayoutKernel already closed");
+        if (closed) throw new DirectMlRuntimeException("DirectMlAddKernel already closed");
     }
 
     private void validate(DirectMlTensor t, String name) throws DirectMlRuntimeException {
@@ -388,9 +315,6 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
         array.set(ValueLayout.ADDRESS, off + 8, bb);
     }
 
-    public Direction direction() { return direction; }
-    public int seq() { return seq; }
-    public int heads() { return heads; }
-    public int headDim() { return headDim; }
+    public int elementCount() { return elementCount; }
 }
 

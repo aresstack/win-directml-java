@@ -57,7 +57,7 @@ directml-sidecar           JSON-RPC 2.0 sidecar entry point + dispatcher + handl
 | SafetensorsReader                                       | ✅ implemented + tested (F32/F16/BF16/I64/I32/I8/U8, lenient on unknown dtypes)                                                                             |
 | WordPieceTokenizer                                      | ✅ implemented + tested (BERT-uncased family)                                                                                                               |
 | Mean Pooling + L2                                       | ✅ CPU reference impl + tests                                                                                                                               |
-| MiniLM encoder runtime                                  | ✅ CPU forward pass (`CpuMiniLmEncoder`) – DirectML kernel migration pending                                                                                |
+| MiniLM encoder runtime                                  | ✅ CPU forward pass (`CpuMiniLmEncoder`). DirectML migration in progress: ✅ `DirectMlMiniLmLayerBlock` (single encoder layer) passes CPU-vs-DirectML compare at tol 2e-3 on FL 5.1+; ⏳ multi-layer wiring + mean-pool + L2 next. |
 | Sidecar lifecycle tests                                 | ✅ end-to-end via piped streams                                                                                                                             |
 | Phi-3 benchmark harness                                 | ✅ runnable (`Phi3Benchmark`)                                                                                                                               |
 | E5 / Reranker / further decoders                        | 📄 concept docs in `docs/`                                                                                                                                 |
@@ -233,6 +233,9 @@ related vs. unrelated sentences.
    fast path.
 10. ⏳ `DirectMlMiniLmEncoder` – wire the kernels together; reference test `CpuMiniLmEncoder.embed(t)` vs.
     `DirectMlMiniLmEncoder.embed(t)` cosine > 0.99.
+    **Step 10a:** ✅ `DirectMlMiniLmLayerBlock` – one full encoder layer (Q/K/V Linear → head layout → Attention → head layout → Wo Linear → residual+LN → MLP w/ GELU → residual+LN). Synthetic CPU-vs-DirectML compare at tolerance 2e-3 (`DirectMlMiniLmLayerBlockTest`). Requires FL 5.1 due to native fused GELU.
+    **Step 10b:** ⏳ Multi-layer wiring (6 layers + token-type/position/word embeddings + embedding LN).
+    **Step 10c:** ⏳ Mean-pool + L2 on DirectML (or CPU read-back), then `DirectMlMiniLmEncoder.embed(t)`.
 11. ⏳ E5 and JinaBERT encoders on the same runtime core.
 12. ⏳ Reranker encoder support.
 13. ⏳ Additional decoder LLM families after the encoder path is stable.

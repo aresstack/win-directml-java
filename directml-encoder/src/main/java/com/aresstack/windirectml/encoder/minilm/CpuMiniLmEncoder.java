@@ -128,30 +128,9 @@ public final class CpuMiniLmEncoder implements EmbeddingModel, AutoCloseable {
 
         for (int l = 0; l < numLayers; l++) {
             CpuMiniLmWeights.LayerWeights lw = weights.layers.get(l);
-
-            // Q, K, V projections
-            matmulXWtPlusB(x, seqLen, hiddenSize, lw.qWeight, hiddenSize, lw.qBias, q);
-            matmulXWtPlusB(x, seqLen, hiddenSize, lw.kWeight, hiddenSize, lw.kBias, k);
-            matmulXWtPlusB(x, seqLen, hiddenSize, lw.vWeight, hiddenSize, lw.vBias, v);
-
-            // Multi-Head Attention
-            multiHeadAttention(q, k, v, encoded.attentionMask(), seqLen, attn, scores);
-
-            // Output projection
-            matmulXWtPlusB(attn, seqLen, hiddenSize, lw.attnOutWeight, hiddenSize, lw.attnOutBias, attnOut);
-
-            // Residual + LayerNorm
-            for (int i = 0; i < x.length; i++) x[i] = x[i] + attnOut[i];
-            layerNormInPlace(x, seqLen, hiddenSize, lw.attnLnGamma, lw.attnLnBeta, layerNormEps);
-
-            // MLP: x -> intermediate, GELU, -> hidden
-            matmulXWtPlusB(x, seqLen, hiddenSize, lw.mlpInterWeight, intermediateSize, lw.mlpInterBias, mlpInter);
-            geluInPlace(mlpInter);
-            matmulXWtPlusB(mlpInter, seqLen, intermediateSize, lw.mlpOutWeight, hiddenSize, lw.mlpOutBias, mlpOut);
-
-            // Residual + LayerNorm
-            for (int i = 0; i < x.length; i++) x[i] = x[i] + mlpOut[i];
-            layerNormInPlace(x, seqLen, hiddenSize, lw.outLnGamma, lw.outLnBeta, layerNormEps);
+            forwardSingleLayer(x, lw, encoded.attentionMask(), seqLen,
+                    hiddenSize, numHeads, headDim, intermediateSize, layerNormEps,
+                    q, k, v, attn, attnOut, mlpInter, mlpOut, scores);
         }
 
         // 3. Mean Pooling über Attention-Mask
@@ -172,6 +151,61 @@ public final class CpuMiniLmEncoder implements EmbeddingModel, AutoCloseable {
     // ═════════════════════════════════════════════════════════════════════
     //  Compute-Hilfsmethoden (CPU)
     // ═════════════════════════════════════════════════════════════════════
+
+    /**
+     * Vollständiger Forward-Pass für genau einen MiniLM-Encoder-Block,
+     * in-place auf {@code x}.
+     * <p>
+     * Diese statische Variante ist von {@code DirectMlMiniLmLayerBlockTest}
+     * als CPU-Referenz wiederverwendbar – Single-Layer-Vergleich ist der
+     * verbindliche Prüfschritt, bevor der vollständige 6-Layer-DirectML-
+     * Encoder gebaut wird (siehe {@code docs/head-layout-convention.md}).
+     * <p>
+     * Reihenfolge der Sub-Schritte exakt nach BERT-Konvention:
+     * Q/K/V-Linear → MultiHeadAttention → Output-Projection →
+     * Residual-Add → Attn-LayerNorm → MLP-Intermediate-Linear → GELU →
+     * MLP-Output-Linear → Residual-Add → Out-LayerNorm.
+     * <p>
+     * Alle Scratch-Buffer ({@code q, k, v, attn, attnOut, mlpInter,
+     * mlpOut, scores}) müssen vom Caller in den passenden Größen
+     * vorallokiert übergeben werden, damit diese Methode allokationsfrei
+     * läuft.
+     */
+    public static void forwardSingleLayer(float[] x,
+                                          CpuMiniLmWeights.LayerWeights lw,
+                                          int[] attentionMask,
+                                          int seqLen,
+                                          int hiddenSize, int numHeads, int headDim,
+                                          int intermediateSize, float layerNormEps,
+                                          float[] q, float[] k, float[] v,
+                                          float[] attn, float[] attnOut,
+                                          float[] mlpInter, float[] mlpOut,
+                                          float[] scoresBuf) {
+        // Q, K, V projections
+        matmulXWtPlusB(x, seqLen, hiddenSize, lw.qWeight, hiddenSize, lw.qBias, q);
+        matmulXWtPlusB(x, seqLen, hiddenSize, lw.kWeight, hiddenSize, lw.kBias, k);
+        matmulXWtPlusB(x, seqLen, hiddenSize, lw.vWeight, hiddenSize, lw.vBias, v);
+
+        // Multi-Head Attention
+        multiHeadAttention(q, k, v, attentionMask, seqLen,
+                hiddenSize, numHeads, headDim, attn, scoresBuf);
+
+        // Output projection
+        matmulXWtPlusB(attn, seqLen, hiddenSize, lw.attnOutWeight, hiddenSize, lw.attnOutBias, attnOut);
+
+        // Residual + LayerNorm
+        for (int i = 0; i < seqLen * hiddenSize; i++) x[i] = x[i] + attnOut[i];
+        layerNormInPlace(x, seqLen, hiddenSize, lw.attnLnGamma, lw.attnLnBeta, layerNormEps);
+
+        // MLP: x -> intermediate, GELU, -> hidden
+        matmulXWtPlusB(x, seqLen, hiddenSize, lw.mlpInterWeight, intermediateSize, lw.mlpInterBias, mlpInter);
+        geluInPlace(mlpInter);
+        matmulXWtPlusB(mlpInter, seqLen, intermediateSize, lw.mlpOutWeight, hiddenSize, lw.mlpOutBias, mlpOut);
+
+        // Residual + LayerNorm
+        for (int i = 0; i < seqLen * hiddenSize; i++) x[i] = x[i] + mlpOut[i];
+        layerNormInPlace(x, seqLen, hiddenSize, lw.outLnGamma, lw.outLnBeta, layerNormEps);
+    }
 
     /**
      * Berechnet {@code out[M,N] = x[M,K] · W[N,K]^T + bias[N]}.
@@ -247,9 +281,10 @@ public final class CpuMiniLmEncoder implements EmbeddingModel, AutoCloseable {
      * Heads sind interleaved über die letzte Dimension:
      * {@code x[t][h*D + d] = head h, dim d an Token t}.
      */
-    private void multiHeadAttention(float[] q, float[] k, float[] v,
-                                    int[] attentionMask, int seqLen,
-                                    float[] out, float[] scoresBuf) {
+    private static void multiHeadAttention(float[] q, float[] k, float[] v,
+                                           int[] attentionMask, int seqLen,
+                                           int hiddenSize, int numHeads, int headDim,
+                                           float[] out, float[] scoresBuf) {
         double scale = 1.0 / Math.sqrt(headDim);
         // Per Head
         for (int h = 0; h < numHeads; h++) {
