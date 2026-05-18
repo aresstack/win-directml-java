@@ -13,13 +13,15 @@ package com.aresstack.windirectml.runtime.kernels;
  *       ({@code DML_OPERATOR_GEMM}), GPU-getestet</li>
  *   <li>{@link LayerNormKernel} – ✅ {@link DirectMlLayerNormKernel}
  *       ({@code DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION}, MVN0), GPU-getestet</li>
- *   <li>{@link GeluKernel} – ✅ {@link DirectMlGeluKernel}
- *       ({@code DML_OPERATOR_ACTIVATION_GELU}, Enum-ID 157, FL 5.1),
- *       benötigt {@code DirectML.dll} ≥ 1.10 – auf älteren in-box
- *       DLLs (1.8.0, Windows 11 RTM) per
- *       {@code -Dwindirectml.directml.dll=...} ein neueres
- *       Microsoft.AI.DirectML-Redistributable einhängen.
- *       GPU-getestet</li>
+ *   <li>{@link GeluKernel} – ✅ Strategie-Interface mit Feature-Level-Switch
+ *       via {@link GeluKernel#create(com.aresstack.windirectml.runtime.DirectMlContextImpl, int)}:
+ *       nativer {@link DirectMlGeluKernel}
+ *       ({@code DML_OPERATOR_ACTIVATION_GELU}, Enum-ID 157, FL 5.1) auf
+ *       neueren DLLs, sonst Composite-Fallback
+ *       {@link DirectMlCompositeGeluKernel}
+ *       (ERF + IDENTITY + MULTIPLY, alle FL 2.0). Damit läuft GELU auch
+ *       auf Windows-11-In-Box {@code DirectML.dll} 1.8.0 (FL 5.0) ohne
+ *       Redist. GPU-getestet auf beiden Pfaden.</li>
  *   <li>{@link SoftmaxKernel} – ✅ {@link DirectMlSoftmaxKernel}
  *       ({@code DML_OPERATOR_ACTIVATION_SOFTMAX}, Enum-ID 48, FL 2.0),
  *       läuft auf jeder ausgelieferten {@code DirectML.dll}. GPU-getestet</li>

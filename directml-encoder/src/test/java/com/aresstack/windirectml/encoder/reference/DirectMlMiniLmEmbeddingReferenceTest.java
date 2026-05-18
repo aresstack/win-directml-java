@@ -27,11 +27,12 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * Skip-Bedingungen zur Laufzeit:
  * <ul>
  *   <li>kein D3D12-fähiges Windows,</li>
- *   <li>keine DirectML-fähige Karte,</li>
- *   <li>DirectML-DLL liefert kein {@code DML_FEATURE_LEVEL_5_1}.</li>
+ *   <li>keine DirectML-fähige Karte.</li>
  * </ul>
- * Letzteres lässt sich per
- * {@code -Dwindirectml.directml.dll=<redistributable>} überbrücken.
+ * Ein älteres {@code DML_FEATURE_LEVEL} (z. B. 5.0 auf Windows-11-In-Box
+ * {@code DirectML.dll} 1.8.0) ist kein Skip-Grund mehr: der Encoder
+ * verwendet {@code GeluKernel.create(...)} und wechselt automatisch auf
+ * den Composite-ERF-Fallback.
  * <p>
  * Erwartung: pro Eingabesatz cosine(CPU, DirectML) &gt; 0.99 und
  * Ausgabedimension exakt 384. Die L2-Norm der DirectML-Ausgabe muss

@@ -99,7 +99,10 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
 
     /**
      * Construct an encoder that owns its own {@link DirectMlContextImpl}.
-     * The context is initialised eagerly; FL 5.1 (fused GELU) is required.
+     * The context is initialised eagerly. Uses the native fused GELU on
+     * {@code DML_FEATURE_LEVEL_5_1} and falls back to the composite
+     * ERF+IDENTITY+MULTIPLY GELU on older DirectML feature levels, so the
+     * encoder runs on any shipping Windows-10/11 in-box {@code DirectML.dll}.
      */
     public static DirectMlMiniLmEncoder load(Path modelDir) throws EmbeddingException {
         DirectMlContextImpl ctx = null;

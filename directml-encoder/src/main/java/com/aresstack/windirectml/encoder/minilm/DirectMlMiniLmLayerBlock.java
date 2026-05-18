@@ -44,17 +44,17 @@ import org.slf4j.LoggerFactory;
  * <p>
  * <b>Feature levels:</b>
  * <ul>
- *   <li>{@link DirectMlGeluKernel} requires {@code DML_FEATURE_LEVEL_5_1}
- *       (native fused GELU). On Windows-11-RTM in-box DirectML 1.8.0
- *       (FL 5.0) the construction of the block will fail with the
- *       upstream {@code E_INVALIDARG}; pass a redistributable DLL
- *       via {@code -Dwindirectml.directml.dll=...} to enable the
- *       layer block there.</li>
+ *   <li>GELU is obtained via {@link GeluKernel#create(DirectMlContextImpl, int)}:
+ *       the native fused {@link DirectMlGeluKernel}
+ *       ({@code DML_OPERATOR_ACTIVATION_GELU}, FL 5.1) is used when
+ *       available; otherwise a composite ERF+IDENTITY+MULTIPLY fallback
+ *       is selected automatically. The block therefore works on every
+ *       shipped {@code DirectML.dll}, including Windows-11-RTM in-box
+ *       1.8.0 (FL 5.0).</li>
  *   <li>All other kernels in the chain (Linear/GEMM, LayerNorm/MVN0,
  *       HeadLayout/Identity, Attention/composite, Add) are FL 2.0 and
  *       work on every shipped {@code DirectML.dll}.</li>
  * </ul>
- * A composite ERF-based GELU fallback is a separate follow-up sprint.
  */
 public final class DirectMlMiniLmLayerBlock implements AutoCloseable {
 
