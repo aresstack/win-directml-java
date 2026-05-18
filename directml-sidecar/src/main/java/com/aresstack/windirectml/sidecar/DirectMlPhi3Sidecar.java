@@ -134,47 +134,61 @@ public final class DirectMlPhi3Sidecar {
         DirectMlPhi3Sidecar sidecar = new DirectMlPhi3Sidecar(
                 System.in, System.out, modelDir, backend, maxTokens, true);
 
-        // Optional: MiniLM-Encoder mit -Dembed.backend=cpu|directml|auto.
+        // Embedding backend: parse -Dembed.backend first so that a forced
+        // mode (cpu/directml) fails visibly even when the MiniLM model
+        // directory is missing entirely.
+        EmbeddingBackendSelector.Mode embedMode;
+        try {
+            embedMode = EmbeddingBackendSelector.Mode.parse(System.getProperty("embed.backend"));
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid -Dembed.backend value: {}", e.getMessage());
+            System.exit(2);
+            return;
+        }
+
         Path minilmDir = resolveMiniLmDir();
-        if (minilmDir != null) {
-            EmbeddingBackendSelector.Mode mode;
-            try {
-                mode = EmbeddingBackendSelector.Mode.parse(System.getProperty("embed.backend"));
-            } catch (IllegalArgumentException e) {
-                log.error("Invalid -Dembed.backend value: {}", e.getMessage());
-                System.exit(2);
+        if (minilmDir == null) {
+            if (embedMode == EmbeddingBackendSelector.Mode.CPU
+                    || embedMode == EmbeddingBackendSelector.Mode.DIRECTML) {
+                log.error("embed.backend={} requested but no MiniLM model directory found "
+                                + "(checked -Dminilm.modelDir and model/all-MiniLM-L6-v2/)",
+                        embedMode.token());
+                sidecar.status.setEmbeddingBackend("error");
+                sidecar.status.setEmbeddingReady(false);
+                sidecar.status.setLastError("embed.backend=" + embedMode.token()
+                        + " requested but MiniLM model directory not found");
+                System.exit(3);
                 return;
             }
+            log.info("No MiniLM model directory found – embed handler will report not-implemented");
+        } else {
             log.info("MiniLM model present at {} – selecting embedding backend (mode={})",
-                    minilmDir, mode.token());
+                    minilmDir, embedMode.token());
             EmbeddingBackendSelector selector = new EmbeddingBackendSelector(
                     CpuMiniLmEncoder::load,
                     DirectMlMiniLmEncoder::load);
             try {
-                EmbeddingBackendSelector.Selection sel = selector.select(mode, minilmDir);
+                EmbeddingBackendSelector.Selection sel = selector.select(embedMode, minilmDir);
                 sidecar.withEmbeddingBackend(sel.backend(), sel.model());
                 if (sel.fallback()) {
                     sidecar.status.setLastError(sel.warning());
                 }
                 log.info("Embedding backend ready: {} (fallback={})", sel.backend(), sel.fallback());
             } catch (RuntimeException e) {
-                // CPU forced or DirectML forced ⇒ visible failure: log and continue
-                // without an embedding encoder so summarize/health still work.
+                // Forced mode failed visibly. Log + record in status and, for
+                // cpu/directml, exit so a supervising parent can detect it
+                // instead of silently serving a degraded sidecar.
                 log.error("Embedding backend initialisation failed: {}", e.getMessage(), e);
                 sidecar.status.setEmbeddingBackend("error");
                 sidecar.status.setEmbeddingReady(false);
-                sidecar.status.setLastError("embed.backend=" + mode.token()
+                sidecar.status.setLastError("embed.backend=" + embedMode.token()
                         + " failed: " + e.getMessage());
-                if (mode == EmbeddingBackendSelector.Mode.DIRECTML
-                        || mode == EmbeddingBackendSelector.Mode.CPU) {
-                    // Forced mode failed visibly. Exit so a supervising parent
-                    // can detect it instead of silently serving a degraded sidecar.
+                if (embedMode == EmbeddingBackendSelector.Mode.DIRECTML
+                        || embedMode == EmbeddingBackendSelector.Mode.CPU) {
                     System.exit(3);
                     return;
                 }
             }
-        } else {
-            log.info("No MiniLM model directory found – embed handler will report not-implemented");
         }
 
         int exitCode = sidecar.run();

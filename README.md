@@ -192,11 +192,21 @@ Protocol details: [`directml-sidecar/PROTOCOL.md`](directml-sidecar/PROTOCOL.md)
 
 ## Embeddings (`embed`)
 
-`embed` is backed by a pure-Java CPU implementation of
-`sentence-transformers/all-MiniLM-L6-v2` (`CpuMiniLmEncoder`). Behaviour is
-deliberately *correct first, fast later*: a single sentence at sequence length
-≤ 128 takes < 100 ms on a modern desktop. The CPU pass serves as the reference
-for the upcoming DirectML kernel migration.
+`embed` is backed by `sentence-transformers/all-MiniLM-L6-v2`. Two
+interchangeable encoder implementations exist behind the same
+`EmbeddingModel` API:
+
+* **`DirectMlMiniLmEncoder`** – the intended product path. Runs the full
+  6-layer BERT encoder on DirectML: embedding lookup, per-layer
+  Q/K/V/Linear + composite/native GELU + LayerNorm, head-layout
+  reshuffles, attention, MLP, residuals. Reference test
+  `DirectMlMiniLmEmbeddingReferenceTest` confirms
+  `cos(CPU, DirectML) = 1.000000` over the full corpus. Works on every
+  shipped `DirectML.dll`, including Windows 11 RTM in-box 1.8.0 (FL 5.0),
+  via the composite GELU fallback in `GeluKernel.create(...)`.
+* **`CpuMiniLmEncoder`** – pure-Java CPU reference / debug / fallback.
+  Correct-first, fast-later: a single sentence at sequence length ≤ 128
+  takes < 100 ms on a modern desktop.
 
 Fetch the model once (≈ 90 MB):
 
@@ -204,13 +214,12 @@ Fetch the model once (≈ 90 MB):
 pwsh scripts/download-minilm.ps1
 ```
 
-Then `embed("…")` returns a real 384-dim, L2-normalised vector. Reference tests
-in `EmbeddingReferenceTest` validate cosine separation between semantically
-related vs. unrelated sentences.
+`embed("…")` then returns a real 384-dim, L2-normalised vector regardless
+of the active backend.
 
 ### Backend selection
 
-The sidecar picks between CPU and DirectML encoder via `-Dembed.backend`:
+The sidecar picks between the two encoders via `-Dembed.backend`:
 
 ```powershell
 ./gradlew.bat :directml-sidecar:run -Dembed.backend=auto       # default: try DirectML, fall back to CPU with warn log
@@ -218,9 +227,12 @@ The sidecar picks between CPU and DirectML encoder via `-Dembed.backend`:
 ./gradlew.bat :directml-sidecar:run -Dembed.backend=cpu        # force CpuMiniLmEncoder (reference / debug path)
 ```
 
-The active backend is reported in the `health` response as `embeddingBackend`
-(`cpu`, `directml`, `none`, or `error`) together with `embeddingReady`.
-Auto-mode fallback warnings show up as `lastError` in `health`.
+A forced mode (`cpu` or `directml`) exits with code `3` if its encoder
+cannot be loaded – including the case where no MiniLM model directory is
+present at all. `auto` falls back silently to CPU and records the
+DirectML error message in `lastError`. The active backend is reported in
+the `health` response as `embeddingBackend` (`cpu`, `directml`, `none`,
+or `error`) together with `embeddingReady`.
 
 ## Roadmap
 
@@ -248,13 +260,24 @@ Auto-mode fallback warnings show up as `lastError` in `health`.
    Windows 11 RTM in-box 1.8.0. CPU-reference-tested on real GPU with and without padding mask
    (tolerance 5e-4). Native fused `DML_OPERATOR_MULTIHEAD_ATTENTION` (op 164, FL 6.1) reserved as an optional
    fast path.
-10. ⏳ `DirectMlMiniLmEncoder` – wire the kernels together; reference test `CpuMiniLmEncoder.embed(t)` vs.
-    `DirectMlMiniLmEncoder.embed(t)` cosine > 0.99.
-    **Step 10a:** ✅ `DirectMlMiniLmLayerBlock` – one full encoder layer (Q/K/V Linear → head layout → Attention → head layout → Wo Linear → residual+LN → MLP w/ GELU → residual+LN). Synthetic CPU-vs-DirectML compare at tolerance 2e-3 (`DirectMlMiniLmLayerBlockTest`). Requires FL 5.1 due to native fused GELU.
-    **Step 10b:** ⏳ Multi-layer wiring (6 layers + token-type/position/word embeddings + embedding LN).
-    **Step 10c:** ⏳ Mean-pool + L2 on DirectML (or CPU read-back), then `DirectMlMiniLmEncoder.embed(t)`.
-11. ⏳ E5 and JinaBERT encoders on the same runtime core.
-12. ⏳ Reranker encoder support.
-13. ⏳ Additional decoder LLM families after the encoder path is stable.
+10. ✅ `DirectMlMiniLmEncoder` – kernels wired into the full encoder pipeline.
+    Reference test `DirectMlMiniLmEmbeddingReferenceTest` confirms
+    `cos(CpuMiniLmEncoder.embed(t), DirectMlMiniLmEncoder.embed(t)) = 1.000000`
+    over the full corpus.
+    **Step 10a:** ✅ `DirectMlMiniLmLayerBlock` – one full encoder layer (Q/K/V Linear → head layout → Attention → head
+    layout → Wo Linear → residual+LN → MLP w/ GELU → residual+LN). Synthetic CPU-vs-DirectML compare at tolerance 2e-3 (
+    `DirectMlMiniLmLayerBlockTest`). Runs on FL ≥ 5.0 via the GELU strategy switch in step 7.
+    **Step 10b:** ✅ `DirectMlMiniLmEncoderStack` – multi-layer wiring (6 layers + token-type/position/word embeddings +
+    embedding LN), reference-tested in `DirectMlMiniLmEncoderStackTest`.
+    **Step 10c:** ✅ `DirectMlMiniLmEncoder.embed(t)` – mean-pool + L2 on CPU after the DirectML stack, returning a
+    384-dim L2-normalised vector.
+11. ✅ Sidecar embedding switch (`-Dembed.backend=cpu|directml|auto`) – wires `DirectMlMiniLmEncoder` and
+    `CpuMiniLmEncoder` behind one JSON-RPC endpoint; forced modes fail visibly with exit code 3.
+12. ⏳ Pad-bucket cache for the DirectML encoder (`S ∈ {64, 128, 256, 512}`) – stabilises kernel/buffer count and tail
+    latency.
+13. ⏳ Mean-pool + L2 on DirectML (eliminate the CPU read-back tail).
+14. ⏳ E5 and JinaBERT encoders on the same runtime core.
+15. ⏳ Reranker encoder support.
+16. ⏳ Additional decoder LLM families after the encoder path is stable.
 
 Issue backlog: [`win-directml-java-issues.md`](win-directml-java-issues.md).

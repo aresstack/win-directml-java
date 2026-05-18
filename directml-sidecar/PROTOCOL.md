@@ -177,6 +177,11 @@ Systemproperty `-Dembed.backend`:
 | `-Dembed.backend=directml`       | `DirectMlMiniLmEncoder` erzwingen. Wenn DirectML nicht verfügbar ist (kein Windows/D3D12, keine kompatible Karte), beendet sich der Sidecar mit Exit-Code `3`. **Keinen** stillen Fallback. |
 | `-Dembed.backend=auto` (Default) | Erst DirectML versuchen, bei Fehler sauber auf CPU zurückfallen. Die Fallback-Warnung wird auf `stderr`/Log geschrieben und ist als `lastError` im `health`-Result sichtbar.                |
 
+Fehlt das MiniLM-Modellverzeichnis komplett (weder `-Dminilm.modelDir`
+noch `model/all-MiniLM-L6-v2/` aufgelöst), gilt dieselbe Regel:
+`cpu`/`directml` ⇒ Exit-Code `3`, `auto` ⇒ Sidecar startet weiter, aber
+`embed` antwortet `-32005 Not implemented`.
+
 Der aktiv geladene Backend-Name wird in `health` ausgegeben:
 
 ```json
