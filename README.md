@@ -43,20 +43,22 @@ directml-sidecar           JSON-RPC 2.0 sidecar entry point + dispatcher + handl
 
 ## Status
 
-| Area                                                             | Status                                                                                                           |
-|------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| Phi-3 summarizer                                                 | ✅ working (CPU + DirectML hybrid)                                                                                |
-| JSON-RPC protocol                                                | ✅ formalized (`directml-sidecar/PROTOCOL.md`)                                                                    |
-| `health`, `summarize`, `shutdown`, `cancel`                      | ✅ wired                                                                                                          |
-| `embed`                                                          | ✅ wired – CPU reference `MiniLM` encoder returns real 384-dim vectors                                            |
-| Runtime-Core API (D3D12/DML context, Tensor, GpuBuffer, Kernels) | 🟡 `DirectMlContextImpl` + `DefaultGpuBuffer` live (roundtrip-tested on real GPU); DirectML kernel impls pending |
-| SafetensorsReader                                                | ✅ implemented + tested (F32/F16/BF16/I64/I32/I8/U8, lenient on unknown dtypes)                                   |
-| WordPieceTokenizer                                               | ✅ implemented + tested (BERT-uncased family)                                                                     |
-| Mean Pooling + L2                                                | ✅ CPU reference impl + tests                                                                                     |
-| MiniLM encoder runtime                                           | ✅ CPU forward pass (`CpuMiniLmEncoder`) – DirectML kernel migration pending                                      |
-| Sidecar lifecycle tests                                          | ✅ end-to-end via piped streams                                                                                   |
-| Phi-3 benchmark harness                                          | ✅ runnable (`Phi3Benchmark`)                                                                                     |
-| E5 / Reranker / further decoders                                 | 📄 concept docs in `docs/`                                                                                       |
+| Area                                                    | Status                                                                                                                                                     |
+|---------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Phi-3 summarizer                                        | ✅ working (CPU + DirectML hybrid)                                                                                                                          |
+| JSON-RPC protocol                                       | ✅ formalized (`directml-sidecar/PROTOCOL.md`)                                                                                                              |
+| `health`, `summarize`, `shutdown`, `cancel`             | ✅ wired                                                                                                                                                    |
+| `embed`                                                 | ✅ wired – CPU reference `MiniLM` encoder returns real 384-dim vectors                                                                                      |
+| Runtime-Core API (D3D12/DML context, Tensor, GpuBuffer) | ✅ `DirectMlContextImpl` + `DefaultGpuBuffer` (GPU roundtrip-tested)                                                                                        |
+| DirectML kernels (`Linear`, `LayerNorm`, `GELU`)        | ✅ `DirectMlLinearKernel`, `DirectMlLayerNormKernel`, `DirectMlGeluKernel` (composite ERF+IDENTITY+MULTIPLY, FL 2.0) – all CPU-reference-tested on real GPU |
+| DirectML kernels (`Attention`)                          | ⏳ next sprint                                                                                                                                              |
+| SafetensorsReader                                       | ✅ implemented + tested (F32/F16/BF16/I64/I32/I8/U8, lenient on unknown dtypes)                                                                             |
+| WordPieceTokenizer                                      | ✅ implemented + tested (BERT-uncased family)                                                                                                               |
+| Mean Pooling + L2                                       | ✅ CPU reference impl + tests                                                                                                                               |
+| MiniLM encoder runtime                                  | ✅ CPU forward pass (`CpuMiniLmEncoder`) – DirectML kernel migration pending                                                                                |
+| Sidecar lifecycle tests                                 | ✅ end-to-end via piped streams                                                                                                                             |
+| Phi-3 benchmark harness                                 | ✅ runnable (`Phi3Benchmark`)                                                                                                                               |
+| E5 / Reranker / further decoders                        | 📄 concept docs in `docs/`                                                                                                                                 |
 
 ## Requirements
 
@@ -124,12 +126,18 @@ related vs. unrelated sentences.
 3. ✅ CPU reference encoder for `all-MiniLM-L6-v2` (validated via cosine reference tests).
 4. ✅ Concrete `DirectMlContextImpl` + `DefaultGpuBuffer` with explicit D3D12 state machine
    (`COMMON → COPY_DEST → UAV → COPY_SOURCE → UAV`), validated by GPU upload/download roundtrip test.
-5. ⏳ `DirectMlLinearKernel` (DML_GEMM_OPERATOR_DESC) – first real DirectML operator.
-6. ⏳ Migrate MiniLM forward pass to DirectML kernels (`LayerNormKernel`, `GeluKernel`,
-   `AttentionKernel`); reference test `CpuMiniLmEncoder.embed(t)` vs. `DirectMlMiniLmEncoder.embed(t)`
-   cosine > 0.99.
-7. ⏳ E5 and JinaBERT encoders on the same runtime core.
-8. ⏳ Reranker encoder support.
-9. ⏳ Additional decoder LLM families after the encoder path is stable.
+5. ✅ `DirectMlLinearKernel` (`DML_OPERATOR_GEMM`) – first real DirectML compute kernel, CPU-reference-tested on real
+   GPU.
+6. ✅ `DirectMlLayerNormKernel` (`DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION`, MVN0) – BERT-style LayerNorm,
+   CPU-reference-tested.
+7. ✅ `DirectMlGeluKernel` – composite GELU built from `ELEMENT_WISE_ERF` + `ELEMENT_WISE_IDENTITY` (with `ScaleBias`) +
+   `ELEMENT_WISE_MULTIPLY`, all FL 2.0 primitives, runs on every in-box `C:\Windows\System32\DirectML.dll` (incl.
+   1.8.0). CPU-reference-tested.
+8. ⏳ `DirectMlAttentionKernel` – scaled-dot-product multi-head attention.
+9. ⏳ `DirectMlMiniLmEncoder` – wire the four kernels together; reference test `CpuMiniLmEncoder.embed(t)` vs.
+   `DirectMlMiniLmEncoder.embed(t)` cosine > 0.99.
+10. ⏳ E5 and JinaBERT encoders on the same runtime core.
+11. ⏳ Reranker encoder support.
+12. ⏳ Additional decoder LLM families after the encoder path is stable.
 
 Issue backlog: [`win-directml-java-issues.md`](win-directml-java-issues.md).

@@ -41,6 +41,7 @@ public final class DirectMlBindings {
     // (see Git history of LayerNorm: MVN0 was 39, which is LEAKY_RELU).
     public static final int DML_OPERATOR_ELEMENT_WISE_IDENTITY = 1;
     public static final int DML_OPERATOR_ELEMENT_WISE_ADD = 4;
+    public static final int DML_OPERATOR_ELEMENT_WISE_MULTIPLY = 24;
     public static final int DML_OPERATOR_ACTIVATION_RELU = 44;
     public static final int DML_OPERATOR_CONVOLUTION = 53;
     public static final int DML_OPERATOR_GEMM = 54;
@@ -48,16 +49,28 @@ public final class DirectMlBindings {
     public static final int DML_OPERATOR_BATCH_NORMALIZATION = 72;
     public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION = 73;
     /**
+     * ERF primitive ({@code y = erf(scale·x + bias)}) with optional
+     * {@code DML_SCALE_BIAS} pre-processing. FL 2.0 baseline – present
+     * in every {@code DirectML.dll} shipped with Windows 10/11. Used
+     * as the core of the composite GELU implementation.
+     */
+    public static final int DML_OPERATOR_ELEMENT_WISE_ERF = 81;
+    /**
      * MVN1 (DML_TARGET_VERSION ≥ 0x2100). Verified by counting the enum:
      * sits between SPACE_TO_DEPTH1 and RESAMPLE1 → 115. Not used by the
      * LayerNorm kernel (we use MVN0=73), kept for completeness.
      */
     public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION1 = 115;
     /**
-     * Exact GELU activation ({@code 0.5·x·(1+erf(x/√2))}). Requires
-     * DML_FEATURE_LEVEL_5_1 (Windows 11 22H2+, every DirectML 1.10+ build
-     * ships it). Desc layout is the minimal two-tensor activation struct,
-     * see {@link com.aresstack.windirectml.runtime.kernels.DirectMlGeluKernel}.
+     * Native exact GELU ({@code 0.5·x·(1+erf(x/√2))}). Requires
+     * DML_FEATURE_LEVEL_5_1, i.e. an in-box {@code DirectML.dll} ≥ 1.10
+     * (Windows 11 22H2-Update). On older Windows 11 builds the shipping
+     * system DLL is 1.8.0 and does not know this op – {@code CreateOperator}
+     * returns {@code E_INVALIDARG}. The production {@code DirectMlGeluKernel}
+     * therefore does <b>not</b> use this op directly; it is composed from
+     * ERF + IDENTITY + MULTIPLY (all FL 2.0 primitives present in every
+     * Windows 11 system DLL). The constant is kept for documentation and
+     * for a future fast-path on newer in-box runtimes.
      */
     public static final int DML_OPERATOR_ACTIVATION_GELU = 157;
     /**
