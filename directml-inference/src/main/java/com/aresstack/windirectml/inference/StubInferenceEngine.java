@@ -7,8 +7,8 @@ import org.slf4j.LoggerFactory;
  * Stub implementation of {@link InferenceEngine} for development and testing.
  * <p>
  * Returns deterministic canned responses. This is <b>not</b> a real
- * inference backend – it exists so the rest of the stack (ACP, graph,
- * MCP) can run end-to-end without a GPU or the MNIST model file.
+ * inference backend – it exists so unrelated subsystems can run end-to-end
+ * without a GPU or any real model file.
  */
 public class StubInferenceEngine implements InferenceEngine {
 

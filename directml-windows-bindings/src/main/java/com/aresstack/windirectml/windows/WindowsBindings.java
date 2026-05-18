@@ -77,7 +77,8 @@ public final class WindowsBindings implements AutoCloseable {
         }
 
 // 1. DXGI Factory
-        int adapterIndex = Integer.getInteger("winacp.dxgi.adapterIndex", 0);
+        int adapterIndex = Integer.getInteger("windirectml.dxgi.adapterIndex",
+                Integer.getInteger("winacp.dxgi.adapterIndex", 0));
 
         dxgiFactory = DxgiBindings.createFactory1(arena);
 

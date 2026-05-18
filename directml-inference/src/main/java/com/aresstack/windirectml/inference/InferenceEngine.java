@@ -4,8 +4,8 @@ package com.aresstack.windirectml.inference;
  * Abstraction over the local inference backend.
  * <p>
  * The rest of the system consumes inference through this interface only.
- * The concrete implementation is hidden behind it – no ACP, graph, or
- * MCP code may know about Windows/DirectML details.
+ * The concrete implementation is hidden behind it – callers must not know
+ * about Windows / DirectML / D3D12 details.
  * <p>
  * <b>Implementations:</b>
  * <ul>

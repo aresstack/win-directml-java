@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.sidecar;
 
 import com.aresstack.windirectml.encoder.EmbeddingModel;
+import com.aresstack.windirectml.encoder.minilm.CpuMiniLmEncoder;
 import com.aresstack.windirectml.inference.Phi3InferenceEngine;
 import com.aresstack.windirectml.inference.Phi3Summarizer;
 import com.aresstack.windirectml.inference.Summarizer;
@@ -113,8 +114,39 @@ public final class DirectMlPhi3Sidecar {
 
         DirectMlPhi3Sidecar sidecar = new DirectMlPhi3Sidecar(
                 System.in, System.out, modelDir, backend, maxTokens, true);
+
+        // Optional: MiniLM-Encoder auto-detect.
+        Path minilmDir = resolveMiniLmDir();
+        if (minilmDir != null) {
+            try {
+                log.info("Found MiniLM model at {}, loading CPU encoder", minilmDir);
+                CpuMiniLmEncoder encoder = CpuMiniLmEncoder.load(minilmDir);
+                sidecar.withEmbeddingModel(encoder);
+            } catch (Exception e) {
+                log.warn("MiniLM model present but failed to load: {}", e.getMessage());
+            }
+        }
+
         int exitCode = sidecar.run();
         System.exit(exitCode);
+    }
+
+    private static Path resolveMiniLmDir() {
+        String override = System.getProperty("minilm.modelDir");
+        if (override != null && !override.isBlank()) {
+            Path p = Path.of(override);
+            return Files.exists(p.resolve("model.safetensors")) ? p : null;
+        }
+        for (Path candidate : new Path[]{
+                Path.of("model/all-MiniLM-L6-v2"),
+                Path.of("model/sentence-transformers/all-MiniLM-L6-v2"),
+        }) {
+            if (Files.exists(candidate.resolve("model.safetensors"))
+                    && Files.exists(candidate.resolve("tokenizer.json"))) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private static Path resolveModelDir() {
