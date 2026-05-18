@@ -26,3 +26,5 @@ application.yml
 model/all-MiniLM-L6-v2/
 
 .commitmsg.tmp
+
+hs_err_pid*.log

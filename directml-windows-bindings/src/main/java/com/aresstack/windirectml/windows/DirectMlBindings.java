@@ -43,6 +43,12 @@ public final class DirectMlBindings {
     public static final int DML_OPERATOR_ELEMENT_WISE_ADD = 4;
     public static final int DML_OPERATOR_ELEMENT_WISE_MULTIPLY = 24;
     public static final int DML_OPERATOR_ACTIVATION_RELU = 44;
+    /**
+     * Softmax over the innermost dimension (FL 2.0). Applied to the last
+     * tensor axis: {@code y_i = exp(x_i) / sum_j exp(x_j)}. Used by the
+     * attention kernel for the score normalisation.
+     */
+    public static final int DML_OPERATOR_ACTIVATION_SOFTMAX = 48;
     public static final int DML_OPERATOR_CONVOLUTION = 53;
     public static final int DML_OPERATOR_GEMM = 54;
     public static final int DML_OPERATOR_MAX_POOLING = 58;

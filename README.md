@@ -51,6 +51,7 @@ directml-sidecar           JSON-RPC 2.0 sidecar entry point + dispatcher + handl
 | `embed`                                                 | ✅ wired – CPU reference `MiniLM` encoder returns real 384-dim vectors                                                                                      |
 | Runtime-Core API (D3D12/DML context, Tensor, GpuBuffer) | ✅ `DirectMlContextImpl` + `DefaultGpuBuffer` (GPU roundtrip-tested)                                                                                        |
 | DirectML kernels (`Linear`, `LayerNorm`, `GELU`)        | ✅ `DirectMlLinearKernel`, `DirectMlLayerNormKernel`, `DirectMlGeluKernel` (native `DML_OPERATOR_ACTIVATION_GELU`, requires `DML_FEATURE_LEVEL_5_1`) – all CPU-reference-tested on real GPU |
+| DirectML kernels (`Softmax`)                            | ✅ `DirectMlSoftmaxKernel` (`DML_OPERATOR_ACTIVATION_SOFTMAX`, FL 2.0) – row-wise, CPU-reference-tested, runs on every shipped `DirectML.dll`                |
 | DirectML kernels (`Attention`)                          | ⏳ next sprint                                                                                                                                              |
 | SafetensorsReader                                       | ✅ implemented + tested (F32/F16/BF16/I64/I32/I8/U8, lenient on unknown dtypes)                                                                             |
 | WordPieceTokenizer                                      | ✅ implemented + tested (BERT-uncased family)                                                                                                               |
@@ -175,11 +176,15 @@ related vs. unrelated sentences.
    CPU-reference-tested on real GPU. On the Windows 11 RTM in-box `DirectML.dll` 1.8.0 (FL 5.0) the test is skipped;
    ship a Microsoft.AI.DirectML redistributable via `-Dwindirectml.directml.dll=...` to enable the kernel there.
    A composite ERF+IDENTITY+MULTIPLY fallback on FL 2.0 primitives is tracked as a follow-up.
-8. ⏳ `DirectMlAttentionKernel` – scaled-dot-product multi-head attention.
-9. ⏳ `DirectMlMiniLmEncoder` – wire the four kernels together; reference test `CpuMiniLmEncoder.embed(t)` vs.
-   `DirectMlMiniLmEncoder.embed(t)` cosine > 0.99.
-10. ⏳ E5 and JinaBERT encoders on the same runtime core.
-11. ⏳ Reranker encoder support.
+8. ✅ `DirectMlSoftmaxKernel` – `DML_OPERATOR_ACTIVATION_SOFTMAX` (op 48, FL 2.0). Row-wise normalisation over the
+   innermost axis; CPU-reference-tested. Building block for the attention kernel and reranker logit heads.
+9. ⏳ `DirectMlAttentionKernel` – scaled-dot-product multi-head attention composed of `GEMM` (Q·Kᵀ, scaled via
+   `Alpha`), masked `ELEMENT_WISE_ADD`, `Softmax`, second `GEMM` (·V) and an output projection. Native fused
+   `DML_OPERATOR_MULTIHEAD_ATTENTION` (op 164, FL 6.1) reserved as an optional fast path.
+10. ⏳ `DirectMlMiniLmEncoder` – wire the kernels together; reference test `CpuMiniLmEncoder.embed(t)` vs.
+    `DirectMlMiniLmEncoder.embed(t)` cosine > 0.99.
+11. ⏳ E5 and JinaBERT encoders on the same runtime core.
+12. ⏳ Reranker encoder support.
 12. ⏳ Additional decoder LLM families after the encoder path is stable.
 
 Issue backlog: [`win-directml-java-issues.md`](win-directml-java-issues.md).
