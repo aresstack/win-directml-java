@@ -78,10 +78,14 @@ public final class MiniLmArchitecture implements EncoderArchitecture {
     @Override public PoolingStrategy poolingStrategy() { return PoolingStrategy.MEAN; }
     @Override public boolean l2NormalizeByDefault() { return true; }
 
+    /**
+     * Loads MiniLM weights from {@code modelDir} into the CPU reference bundle
+     * ({@link CpuMiniLmWeights}). This is the same path used by
+     * {@link CpuMiniLmEncoder#load(Path)} and serves as the correctness
+     * reference for the upcoming DirectML kernel migration.
+     */
     @Override
     public EncoderWeights loadWeights(Path modelDir) throws EmbeddingException {
-        throw new EmbeddingException(
-                "MiniLmArchitecture.loadWeights not implemented yet. "
-                        + "Pending: safetensors reader (issue 16 done) + DirectML runtime core (issues 11–13).");
+        return CpuMiniLmWeights.load(modelDir, this);
     }
 }

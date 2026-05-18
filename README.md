@@ -27,7 +27,9 @@ Windows 11 DirectML / D3D12 / DXGI
 - No ONNX Runtime
 - No JNA, no JNI
 - No universal ONNX/GGUF/Transformers runner
-- No Java CPU transformer runtime
+- No *production* Java CPU transformer runtime. The CPU MiniLM path
+  (`CpuMiniLmEncoder`) exists **only as a correctness reference** for the
+  DirectML migration and is not intended to scale.
 
 ## Modules
 
