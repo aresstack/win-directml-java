@@ -19,34 +19,52 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 
 /**
- * BERT-/MiniLM-Style LayerNorm via {@code DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION}.
+ * BERT-/MiniLM-Style LayerNorm via {@code DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION}
+ * (MVN0, Enum-ID 73). MVN0 ist auf allen aktuellen Windows-11-DML-Runtimes
+ * verfügbar und ausreichend für LayerNorm pro Zeile – wir benötigen keine
+ * explizite Achsen-Liste, weil die Geometrie ({@code [M, 1, 1, H]} mit
+ * {@code CrossChannel=FALSE}) die Normalisierung implizit auf die letzte
+ * Dimension festlegt.
  * <p>
- * <b>Status:</b> Implementierung in Arbeit. {@code IDMLDevice::CreateOperator}
- * lehnt das aktuelle Operator-Desc-Layout auf dieser DML-Version mit
- * {@code E_INVALIDARG} ab; der zugehörige Test ist temporär {@code @Disabled}.
- * Reaktivierung folgt, sobald der DML-Debug-Layer eingebunden ist und das
- * exakte Feld validiert werden kann. Bis dahin nutzt der Encoder-Pfad die
- * CPU-Fallback-LayerNorm.
+ * <b>Historie:</b> Ältere Builds dieses Moduls definierten die MVN0-Enum-ID
+ * fälschlich als 39 (das ist in Wahrheit {@code DML_OPERATOR_ACTIVATION_LEAKY_RELU}),
+ * weshalb {@code IDMLDevice::CreateOperator} mit {@code E_INVALIDARG}
+ * abgewiesen hat – das LeakyReLU-Desc-Layout passt nicht zum MVN-Desc-Layout.
+ * Behoben in Sprint <i>fix(runtime): enable DirectML debug layer and unblock
+ * LayerNorm kernel</i>.
  * <p>
- * Normalisiert über die letzte Dimension {@code H} eines Eingangs der Form
- * {@code [M, H]}, intern als {@code [1, 1, M, H]} dargestellt. {@code γ} und
- * {@code β} sind {@code [H]}-Vektoren und werden über die Batch-Dimension
- * {@code M} per Broadcast-Strides {@code [0,0,0,1]} angewendet.
+ * <b>Debug-Mode:</b> Mit {@code -Dwindirectml.debug=true} aktiviert
+ * {@link WindowsBindings} sowohl den D3D12-Validation-Layer (über
+ * {@code D3D12GetDebugInterface → ID3D12Debug::EnableDebugLayer}) als auch
+ * {@code DML_CREATE_DEVICE_FLAG_DEBUG}. DML schreibt Validierungsmeldungen
+ * nach {@code OutputDebugString} – sichtbar in einem angeschlossenen
+ * Debugger oder über Sysinternals
+ * <a href="https://learn.microsoft.com/en-us/sysinternals/downloads/debugview">DbgView</a>.
+ * Reine D3D12-Validierungsfehler werden zusätzlich aus der Info-Queue
+ * gedrant und an Exception-Texte angehängt
+ * (siehe {@link WindowsBindings#drainDebugMessages()}).
  * <p>
- * Operator-Desc-Layout (DirectML 1.6+):
+ * Geometrie: Eingang {@code [M, H]} wird intern als 4D {@code [M, 1, 1, H]}
+ * dargestellt – jede Eingangszeile sitzt in einer eigenen N-Slice. MVN0 mit
+ * {@code CrossChannel=FALSE} normalisiert pro {@code (N=m, C=0)} über die
+ * Spatial-Dims {@code (H_=1, W=H)} = {@code H} Elemente, was exakt einer
+ * LayerNorm pro Zeile entspricht. {@code γ} und {@code β} liegen als
+ * {@code [1, 1, 1, H]} und werden via DML-Standard-Broadcast über die
+ * N-Achse verteilt.
+ * <p>
+ * Operator-Desc-Layout (MVN0, 56 Bytes):
  * <pre>
- * struct DML_MEAN_VARIANCE_NORMALIZATION1_OPERATOR_DESC {
- *     const DML_TENSOR_DESC* InputTensor;     // off  0
- *     const DML_TENSOR_DESC* ScaleTensor;     // off  8  (nullable)
- *     const DML_TENSOR_DESC* BiasTensor;      // off 16  (nullable)
- *     const DML_TENSOR_DESC* OutputTensor;    // off 24
- *     const UINT*            Axes;            // off 32
- *     UINT                   AxisCount;       // off 40
- *     BOOL                   NormalizeVariance; // off 44
- *     FLOAT                  Epsilon;         // off 48
- *     // pad 4                                // off 52
- *     const DML_OPERATOR_DESC* FusedActivation; // off 56
- * }; // 64 bytes
+ * struct DML_MEAN_VARIANCE_NORMALIZATION_OPERATOR_DESC {
+ *     const DML_TENSOR_DESC*   InputTensor;        // off  0
+ *     const DML_TENSOR_DESC*   ScaleTensor;        // off  8  (nullable)
+ *     const DML_TENSOR_DESC*   BiasTensor;         // off 16  (nullable)
+ *     const DML_TENSOR_DESC*   OutputTensor;       // off 24
+ *     BOOL                     CrossChannel;       // off 32
+ *     BOOL                     NormalizeVariance;  // off 36
+ *     FLOAT                    Epsilon;            // off 40
+ *     // pad 4                                     // off 44
+ *     const DML_OPERATOR_DESC* FusedActivation;    // off 48
+ * }; // 56 bytes
  * </pre>
  */
 public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoCloseable {
@@ -94,20 +112,21 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
         this.arena = Arena.ofShared();
 
         try {
-            // ── Tensoren (rank 4: [M, 1, H, 1] – MVN0 mit CrossChannel=FALSE
-            //   normalisiert per (N,C) über (H,W)=(H,1)=H Elemente → LayerNorm
-            //   pro Sequenz-Eintrag M). ──
-            MemorySegment xDesc = bufferTensorDesc(new int[]{M, 1, H, 1}, null,
+            // ── Tensoren (rank 4: [M, 1, 1, H]) – jede Eingangszeile sitzt in
+            //   einer eigenen N-Slice; MVN0 mit CrossChannel=FALSE normalisiert
+            //   pro (N=m, C=0) über die Spatial-Dims (H_=1, W=H) = H Elemente.
+            //   Das ist semantisch genau LayerNorm pro Zeile von [M, H].
+            MemorySegment xDesc = bufferTensorDesc(new int[]{M, 1, 1, H}, null,
                     (long) M * H * Float.BYTES);
-            // γ und β als [1, 1, H, 1] – Broadcast über M.
-            MemorySegment gammaDesc = bufferTensorDesc(new int[]{1, 1, H, 1},
-                    null, (long) H * Float.BYTES);
-            MemorySegment betaDesc = bufferTensorDesc(new int[]{1, 1, H, 1},
-                    null, (long) H * Float.BYTES);
-            MemorySegment yDesc = bufferTensorDesc(new int[]{M, 1, H, 1}, null,
+            // γ und β als [1, 1, 1, H] – Broadcast über die N-Achse.
+            MemorySegment gammaDesc = bufferTensorDesc(new int[]{1, 1, 1, H}, null,
+                    (long) H * Float.BYTES);
+            MemorySegment betaDesc = bufferTensorDesc(new int[]{1, 1, 1, H}, null,
+                    (long) H * Float.BYTES);
+            MemorySegment yDesc = bufferTensorDesc(new int[]{M, 1, 1, H}, null,
                     (long) M * H * Float.BYTES);
 
-            // ── DML_MEAN_VARIANCE_NORMALIZATION_OPERATOR_DESC (56 bytes) ──
+            // ── DML_MEAN_VARIANCE_NORMALIZATION_OPERATOR_DESC (MVN0, 56 bytes) ──
             MemorySegment desc = arena.allocate(56, 8);
             desc.set(ValueLayout.ADDRESS, 0, xDesc);
             desc.set(ValueLayout.ADDRESS, 8, gammaDesc);
@@ -116,6 +135,7 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
             desc.set(ValueLayout.JAVA_INT, 32, 0);              // CrossChannel = FALSE
             desc.set(ValueLayout.JAVA_INT, 36, 1);              // NormalizeVariance = TRUE
             desc.set(ValueLayout.JAVA_FLOAT, 40, epsilon);
+            // pad 4 bytes at offset 44
             desc.set(ValueLayout.ADDRESS, 48, MemorySegment.NULL); // FusedActivation
 
             MemorySegment opDesc = DirectMlBindings.allocOperatorDesc(arena,
@@ -148,12 +168,29 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
             log.info("DirectMlLayerNormKernel ready: M={}, H={}, eps={}, desc={}, temp={}B, persist={}B",
                     M, H, epsilon, descriptorCount, tempSize, persistSize);
         } catch (WindowsNativeException e) {
+            String dbg = formatDebugMessages(wb);
             arena.close();
-            throw new DirectMlRuntimeException("Failed to build DirectMlLayerNormKernel", e);
+            throw new DirectMlRuntimeException(
+                    "Failed to build DirectMlLayerNormKernel" + dbg, e);
         } catch (RuntimeException e) {
+            String dbg = formatDebugMessages(wb);
             arena.close();
-            throw new DirectMlRuntimeException("Failed to build DirectMlLayerNormKernel", e);
+            throw new DirectMlRuntimeException(
+                    "Failed to build DirectMlLayerNormKernel" + dbg, e);
         }
+    }
+
+    /**
+     * Drain pending debug-layer messages and format them for inclusion in
+     * an exception text. Returns an empty string when debug mode is off
+     * or the info queue is empty.
+     */
+    private static String formatDebugMessages(WindowsBindings wb) {
+        java.util.List<String> msgs = wb.drainDebugMessages();
+        if (msgs.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("\n--- DirectML/D3D12 debug messages ---");
+        for (String m : msgs) sb.append("\n  ").append(m);
+        return sb.toString();
     }
 
     private void initializeOperator() throws WindowsNativeException {

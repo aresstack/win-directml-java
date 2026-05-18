@@ -27,6 +27,13 @@ subprojects {
     tasks.withType(Test).configureEach {
         useJUnitPlatform()
         jvmArgs '--enable-preview', '--enable-native-access=ALL-UNNAMED'
+        // Forward -Dwindirectml.* system properties from the Gradle invocation
+        // into the test JVM (e.g. -Dwindirectml.debug=true).
+        System.getProperties().each { k, v ->
+            if (k.toString().startsWith('windirectml.')) {
+                systemProperty(k.toString(), v.toString())
+            }
+        }
     }
 
     tasks.withType(JavaExec).configureEach {

@@ -935,35 +935,35 @@ Danach beginnt die Encoder-Schiene:
 
 ---
 
-## Offen: DirectMlLayerNormKernel � CreateOperator gibt E_INVALIDARG
+## Gelöst (Sprint `fix(runtime)/layernorm-debug-layer`): DirectMlLayerNormKernel CreateOperator gibt E_INVALIDARG
 
-**Status:** WIP. Kernel-Ger�st (Konstruktor, Operator-Compile, Binding-Table,
-Dispatch, Initializer-Pass) ist vollst�ndig, Test ist mit `@Disabled`
-markiert.
-**Beobachtung:** `IDMLDevice::CreateOperator` lehnt das aktuelle
-`DML_MEAN_VARIANCE_NORMALIZATION_OPERATOR_DESC`/`...1_DESC` mit
-`HRESULT 0x80070057 (E_INVALIDARG)` ab � sowohl f�r rank-2 `[M,H]` mit
-Axes=[1] als auch rank-4 Layouts `[M,1,1,H]`/`[M,1,H,1]` mit
-CrossChannel=TRUE/FALSE. Scale/Bias als NULL oder als `[1,1,1,H]` �ndert
-nichts. `DML_OPERATOR_GEMM` auf demselben Stack funktioniert einwandfrei
-(siehe `DirectMlLinearKernelTest`).
-**Vermutete Ursachen:**
+**Status:** ERLEDIGT. `DirectMlLayerNormKernelTest.layerNormMatchesCpuReference`
+ist grün, `@Disabled` entfernt.
+**Wurzel-Ursache:** Die Konstante `DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION`
+war in `DirectMlBindings.java` als `39` definiert. Korrekt ist `73` –
+ID `39` ist im DirectML-Enum tatsächlich `DML_OPERATOR_ACTIVATION_LEAKY_RELU`.
+Damit wurde dem DML-Runtime das MVN-Operator-Desc-Layout (56 Bytes mit
+`CrossChannel/NormalizeVariance/Epsilon`) als LeakyReLU-Desc (anderer Aufbau)
+übergeben → konsequent `HRESULT 0x80070057 (E_INVALIDARG)`. Vergleichbar
+falsch waren `BATCH_NORMALIZATION = 29` (richtig: `72`) und
+`MEAN_VARIANCE_NORMALIZATION1 = 50` (richtig liegt deutlich höher, MVN1
+wird aktuell nicht genutzt).
+**Fix:**
 
-1. Feld-Layout des Operator-Desc-Structs ist subtil falsch (z. B. `BOOL`
-   = 4 Bytes vs Padding-Annahmen).
-2. DML-Version dieses Treibers unterst�tzt MVN1 nicht (Operator-ID 50);
-   MVN0 (ID 39) wird zwar als `E_INVALIDARG` abgewiesen, k�nnte aber an
-   Scale/Bias-Shape-Regeln scheitern.
-3. `DML_BUFFER_TENSOR_DESC.TotalTensorSizeInBytes` muss auf 4-Byte- und
-   gleichzeitig auf physisch zusammenh�ngende Stride-Berechnung passen.
-   **N�chste Schritte:**
-1. `D3D12Bindings.createDebugDevice` einbinden und `DML_CREATE_DEVICE_FLAG_DEBUG`
-   im DML-Init-Pfad aktivieren, damit der DML-Debug-Layer die genaue Feld-
-   Validierungsmeldung in `OutputDebugString` schreibt.
-2. Cross-Check gegen das offizielle `DirectMLHelloWorld`-Sample
-   (Microsoft DirectML samples) � speziell wie dort MVN/LayerNorm gebaut wird.
-3. Falls Treiber MVN1 nicht kennt: LayerNorm als Komposition von
-   `REDUCE_MEAN` + `SUBTRACT` + `REDUCE_VARIANCE` + `RSQRT` +
-   `MULTIPLY` + `ADD` bauen.
-   Solange der Fehler offen ist, kann der Encoder-Pfad LayerNorm als CPU-Fallback
-   f�hren.
+1. Operator-IDs in `DirectMlBindings` korrigiert (MVN0 = 73, BN = 72).
+2. LayerNorm-Kernel verwendet 4D-Layout `[M, 1, 1, H]` für Input/Output,
+   `[1, 1, 1, H]` für `γ`/`β` mit impliziter Broadcast über die N-Achse,
+   `CrossChannel = FALSE`, `NormalizeVariance = TRUE`.
+3. `DirectML`-Debug-Pfad zusätzlich verdrahtet (PO-Forderung):
+   System-Property `-Dwindirectml.debug=true` aktiviert in
+   `WindowsBindings` sowohl den D3D12-Validation-Layer
+   (`D3D12GetDebugInterface → ID3D12Debug::EnableDebugLayer`) als auch
+   `DML_CREATE_DEVICE_FLAG_DEBUG`. Beim Initialisieren wird
+   `ID3D12InfoQueue` über `QueryInterface` aufgegriffen;
+   `WindowsBindings.drainDebugMessages()` zieht D3D12-Validierungsmeldungen
+   ins Java-Land. DML-Meldungen gehen weiter an `OutputDebugString`
+   (sichtbar über DbgView oder einen angeschlossenen Debugger).
+4. Gradle-Build forward'ed alle `-Dwindirectml.*`-System-Properties in
+   den Test-JVM.
+   **Verifikation:** `gradlew :directml-windows-bindings:test` ist grün,
+   sowohl mit als auch ohne `-Dwindirectml.debug=true`.

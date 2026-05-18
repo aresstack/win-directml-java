@@ -36,13 +36,17 @@ public final class DirectMlBindings {
     // DML_OPERATOR_TYPE values (from DirectML.h – Windows SDK 10.0.26100.0)
     public static final int DML_OPERATOR_ELEMENT_WISE_IDENTITY = 1;
     public static final int DML_OPERATOR_ELEMENT_WISE_ADD        = 4;
-    public static final int DML_OPERATOR_BATCH_NORMALIZATION   = 29;
     public static final int DML_OPERATOR_ACTIVATION_RELU       = 44;
     public static final int DML_OPERATOR_CONVOLUTION            = 53;
-    public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION = 39;
-    public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION1 = 50;
     public static final int DML_OPERATOR_GEMM                   = 54;
     public static final int DML_OPERATOR_MAX_POOLING             = 58;
+    public static final int DML_OPERATOR_BATCH_NORMALIZATION = 72;
+    public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION = 73;
+    // MVN1 was introduced in DML feature level 2.1; the numeric ID in
+    // DirectML.h is high. Provisional placeholder – verify with jextract or
+    // by enumerating IDMLDevice::CheckFeatureSupport before using. MVN0 (73)
+    // is the working ID on current Windows 11 builds.
+    public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION1 = 165;
 
     // DML_CONVOLUTION_MODE / DIRECTION
     public static final int DML_CONVOLUTION_MODE_CROSS_CORRELATION = 0;

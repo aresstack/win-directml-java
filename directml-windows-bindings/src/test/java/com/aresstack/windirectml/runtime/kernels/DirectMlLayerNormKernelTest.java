@@ -31,9 +31,6 @@ class DirectMlLayerNormKernelTest {
     private static final float EPS = 1e-12f;
 
     @Test
-    @Disabled("TODO(layernorm): IDMLDevice::CreateOperator rejects MVN0/MVN1 with E_INVALIDARG "
-            + "on this DML build. Re-enable once the operator-desc layout has been validated "
-            + "against the DML debug layer (see win-directml-java-issues.md).")
     void layerNormMatchesCpuReference() throws DirectMlRuntimeException {
         assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12");
 

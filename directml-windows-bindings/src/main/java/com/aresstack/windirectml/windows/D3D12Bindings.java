@@ -116,6 +116,148 @@ public final class D3D12Bindings {
     }
 
     // ══════════════════════════════════════════════════════════════════════
+    // Debug layer (D3D12GetDebugInterface → ID3D12Debug::EnableDebugLayer)
+    // ══════════════════════════════════════════════════════════════════════
+
+    private static final FunctionDescriptor D3D12_GET_DEBUG_INTERFACE_DESC =
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS);
+    private static volatile MethodHandle d3d12GetDebugInterfaceHandle;
+
+    private static MethodHandle getD3D12GetDebugInterfaceHandle() {
+        if (d3d12GetDebugInterfaceHandle == null) {
+            synchronized (D3D12Bindings.class) {
+                if (d3d12GetDebugInterfaceHandle == null) {
+                    SymbolLookup d3d12 = SymbolLookup.libraryLookup("d3d12.dll", Arena.global());
+                    MemorySegment addr = d3d12.find("D3D12GetDebugInterface")
+                            .orElseThrow(() -> new UnsatisfiedLinkError("D3D12GetDebugInterface not in d3d12.dll"));
+                    d3d12GetDebugInterfaceHandle = Linker.nativeLinker()
+                            .downcallHandle(addr, D3D12_GET_DEBUG_INTERFACE_DESC);
+                }
+            }
+        }
+        return d3d12GetDebugInterfaceHandle;
+    }
+
+    /**
+     * Activate the D3D12 validation layer <i>before</i> any device is created.
+     * Best-effort – if the optional "Graphics Tools" feature is missing on the
+     * machine, this logs a warning and returns {@code false} instead of throwing.
+     *
+     * @return {@code true} if the debug layer was enabled successfully
+     */
+    public static boolean enableDebugLayer(Arena arena) {
+        try {
+            MemorySegment riid = ComIID.allocateGuid(arena, ComIID.IID_ID3D12Debug_BYTES);
+            MemorySegment pp = arena.allocate(ValueLayout.ADDRESS);
+            int hr = (int) getD3D12GetDebugInterfaceHandle().invokeExact(riid, pp);
+            if (hr != 0) {
+                log.warn("D3D12GetDebugInterface failed: HRESULT 0x{} – continuing without debug layer",
+                        Integer.toHexString(hr));
+                return false;
+            }
+            MemorySegment dbg = pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
+
+            // ID3D12Debug::EnableDebugLayer (vtable slot 3, void return, this only).
+            MethodHandle enable = DxgiBindings.vtableMethod(dbg, 3,
+                    FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+            enable.invokeExact(dbg);
+            DxgiBindings.release(dbg);
+            log.info("D3D12 debug layer enabled");
+            return true;
+        } catch (Throwable t) {
+            log.warn("Could not enable D3D12 debug layer: {} – is the 'Graphics Tools' optional "
+                    + "feature installed?", t.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Query {@code ID3D12InfoQueue} from the given device. Returns {@code null}
+     * if the device has no info queue (debug layer not enabled, or device
+     * created without {@code D3D12_CREATE_DEVICE_FLAG_DEBUG}).
+     */
+    public static MemorySegment queryInfoQueue(MemorySegment d3d12Device, Arena arena) {
+        try {
+            MemorySegment riid = ComIID.allocateGuid(arena, ComIID.IID_ID3D12InfoQueue_BYTES);
+            MemorySegment pp = arena.allocate(ValueLayout.ADDRESS);
+            // ID3D12Device inherits IUnknown::QueryInterface at vtable slot 0.
+            MethodHandle qi = DxgiBindings.vtableMethod(d3d12Device, 0,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                            ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+            int hr = (int) qi.invokeExact(d3d12Device, riid, pp);
+            if (hr != 0) return null;
+            return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
+        } catch (Throwable t) {
+            log.debug("queryInfoQueue failed: {}", t.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Drain all currently stored messages from an {@code ID3D12InfoQueue}.
+     * <p>
+     * Returns a human-readable list of message texts (severity + description).
+     * Clears the queue afterwards. Best-effort: any internal failure returns
+     * an empty list.
+     *
+     * @param infoQueue handle returned by {@link #queryInfoQueue}, may be {@code null}
+     */
+    public static java.util.List<String> drainInfoQueue(MemorySegment infoQueue, Arena arena) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (infoQueue == null) return out;
+        try {
+            // ID3D12InfoQueue vtable (post-IUnknown):
+            //   3 SetMessageCountLimit
+            //   4 ClearStoredMessages
+            //   5 GetMessage(this, idx, pMessage, pMessageByteLength) -> HRESULT
+            //   6..7 GetNumMessagesAllowed/Denied
+            //   8 GetNumStoredMessages() -> UINT64
+            MethodHandle getNumStored = DxgiBindings.vtableMethod(infoQueue, 8,
+                    FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+            MethodHandle getMessage = DxgiBindings.vtableMethod(infoQueue, 5,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                            ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+            MethodHandle clear = DxgiBindings.vtableMethod(infoQueue, 4,
+                    FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+
+            long n = (long) getNumStored.invokeExact(infoQueue);
+            for (long i = 0; i < n; i++) {
+                // First call: pMessage=NULL → driver writes required byte length into pSize.
+                MemorySegment pSize = arena.allocate(ValueLayout.JAVA_LONG);
+                int hr = (int) getMessage.invokeExact(infoQueue, i, MemorySegment.NULL, pSize);
+                if (hr != 0) continue;
+                long sz = pSize.get(ValueLayout.JAVA_LONG, 0);
+                if (sz <= 32) continue;
+                MemorySegment buf = arena.allocate(sz, 8);
+                hr = (int) getMessage.invokeExact(infoQueue, i, buf, pSize);
+                if (hr != 0) continue;
+                // D3D12_MESSAGE layout:
+                //   Category(4) + Severity(4) + ID(4) + pad(4) + pDescription(8) + DescByteLength(8) = 32
+                int severity = buf.get(ValueLayout.JAVA_INT, 4);
+                MemorySegment descPtr = buf.get(ValueLayout.ADDRESS, 16);
+                long descLen = buf.get(ValueLayout.JAVA_LONG, 24);
+                String txt;
+                if (descPtr.equals(MemorySegment.NULL) || descLen <= 0) {
+                    txt = "(no description)";
+                } else {
+                    MemorySegment desc = descPtr.reinterpret(descLen);
+                    byte[] bytes = new byte[(int) Math.min(descLen, 4096)];
+                    MemorySegment.copy(desc, ValueLayout.JAVA_BYTE, 0, bytes, 0, bytes.length);
+                    int end = bytes.length;
+                    while (end > 0 && bytes[end - 1] == 0) end--;
+                    txt = new String(bytes, 0, end, java.nio.charset.StandardCharsets.US_ASCII);
+                }
+                out.add("[sev=" + severity + "] " + txt);
+            }
+            clear.invokeExact(infoQueue);
+        } catch (Throwable t) {
+            log.debug("drainInfoQueue failed: {}", t.getMessage());
+        }
+        return out;
+    }
+
+
+    // ══════════════════════════════════════════════════════════════════════
     // Command queue (existing)
     // ══════════════════════════════════════════════════════════════════════
 

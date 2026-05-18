@@ -98,6 +98,22 @@ public final class ComIID {
             (byte) 0xbc, (byte) 0x79, (byte) 0x5b, (byte) 0x5c,
             (byte) 0x98, (byte) 0x04, (byte) 0x0f, (byte) 0xad);
 
+    /**
+     * IID_ID3D12Debug = {344488b7-6846-474b-b989-f027448245e0}
+     */
+    public static final byte[] IID_ID3D12Debug_BYTES = guidBytes(
+            0x344488b7, (short) 0x6846, (short) 0x474b,
+            (byte) 0xb9, (byte) 0x89, (byte) 0xf0, (byte) 0x27,
+            (byte) 0x44, (byte) 0x82, (byte) 0x45, (byte) 0xe0);
+
+    /**
+     * IID_ID3D12InfoQueue = {0742a90b-c387-483f-b946-30a7e4e61458}
+     */
+    public static final byte[] IID_ID3D12InfoQueue_BYTES = guidBytes(
+            0x0742a90b, (short) 0xc387, (short) 0x483f,
+            (byte) 0xb9, (byte) 0x46, (byte) 0x30, (byte) 0xa7,
+            (byte) 0xe4, (byte) 0xe6, (byte) 0x14, (byte) 0x58);
+
     /** IID_ID3D12RootSignature = {c54a6b66-72df-4ee8-8be5-a946a1429214} */
     public static final byte[] IID_ID3D12RootSignature_BYTES = guidBytes(
             0xc54a6b66, (short) 0x72df, (short) 0x4ee8,

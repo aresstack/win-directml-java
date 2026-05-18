@@ -38,12 +38,25 @@ public final class WindowsBindings implements AutoCloseable {
     private MemorySegment d3d12Device;
     private MemorySegment commandQueue;
     private MemorySegment dmlDevice;
+    /**
+     * Non-null when the debug layer is active and the device exposes an info queue.
+     */
+    private MemorySegment infoQueue;
+    /**
+     * True when {@code -Dwindirectml.debug=true} (or constructor override) requested the debug layer.
+     */
+    private final boolean debugRequested;
 
     private boolean initialised = false;
     private boolean closed = false;
 
     public WindowsBindings() {
+        this(Boolean.getBoolean("windirectml.debug"));
+    }
+
+    public WindowsBindings(boolean debug) {
         this.arena = Arena.ofShared();
+        this.debugRequested = debug;
     }
 
     /**
@@ -76,6 +89,12 @@ public final class WindowsBindings implements AutoCloseable {
             throw new WindowsNativeException("Not running on Windows – native bindings unavailable");
         }
 
+        // 0. Optional: enable D3D12 + DML validation layers *before* any device exists.
+        if (debugRequested) {
+            boolean ok = D3D12Bindings.enableDebugLayer(arena);
+            log.info("DirectML debug mode requested (-Dwindirectml.debug=true); D3D12 layer enabled={}", ok);
+        }
+
 // 1. DXGI Factory
         int adapterIndex = Integer.getInteger("windirectml.dxgi.adapterIndex", 0);
 
@@ -92,6 +111,12 @@ public final class WindowsBindings implements AutoCloseable {
         d3d12Device = D3D12Bindings.createDevice(
                 dxgiAdapter, D3D12Bindings.D3D_FEATURE_LEVEL_11_0, arena);
 
+        // 3b. With debug layer active, grab the info queue for later message draining.
+        if (debugRequested) {
+            infoQueue = D3D12Bindings.queryInfoQueue(d3d12Device, arena);
+            log.info("D3D12 info queue available: {}", infoQueue != null);
+        }
+
         // 4. Command queue (needed for DirectML dispatch)
         commandQueue = D3D12Bindings.createCommandQueue(d3d12Device, arena);
 
@@ -99,9 +124,11 @@ public final class WindowsBindings implements AutoCloseable {
         if ("cpu".equalsIgnoreCase(backend)) {
             log.info("CPU-only mode requested – skipping DirectML device creation");
         } else {
+            int dmlFlags = debugRequested
+                    ? DirectMlBindings.DML_CREATE_DEVICE_FLAG_DEBUG
+                    : DirectMlBindings.DML_CREATE_DEVICE_FLAG_NONE;
             try {
-                dmlDevice = DirectMlBindings.createDevice(
-                        d3d12Device, DirectMlBindings.DML_CREATE_DEVICE_FLAG_NONE, arena);
+                dmlDevice = DirectMlBindings.createDevice(d3d12Device, dmlFlags, arena);
             } catch (WindowsNativeException e) {
                 if ("auto".equalsIgnoreCase(backend)) {
                     log.warn("DirectML device creation failed (auto mode), continuing without: {}",
@@ -147,6 +174,30 @@ public final class WindowsBindings implements AutoCloseable {
         return dmlDevice != null;
     }
 
+    /**
+     * Drain pending D3D12/DirectML debug messages from the device's info queue.
+     * <p>
+     * Returns an empty list when the debug layer is not active or the info
+     * queue is unavailable. Useful to enrich an exception message right after
+     * a failing native call:
+     * <pre>
+     *   try {
+     *       DirectMlBindings.createOperator(...);
+     *   } catch (WindowsNativeException e) {
+     *       for (String msg : wb.drainDebugMessages()) log.error(msg);
+     *       throw e;
+     *   }
+     * </pre>
+     */
+    public java.util.List<String> drainDebugMessages() {
+        if (infoQueue == null) return java.util.List.of();
+        return D3D12Bindings.drainInfoQueue(infoQueue, arena);
+    }
+
+    public boolean isDebugEnabled() {
+        return debugRequested && infoQueue != null;
+    }
+
     @Override
     public void close() {
         if (closed) return;           // idempotent
@@ -157,12 +208,14 @@ public final class WindowsBindings implements AutoCloseable {
         // Release in reverse creation order; null-safe
         safeRelease(dmlDevice, "DML device");
         safeRelease(commandQueue, "command queue");
+        safeRelease(infoQueue, "info queue");
         safeRelease(d3d12Device, "D3D12 device");
         safeRelease(dxgiAdapter, "DXGI adapter");
         safeRelease(dxgiFactory, "DXGI factory");
 
         dmlDevice = null;
         commandQueue = null;
+        infoQueue = null;
         d3d12Device = null;
         dxgiAdapter = null;
         dxgiFactory = null;
