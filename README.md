@@ -115,6 +115,52 @@ installed by other software (e.g. anything under `C:\Program Files\…`); the
 default behaviour of loading the in-box `System32\DirectML.dll` is the only
 supported production path.
 
+### Optional: opt-in NuGet redist downloader
+
+If your application wants to enable fused FL ≥ 5.1 kernels even on a host
+whose in-box `DirectML.dll` is the 1.8.0 RTM baseline, it may download the
+official `Microsoft.AI.DirectML` NuGet package into its own per-user
+settings folder. The `directml-windows-bindings` module ships a generic
+NuGet installer (`com.aresstack.windirectml.runtime.redist.*`) for exactly
+this purpose:
+
+```java
+import com.aresstack.windirectml.runtime.redist.AppSettingsPaths;
+import com.aresstack.windirectml.runtime.redist.DirectMlRedistInstaller;
+
+// ONLY call this after the user has explicitly opted in, e.g. through a
+// settings checkbox or first-run dialog. Never download silently.
+Path appSettings = AppSettingsPaths.forApp("my-app");
+DirectMlRedistInstaller installer = new DirectMlRedistInstaller(appSettings);
+Path dll = installer.installAndUse("1.15.4", "x64");   // FL 6.4 on every Win11
+// ...subsequent DirectMlBindings.createDevice(...) loads the redist DLL.
+```
+
+`installAndUse` is equivalent to calling `install(...)` and then setting
+`-D` system property `windirectml.directml.dll` to the returned path. It
+must be called **before** the first use of `DirectMlBindings`, otherwise
+the symbol lookup is already cached against the in-box DLL.
+
+Layout under `%LOCALAPPDATA%\<app-name>`:
+
+```text
+nuget-cache/Microsoft.AI.DirectML/<version>/Microsoft.AI.DirectML.<version>.nupkg
+native/directml/<version>/<arch>-win/DirectML.dll
+```
+
+Supported architectures: `x64`, `x86`, `arm64`, `arm`. The installer is
+idempotent (cached `.nupkg` is reused; extract is a no-op if the file is
+already in place with the expected size) and refuses to write outside the
+app settings folder (ZIP-slip protection).
+
+A real end-to-end test against `nuget.org` is included but opt-in:
+
+```powershell
+./gradlew.bat :directml-windows-bindings:test `
+    --tests *DirectMlRedistDownloadIT `
+    "-Dwindirectml.redist.itest=true"
+```
+
 ## Build
 
 PowerShell:
