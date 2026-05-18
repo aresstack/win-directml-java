@@ -33,20 +33,38 @@ public final class DirectMlBindings {
     // DML_TENSOR_FLAGS
     public static final int DML_TENSOR_FLAG_NONE = 0;
 
-    // DML_OPERATOR_TYPE values (from DirectML.h – Windows SDK 10.0.26100.0)
+    // DML_OPERATOR_TYPE values (from DirectML.h – Windows SDK 10.0.26100.0).
+    // Each ID below has been verified by counting the canonical enum in
+    // %WindowsSdkDir%/Include/10.0.26100.0/um/DirectML.h. Do NOT guess –
+    // a wrong ID makes IDMLDevice::CreateOperator fail with E_INVALIDARG
+    // because DML interprets our desc with the wrong struct layout
+    // (see Git history of LayerNorm: MVN0 was 39, which is LEAKY_RELU).
     public static final int DML_OPERATOR_ELEMENT_WISE_IDENTITY = 1;
-    public static final int DML_OPERATOR_ELEMENT_WISE_ADD        = 4;
-    public static final int DML_OPERATOR_ACTIVATION_RELU       = 44;
-    public static final int DML_OPERATOR_CONVOLUTION            = 53;
-    public static final int DML_OPERATOR_GEMM                   = 54;
-    public static final int DML_OPERATOR_MAX_POOLING             = 58;
+    public static final int DML_OPERATOR_ELEMENT_WISE_ADD = 4;
+    public static final int DML_OPERATOR_ACTIVATION_RELU = 44;
+    public static final int DML_OPERATOR_CONVOLUTION = 53;
+    public static final int DML_OPERATOR_GEMM = 54;
+    public static final int DML_OPERATOR_MAX_POOLING = 58;
     public static final int DML_OPERATOR_BATCH_NORMALIZATION = 72;
     public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION = 73;
-    // MVN1 was introduced in DML feature level 2.1; the numeric ID in
-    // DirectML.h is high. Provisional placeholder – verify with jextract or
-    // by enumerating IDMLDevice::CheckFeatureSupport before using. MVN0 (73)
-    // is the working ID on current Windows 11 builds.
-    public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION1 = 165;
+    /**
+     * MVN1 (DML_TARGET_VERSION ≥ 0x2100). Verified by counting the enum:
+     * sits between SPACE_TO_DEPTH1 and RESAMPLE1 → 115. Not used by the
+     * LayerNorm kernel (we use MVN0=73), kept for completeness.
+     */
+    public static final int DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION1 = 115;
+    /**
+     * Exact GELU activation ({@code 0.5·x·(1+erf(x/√2))}). Requires
+     * DML_FEATURE_LEVEL_5_1 (Windows 11 22H2+, every DirectML 1.10+ build
+     * ships it). Desc layout is the minimal two-tensor activation struct,
+     * see {@link com.aresstack.windirectml.runtime.kernels.DirectMlGeluKernel}.
+     */
+    public static final int DML_OPERATOR_ACTIVATION_GELU = 157;
+    /**
+     * Multi-head attention fused op (DML_TARGET_VERSION ≥ 0x6100). Reserved
+     * for the upcoming {@code DirectMlAttentionKernel} sprint.
+     */
+    public static final int DML_OPERATOR_MULTIHEAD_ATTENTION = 164;
 
     // DML_CONVOLUTION_MODE / DIRECTION
     public static final int DML_CONVOLUTION_MODE_CROSS_CORRELATION = 0;
