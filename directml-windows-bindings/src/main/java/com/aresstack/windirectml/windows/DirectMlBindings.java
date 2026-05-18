@@ -51,8 +51,13 @@ public final class DirectMlBindings {
     /**
      * ERF primitive ({@code y = erf(scale·x + bias)}) with optional
      * {@code DML_SCALE_BIAS} pre-processing. FL 2.0 baseline – present
-     * in every {@code DirectML.dll} shipped with Windows 10/11. Used
-     * as the core of the composite GELU implementation.
+     * in every {@code DirectML.dll} shipped with Windows 10/11.
+     * <p>
+     * Currently unused at runtime. Reserved as the building block for a
+     * planned composite GELU fallback ({@code 0.5·x·(1+erf(x/√2))} via
+     * ERF + IDENTITY(scale=0.5, bias=0.5) + MULTIPLY) that would let the
+     * GELU kernel run on FL 5.0 in-box DLLs such as Windows 11 RTM 1.8.0,
+     * where {@link #DML_OPERATOR_ACTIVATION_GELU} is unavailable.
      */
     public static final int DML_OPERATOR_ELEMENT_WISE_ERF = 81;
     /**

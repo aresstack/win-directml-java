@@ -50,7 +50,7 @@ directml-sidecar           JSON-RPC 2.0 sidecar entry point + dispatcher + handl
 | `health`, `summarize`, `shutdown`, `cancel`             | ✅ wired                                                                                                                                                    |
 | `embed`                                                 | ✅ wired – CPU reference `MiniLM` encoder returns real 384-dim vectors                                                                                      |
 | Runtime-Core API (D3D12/DML context, Tensor, GpuBuffer) | ✅ `DirectMlContextImpl` + `DefaultGpuBuffer` (GPU roundtrip-tested)                                                                                        |
-| DirectML kernels (`Linear`, `LayerNorm`, `GELU`)        | ✅ `DirectMlLinearKernel`, `DirectMlLayerNormKernel`, `DirectMlGeluKernel` (composite ERF+IDENTITY+MULTIPLY, FL 2.0) – all CPU-reference-tested on real GPU |
+| DirectML kernels (`Linear`, `LayerNorm`, `GELU`)        | ✅ `DirectMlLinearKernel`, `DirectMlLayerNormKernel`, `DirectMlGeluKernel` (native `DML_OPERATOR_ACTIVATION_GELU`, requires `DML_FEATURE_LEVEL_5_1`) – all CPU-reference-tested on real GPU |
 | DirectML kernels (`Attention`)                          | ⏳ next sprint                                                                                                                                              |
 | SafetensorsReader                                       | ✅ implemented + tested (F32/F16/BF16/I64/I32/I8/U8, lenient on unknown dtypes)                                                                             |
 | WordPieceTokenizer                                      | ✅ implemented + tested (BERT-uncased family)                                                                                                               |
@@ -171,9 +171,10 @@ related vs. unrelated sentences.
    GPU.
 6. ✅ `DirectMlLayerNormKernel` (`DML_OPERATOR_MEAN_VARIANCE_NORMALIZATION`, MVN0) – BERT-style LayerNorm,
    CPU-reference-tested.
-7. ✅ `DirectMlGeluKernel` – composite GELU built from `ELEMENT_WISE_ERF` + `ELEMENT_WISE_IDENTITY` (with `ScaleBias`) +
-   `ELEMENT_WISE_MULTIPLY`, all FL 2.0 primitives, runs on every in-box `C:\Windows\System32\DirectML.dll` (incl.
-   1.8.0). CPU-reference-tested.
+7. ✅ `DirectMlGeluKernel` – native `DML_OPERATOR_ACTIVATION_GELU` (op 157, requires `DML_FEATURE_LEVEL_5_1`).
+   CPU-reference-tested on real GPU. On the Windows 11 RTM in-box `DirectML.dll` 1.8.0 (FL 5.0) the test is skipped;
+   ship a Microsoft.AI.DirectML redistributable via `-Dwindirectml.directml.dll=...` to enable the kernel there.
+   A composite ERF+IDENTITY+MULTIPLY fallback on FL 2.0 primitives is tracked as a follow-up.
 8. ⏳ `DirectMlAttentionKernel` – scaled-dot-product multi-head attention.
 9. ⏳ `DirectMlMiniLmEncoder` – wire the four kernels together; reference test `CpuMiniLmEncoder.embed(t)` vs.
    `DirectMlMiniLmEncoder.embed(t)` cosine > 0.99.
