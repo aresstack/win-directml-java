@@ -153,6 +153,40 @@ public final class CpuMiniLmEncoder implements EmbeddingModel, AutoCloseable {
     // ═════════════════════════════════════════════════════════════════════
 
     /**
+     * Embedding-LayerNorm gefolgt von {@code n} aufeinanderfolgenden
+     * Encoder-Blöcken, in-place auf {@code x}.
+     * <p>
+     * Diese statische Variante deckt die Stufen 3 und 4 des
+     * BERT/MiniLM-Forward-Passes ab (Embedding-LN + alle Transformer-Layer)
+     * und ist von {@code DirectMlMiniLmEncoderStackTest} als CPU-Referenz
+     * wiederverwendbar – Multi-Layer-Vergleich ist der verbindliche
+     * Prüfschritt, bevor der vollständige 6-Layer-DirectML-Encoder gegen
+     * {@code all-MiniLM-L6-v2} gemessen wird.
+     * <p>
+     * Der Caller stellt das schon summierte Embedding-Array
+     * ({@code word+pos+tokenType}) in {@code x} bereit und übergibt
+     * passend dimensionierte Scratch-Buffer.
+     */
+    public static void forwardEmbeddingAndLayers(float[] x,
+                                                 float[] embLnGamma, float[] embLnBeta,
+                                                 java.util.List<CpuMiniLmWeights.LayerWeights> layers,
+                                                 int[] attentionMask,
+                                                 int seqLen,
+                                                 int hiddenSize, int numHeads, int headDim,
+                                                 int intermediateSize, float layerNormEps,
+                                                 float[] q, float[] k, float[] v,
+                                                 float[] attn, float[] attnOut,
+                                                 float[] mlpInter, float[] mlpOut,
+                                                 float[] scoresBuf) {
+        layerNormInPlace(x, seqLen, hiddenSize, embLnGamma, embLnBeta, layerNormEps);
+        for (CpuMiniLmWeights.LayerWeights lw : layers) {
+            forwardSingleLayer(x, lw, attentionMask, seqLen,
+                    hiddenSize, numHeads, headDim, intermediateSize, layerNormEps,
+                    q, k, v, attn, attnOut, mlpInter, mlpOut, scoresBuf);
+        }
+    }
+
+    /**
      * Vollständiger Forward-Pass für genau einen MiniLM-Encoder-Block,
      * in-place auf {@code x}.
      * <p>
