@@ -23,7 +23,13 @@ package com.aresstack.windirectml.runtime.kernels;
  *   <li>{@link SoftmaxKernel} – ✅ {@link DirectMlSoftmaxKernel}
  *       ({@code DML_OPERATOR_ACTIVATION_SOFTMAX}, Enum-ID 48, FL 2.0),
  *       läuft auf jeder ausgelieferten {@code DirectML.dll}. GPU-getestet</li>
- *   <li>{@link AttentionKernel} – ⏳ nächster Sprint</li>
+ *   <li>{@link AttentionKernel} – ✅ {@link DirectMlAttentionKernel}
+ *       (Composite-SDPA aus {@code DML_OPERATOR_GEMM} ×2,
+ *       optional {@code DML_OPERATOR_ELEMENT_WISE_ADD} (Mask) und
+ *       {@code DML_OPERATOR_ACTIVATION_SOFTMAX}). Alle vier
+ *       Sub-Ops sind FL 2.0 – läuft auf jeder ausgelieferten
+ *       {@code DirectML.dll}, einschließlich Windows-11-RTM
+ *       In-Box 1.8.0. GPU-getestet (mit und ohne Mask).</li>
  *   <li>{@link MeanPoolingKernel} – ⏳ Encoder-Pflicht</li>
  *   <li>{@link L2NormalizeKernel} – ⏳ Encoder-Pflicht</li>
  * </ul>

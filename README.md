@@ -52,7 +52,7 @@ directml-sidecar           JSON-RPC 2.0 sidecar entry point + dispatcher + handl
 | Runtime-Core API (D3D12/DML context, Tensor, GpuBuffer) | ✅ `DirectMlContextImpl` + `DefaultGpuBuffer` (GPU roundtrip-tested)                                                                                        |
 | DirectML kernels (`Linear`, `LayerNorm`, `GELU`)        | ✅ `DirectMlLinearKernel`, `DirectMlLayerNormKernel`, `DirectMlGeluKernel` (native `DML_OPERATOR_ACTIVATION_GELU`, requires `DML_FEATURE_LEVEL_5_1`) – all CPU-reference-tested on real GPU |
 | DirectML kernels (`Softmax`)                            | ✅ `DirectMlSoftmaxKernel` (`DML_OPERATOR_ACTIVATION_SOFTMAX`, FL 2.0) – row-wise, CPU-reference-tested, runs on every shipped `DirectML.dll`                |
-| DirectML kernels (`Attention`)                          | ⏳ next sprint                                                                                                                                              |
+| DirectML kernels (`Attention`)                          | ✅ `DirectMlAttentionKernel` – composite SDPA over `GEMM` ×2 + optional masked `ELEMENT_WISE_ADD` + `Softmax`, all FL 2.0 (runs on every shipped `DirectML.dll`, in-box 1.8.0 included). CPU-reference-tested on real GPU, with and without padding mask. |
 | SafetensorsReader                                       | ✅ implemented + tested (F32/F16/BF16/I64/I32/I8/U8, lenient on unknown dtypes)                                                                             |
 | WordPieceTokenizer                                      | ✅ implemented + tested (BERT-uncased family)                                                                                                               |
 | Mean Pooling + L2                                       | ✅ CPU reference impl + tests                                                                                                                               |
@@ -224,9 +224,12 @@ related vs. unrelated sentences.
    A composite ERF+IDENTITY+MULTIPLY fallback on FL 2.0 primitives is tracked as a follow-up.
 8. ✅ `DirectMlSoftmaxKernel` – `DML_OPERATOR_ACTIVATION_SOFTMAX` (op 48, FL 2.0). Row-wise normalisation over the
    innermost axis; CPU-reference-tested. Building block for the attention kernel and reranker logit heads.
-9. ⏳ `DirectMlAttentionKernel` – scaled-dot-product multi-head attention composed of `GEMM` (Q·Kᵀ, scaled via
-   `Alpha`), masked `ELEMENT_WISE_ADD`, `Softmax`, second `GEMM` (·V) and an output projection. Native fused
-   `DML_OPERATOR_MULTIHEAD_ATTENTION` (op 164, FL 6.1) reserved as an optional fast path.
+9. ✅ `DirectMlAttentionKernel` – scaled-dot-product multi-head attention composed of `GEMM` (Q·Kᵀ, scaled via
+   `Alpha`), optional masked `ELEMENT_WISE_ADD` (mask broadcast via strides `[S,0,0,1]`), `Softmax`, second `GEMM`
+   (·V). All four sub-ops are FL 2.0, so the kernel runs on every shipped `DirectML.dll`, including the
+   Windows 11 RTM in-box 1.8.0. CPU-reference-tested on real GPU with and without padding mask
+   (tolerance 5e-4). Native fused `DML_OPERATOR_MULTIHEAD_ATTENTION` (op 164, FL 6.1) reserved as an optional
+   fast path.
 10. ⏳ `DirectMlMiniLmEncoder` – wire the kernels together; reference test `CpuMiniLmEncoder.embed(t)` vs.
     `DirectMlMiniLmEncoder.embed(t)` cosine > 0.99.
 11. ⏳ E5 and JinaBERT encoders on the same runtime core.
