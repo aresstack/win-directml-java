@@ -8,6 +8,7 @@ import com.aresstack.windirectml.runtime.GpuBuffer;
 import com.aresstack.windirectml.runtime.TensorDataType;
 import com.aresstack.windirectml.runtime.TensorLayout;
 import com.aresstack.windirectml.runtime.TensorShape;
+import com.aresstack.windirectml.windows.DirectMlBindings;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import org.junit.jupiter.api.Test;
 
@@ -43,6 +44,18 @@ class DirectMlGeluKernelTest {
             }
             assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
                     "Skipping: no DirectML device on this adapter");
+
+            // DML_OPERATOR_ACTIVATION_GELU (op 157) requires DML_FEATURE_LEVEL_5_1.
+            // The in-box DirectML.dll shipped with Windows 11 21H2/22H2 RTM is
+            // v1.8.0 (FL 5.0). Bundle a Microsoft.AI.DirectML redistributable
+            // (>= 1.10) or point -Dwindirectml.directml.dll at one to enable
+            // the fused kernel. A composite (ERF + IDENTITY + MUL) fallback
+            // is tracked as a follow-up sprint.
+            int fl = ctx.bindings().getDmlFeatureLevel();
+            assumeTrue(DirectMlBindings.supportsFusedGelu(fl),
+                    "Skipping: fused GELU requires DML_FEATURE_LEVEL_5_1, but " +
+                            "DirectML.dll reports " + DirectMlBindings.formatFeatureLevel(fl) +
+                            " (set -Dwindirectml.directml.dll to a bundled redist)");
 
             Random rng = new Random(0xC0FFEE);
             float[] xData = randomFloats(rng, N);

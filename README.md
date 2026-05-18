@@ -73,6 +73,47 @@ FFM is still a preview feature, so builds and runs use:
 --enable-native-access=ALL-UNNAMED
 ```
 
+## Runtime configuration
+
+| System property                  | Default                              | Effect |
+| -------------------------------- | ------------------------------------ | ------ |
+| `windirectml.debug`              | `false`                              | Enables the D3D12 + DirectML debug layer. Drains the InfoQueue and surfaces the messages in exceptions. |
+| `windirectml.directml.dll`       | *(unset → in-box `System32`)*        | Absolute path to a `DirectML.dll` to load instead of the in-box copy. Use this to ship a [Microsoft.AI.DirectML](https://www.nuget.org/packages/Microsoft.AI.DirectML/) redistributable next to your application (e.g. `app/native/DirectML.dll`). |
+| `windirectml.dxgi.adapterIndex`  | `0`                                  | DXGI adapter index to bind. |
+
+### Feature-level fallback
+
+DirectML operators are gated by `DML_FEATURE_LEVEL`. At startup the runtime
+logs the active level and which fused operators it enables:
+
+```text
+DirectML.dll source: DirectML.dll (system), max DML_FEATURE_LEVEL = 5.0 (raw 0x5000)
+Fused-op availability: GELU(FL>=5.1)=false, MultiHeadAttention(FL>=6.1)=false
+```
+
+Reference points:
+
+| `DirectML.dll`                     | Source                                                  | Max FL |
+| ---------------------------------- | ------------------------------------------------------- | ------ |
+| 1.8.0 (Jan 2022)                   | Windows 11 21H2/22H2 in-box                             | 5.0    |
+| 1.15.4.0 (Nov 2025)                | Microsoft.AI.DirectML redist / WSL                      | 6.4    |
+| 1.15.5.0 (Mar 2026)                | Windows 11 24H2+ in-box                                 | 6.4    |
+
+If you target the 1.8.0 baseline, fused kernels that require ≥5.1 (e.g.
+GELU) are unavailable and the corresponding tests are skipped. For full
+coverage on older boxes bundle a redistributable and point the property at
+it:
+
+```powershell
+java -Dwindirectml.directml.dll="C:\app\native\DirectML.dll" ...
+```
+
+**Policy:** `windirectml.directml.dll` is only intended for redistributables
+that **your** application ships deliberately. Do **not** point it at DLLs
+installed by other software (e.g. anything under `C:\Program Files\…`); the
+default behaviour of loading the in-box `System32\DirectML.dll` is the only
+supported production path.
+
 ## Build
 
 PowerShell:

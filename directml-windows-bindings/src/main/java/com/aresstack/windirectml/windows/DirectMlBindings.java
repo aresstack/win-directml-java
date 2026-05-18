@@ -88,6 +88,39 @@ public final class DirectMlBindings {
     public static final int DML_BINDING_TYPE_NONE   = 0;
     public static final int DML_BINDING_TYPE_BUFFER = 1;
 
+    // ── DML_FEATURE / DML_FEATURE_LEVEL ──────────────────────────────────
+    /** DML_FEATURE enum value for querying supported feature levels. */
+    public static final int DML_FEATURE_FEATURE_LEVELS = 1;
+
+    // DML_FEATURE_LEVEL enum (UINT). Values from DirectML.h.
+    public static final int DML_FEATURE_LEVEL_1_0 = 0x1000;
+    public static final int DML_FEATURE_LEVEL_2_0 = 0x2000;
+    public static final int DML_FEATURE_LEVEL_2_1 = 0x2100;
+    public static final int DML_FEATURE_LEVEL_3_0 = 0x3000;
+    public static final int DML_FEATURE_LEVEL_3_1 = 0x3100;
+    public static final int DML_FEATURE_LEVEL_4_0 = 0x4000;
+    public static final int DML_FEATURE_LEVEL_4_1 = 0x4100;
+    public static final int DML_FEATURE_LEVEL_5_0 = 0x5000;
+    /** Introduces native {@link #DML_OPERATOR_ACTIVATION_GELU} (op 157). */
+    public static final int DML_FEATURE_LEVEL_5_1 = 0x5100;
+    public static final int DML_FEATURE_LEVEL_5_2 = 0x5200;
+    public static final int DML_FEATURE_LEVEL_6_0 = 0x6000;
+    /** Introduces native {@link #DML_OPERATOR_MULTIHEAD_ATTENTION} (op 164). */
+    public static final int DML_FEATURE_LEVEL_6_1 = 0x6100;
+    public static final int DML_FEATURE_LEVEL_6_2 = 0x6200;
+    public static final int DML_FEATURE_LEVEL_6_3 = 0x6300;
+    public static final int DML_FEATURE_LEVEL_6_4 = 0x6400;
+
+    /** All known DML feature levels in ascending order – used for the max-FL query. */
+    private static final int[] ALL_FEATURE_LEVELS = {
+            DML_FEATURE_LEVEL_1_0, DML_FEATURE_LEVEL_2_0, DML_FEATURE_LEVEL_2_1,
+            DML_FEATURE_LEVEL_3_0, DML_FEATURE_LEVEL_3_1,
+            DML_FEATURE_LEVEL_4_0, DML_FEATURE_LEVEL_4_1,
+            DML_FEATURE_LEVEL_5_0, DML_FEATURE_LEVEL_5_1, DML_FEATURE_LEVEL_5_2,
+            DML_FEATURE_LEVEL_6_0, DML_FEATURE_LEVEL_6_1, DML_FEATURE_LEVEL_6_2,
+            DML_FEATURE_LEVEL_6_3, DML_FEATURE_LEVEL_6_4
+    };
+
     // ── IDMLDevice vtable slots ──────────────────────────────────────────
     // IUnknown: 0-2, IDMLObject: 3-6
     static final int DML_DEV_CHECK_FEATURE_SUPPORT       = 7;
@@ -529,5 +562,94 @@ public final class DirectMlBindings {
     /** Compute the aligned byte size for a float tensor with given element count. DML requires 4-byte aligned sizes. */
     public static long tensorByteSize(int elementCount) {
         return (long) elementCount * Float.BYTES;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Feature-level detection
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * IDMLDevice::CheckFeatureSupport (vtable slot 7).
+     * <p>
+     * Native signature:
+     * <pre>{@code
+     * HRESULT CheckFeatureSupport(
+     *     DML_FEATURE feature,
+     *     UINT featureQueryDataSize,
+     *     const void* featureQueryData,
+     *     UINT featureSupportDataSize,
+     *     void* featureSupportData);
+     * }</pre>
+     *
+     * @param dmlDevice         IDMLDevice
+     * @param feature           DML_FEATURE enum value
+     * @param queryData         pointer to feature-specific query struct (may be NULL)
+     * @param queryDataSize     size of the query struct
+     * @param supportData       pointer to caller-allocated output struct
+     * @param supportDataSize   size of the output struct
+     */
+    public static void checkFeatureSupport(MemorySegment dmlDevice, int feature,
+                                            MemorySegment queryData, int queryDataSize,
+                                            MemorySegment supportData, int supportDataSize)
+            throws WindowsNativeException {
+        try {
+            MethodHandle mh = DxgiBindings.vtableMethod(dmlDevice, DML_DEV_CHECK_FEATURE_SUPPORT,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                            ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                            ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+            int hr = (int) mh.invokeExact(dmlDevice, feature,
+                    queryDataSize, queryData,
+                    supportDataSize, supportData);
+            HResult.check(hr, "IDMLDevice::CheckFeatureSupport");
+        } catch (WindowsNativeException e) { throw e; }
+        catch (Throwable t) { throw new WindowsNativeException("CheckFeatureSupport failed", t); }
+    }
+
+    /**
+     * Query the maximum DML feature level supported by {@code dmlDevice}
+     * (using {@link #ALL_FEATURE_LEVELS} as the requested set). Returns
+     * the raw {@code DML_FEATURE_LEVEL} UINT value, e.g. {@code 0x5100}
+     * for FL 5.1.
+     */
+    public static int queryMaxFeatureLevel(MemorySegment dmlDevice, Arena arena)
+            throws WindowsNativeException {
+        // DML_FEATURE_QUERY_FEATURE_LEVELS:
+        //   UINT  RequestedFeatureLevelCount       (offset 0, 4)
+        //   pad                                    (offset 4, 4)
+        //   const DML_FEATURE_LEVEL* RequestedFeatureLevels  (offset 8, 8)
+        // → 16 bytes
+        MemorySegment levelsArr = arena.allocate((long) ALL_FEATURE_LEVELS.length * Integer.BYTES, 4);
+        for (int i = 0; i < ALL_FEATURE_LEVELS.length; i++) {
+            levelsArr.setAtIndex(ValueLayout.JAVA_INT, i, ALL_FEATURE_LEVELS[i]);
+        }
+        MemorySegment query = arena.allocate(16, 8);
+        query.set(ValueLayout.JAVA_INT, 0, ALL_FEATURE_LEVELS.length);
+        query.set(ValueLayout.ADDRESS, 8, levelsArr);
+
+        // DML_FEATURE_DATA_FEATURE_LEVELS: single DML_FEATURE_LEVEL (UINT) = 4 bytes
+        MemorySegment out = arena.allocate(4, 4);
+        checkFeatureSupport(dmlDevice, DML_FEATURE_FEATURE_LEVELS,
+                query, 16, out, 4);
+        return out.get(ValueLayout.JAVA_INT, 0);
+    }
+
+    /**
+     * Human-readable {@code "5.1"} / {@code "6.1"} formatting of a raw
+     * {@code DML_FEATURE_LEVEL} value such as {@code 0x5100}.
+     */
+    public static String formatFeatureLevel(int rawLevel) {
+        int major = (rawLevel >>> 12) & 0xF;
+        int minor = (rawLevel >>> 8) & 0xF;
+        return major + "." + minor;
+    }
+
+    /** @return {@code true} iff {@link #DML_OPERATOR_ACTIVATION_GELU} is available natively. */
+    public static boolean supportsFusedGelu(int featureLevel) {
+        return Integer.compareUnsigned(featureLevel, DML_FEATURE_LEVEL_5_1) >= 0;
+    }
+
+    /** @return {@code true} iff {@link #DML_OPERATOR_MULTIHEAD_ATTENTION} is available. */
+    public static boolean supportsMultiHeadAttention(int featureLevel) {
+        return Integer.compareUnsigned(featureLevel, DML_FEATURE_LEVEL_6_1) >= 0;
     }
 }

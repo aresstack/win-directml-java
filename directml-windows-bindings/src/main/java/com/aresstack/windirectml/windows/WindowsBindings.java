@@ -38,6 +38,8 @@ public final class WindowsBindings implements AutoCloseable {
     private MemorySegment d3d12Device;
     private MemorySegment commandQueue;
     private MemorySegment dmlDevice;
+    /** Raw {@code DML_FEATURE_LEVEL} of {@link #dmlDevice}; {@code 0} when no DML device. */
+    private int dmlFeatureLevel;
     /**
      * Non-null when the debug layer is active and the device exposes an info queue.
      */
@@ -129,6 +131,18 @@ public final class WindowsBindings implements AutoCloseable {
                     : DirectMlBindings.DML_CREATE_DEVICE_FLAG_NONE;
             try {
                 dmlDevice = DirectMlBindings.createDevice(d3d12Device, dmlFlags, arena);
+                try {
+                    dmlFeatureLevel = DirectMlBindings.queryMaxFeatureLevel(dmlDevice, arena);
+                    log.info("DirectML.dll source: {}, max DML_FEATURE_LEVEL = {} (raw 0x{})",
+                            DirectMlBindings.directMlSource(),
+                            DirectMlBindings.formatFeatureLevel(dmlFeatureLevel),
+                            Integer.toHexString(dmlFeatureLevel));
+                    log.info("Fused-op availability: GELU(FL>=5.1)={}, MultiHeadAttention(FL>=6.1)={}",
+                            DirectMlBindings.supportsFusedGelu(dmlFeatureLevel),
+                            DirectMlBindings.supportsMultiHeadAttention(dmlFeatureLevel));
+                } catch (WindowsNativeException fe) {
+                    log.warn("Could not query DML feature level: {}", fe.getMessage());
+                }
             } catch (WindowsNativeException e) {
                 if ("auto".equalsIgnoreCase(backend)) {
                     log.warn("DirectML device creation failed (auto mode), continuing without: {}",
@@ -172,6 +186,11 @@ public final class WindowsBindings implements AutoCloseable {
 
     public boolean hasDirectMl() {
         return dmlDevice != null;
+    }
+
+    /** @return raw {@code DML_FEATURE_LEVEL} value (e.g. {@code 0x6100}), or {@code 0} if no DML device. */
+    public int getDmlFeatureLevel() {
+        return dmlFeatureLevel;
     }
 
     /**
