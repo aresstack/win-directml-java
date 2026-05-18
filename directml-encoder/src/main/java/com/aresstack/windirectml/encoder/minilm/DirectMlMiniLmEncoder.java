@@ -55,12 +55,14 @@ import java.util.Objects;
  * im Konstruktor einmal hochgeladen und für die Lebensdauer des Encoders
  * gehalten.
  * <p>
- * <b>Feature levels:</b> {@code DirectMlMiniLmLayerBlock} benötigt
- * {@code DML_FEATURE_LEVEL_5_1} wegen der fused GELU. Auf Windows-11-
- * In-Box (FL 5.0) schlägt die Konstruktion mit {@code E_INVALIDARG}
- * fehl – per {@code -Dwindirectml.directml.dll=...} kann eine
- * redistributable DLL eingehängt werden. Ein Composite-GELU-Fallback
- * für FL 2.0/5.0 ist ein nachgelagerter Sprint.
+ * <b>Feature levels:</b> {@code DirectMlMiniLmLayerBlock} bezieht GELU
+ * über {@code GeluKernel.create(ctx, n)}. Auf
+ * {@code DML_FEATURE_LEVEL_5_1} und höher wird die native fused GELU
+ * ({@code DML_OPERATOR_ACTIVATION_GELU}) verwendet, auf älteren
+ * Feature-Levels (z. B. Windows-11-In-Box DirectML 1.8.0, FL 5.0) wird
+ * automatisch der Composite-Fallback (ERF + IDENTITY + MULTIPLY, alle
+ * FL 2.0) gewählt. Der Encoder läuft damit auf jeder ausgelieferten
+ * {@code DirectML.dll} ohne Redist-Pflicht.
  */
 public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseable {
 
