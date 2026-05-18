@@ -11,6 +11,7 @@ public enum TensorDataType {
     FLOAT32(4),
     FLOAT16(2),
     BFLOAT16(2),
+    INT64(8),
     INT32(4),
     INT8(1),
     UINT8(1),

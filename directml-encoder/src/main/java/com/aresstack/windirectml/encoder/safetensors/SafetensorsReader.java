@@ -115,6 +115,11 @@ public final class SafetensorsReader implements AutoCloseable {
                 throw new SafetensorsException("invalid tensor entry: " + name);
             }
             TensorDataType dataType = mapDataType(dtypeNode.asText(), name);
+            if (dataType == null) {
+                // Unsupported dtype – skip entry but allow the rest of the file to load.
+                // Reading the tensor later will fail explicitly via entry() lookup.
+                continue;
+            }
             int[] dims = new int[shapeNode.size()];
             if (dims.length == 0) throw new SafetensorsException("empty shape for tensor " + name);
             for (int i = 0; i < dims.length; i++) {
@@ -141,11 +146,11 @@ public final class SafetensorsReader implements AutoCloseable {
             case "F32"  -> TensorDataType.FLOAT32;
             case "F16"  -> TensorDataType.FLOAT16;
             case "BF16" -> TensorDataType.BFLOAT16;
+            case "I64" -> TensorDataType.INT64;
             case "I32"  -> TensorDataType.INT32;
             case "I8"   -> TensorDataType.INT8;
             case "U8"   -> TensorDataType.UINT8;
-            default -> throw new SafetensorsException(
-                    "unsupported dtype '" + dtype + "' for tensor " + tensorName);
+            default -> null; // unsupported – caller skips the entry
         };
     }
 

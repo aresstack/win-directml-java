@@ -10,7 +10,7 @@ import java.lang.foreign.MemorySegment;
  * High-level façade for the Windows native stack (DXGI → D3D12 → DirectML).
  * <p>
  * All FFM / Panama details are confined to this module.
- * The rest of the project (inference, graph, ACP) never sees
+ * The rest of the project (inference, runtime, encoder, sidecar) never sees
  * {@link MemorySegment}, {@link java.lang.invoke.MethodHandle},
  * or {@link java.lang.foreign.FunctionDescriptor}.
  * <p>
@@ -77,8 +77,7 @@ public final class WindowsBindings implements AutoCloseable {
         }
 
 // 1. DXGI Factory
-        int adapterIndex = Integer.getInteger("windirectml.dxgi.adapterIndex",
-                Integer.getInteger("winacp.dxgi.adapterIndex", 0));
+        int adapterIndex = Integer.getInteger("windirectml.dxgi.adapterIndex", 0);
 
         dxgiFactory = DxgiBindings.createFactory1(arena);
 

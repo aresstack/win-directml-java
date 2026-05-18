@@ -44,7 +44,10 @@ class SafetensorsReaderTest {
     }
 
     @Test
-    void rejectsUnknownDtype(@TempDir Path dir) throws Exception {
+    void skipsUnknownDtypeButLoadsFile(@TempDir Path dir) throws Exception {
+        // Unknown dtypes are tolerated (real HF models sometimes carry I64 buffer-tensors
+        // we don't need). They must be excluded from tensorNames() and entry() lookup
+        // must surface them as "not found" so weight loaders can still complete.
         String json = "{\"weights\":{\"dtype\":\"BANANA\",\"shape\":[2],\"data_offsets\":[0,8]}}";
         byte[] jsonBytes = json.getBytes(StandardCharsets.UTF_8);
         Path file = dir.resolve("bad-dtype.safetensors");
@@ -55,7 +58,11 @@ class SafetensorsReaderTest {
             out.write(jsonBytes);
             out.write(new byte[8]);
         }
-        assertThrows(SafetensorsException.class, () -> SafetensorsReader.open(file));
+        try (SafetensorsReader reader = SafetensorsReader.open(file)) {
+            assertTrue(reader.tensorNames().isEmpty(),
+                    "unknown-dtype tensors must be skipped, got " + reader.tensorNames());
+            assertThrows(SafetensorsException.class, () -> reader.entry("weights"));
+        }
     }
 
     private static Path writeSafetensors(Path file, float[] floats) throws IOException {
