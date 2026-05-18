@@ -44,7 +44,9 @@ public final class DefaultGpuBuffer implements GpuBuffer {
     private final long sizeInBytes;
     private final BufferUsage usage;
 
-    /** Aktueller D3D12-Resource-State. Wird von upload/download fortgeschrieben. */
+    /**
+     * Aktueller D3D12-Resource-State. Wird von upload/download fortgeschrieben.
+     */
     private int currentState;
     private boolean closed = false;
 

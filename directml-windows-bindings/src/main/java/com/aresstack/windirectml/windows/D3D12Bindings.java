@@ -621,16 +621,16 @@ public final class D3D12Bindings {
      * respective transition (legacy / implicit-promotion path).
      */
     public static void uploadFloatsExplicit(MemorySegment device, MemorySegment queue,
-                                             MemorySegment dstResource, float[] data,
-                                             int stateBefore, int stateAfter,
-                                             Arena arena) throws WindowsNativeException {
+                                            MemorySegment dstResource, float[] data,
+                                            int stateBefore, int stateAfter,
+                                            Arena arena) throws WindowsNativeException {
         uploadFloatsInternal(device, queue, dstResource, data, stateBefore, stateAfter, arena);
     }
 
     private static void uploadFloatsInternal(MemorySegment device, MemorySegment queue,
-                                              MemorySegment dstResource, float[] data,
-                                              int stateBefore, int stateAfter,
-                                              Arena arena) throws WindowsNativeException {
+                                             MemorySegment dstResource, float[] data,
+                                             int stateBefore, int stateAfter,
+                                             Arena arena) throws WindowsNativeException {
         long sizeBytes = (long) data.length * Float.BYTES;
         MemorySegment uploadBuf = createUploadBuffer(device, sizeBytes, arena);
         MemorySegment allocator = null;
@@ -687,17 +687,17 @@ public final class D3D12Bindings {
      * </pre>
      */
     public static float[] readbackFloatsExplicit(MemorySegment device, MemorySegment queue,
-                                                  MemorySegment srcResource, int numFloats,
-                                                  int stateBefore, int stateAfter,
-                                                  Arena arena) throws WindowsNativeException {
+                                                 MemorySegment srcResource, int numFloats,
+                                                 int stateBefore, int stateAfter,
+                                                 Arena arena) throws WindowsNativeException {
         return readbackFloatsInternal(device, queue, srcResource, numFloats,
                 stateBefore, stateAfter, arena);
     }
 
     private static float[] readbackFloatsInternal(MemorySegment device, MemorySegment queue,
-                                                   MemorySegment srcResource, int numFloats,
-                                                   int stateBefore, int stateAfter,
-                                                   Arena arena) throws WindowsNativeException {
+                                                  MemorySegment srcResource, int numFloats,
+                                                  int stateBefore, int stateAfter,
+                                                  Arena arena) throws WindowsNativeException {
         long sizeBytes = (long) numFloats * Float.BYTES;
         MemorySegment readbackBuf = createReadbackBuffer(device, sizeBytes, arena);
         MemorySegment allocator = null;
