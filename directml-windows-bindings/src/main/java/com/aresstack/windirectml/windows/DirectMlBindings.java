@@ -89,7 +89,9 @@ public final class DirectMlBindings {
     public static final int DML_BINDING_TYPE_BUFFER = 1;
 
     // ── DML_FEATURE / DML_FEATURE_LEVEL ──────────────────────────────────
-    /** DML_FEATURE enum value for querying supported feature levels. */
+    /**
+     * DML_FEATURE enum value for querying supported feature levels.
+     */
     public static final int DML_FEATURE_FEATURE_LEVELS = 1;
 
     // DML_FEATURE_LEVEL enum (UINT). Values from DirectML.h.
@@ -101,17 +103,23 @@ public final class DirectMlBindings {
     public static final int DML_FEATURE_LEVEL_4_0 = 0x4000;
     public static final int DML_FEATURE_LEVEL_4_1 = 0x4100;
     public static final int DML_FEATURE_LEVEL_5_0 = 0x5000;
-    /** Introduces native {@link #DML_OPERATOR_ACTIVATION_GELU} (op 157). */
+    /**
+     * Introduces native {@link #DML_OPERATOR_ACTIVATION_GELU} (op 157).
+     */
     public static final int DML_FEATURE_LEVEL_5_1 = 0x5100;
     public static final int DML_FEATURE_LEVEL_5_2 = 0x5200;
     public static final int DML_FEATURE_LEVEL_6_0 = 0x6000;
-    /** Introduces native {@link #DML_OPERATOR_MULTIHEAD_ATTENTION} (op 164). */
+    /**
+     * Introduces native {@link #DML_OPERATOR_MULTIHEAD_ATTENTION} (op 164).
+     */
     public static final int DML_FEATURE_LEVEL_6_1 = 0x6100;
     public static final int DML_FEATURE_LEVEL_6_2 = 0x6200;
     public static final int DML_FEATURE_LEVEL_6_3 = 0x6300;
     public static final int DML_FEATURE_LEVEL_6_4 = 0x6400;
 
-    /** All known DML feature levels in ascending order – used for the max-FL query. */
+    /**
+     * All known DML feature levels in ascending order – used for the max-FL query.
+     */
     private static final int[] ALL_FEATURE_LEVELS = {
             DML_FEATURE_LEVEL_1_0, DML_FEATURE_LEVEL_2_0, DML_FEATURE_LEVEL_2_1,
             DML_FEATURE_LEVEL_3_0, DML_FEATURE_LEVEL_3_1,
@@ -581,16 +589,16 @@ public final class DirectMlBindings {
      *     void* featureSupportData);
      * }</pre>
      *
-     * @param dmlDevice         IDMLDevice
-     * @param feature           DML_FEATURE enum value
-     * @param queryData         pointer to feature-specific query struct (may be NULL)
-     * @param queryDataSize     size of the query struct
-     * @param supportData       pointer to caller-allocated output struct
-     * @param supportDataSize   size of the output struct
+     * @param dmlDevice       IDMLDevice
+     * @param feature         DML_FEATURE enum value
+     * @param queryData       pointer to feature-specific query struct (may be NULL)
+     * @param queryDataSize   size of the query struct
+     * @param supportData     pointer to caller-allocated output struct
+     * @param supportDataSize size of the output struct
      */
     public static void checkFeatureSupport(MemorySegment dmlDevice, int feature,
-                                            MemorySegment queryData, int queryDataSize,
-                                            MemorySegment supportData, int supportDataSize)
+                                           MemorySegment queryData, int queryDataSize,
+                                           MemorySegment supportData, int supportDataSize)
             throws WindowsNativeException {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(dmlDevice, DML_DEV_CHECK_FEATURE_SUPPORT,
@@ -601,8 +609,11 @@ public final class DirectMlBindings {
                     queryDataSize, queryData,
                     supportDataSize, supportData);
             HResult.check(hr, "IDMLDevice::CheckFeatureSupport");
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CheckFeatureSupport failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CheckFeatureSupport failed", t);
+        }
     }
 
     /**
@@ -643,12 +654,16 @@ public final class DirectMlBindings {
         return major + "." + minor;
     }
 
-    /** @return {@code true} iff {@link #DML_OPERATOR_ACTIVATION_GELU} is available natively. */
+    /**
+     * @return {@code true} iff {@link #DML_OPERATOR_ACTIVATION_GELU} is available natively.
+     */
     public static boolean supportsFusedGelu(int featureLevel) {
         return Integer.compareUnsigned(featureLevel, DML_FEATURE_LEVEL_5_1) >= 0;
     }
 
-    /** @return {@code true} iff {@link #DML_OPERATOR_MULTIHEAD_ATTENTION} is available. */
+    /**
+     * @return {@code true} iff {@link #DML_OPERATOR_MULTIHEAD_ATTENTION} is available.
+     */
     public static boolean supportsMultiHeadAttention(int featureLevel) {
         return Integer.compareUnsigned(featureLevel, DML_FEATURE_LEVEL_6_1) >= 0;
     }

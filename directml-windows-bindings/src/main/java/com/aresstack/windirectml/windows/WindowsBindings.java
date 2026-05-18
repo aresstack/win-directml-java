@@ -38,7 +38,9 @@ public final class WindowsBindings implements AutoCloseable {
     private MemorySegment d3d12Device;
     private MemorySegment commandQueue;
     private MemorySegment dmlDevice;
-    /** Raw {@code DML_FEATURE_LEVEL} of {@link #dmlDevice}; {@code 0} when no DML device. */
+    /**
+     * Raw {@code DML_FEATURE_LEVEL} of {@link #dmlDevice}; {@code 0} when no DML device.
+     */
     private int dmlFeatureLevel;
     /**
      * Non-null when the debug layer is active and the device exposes an info queue.
@@ -188,7 +190,9 @@ public final class WindowsBindings implements AutoCloseable {
         return dmlDevice != null;
     }
 
-    /** @return raw {@code DML_FEATURE_LEVEL} value (e.g. {@code 0x6100}), or {@code 0} if no DML device. */
+    /**
+     * @return raw {@code DML_FEATURE_LEVEL} value (e.g. {@code 0x6100}), or {@code 0} if no DML device.
+     */
     public int getDmlFeatureLevel() {
         return dmlFeatureLevel;
     }
