@@ -51,7 +51,7 @@ class DirectMlLayerNormKernelTest {
             Random rng = new Random(0xBA5E);
             float[] xData = randomFloats(rng, M * H);
             float[] gammaData = randomFloats(rng, H);
-            float[] betaData  = randomFloats(rng, H);
+            float[] betaData = randomFloats(rng, H);
 
             float[] expected = cpuLayerNorm(xData, gammaData, betaData, M, H, EPS);
 
@@ -113,7 +113,7 @@ class DirectMlLayerNormKernelTest {
      * BERT-Style LayerNorm: y = (x - μ) / √(σ² + ε) · γ + β über die letzte Dim.
      */
     private static float[] cpuLayerNorm(float[] x, float[] gamma, float[] beta,
-                                          int M, int H, float eps) {
+                                        int M, int H, float eps) {
         float[] y = new float[M * H];
         for (int m = 0; m < M; m++) {
             int base = m * H;

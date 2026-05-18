@@ -102,15 +102,15 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
             // γ und β als [1, 1, H, 1] – Broadcast über M.
             MemorySegment gammaDesc = bufferTensorDesc(new int[]{1, 1, H, 1},
                     null, (long) H * Float.BYTES);
-            MemorySegment betaDesc  = bufferTensorDesc(new int[]{1, 1, H, 1},
+            MemorySegment betaDesc = bufferTensorDesc(new int[]{1, 1, H, 1},
                     null, (long) H * Float.BYTES);
             MemorySegment yDesc = bufferTensorDesc(new int[]{M, 1, H, 1}, null,
                     (long) M * H * Float.BYTES);
 
             // ── DML_MEAN_VARIANCE_NORMALIZATION_OPERATOR_DESC (56 bytes) ──
             MemorySegment desc = arena.allocate(56, 8);
-            desc.set(ValueLayout.ADDRESS,  0, xDesc);
-            desc.set(ValueLayout.ADDRESS,  8, gammaDesc);
+            desc.set(ValueLayout.ADDRESS, 0, xDesc);
+            desc.set(ValueLayout.ADDRESS, 8, gammaDesc);
             desc.set(ValueLayout.ADDRESS, 16, betaDesc);
             desc.set(ValueLayout.ADDRESS, 24, yDesc);
             desc.set(ValueLayout.JAVA_INT, 32, 0);              // CrossChannel = FALSE
@@ -296,14 +296,29 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
     public void close() {
         if (closed) return;
         closed = true;
-        try { DxgiBindings.release(cmdRecorder); } catch (Exception ignored) {}
-        try { DxgiBindings.release(descriptorHeap); } catch (Exception ignored) {}
-        try { DxgiBindings.release(compiled); } catch (Exception ignored) {}
+        try {
+            DxgiBindings.release(cmdRecorder);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(descriptorHeap);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(compiled);
+        } catch (Exception ignored) {
+        }
         if (!persistBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(persistBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(persistBuffer);
+            } catch (Exception ignored) {
+            }
         }
         if (!tempBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(tempBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(tempBuffer);
+            } catch (Exception ignored) {
+            }
         }
         arena.close();
     }
@@ -365,15 +380,23 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
     }
 
     private static void setBufferBinding(Arena scratch, MemorySegment array, int index,
-                                          MemorySegment resource, long size) {
+                                         MemorySegment resource, long size) {
         MemorySegment bb = DirectMlBindings.allocBufferBinding(scratch, resource, 0, size);
         long off = (long) index * 16;
         array.set(ValueLayout.JAVA_INT, off, DirectMlBindings.DML_BINDING_TYPE_BUFFER);
         array.set(ValueLayout.ADDRESS, off + 8, bb);
     }
 
-    public int M() { return M; }
-    public int H() { return H; }
-    public float epsilon() { return epsilon; }
+    public int M() {
+        return M;
+    }
+
+    public int H() {
+        return H;
+    }
+
+    public float epsilon() {
+        return epsilon;
+    }
 }
 
