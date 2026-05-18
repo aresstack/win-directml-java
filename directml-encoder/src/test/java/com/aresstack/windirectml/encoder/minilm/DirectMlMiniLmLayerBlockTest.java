@@ -61,11 +61,9 @@ class DirectMlMiniLmLayerBlockTest {
             catch (DirectMlRuntimeException e) { assumeTrue(false, "no DML: " + e.getMessage()); return; }
             assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
                     "Skipping: no DirectML device on this adapter");
-            int fl = ctx.bindings().getDmlFeatureLevel();
-            assumeTrue(DirectMlBindings.supportsFusedGelu(fl),
-                    "Skipping: fused GELU requires DML_FEATURE_LEVEL_5_1, "
-                            + "DirectML.dll reports " + DirectMlBindings.formatFeatureLevel(fl)
-                            + " (set -Dwindirectml.directml.dll to a redistributable to enable)");
+            // GeluKernel.create(...) auto-selects native fused GELU on FL>=5.1
+            // and the ERF+IDENTITY+MULTIPLY composite fallback on FL<5.1, so
+            // this test runs on every shipping DirectML.dll.
 
             // ── 1. Build synthetic weights ────────────────────────────────
             Random rng = new Random(0xB10C1L);

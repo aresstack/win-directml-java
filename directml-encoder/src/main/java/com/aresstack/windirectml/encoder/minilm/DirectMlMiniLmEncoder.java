@@ -113,12 +113,15 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
                 throw new EmbeddingException("No DirectML device available on this adapter");
             }
             int fl = ctx.bindings().getDmlFeatureLevel();
+            // DirectMlMiniLmLayerBlock uses GeluKernel.create(...) which selects
+            // the native fused GELU on FL>=5.1 and the ERF+IDENTITY+MULTIPLY
+            // composite fallback on FL<5.1 — so the whole pipeline runs on
+            // every shipping Windows-10/11 in-box DirectML.dll. We just log
+            // the chosen strategy here.
             if (!DirectMlBindings.supportsFusedGelu(fl)) {
-                throw new EmbeddingException("DirectMlMiniLmEncoder requires "
-                        + "DML_FEATURE_LEVEL_5_1 (fused GELU), got "
-                        + DirectMlBindings.formatFeatureLevel(fl)
-                        + " — pass -Dwindirectml.directml.dll=<redistributable> "
-                        + "or wait for a composite GELU fallback sprint");
+                org.slf4j.LoggerFactory.getLogger(DirectMlMiniLmEncoder.class)
+                        .info("DirectMlMiniLmEncoder: FL={} – using composite GELU fallback",
+                                DirectMlBindings.formatFeatureLevel(fl));
             }
 
             MiniLmArchitecture arch = new MiniLmArchitecture();

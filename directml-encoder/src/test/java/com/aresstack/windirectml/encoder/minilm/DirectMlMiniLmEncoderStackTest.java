@@ -60,11 +60,7 @@ class DirectMlMiniLmEncoderStackTest {
             catch (DirectMlRuntimeException e) { assumeTrue(false, "no DML: " + e.getMessage()); return; }
             assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
                     "Skipping: no DirectML device on this adapter");
-            int fl = ctx.bindings().getDmlFeatureLevel();
-            assumeTrue(DirectMlBindings.supportsFusedGelu(fl),
-                    "Skipping: fused GELU requires DML_FEATURE_LEVEL_5_1, "
-                            + "DirectML.dll reports " + DirectMlBindings.formatFeatureLevel(fl)
-                            + " (set -Dwindirectml.directml.dll to a redistributable to enable)");
+            // GELU strategy is auto-selected per feature level (composite fallback on FL<5.1).
 
             // ── 1. Build synthetic weights ────────────────────────────────
             Random rng = new Random(0xB10C2L);

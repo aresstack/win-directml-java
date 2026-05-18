@@ -81,10 +81,9 @@ class DirectMlMiniLmEmbeddingReferenceTest {
         try {
             dmlModel = DirectMlMiniLmEncoder.load(dir);
         } catch (Exception e) {
-            // Skip cleanly when the DLL/Adapter does not support FL 5.1.
+            // Skip cleanly when no D3D12/DirectML adapter is present.
             String msg = e.getMessage() == null ? "" : e.getMessage();
-            if (msg.contains("DML_FEATURE_LEVEL_5_1")
-                    || msg.contains("No DirectML device")
+            if (msg.contains("No DirectML device")
                     || msg.contains("DirectML requires Windows")) {
                 assumeTrue(false, "Skipping: " + msg);
                 return;

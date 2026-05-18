@@ -13,6 +13,7 @@ import com.aresstack.windirectml.runtime.kernels.DirectMlGeluKernel;
 import com.aresstack.windirectml.runtime.kernels.DirectMlHeadLayoutKernel;
 import com.aresstack.windirectml.runtime.kernels.DirectMlLayerNormKernel;
 import com.aresstack.windirectml.runtime.kernels.DirectMlLinearKernel;
+import com.aresstack.windirectml.runtime.kernels.GeluKernel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -91,7 +92,7 @@ public final class DirectMlMiniLmLayerBlock implements AutoCloseable {
     private final DirectMlAttentionKernel attention;
     private final DirectMlLayerNormKernel attnLayerNorm;
     private final DirectMlLayerNormKernel outLayerNorm;
-    private final DirectMlGeluKernel gelu;
+    private final GeluKernel gelu;
     private final DirectMlAddKernel residualAdd;
 
     // ── scratch GPU buffers (owned) ───────────────────────────────────
@@ -134,7 +135,7 @@ public final class DirectMlMiniLmLayerBlock implements AutoCloseable {
         DirectMlHeadLayoutKernel lFwd = null, lBwd = null;
         DirectMlAttentionKernel att = null;
         DirectMlLayerNormKernel ln1 = null, ln2 = null;
-        DirectMlGeluKernel g = null;
+        GeluKernel g = null;
         DirectMlAddKernel add = null;
 
         GpuBuffer bq = null, bk = null, bv = null;
@@ -159,7 +160,7 @@ public final class DirectMlMiniLmLayerBlock implements AutoCloseable {
             att   = new DirectMlAttentionKernel(ctx, /* B */ 1, heads, seq, headDim, scale, hasMask);
             ln1   = new DirectMlLayerNormKernel(ctx, seq, hidden, eps);
             ln2   = new DirectMlLayerNormKernel(ctx, seq, hidden, eps);
-            g     = new DirectMlGeluKernel(ctx, seq * intermediate);
+            g = GeluKernel.create(ctx, seq * intermediate);
             add   = new DirectMlAddKernel(ctx, seq * hidden);
 
             long hiddenBytes       = (long) seq * hidden * Float.BYTES;

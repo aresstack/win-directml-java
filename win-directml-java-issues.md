@@ -1031,3 +1031,77 @@ erwartete, gut diagnostizierbare Signal, das nun in der Doku steht.
 **Folgesprint:** dieselbe Strategie für die übrigen FL-5.1+-Operatoren
 (`MULTIHEAD_ATTENTION` Op 164, `MEAN_VARIANCE_NORMALIZATION1` Op 115,
 quantisierte Decoder-Pfade).
+
+---
+
+## Gelöst (Sprint `feat(runtime)/composite-gelu-fallback`):
+`DirectMlCompositeGeluKernel` – FL-2.0-Composite-GELU für In-Box-DLL
+
+**Status:** ERLEDIGT. Der vollständige `DirectMlMiniLmEncoder` läuft nun
+auch gegen die Windows-11-In-Box `DirectML.dll` 1.8.0 (FL 5.0), ohne
+zusätzliche Microsoft.AI.DirectML-Redistributable.
+
+**Befund:** Der native fused GELU (Op 157) verlangt
+`DML_FEATURE_LEVEL_5_1`. Die Akzeptanz für das Embedding-Sprint-Ziel war
+ausdrücklich:
+
+```text
+Windows-11-In-Box DirectML ohne zusätzliche DirectML.dll
+DirectMlMiniLmEncoder läuft auch mit in-box DirectML 1.8.0 / FL 5.0.
+CPU-vs-DirectML Cosine bleibt > 0.99.
+```
+
+**Fix:**
+
+1. Neuer Kernel `DirectMlCompositeGeluKernel` implementiert
+   `GeluKernel` über drei FL-1.0/2.0-Primitives, die in jeder
+   ausgelieferten `DirectML.dll` seit Win10 RS3 vorhanden sind:
+   ```text
+   tmpA = ERF(x,        ScaleBias = 1/√2, 0)   // erf(x/√2)
+   tmpB = IDENTITY(tmpA, ScaleBias = 0.5,  0.5) // 0.5*(1 + erf(x/√2))
+   y    = MULTIPLY(x, tmpB)                     // 0.5*x*(1 + erf(x/√2))
+   ```
+   Jeder Sub-Op hat eigenen Compiled-Op + DescriptorHeap + temp/persistent
+   Buffers; die zwei Zwischenresultate liegen in zwei N-Float-Default-Buffern,
+   die der Kernel selbst besitzt. Jeder `dispatch(x, y)` submittet drei
+   Command-Lists mit `executeAndWait` dazwischen.
+2. `GeluKernel` zur Interface-Factory erweitert
+   (`GeluKernel.create(ctx, n)`): wählt `DirectMlGeluKernel` bei
+   `FL ≥ 5.1`, sonst `DirectMlCompositeGeluKernel`.
+3. `DirectMlMiniLmLayerBlock` zieht ab sofort über die Factory; das
+   harte FL-5.1-Gate in `DirectMlMiniLmEncoder.load(...)` wurde entfernt
+   (nur noch Info-Log beim Composite-Fallback).
+4. Bestehende `DirectMlMiniLmLayerBlockTest` /
+   `DirectMlMiniLmEncoderStackTest` /
+   `DirectMlMiniLmEmbeddingReferenceTest` laufen jetzt sowohl auf FL 5.0
+   (in-box) als auch auf FL 5.1+ (Redist); das FL-Gate dort wurde
+   entfernt.
+5. Neuer Regressionstest `DirectMlCompositeGeluKernelTest` zwingt den
+   Composite-Pfad direkt (unabhängig vom Feature-Level), damit der
+   Fallback auf modernen Hosts nicht still ungetestet bleibt.
+
+**Verifikation:**
+
+* `gradlew :directml-windows-bindings:test --tests *DirectMlCompositeGeluKernelTest*` – grün.
+* In-box DLL (FL 5.0), kein `-Dwindirectml.directml.dll`:
+  `gradlew :directml-encoder:test --tests *DirectMlMiniLmEmbeddingReferenceTest*` – grün.
+  Log zeigt `FL=5.0 – using composite GELU fallback` und
+  `DirectMlCompositeGeluKernel ready: N=… (ERF+IDENTITY+MUL composite, FL-2.0 path)` ×6 Layer.
+  `cos(CPU, DML)` auf allen Referenzsätzen = **1,000000**,
+  `min cos across corpus = 1,000000`.
+* Redist DLL (FL 6.4) via `-Dwindirectml.directml.dll=<…>`:
+  derselbe Test grün, Log meldet `FL=6.4` (kein Composite-Hinweis),
+  weiterhin `cos = 1,000000`.
+* Voller Test-Lauf auf in-box DLL: 69 Tests, 2 skipped (nativer
+  `DirectMlGeluKernelTest` springt auf FL 5.0 weiterhin per
+  `assumeTrue` raus; `DirectMlRedistDownloadIT` skipped wie bisher),
+  0 failures, 0 errors.
+
+**Optimierungsbacklog (nicht blockierend):**
+
+* Drei `executeAndWait` pro `dispatch(x, y)` durch ein einziges
+  Command-List-Recording mit UAV-Barriers zwischen den Sub-Ops und
+  separaten Descriptor-Ranges in einem gemeinsamen Heap ersetzen.
+* Optional: Native-vs-Composite-Wahl via `-Dwindirectml.gelu.strategy=
+  {auto|native|composite}` exposen, falls Diagnose es verlangt.
+
