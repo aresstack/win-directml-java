@@ -1,0 +1,14 @@
+plugins {
+    id 'application'
+}
+
+application {
+    mainClass = 'com.aresstack.windirectml.sidecar.DirectMlPhi3Sidecar'
+    applicationDefaultJvmArgs = ['--enable-preview', '--enable-native-access=ALL-UNNAMED', '-Xmx4g']
+}
+
+dependencies {
+    implementation project(':directml-inference')
+    implementation project(':directml-windows-bindings')
+    runtimeOnly 'ch.qos.logback:logback-classic:1.5.6'
+}

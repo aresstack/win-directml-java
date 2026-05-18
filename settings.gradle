@@ -1,0 +1,6 @@
+rootProject.name = 'win-directml-java'
+
+include 'directml-config'
+include 'directml-windows-bindings'
+include 'directml-inference'
+include 'directml-sidecar'
