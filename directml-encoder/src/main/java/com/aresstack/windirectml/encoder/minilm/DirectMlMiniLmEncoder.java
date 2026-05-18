@@ -46,10 +46,13 @@ import java.util.Objects;
  *     → L2-Normalize (CPU, optional je Request)
  *     → EmbeddingVector
  * </pre>
- * Die DirectML-Stacks sind formgebunden auf {@code seq}; eine Map cacht
- * eine {@link StackEntry}-Instanz pro tatsächlich vorgekommener Sequenz-
- * Länge. Ein Pad-Bucket-Cache ({@code S = 64/128/256/512}) ist ein
- * späterer Optimierungs-Sprint.
+ * Die DirectML-Stacks sind formgebunden auf {@code seq}. Eingaben werden
+ * auf einen Pad-Bucket {@code S ∈ {64, 128, 256, 512}} aufgefüllt; der
+ * Stack-Cache hält damit höchstens vier Einträge pro Encoder
+ * (statt einem pro tatsächlich vorgekommener Sequenz-Länge). Padded
+ * Positionen werden in der Attention durch eine Mask von {@code -1e9}
+ * deaktiviert und in MeanPool/L2 durch die ursprüngliche
+ * {@code attentionMask} ignoriert.
  * <p>
  * Alle 16 Gewichts-Buffer pro Layer sowie das Embedding-LN-Paar werden
  * im Konstruktor einmal hochgeladen und für die Lebensdauer des Encoders
@@ -68,6 +71,26 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
 
     private static final Logger log = LoggerFactory.getLogger(DirectMlMiniLmEncoder.class);
 
+    /**
+     * Pad-buckets used to coalesce arbitrary tokenizer sequence lengths
+     * onto a small set of fixed DirectML stack shapes. Ordered ascending.
+     * MiniLM's {@code maxPositionEmbeddings} is 512; any seqLen above the
+     * largest bucket falls through to an exact-length stack (unbucketed).
+     */
+    public static final int[] BUCKETS = {64, 128, 256, 512};
+
+    /**
+     * Selects the smallest bucket {@code b} such that {@code b >= seqLen}.
+     * For {@code seqLen > 512} returns the exact length so the encoder
+     * still works (no bucketing benefit in that overflow case).
+     */
+    public static int bucketFor(int seqLen) {
+        for (int b : BUCKETS) {
+            if (b >= seqLen) return b;
+        }
+        return seqLen;
+    }
+
     private final MiniLmArchitecture architecture;
     private final MiniLmConfig config;
     private final CpuMiniLmWeights weights;          // Embedding-Tables + LN-Params bleiben CPU-resident
@@ -81,8 +104,8 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
     private final GpuBuffer embLnBetaBuf;
     private final List<DirectMlMiniLmLayerBlock.LayerWeights> gpuLayers;
 
-    // Per-sequence-length stack cache. Stacks are form-bound, so each
-    // unique seq triggers one entry; weights are shared across entries.
+    // Per-bucket stack cache. Stacks are form-bound, so each bucket
+    // size triggers exactly one entry; weights are shared across entries.
     private final Map<Integer, StackEntry> stackCache = new HashMap<>();
 
     private volatile boolean ready = false;
@@ -214,8 +237,15 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
         }
 
         int H = config.hiddenSize();
-        // 1. CPU embedding lookup (word + pos + tokenType).
-        float[] x = new float[seqLen * H];
+        // Pad-bucket: pick smallest bucket >= seqLen so we reuse one stack
+        // per bucket (S∈{64,128,256,512}) instead of one per actual length.
+        int B = bucketFor(seqLen);
+
+        // 1. CPU embedding lookup (word + pos + tokenType) for the first
+        // seqLen rows; rows [seqLen, B) stay zero. Padded rows never feed
+        // back into valid rows (attention mask + per-row LN/Linear), and
+        // MeanPool reads only valid rows via the original attentionMask.
+        float[] x = new float[B * H];
         for (int t = 0; t < seqLen; t++) {
             int id  = encoded.inputIds()[t];
             int tt  = encoded.tokenTypeIds()[t];
@@ -229,46 +259,54 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
                         + weights.tokenTypeEmbeddings[tts + h];
             }
         }
-        // 2. Build/get cached stack and per-seq scratch buffers.
+
+        // 2. Build/get cached stack and per-bucket scratch buffers.
         StackEntry entry;
         try {
-            entry = stackFor(seqLen);
+            entry = stackFor(B);
         } catch (DirectMlRuntimeException e) {
-            throw new EmbeddingException("Failed to build DirectML encoder stack for seq=" + seqLen, e);
+            throw new EmbeddingException("Failed to build DirectML encoder stack for bucket=" + B
+                    + " (seqLen=" + seqLen + ")", e);
         }
 
-        // 3. Mask: 0.0 valid, -1e9 padding.
-        float[] mask = new float[seqLen];
+        // 3. Mask: 0.0 valid (incl. all real tokens, attentionMask=1),
+        //    -1e9 for padded bucket positions [seqLen, B).
+        float[] mask = new float[B];
         for (int i = 0; i < seqLen; i++) {
             mask[i] = encoded.attentionMask()[i] == 0 ? -1e9f : 0f;
         }
+        for (int i = seqLen; i < B; i++) {
+            mask[i] = -1e9f;
+        }
 
         // 4. Upload and dispatch.
-        float[] xOutGpu = new float[seqLen * H];
+        float[] xOutGpu = new float[B * H];
         try {
-            CpuTensor xCpu    = CpuTensor.float32(TensorShape.of(seqLen, H), x);
-            CpuTensor maskCpu = CpuTensor.float32(TensorShape.of(seqLen), mask);
+            CpuTensor xCpu = CpuTensor.float32(TensorShape.of(B, H), x);
+            CpuTensor maskCpu = CpuTensor.float32(TensorShape.of(B), mask);
             entry.xIn.upload(xCpu);
             entry.mask.upload(maskCpu);
 
-            DirectMlTensor xInT   = tensorOf(entry.xIn,  seqLen, H);
-            DirectMlTensor xOutT  = tensorOf(entry.xOut, seqLen, H);
-            DirectMlTensor maskT  = tensorOf(entry.mask, seqLen);
+            DirectMlTensor xInT = tensorOf(entry.xIn, B, H);
+            DirectMlTensor xOutT = tensorOf(entry.xOut, B, H);
+            DirectMlTensor maskT = tensorOf(entry.mask, B);
             DirectMlTensor embGT  = tensorOf(embLnGammaBuf, H);
             DirectMlTensor embBT  = tensorOf(embLnBetaBuf,  H);
 
             entry.stack.dispatch(xInT, embGT, embBT, gpuLayers, maskT, xOutT);
 
-            CpuTensor xOutCpu = emptyCpuTensor(seqLen * H);
+            CpuTensor xOutCpu = emptyCpuTensor(B * H);
             entry.xOut.download(xOutCpu);
             FloatBuffer fv = xOutCpu.data().duplicate().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
             fv.position(0);
-            fv.get(xOutGpu, 0, seqLen * H);
+            fv.get(xOutGpu, 0, B * H);
         } catch (DirectMlRuntimeException e) {
-            throw new EmbeddingException("DirectML dispatch failed for seq=" + seqLen, e);
+            throw new EmbeddingException("DirectML dispatch failed for bucket=" + B
+                    + " (seqLen=" + seqLen + ")", e);
         }
 
-        // 5. Mean-Pool over attention mask.
+        // 5. Mean-Pool over the original attention mask: copy only the
+        // valid first seqLen rows; padded rows are not pooled.
         float[][] tokens = new float[seqLen][H];
         for (int t = 0; t < seqLen; t++) {
             System.arraycopy(xOutGpu, t * H, tokens[t], 0, H);
@@ -284,13 +322,13 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
 
     // ── helpers ─────────────────────────────────────────────────────────
 
-    private synchronized StackEntry stackFor(int seqLen) throws DirectMlRuntimeException {
-        StackEntry cached = stackCache.get(seqLen);
+    private synchronized StackEntry stackFor(int bucket) throws DirectMlRuntimeException {
+        StackEntry cached = stackCache.get(bucket);
         if (cached != null) return cached;
 
         int H = config.hiddenSize();
-        long hiddenBytes = (long) seqLen * H * Float.BYTES;
-        long maskBytes   = (long) seqLen * Float.BYTES;
+        long hiddenBytes = (long) bucket * H * Float.BYTES;
+        long maskBytes = (long) bucket * Float.BYTES;
 
         GpuBuffer xIn = null, xOut = null, mask = null;
         DirectMlMiniLmEncoderStack stack = null;
@@ -299,12 +337,14 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
             xOut = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
             mask = ctx.allocateBuffer(maskBytes,   GpuBuffer.BufferUsage.ACTIVATION);
             stack = new DirectMlMiniLmEncoderStack(
-                    ctx, seqLen, H,
+                    ctx, bucket, H,
                     config.numAttentionHeads(), config.headDim(),
                     config.intermediateSize(),  config.numLayers(),
                     config.layerNormEps(),      /* hasMask */ true);
             StackEntry entry = new StackEntry(stack, xIn, xOut, mask);
-            stackCache.put(seqLen, entry);
+            stackCache.put(bucket, entry);
+            log.info("DirectMlMiniLmEncoder stack ready for bucket S={} (cached buckets so far: {})",
+                    bucket, stackCache.size());
             return entry;
         } catch (DirectMlRuntimeException | RuntimeException e) {
             if (stack != null) try { stack.close(); } catch (Exception ignored) {}
@@ -312,7 +352,7 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
             if (xOut != null)  try { xOut.close();  } catch (Exception ignored) {}
             if (xIn != null)   try { xIn.close();   } catch (Exception ignored) {}
             throw (e instanceof DirectMlRuntimeException d) ? d
-                    : new DirectMlRuntimeException("Failed to allocate stack for seq=" + seqLen, e);
+                    : new DirectMlRuntimeException("Failed to allocate stack for bucket=" + bucket, e);
         }
     }
 
@@ -369,7 +409,9 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
         ownedGpuBuffers.clear();
     }
 
-    /** Number of cached form-bound stacks (one per encountered seq length). */
+    /**
+     * Number of cached form-bound stacks (one per active pad bucket).
+     */
     public int cachedStackCount() { return stackCache.size(); }
 }
 

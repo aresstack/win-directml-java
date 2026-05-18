@@ -137,6 +137,20 @@ class DirectMlMiniLmEmbeddingReferenceTest {
                         + " vs unrelated=" + unrelated);
     }
 
+    @Test
+    void padBucketCacheCoalescesShortCorpus() throws Exception {
+        // All four CORPUS sentences are short (< 64 tokens) and must
+        // therefore share a single S=64 bucket; the encoder must not
+        // allocate one stack per actual sequence length any more.
+        for (String text : CORPUS) {
+            dmlModel.embed(EmbeddingRequest.of(text));
+        }
+        assertEquals(1, dmlModel.cachedStackCount(),
+                "all CORPUS sentences must share a single pad-bucket (S=64)");
+        assertTrue(dmlModel.cachedStackCount() <= DirectMlMiniLmEncoder.BUCKETS.length,
+                "stack cache must never exceed the number of pad-buckets");
+    }
+
     private static String abbreviate(String s) {
         return s.length() <= 32 ? s : s.substring(0, 29) + "...";
     }

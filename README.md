@@ -273,8 +273,11 @@ or `error`) together with `embeddingReady`.
     384-dim L2-normalised vector.
 11. ✅ Sidecar embedding switch (`-Dembed.backend=cpu|directml|auto`) – wires `DirectMlMiniLmEncoder` and
     `CpuMiniLmEncoder` behind one JSON-RPC endpoint; forced modes fail visibly with exit code 3.
-12. ⏳ Pad-bucket cache for the DirectML encoder (`S ∈ {64, 128, 256, 512}`) – stabilises kernel/buffer count and tail
-    latency.
+12. ✅ Pad-bucket cache for the DirectML encoder (`S ∈ {64, 128, 256, 512}`) – arbitrary tokenizer lengths are padded
+    up to the smallest matching bucket; the encoder caches at most four form-bound stacks instead of one per actual
+    sequence length. Padded positions are masked out in attention (`-1e9`) and ignored by MeanPool via the original
+    `attentionMask`, so `cos(CPU, DirectML)` is unchanged. Validated by `DirectMlMiniLmEncoderBucketTest` and the
+    existing reference test (`cachedStackCount() == 1` for the short corpus).
 13. ⏳ Mean-pool + L2 on DirectML (eliminate the CPU read-back tail).
 14. ⏳ E5 and JinaBERT encoders on the same runtime core.
 15. ⏳ Reranker encoder support.
