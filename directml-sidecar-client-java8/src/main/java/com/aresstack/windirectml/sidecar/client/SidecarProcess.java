@@ -46,6 +46,20 @@ public class SidecarProcess {
     private Thread stderrPump;
     private List<String> commandLine = Collections.emptyList();
 
+    /**
+     * Final exit code captured by {@link #stop(long)} once the child JVM
+     * has terminated. {@code null} as long as the sidecar has never been
+     * stopped or the OS did not report an exit code.
+     */
+    private Integer lastExitCode;
+
+    /**
+     * {@code true} when the last {@link #stop(long)} had to fall back to
+     * {@code destroyForcibly()} because the graceful EOF shutdown did not
+     * complete within the timeout.
+     */
+    private boolean lastStopForced;
+
     public SidecarProcess(SidecarClientConfig config) {
         if (config == null) throw new IllegalArgumentException("config must not be null");
         this.config = config;
@@ -168,15 +182,26 @@ public class SidecarProcess {
         } catch (IOException ignored) { /* ignore */ }
         Process p = process;
         if (p == null) return;
+        boolean forced = false;
         try {
             if (!p.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)) {
+                forced = true;
                 p.destroyForcibly();
                 p.waitFor(2000, TimeUnit.MILLISECONDS);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            forced = true;
             p.destroyForcibly();
         }
+        // Capture the real exit code now that the process is terminated.
+        try {
+            lastExitCode = Integer.valueOf(p.exitValue());
+        } catch (IllegalThreadStateException stillAlive) {
+            // Should not happen after destroyForcibly + waitFor, but be defensive.
+            lastExitCode = null;
+        }
+        lastStopForced = forced;
         if (stderrPump != null) {
             try {
                 stderrPump.join(500);
@@ -184,6 +209,22 @@ public class SidecarProcess {
                 Thread.currentThread().interrupt();
             }
         }
+    }
+
+    /**
+     * Final exit code of the most recent stopped sidecar, or {@code null}
+     * when the process is still running or no exit code was observed.
+     */
+    public Integer lastExitCode() {
+        return lastExitCode;
+    }
+
+    /**
+     * {@code true} if the last {@link #stop(long)} had to fall back to
+     * {@code destroyForcibly()}.
+     */
+    public boolean lastStopForced() {
+        return lastStopForced;
     }
 
     public String getStderrSnapshot() {

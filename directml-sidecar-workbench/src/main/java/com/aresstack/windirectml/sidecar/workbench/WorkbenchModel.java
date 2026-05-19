@@ -18,6 +18,41 @@ public final class WorkbenchModel {
     private final SidecarClientConfig config = new SidecarClientConfig();
     private SidecarClient client;
 
+    /**
+     * Snapshot of the last stop, captured before {@link #client} is nulled
+     * out so the UI can render a sensible message instead of {@code -1}.
+     */
+    private StopInfo lastStopInfo = StopInfo.never();
+
+    /** Immutable snapshot of a sidecar stop. */
+    public static final class StopInfo {
+        private final boolean everStopped;
+        private final boolean forced;
+        private final Integer exitCode; // null = unknown
+
+        private StopInfo(boolean everStopped, boolean forced, Integer exitCode) {
+            this.everStopped = everStopped;
+            this.forced = forced;
+            this.exitCode = exitCode;
+        }
+
+        static StopInfo never() {
+            return new StopInfo(false, false, null);
+        }
+
+        public boolean everStopped() { return everStopped; }
+        public boolean forced() { return forced; }
+        public Integer exitCode() { return exitCode; }
+
+        /** Human-readable one-liner; never contains the misleading "exit=-1". */
+        public String describe() {
+            if (!everStopped) return "Sidecar stopped";
+            String kind = forced ? "forced" : "clean";
+            if (exitCode == null) return "Sidecar stopped (" + kind + ", exit code unavailable)";
+            return "Sidecar stopped (" + kind + ", exit=" + exitCode + ")";
+        }
+    }
+
     public SidecarClientConfig getConfig() {
         return config;
     }
@@ -37,8 +72,15 @@ public final class WorkbenchModel {
     public synchronized void stopSidecar() {
         if (client != null) {
             client.shutdown();
+            Integer code = client.lastExitCode();
+            boolean forced = client.lastStopForced();
+            lastStopInfo = new StopInfo(true, forced, code);
             client = null;
         }
+    }
+
+    public synchronized StopInfo lastStopInfo() {
+        return lastStopInfo;
     }
 
     public synchronized void restartSidecar() throws SidecarException {

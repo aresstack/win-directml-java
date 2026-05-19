@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.sidecar.workbench.panels;
 
 import com.aresstack.windirectml.sidecar.client.EmbeddingResult;
+import com.aresstack.windirectml.sidecar.client.HealthResult;
 import com.aresstack.windirectml.sidecar.workbench.WorkbenchModel;
 
 import javax.swing.BorderFactory;
@@ -26,6 +27,7 @@ public final class EmbeddingsPanel extends JPanel {
     private final JTextArea textB = new JTextArea(4, 60);
     private final JLabel dimLbl = new JLabel("dimension: —");
     private final JLabel backendLbl = new JLabel("backend: —");
+    private final JLabel modelLbl = new JLabel("model: —");
     private final JLabel timingLbl = new JLabel("timing: —");
     private final JLabel cosineLbl = new JLabel("cos(A,B): —");
     private final JTextArea preview = new JTextArea(8, 60);
@@ -78,11 +80,13 @@ public final class EmbeddingsPanel extends JPanel {
         buttons.add(embedB);
         buttons.add(cosineBtn);
 
-        JPanel readouts = new JPanel(new GridLayout(2, 2, 6, 2));
-        readouts.add(dimLbl);
+        JPanel readouts = new JPanel(new GridLayout(3, 2, 6, 2));
         readouts.add(backendLbl);
+        readouts.add(modelLbl);
+        readouts.add(dimLbl);
         readouts.add(timingLbl);
         readouts.add(cosineLbl);
+        readouts.add(new JLabel());
 
         preview.setEditable(false);
         preview.setLineWrap(true);
@@ -120,7 +124,17 @@ public final class EmbeddingsPanel extends JPanel {
                     if (isA) vecA = r.getVector();
                     else vecB = r.getVector();
                     dimLbl.setText("dimension: " + r.getDimension());
-                    backendLbl.setText("backend: " + safe(r.getModel()));
+                    modelLbl.setText("model: " + safe(r.getModel()));
+                    // Backend mode (cpu/directml/auto/...) is reported by
+                    // health, not by embed. Refresh on demand so the user
+                    // always sees which mode actually computed the vector.
+                    try {
+                        HealthResult h = model.health();
+                        backendLbl.setText("backend: " + safe(h.getEmbeddingBackend())
+                                + (h.isEmbeddingReady() ? "" : " (not ready)"));
+                    } catch (Exception ignore) {
+                        backendLbl.setText("backend: —");
+                    }
                     timingLbl.setText("timing: " + r.getElapsedMillis() + " ms");
                     StringBuilder sb = new StringBuilder();
                     float[] v = r.getVector();

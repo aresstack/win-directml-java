@@ -155,7 +155,7 @@ public final class ConfigPanel extends JPanel {
                     @Override
                     public String call() {
                         model.stopSidecar();
-                        return "Sidecar stopped (exit=" + model.exitValue() + ")";
+                        return model.lastStopInfo().describe();
                     }
                 });
             }

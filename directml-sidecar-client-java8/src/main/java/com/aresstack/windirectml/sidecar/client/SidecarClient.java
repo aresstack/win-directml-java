@@ -109,6 +109,23 @@ public final class SidecarClient {
         return process.exitValue();
     }
 
+    /**
+     * Final exit code of the most recent stopped sidecar (snapshot taken
+     * inside {@link SidecarProcess#stop(long)}). Returns {@code null}
+     * when the process is still running or no exit code was observed.
+     */
+    public Integer lastExitCode() {
+        return process.lastExitCode();
+    }
+
+    /**
+     * {@code true} if the most recent stop had to fall back to
+     * {@code destroyForcibly()}.
+     */
+    public boolean lastStopForced() {
+        return process.lastStopForced();
+    }
+
     public List<String> getCommandLine() {
         return process.getCommandLine();
     }
