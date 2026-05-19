@@ -1,6 +1,9 @@
 package com.aresstack.windirectml.sidecar;
 
 import com.aresstack.windirectml.encoder.EmbeddingModel;
+import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
+import com.aresstack.windirectml.encoder.e5.E5Encoders;
+import com.aresstack.windirectml.encoder.e5.E5EncoderConfig;
 import com.aresstack.windirectml.encoder.minilm.CpuMiniLmEncoder;
 import com.aresstack.windirectml.encoder.minilm.DirectMlMiniLmEncoder;
 import com.aresstack.windirectml.inference.Phi3InferenceEngine;
@@ -135,8 +138,9 @@ public final class DirectMlPhi3Sidecar {
                 System.in, System.out, modelDir, backend, maxTokens, true);
 
         // Embedding backend: parse -Dembed.backend first so that a forced
-        // mode (cpu/directml) fails visibly even when the MiniLM model
-        // directory is missing entirely.
+        // mode (cpu/directml) fails visibly even when the model directory
+        // is missing entirely. -Dembed.model selects the encoder family
+        // (default: minilm; supported: minilm, e5).
         EmbeddingBackendSelector.Mode embedMode;
         try {
             embedMode = EmbeddingBackendSelector.Mode.parse(System.getProperty("embed.backend"));
@@ -145,44 +149,66 @@ public final class DirectMlPhi3Sidecar {
             System.exit(2);
             return;
         }
+        String embedFamily = embedFamily(System.getProperty("embed.model"));
 
-        Path minilmDir = resolveMiniLmDir();
-        if (minilmDir == null) {
+        Path embedModelDir;
+        EmbeddingBackendSelector.EncoderLoader cpuLoader;
+        EmbeddingBackendSelector.EncoderLoader dmlLoader;
+        String missingMsg;
+        switch (embedFamily) {
+            case "e5": {
+                embedModelDir = resolveE5Dir();
+                BertEncoderConfig e5Cfg = E5EncoderConfig.baseStsEnDe();
+                cpuLoader = dir -> E5Encoders.loadCpu(dir, e5Cfg);
+                dmlLoader = dir -> E5Encoders.loadDirectMl(dir, e5Cfg);
+                missingMsg = "No E5 model directory found "
+                        + "(checked -De5.modelDir and model/e5-base-sts-en-de/)";
+                break;
+            }
+            case "minilm":
+            default: {
+                embedFamily = "minilm";
+                embedModelDir = resolveMiniLmDir();
+                cpuLoader = CpuMiniLmEncoder::load;
+                dmlLoader = DirectMlMiniLmEncoder::load;
+                missingMsg = "No MiniLM model directory found "
+                        + "(checked -Dminilm.modelDir and model/all-MiniLM-L6-v2/)";
+                break;
+            }
+        }
+
+        if (embedModelDir == null) {
             if (embedMode == EmbeddingBackendSelector.Mode.CPU
                     || embedMode == EmbeddingBackendSelector.Mode.DIRECTML) {
-                log.error("embed.backend={} requested but no MiniLM model directory found "
-                                + "(checked -Dminilm.modelDir and model/all-MiniLM-L6-v2/)",
-                        embedMode.token());
+                log.error("embed.backend={} (model={}) requested but {}",
+                        embedMode.token(), embedFamily, missingMsg);
                 sidecar.status.setEmbeddingBackend("error");
                 sidecar.status.setEmbeddingReady(false);
                 sidecar.status.setLastError("embed.backend=" + embedMode.token()
-                        + " requested but MiniLM model directory not found");
+                        + " (model=" + embedFamily + ") requested but "
+                        + missingMsg.toLowerCase(java.util.Locale.ROOT));
                 System.exit(3);
                 return;
             }
-            log.info("No MiniLM model directory found – embed handler will report not-implemented");
+            log.info("{} – embed handler will report not-implemented", missingMsg);
         } else {
-            log.info("MiniLM model present at {} – selecting embedding backend (mode={})",
-                    minilmDir, embedMode.token());
-            EmbeddingBackendSelector selector = new EmbeddingBackendSelector(
-                    CpuMiniLmEncoder::load,
-                    DirectMlMiniLmEncoder::load);
+            log.info("{} model present at {} – selecting embedding backend (mode={})",
+                    embedFamily, embedModelDir, embedMode.token());
+            EmbeddingBackendSelector selector = new EmbeddingBackendSelector(cpuLoader, dmlLoader);
             try {
-                EmbeddingBackendSelector.Selection sel = selector.select(embedMode, minilmDir);
+                EmbeddingBackendSelector.Selection sel = selector.select(embedMode, embedModelDir);
                 sidecar.withEmbeddingBackend(sel.backend(), sel.model());
                 if (sel.fallback()) {
                     sidecar.status.setLastError(sel.warning());
                 }
-                log.info("Embedding backend ready: {} (fallback={})", sel.backend(), sel.fallback());
+                log.info("Embedding backend ready: family={} backend={} (fallback={})",
+                        embedFamily, sel.backend(), sel.fallback());
             } catch (RuntimeException e) {
-                // Forced mode failed visibly. Log + record in status and, for
-                // cpu/directml, exit so a supervising parent can detect it
-                // instead of silently serving a degraded sidecar.
                 log.error("Embedding backend initialisation failed: {}", e.getMessage(), e);
                 sidecar.status.setEmbeddingBackend("error");
                 sidecar.status.setEmbeddingReady(false);
                 sidecar.status.setLastError("embed.backend=" + embedMode.token()
-                        + " failed: " + e.getMessage());
+                        + " (model=" + embedFamily + ") failed: " + e.getMessage());
                 if (embedMode == EmbeddingBackendSelector.Mode.DIRECTML
                         || embedMode == EmbeddingBackendSelector.Mode.CPU) {
                     System.exit(3);
@@ -204,6 +230,44 @@ public final class DirectMlPhi3Sidecar {
         for (Path candidate : new Path[]{
                 Path.of("model/all-MiniLM-L6-v2"),
                 Path.of("model/sentence-transformers/all-MiniLM-L6-v2"),
+        }) {
+            if (Files.exists(candidate.resolve("model.safetensors"))
+                    && Files.exists(candidate.resolve("tokenizer.json"))) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Parse {@code -Dembed.model} into a stable family token. Defaults
+     * to {@code minilm}; supported: {@code minilm}, {@code e5}.
+     */
+    static String embedFamily(String raw) {
+        if (raw == null || raw.isBlank()) return "minilm";
+        String s = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (s) {
+            case "minilm", "mini-lm", "minilm-l6", "all-minilm-l6-v2" -> "minilm";
+            case "e5", "e5-base", "e5-base-sts", "e5-base-sts-en-de" -> "e5";
+            default -> throw new IllegalArgumentException(
+                    "Unknown embed.model: '" + raw + "' (supported: minilm, e5)");
+        };
+    }
+
+    private static Path resolveE5Dir() {
+        String override = System.getProperty("e5.modelDir");
+        if (override != null && !override.isBlank()) {
+            Path p = Path.of(override);
+            return Files.exists(p.resolve("model.safetensors"))
+                    && Files.exists(p.resolve("tokenizer.json")) ? p : null;
+        }
+        for (Path candidate : new Path[]{
+                Path.of("model/e5-base-sts-en-de"),
+                Path.of("model/danielheinz/e5-base-sts-en-de"),
+                Path.of("model/e5-base-v2"),
+                Path.of("model/intfloat/e5-base-v2"),
+                Path.of("model/e5-small-v2"),
+                Path.of("model/intfloat/e5-small-v2"),
         }) {
             if (Files.exists(candidate.resolve("model.safetensors"))
                     && Files.exists(candidate.resolve("tokenizer.json"))) {

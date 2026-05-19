@@ -326,8 +326,25 @@ or `error`) together with `embeddingReady`.
     as their own reference implementations so the existing standalone kernel-parity tests keep passing.
     112 / 0 fail / 3 skip; reference test still reports `cos(CpuMiniLmEncoder, DirectMlMiniLmEncoder)
     = 1.000000` on Windows 11 in-box FL 5.0.
-16. ⏳ E5 encoder on the generic stack (next sprint).
-17. ⏳ Reranker (cross-encoder) support.
-18. ⏳ JinaBERT and additional decoder LLM families.
+16. ✅ E5 encoder on the generic stack – introduces a model-agnostic CPU+DirectML driver
+    (`encoder.bert.BertCpuLayerWeights`, `BertCpuEncoderWeights` with a generic safetensors loader,
+    `CpuBertEncoder` shared math, `DirectMlBertEncoder` shared GPU orchestrator) and an `encoder.e5`
+    family adapter (`E5EncoderConfig` factories for `e5-small-v2` / `e5-base-v2` / `e5-large-v2` /
+    `e5-base-sts-en-de`, `E5Prefixes` with `Role.QUERY`/`Role.PASSAGE` for the conventional
+    `"query: "` / `"passage: "` inputs, and `E5Encoders.loadCpu`/`loadDirectMl` convenience
+    loaders that wire safetensors + WordPiece tokenizer + the matching `BertEncoderConfig` into
+    the generic driver). The DirectML compute graph (Q/K/V → attention → Wo+LN → MLP+GELU+LN
+    → mean-pool → L2) is shared verbatim with MiniLM – proving the Sprint-1 abstraction holds
+    on a non-MiniLM shape (12 layers / hidden 768 / 12 heads / inter 3072). The sidecar now
+    accepts `-Dembed.model=minilm|e5` (default `minilm`) and `-De5.modelDir` to pick the
+    embedding family, with model auto-discovery under `model/e5-base-sts-en-de/` and
+    related paths. Tests: 117 / 0 fail / 3 skip; the new `E5SyntheticParityTest` validates
+    CPU↔DirectML cosine > 0.999 on a synthetic E5 shape (2 layers / hidden 24 / heads 4 /
+    inter 48) on real Windows 11 in-box FL 5.0 DirectML, plus a separate test that verifies
+    the `query:` / `passage:` prefixes flow through the request pipeline.
+17. ⏳ Reranker (cross-encoder) support – takes a query+document pair, returns a relevance
+    score via a classification head.
+18. ⏳ SentencePiece-BPE tokenizer for XLM-R-based multilingual E5 variants
+    (`multilingual-e5-large-instruct`, JinaBERT v3, …).
 
 Issue backlog: [`win-directml-java-issues.md`](win-directml-java-issues.md).
