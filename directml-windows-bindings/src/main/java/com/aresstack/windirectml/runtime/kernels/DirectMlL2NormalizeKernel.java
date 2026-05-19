@@ -190,8 +190,9 @@ public final class DirectMlL2NormalizeKernel implements L2NormalizeKernel, AutoC
         // Logical A: [1,1,1,N] – the row vector.
         MemorySegment aDesc = bufferTensorDesc(new int[]{1, 1, 1, N}, null, xBytes);
         // Logical B: [1,1,N,1] – the column vector (DML reads the same
-        // underlying buffer; with TransB=TRANSPOSE the GEMM treats it as
-        // an N×1 matrix). totalSize stays the full N floats.
+        // underlying buffer; the B tensor descriptor exposes it as an
+        // N×1 matrix, so both transforms stay NONE and GEMM computes
+        // Σ x_j² in a single dispatch). totalSize stays the full N floats.
         MemorySegment bDesc = bufferTensorDesc(new int[]{1, 1, N, 1}, null, xBytes);
         MemorySegment yDesc = bufferTensorDesc(new int[]{1, 1, 1, 1}, null, Float.BYTES);
 
