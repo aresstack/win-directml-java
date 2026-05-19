@@ -1,0 +1,42 @@
+// Java-8 Swing workbench for manually exercising the Java-21 sidecar.
+// Talks JSON-RPC to the sidecar exclusively through the Java-8 client lib –
+// must never depend on the windirectml runtime modules.
+plugins {
+    id 'java-library'
+    id 'application'
+}
+
+ext.java8Module = true
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+compileTestJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+application {
+    mainClass = 'com.aresstack.windirectml.sidecar.workbench.WorkbenchApp'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+    // Headless Swing tests do not pop windows.
+    systemProperty 'java.awt.headless', 'true'
+}
+
+dependencies {
+    implementation project(':directml-sidecar-client-java8')
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
