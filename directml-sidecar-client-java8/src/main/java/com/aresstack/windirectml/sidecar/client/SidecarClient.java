@@ -70,7 +70,10 @@ public final class SidecarClient {
         process.start();
         readerAlive.set(true);
         readerThread = new Thread(new Runnable() {
-            @Override public void run() { pumpStdout(); }
+            @Override
+            public void run() {
+                pumpStdout();
+            }
         }, "sidecar-stdout-pump");
         readerThread.setDaemon(true);
         readerThread.start();
@@ -157,11 +160,21 @@ public final class SidecarClient {
 
     // ── inspector accessors ─────────────────────────────────────────────
 
-    public String getLastRawRequest()  { return lastRawRequest; }
-    public String getLastRawResponse() { return lastRawResponse; }
-    public String getStderrSnapshot()  { return process.getStderrSnapshot(); }
+    public String getLastRawRequest() {
+        return lastRawRequest;
+    }
 
-    /** Drain all notifications received so far (e.g. {@code sidecar.started}). */
+    public String getLastRawResponse() {
+        return lastRawResponse;
+    }
+
+    public String getStderrSnapshot() {
+        return process.getStderrSnapshot();
+    }
+
+    /**
+     * Drain all notifications received so far (e.g. {@code sidecar.started}).
+     */
     public java.util.List<JsonRpcResponse> drainNotifications() {
         java.util.List<JsonRpcResponse> out = new java.util.ArrayList<JsonRpcResponse>();
         notifications.drainTo(out);
@@ -271,7 +284,9 @@ public final class SidecarClient {
     }
 
     // For test inspection only.
-    ObjectMapper getMapperForTesting() { return mapper; }
+    ObjectMapper getMapperForTesting() {
+        return mapper;
+    }
 
     // Helper for unit tests that want to feed a synthetic response through
     // the same parsing path as the pump.

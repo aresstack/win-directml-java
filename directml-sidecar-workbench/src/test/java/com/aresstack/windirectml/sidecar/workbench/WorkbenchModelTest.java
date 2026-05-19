@@ -54,13 +54,22 @@ class WorkbenchModelTest {
         m.getConfig().setSidecarJarPath("foo.jar");
         assertFalse(m.isRunning());
         assertThrows(SidecarException.class, new org.junit.jupiter.api.function.Executable() {
-            @Override public void execute() throws Throwable { m.health(); }
+            @Override
+            public void execute() throws Throwable {
+                m.health();
+            }
         });
         assertThrows(SidecarException.class, new org.junit.jupiter.api.function.Executable() {
-            @Override public void execute() throws Throwable { m.embed("hi"); }
+            @Override
+            public void execute() throws Throwable {
+                m.embed("hi");
+            }
         });
         assertThrows(SidecarException.class, new org.junit.jupiter.api.function.Executable() {
-            @Override public void execute() throws Throwable { m.summarize("hi", 32); }
+            @Override
+            public void execute() throws Throwable {
+                m.summarize("hi", 32);
+            }
         });
     }
 
@@ -73,9 +82,9 @@ class WorkbenchModelTest {
 
     @Test
     void cosineSimilarityRoundTripsViaEmbeddingResult() {
-        float[] a = { 1f, 0f, 0f };
-        float[] b = { 0f, 1f, 0f };
-        float[] c = { 1f, 0f, 0f };
+        float[] a = {1f, 0f, 0f};
+        float[] b = {0f, 1f, 0f};
+        float[] c = {1f, 0f, 0f};
         assertEquals(0.0, EmbeddingResult.cosine(a, b), 1e-6);
         assertEquals(1.0, EmbeddingResult.cosine(a, c), 1e-6);
     }

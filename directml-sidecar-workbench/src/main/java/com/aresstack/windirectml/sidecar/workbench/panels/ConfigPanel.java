@@ -40,7 +40,7 @@ public final class ConfigPanel extends JPanel {
             "directml-sidecar/build/libs/directml-sidecar-0.1.0-SNAPSHOT.jar");
     private final JTextField modelDirField = new JTextField("model/all-MiniLM-L6-v2");
     private final JComboBox<String> backendBox =
-            new JComboBox<String>(new String[] { "auto", "directml", "cpu" });
+            new JComboBox<String>(new String[]{"auto", "directml", "cpu"});
     private final JCheckBox debugBox = new JCheckBox("windirectml.debug=true");
     private final JTextField dllOverrideField = new JTextField("");
     private final JTextField timeoutField = new JTextField("30000");
@@ -48,11 +48,11 @@ public final class ConfigPanel extends JPanel {
 
     private final JTextArea commandPreview = new JTextArea(4, 60);
 
-    private final JButton startBtn   = new JButton("Start Sidecar");
-    private final JButton stopBtn    = new JButton("Stop Sidecar");
+    private final JButton startBtn = new JButton("Start Sidecar");
+    private final JButton stopBtn = new JButton("Stop Sidecar");
     private final JButton restartBtn = new JButton("Restart Sidecar");
-    private final JButton healthBtn  = new JButton("Health");
-    private final JButton clearBtn   = new JButton("Clear Logs");
+    private final JButton healthBtn = new JButton("Health");
+    private final JButton clearBtn = new JButton("Clear Logs");
 
     private final JTextArea logArea = new JTextArea(8, 60);
 
@@ -68,14 +68,14 @@ public final class ConfigPanel extends JPanel {
         c.fill = GridBagConstraints.HORIZONTAL;
         c.insets = new Insets(3, 3, 3, 3);
         int row = 0;
-        addRow(form, c, row++, "Java executable",     javaExeField);
-        addRow(form, c, row++, "Sidecar jar path",    jarPathField);
-        addRow(form, c, row++, "Model directory",     modelDirField);
-        addRow(form, c, row++, "embed.backend",       backendBox);
+        addRow(form, c, row++, "Java executable", javaExeField);
+        addRow(form, c, row++, "Sidecar jar path", jarPathField);
+        addRow(form, c, row++, "Model directory", modelDirField);
+        addRow(form, c, row++, "embed.backend", backendBox);
         addRow(form, c, row++, "DirectML.dll override", dllOverrideField);
-        addRow(form, c, row++, "Extra JVM args",      extraJvmField);
+        addRow(form, c, row++, "Extra JVM args", extraJvmField);
         addRow(form, c, row++, "Request timeout (ms)", timeoutField);
-        addRow(form, c, row++, "Debug",                debugBox);
+        addRow(form, c, row++, "Debug", debugBox);
 
         JPanel buttons = new JPanel();
         buttons.add(startBtn);
@@ -109,18 +109,24 @@ public final class ConfigPanel extends JPanel {
         refreshCommandPreview();
     }
 
-    public void setOnChange(Runnable r) { this.onChange = r; }
+    public void setOnChange(Runnable r) {
+        this.onChange = r;
+    }
 
     private void addRow(JPanel form, GridBagConstraints c, int row, String label, java.awt.Component field) {
-        c.gridx = 0; c.gridy = row; c.weightx = 0;
+        c.gridx = 0;
+        c.gridy = row;
+        c.weightx = 0;
         form.add(new JLabel(label), c);
-        c.gridx = 1; c.weightx = 1;
+        c.gridx = 1;
+        c.weightx = 1;
         form.add(field, c);
     }
 
     private void wireActions() {
         ActionListener applyAndPreview = new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
+            @Override
+            public void actionPerformed(ActionEvent e) {
                 applyConfigToModel();
                 refreshCommandPreview();
             }
@@ -129,11 +135,13 @@ public final class ConfigPanel extends JPanel {
         debugBox.addActionListener(applyAndPreview);
 
         startBtn.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
+            @Override
+            public void actionPerformed(ActionEvent e) {
                 applyConfigToModel();
                 refreshCommandPreview();
                 runAsync("Start Sidecar", new Callable() {
-                    @Override public String call() throws SidecarException {
+                    @Override
+                    public String call() throws SidecarException {
                         model.startSidecar();
                         return "Sidecar started: pid not exposed by Java 8 API";
                     }
@@ -141,9 +149,11 @@ public final class ConfigPanel extends JPanel {
             }
         });
         stopBtn.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
+            @Override
+            public void actionPerformed(ActionEvent e) {
                 runAsync("Stop Sidecar", new Callable() {
-                    @Override public String call() {
+                    @Override
+                    public String call() {
                         model.stopSidecar();
                         return "Sidecar stopped (exit=" + model.exitValue() + ")";
                     }
@@ -151,11 +161,13 @@ public final class ConfigPanel extends JPanel {
             }
         });
         restartBtn.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
+            @Override
+            public void actionPerformed(ActionEvent e) {
                 applyConfigToModel();
                 refreshCommandPreview();
                 runAsync("Restart Sidecar", new Callable() {
-                    @Override public String call() throws SidecarException {
+                    @Override
+                    public String call() throws SidecarException {
                         model.restartSidecar();
                         return "Sidecar restarted";
                     }
@@ -163,9 +175,11 @@ public final class ConfigPanel extends JPanel {
             }
         });
         healthBtn.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
+            @Override
+            public void actionPerformed(ActionEvent e) {
                 runAsync("Health", new Callable() {
-                    @Override public String call() throws SidecarException {
+                    @Override
+                    public String call() throws SidecarException {
                         return "health → " + model.health().getStatus()
                                 + " (backend=" + model.health().getEmbeddingBackend()
                                 + ", ready=" + model.health().isEmbeddingReady() + ")";
@@ -174,7 +188,10 @@ public final class ConfigPanel extends JPanel {
             }
         });
         clearBtn.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) { logArea.setText(""); }
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                logArea.setText("");
+            }
         });
     }
 
@@ -201,7 +218,8 @@ public final class ConfigPanel extends JPanel {
         for (int i = 0; i < cmd.size(); i++) {
             if (i > 0) sb.append(' ');
             String s = cmd.get(i);
-            if (s.contains(" ")) sb.append('"').append(s).append('"'); else sb.append(s);
+            if (s.contains(" ")) sb.append('"').append(s).append('"');
+            else sb.append(s);
         }
         commandPreview.setText(sb.toString());
         commandPreview.setCaretPosition(0);
@@ -214,10 +232,13 @@ public final class ConfigPanel extends JPanel {
     private void runAsync(final String action, final Callable c) {
         appendLog("→ " + action + "…");
         SwingWorker<String, Void> w = new SwingWorker<String, Void>() {
-            @Override protected String doInBackground() throws Exception {
+            @Override
+            protected String doInBackground() throws Exception {
                 return c.call();
             }
-            @Override protected void done() {
+
+            @Override
+            protected void done() {
                 try {
                     appendLog("✔ " + get());
                 } catch (Exception e) {
@@ -236,7 +257,8 @@ public final class ConfigPanel extends JPanel {
         logArea.setCaretPosition(logArea.getDocument().getLength());
     }
 
-    @Override public Dimension getPreferredSize() {
+    @Override
+    public Dimension getPreferredSize() {
         Dimension d = super.getPreferredSize();
         d.width = Math.max(d.width, 800);
         return d;

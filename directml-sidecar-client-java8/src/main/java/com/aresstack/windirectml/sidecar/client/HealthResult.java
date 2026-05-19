@@ -55,20 +55,50 @@ public final class HealthResult {
         JsonNode v = n.get(k);
         return (v == null || v.isNull()) ? null : v.asText();
     }
+
     private static boolean asBool(JsonNode n, String k) {
         JsonNode v = n.get(k);
         return v != null && !v.isNull() && v.asBoolean(false);
     }
 
-    public String getStatus()             { return status; }
-    public boolean isReady()              { return ready; }
-    public boolean isBusy()               { return busy; }
-    public boolean isModelLoaded()        { return modelLoaded; }
-    public boolean isShuttingDown()       { return shuttingDown; }
-    public String getMode()               { return mode; }
-    public String getEmbeddingBackend()   { return embeddingBackend; }
-    public boolean isEmbeddingReady()     { return embeddingReady; }
-    public String getLastError()          { return lastError; }
-    public String getRaw()                { return raw; }
+    public String getStatus() {
+        return status;
+    }
+
+    public boolean isReady() {
+        return ready;
+    }
+
+    public boolean isBusy() {
+        return busy;
+    }
+
+    public boolean isModelLoaded() {
+        return modelLoaded;
+    }
+
+    public boolean isShuttingDown() {
+        return shuttingDown;
+    }
+
+    public String getMode() {
+        return mode;
+    }
+
+    public String getEmbeddingBackend() {
+        return embeddingBackend;
+    }
+
+    public boolean isEmbeddingReady() {
+        return embeddingReady;
+    }
+
+    public String getLastError() {
+        return lastError;
+    }
+
+    public String getRaw() {
+        return raw;
+    }
 }
 

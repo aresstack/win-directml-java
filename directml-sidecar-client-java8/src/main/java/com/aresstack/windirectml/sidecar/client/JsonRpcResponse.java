@@ -27,7 +27,7 @@ public final class JsonRpcResponse {
             JsonNode idNode = node.get("id");
             Long parsedId = (idNode == null || idNode.isNull()) ? null : idNode.asLong();
             JsonNode result = node.get("result");
-            JsonNode error  = node.get("error");
+            JsonNode error = node.get("error");
             return new JsonRpcResponse(parsedId, result, error, line);
         } catch (Exception e) {
             throw new SidecarException("Invalid JSON-RPC response line: " + line, e);

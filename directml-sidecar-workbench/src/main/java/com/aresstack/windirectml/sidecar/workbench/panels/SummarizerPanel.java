@@ -26,8 +26,8 @@ public final class SummarizerPanel extends JPanel {
     private final WorkbenchModel model;
     private final JTextArea inputArea = new JTextArea(8, 60);
     private final JSpinner maxTokensSpinner = new JSpinner(new SpinnerNumberModel(256, 16, 4096, 16));
-    private final JButton  summarizeBtn = new JButton("Summarize");
-    private final JLabel   timingLbl = new JLabel("timing: —");
+    private final JButton summarizeBtn = new JButton("Summarize");
+    private final JLabel timingLbl = new JLabel("timing: —");
     private final JTextArea outputArea = new JTextArea(8, 60);
     private final JTextArea rawArea = new JTextArea(6, 60);
 
@@ -50,7 +50,7 @@ public final class SummarizerPanel extends JPanel {
         rawArea.setEditable(false);
         rawArea.setLineWrap(true);
 
-        JScrollPane in  = new JScrollPane(inputArea);
+        JScrollPane in = new JScrollPane(inputArea);
         in.setBorder(BorderFactory.createTitledBorder("Input text"));
         JScrollPane out = new JScrollPane(outputArea);
         out.setBorder(BorderFactory.createTitledBorder("Summary output"));
@@ -66,7 +66,10 @@ public final class SummarizerPanel extends JPanel {
         add(center, BorderLayout.CENTER);
 
         summarizeBtn.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) { runSummarize(); }
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                runSummarize();
+            }
         });
     }
 
@@ -81,10 +84,13 @@ public final class SummarizerPanel extends JPanel {
         outputArea.setText("");
         rawArea.setText("");
         new SwingWorker<SummaryResult, Void>() {
-            @Override protected SummaryResult doInBackground() throws Exception {
+            @Override
+            protected SummaryResult doInBackground() throws Exception {
                 return model.summarize(text, maxTokens);
             }
-            @Override protected void done() {
+
+            @Override
+            protected void done() {
                 try {
                     SummaryResult r = get();
                     outputArea.setText(r.getText() == null ? "" : r.getText());

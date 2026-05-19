@@ -13,17 +13,19 @@ import javax.swing.UnsupportedLookAndFeelException;
  */
 public final class WorkbenchApp {
 
-    private WorkbenchApp() {}
+    private WorkbenchApp() {
+    }
 
     public static void main(String[] args) {
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (ClassNotFoundException | InstantiationException
-                | IllegalAccessException | UnsupportedLookAndFeelException ignored) {
+                 | IllegalAccessException | UnsupportedLookAndFeelException ignored) {
             // Fall back to default L&F.
         }
         SwingUtilities.invokeLater(new Runnable() {
-            @Override public void run() {
+            @Override
+            public void run() {
                 WorkbenchFrame f = new WorkbenchFrame();
                 f.setVisible(true);
             }

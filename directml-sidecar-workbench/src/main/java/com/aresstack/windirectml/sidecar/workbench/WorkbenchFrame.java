@@ -34,12 +34,12 @@ public final class WorkbenchFrame extends JFrame {
     private final WorkbenchModel model = new WorkbenchModel();
     private final JLabel statusLabel = new JLabel(" status: not started ", SwingConstants.LEFT);
 
-    private final ConfigPanel       configPanel;
-    private final HealthPanel       healthPanel;
-    private final EmbeddingsPanel   embeddingsPanel;
-    private final SummarizerPanel   summarizerPanel;
-    private final InspectorPanel    inspectorPanel;
-    private final StderrPanel       stderrPanel;
+    private final ConfigPanel configPanel;
+    private final HealthPanel healthPanel;
+    private final EmbeddingsPanel embeddingsPanel;
+    private final SummarizerPanel summarizerPanel;
+    private final InspectorPanel inspectorPanel;
+    private final StderrPanel stderrPanel;
     private final IntegrationHelpPanel integrationPanel;
 
     public WorkbenchFrame() {
@@ -48,21 +48,21 @@ public final class WorkbenchFrame extends JFrame {
         setSize(new Dimension(1100, 760));
         setLocationByPlatform(true);
 
-        configPanel      = new ConfigPanel(model);
-        healthPanel      = new HealthPanel(model);
-        embeddingsPanel  = new EmbeddingsPanel(model);
-        summarizerPanel  = new SummarizerPanel(model);
-        inspectorPanel   = new InspectorPanel(model);
-        stderrPanel      = new StderrPanel(model);
+        configPanel = new ConfigPanel(model);
+        healthPanel = new HealthPanel(model);
+        embeddingsPanel = new EmbeddingsPanel(model);
+        summarizerPanel = new SummarizerPanel(model);
+        inspectorPanel = new InspectorPanel(model);
+        stderrPanel = new StderrPanel(model);
         integrationPanel = new IntegrationHelpPanel();
 
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Config & Control", configPanel);
-        tabs.addTab("Health",           healthPanel);
-        tabs.addTab("Embeddings",       embeddingsPanel);
-        tabs.addTab("Summarize",        summarizerPanel);
+        tabs.addTab("Health", healthPanel);
+        tabs.addTab("Embeddings", embeddingsPanel);
+        tabs.addTab("Summarize", summarizerPanel);
         tabs.addTab("JSON-RPC Inspector", inspectorPanel);
-        tabs.addTab("stderr Log",       stderrPanel);
+        tabs.addTab("stderr Log", stderrPanel);
         tabs.addTab("Integration Help", integrationPanel);
 
         JPanel statusBar = new JPanel(new BorderLayout());
@@ -75,12 +75,16 @@ public final class WorkbenchFrame extends JFrame {
 
         // Wire shared refresh actions across panels.
         configPanel.setOnChange(new Runnable() {
-            @Override public void run() { refreshAll(); }
+            @Override
+            public void run() {
+                refreshAll();
+            }
         });
 
         // Periodic UI refresh: status + inspector + stderr.
         Timer t = new Timer(500, new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
+            @Override
+            public void actionPerformed(ActionEvent e) {
                 updateStatusBar();
                 inspectorPanel.refresh();
                 stderrPanel.refresh();
@@ -107,6 +111,8 @@ public final class WorkbenchFrame extends JFrame {
     }
 
     // Test hook.
-    WorkbenchModel getModelForTesting() { return model; }
+    WorkbenchModel getModelForTesting() {
+        return model;
+    }
 }
 

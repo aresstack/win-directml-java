@@ -32,15 +32,15 @@ Build the Java-8 modules and run the workbench:
 
 The window opens with seven tabs:
 
-| Tab | Purpose |
-|-----|---------|
-| Config & Control | Java exe, sidecar jar, model dir, `embed.backend`, DLL override, extra JVM args, timeout. Buttons: `Start / Stop / Restart Sidecar`, `Health`, `Clear Logs`. Live command-line preview. |
-| Health | `sidecarRunning`, `embeddingReady`, `embeddingBackend`, `modelLoaded`, `mode`, `lastError` + raw JSON. |
-| Embeddings | Two text fields (A/B), `Embed A`, `Embed B`, `Cosine Similarity`, dimension/timing/backend readout. |
-| Summarize | Input text, `maxTokens` spinner, summary output, raw response. Shows JSON-RPC errors clearly when no summarizer is loaded. |
-| JSON-RPC Inspector | Last raw request and last raw response, refreshed every 500 ms. |
-| stderr Log | Live tail of the sidecar's stderr (separate from stdout). |
-| Integration Help | Java-8 sample code that uses the same client library. |
+| Tab                | Purpose                                                                                                                                                                                 |
+|--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Config & Control   | Java exe, sidecar jar, model dir, `embed.backend`, DLL override, extra JVM args, timeout. Buttons: `Start / Stop / Restart Sidecar`, `Health`, `Clear Logs`. Live command-line preview. |
+| Health             | `sidecarRunning`, `embeddingReady`, `embeddingBackend`, `modelLoaded`, `mode`, `lastError` + raw JSON.                                                                                  |
+| Embeddings         | Two text fields (A/B), `Embed A`, `Embed B`, `Cosine Similarity`, dimension/timing/backend readout.                                                                                     |
+| Summarize          | Input text, `maxTokens` spinner, summary output, raw response. Shows JSON-RPC errors clearly when no summarizer is loaded.                                                              |
+| JSON-RPC Inspector | Last raw request and last raw response, refreshed every 500 ms.                                                                                                                         |
+| stderr Log         | Live tail of the sidecar's stderr (separate from stdout).                                                                                                                               |
+| Integration Help   | Java-8 sample code that uses the same client library.                                                                                                                                   |
 
 ## Architecture
 
@@ -77,27 +77,40 @@ The exact same client library can be embedded into any Java-8 application:
 
 ```java
 SidecarClientConfig config = new SidecarClientConfig();
-config.setJavaExecutable("C:\\Program Files\\Java\\jdk-21\\bin\\java.exe");
-config.setSidecarJarPath("directml-sidecar.jar");
-config.setModelDirectory("model/all-MiniLM-L6-v2");
-config.setEmbedBackend("directml");          // or "auto" / "cpu"
+config.
+
+setJavaExecutable("C:\\Program Files\\Java\\jdk-21\\bin\\java.exe");
+config.
+
+setSidecarJarPath("directml-sidecar.jar");
+config.
+
+setModelDirectory("model/all-MiniLM-L6-v2");
+config.
+
+setEmbedBackend("directml");          // or "auto" / "cpu"
 
 SidecarClient client = new SidecarClient(config);
-try {
-    client.start();
+try{
+        client.
 
-    HealthResult h = client.health();
-    EmbeddingResult e = client.embed("hello world");
-    double cos = EmbeddingResult.cosine(e.getVector(),
-            client.embed("hi").getVector());
+start();
 
-    try {
-        SummaryResult s = client.summarize("long input…", 256);
-    } catch (JsonRpcError err) {
+HealthResult h = client.health();
+EmbeddingResult e = client.embed("hello world");
+double cos = EmbeddingResult.cosine(e.getVector(),
+        client.embed("hi").getVector());
+
+    try{
+SummaryResult s = client.summarize("long input…", 256);
+    }catch(
+JsonRpcError err){
         // summarizer not loaded → -32005 / not implemented
-    }
-} finally {
-    client.shutdown();
+        }
+        }finally{
+        client.
+
+shutdown();
 }
 ```
 

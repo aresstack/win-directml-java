@@ -30,7 +30,8 @@ public final class StderrPanel extends JPanel {
 
         JButton clearBtn = new JButton("Clear");
         clearBtn.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
+            @Override
+            public void actionPerformed(ActionEvent e) {
                 area.setText("");
                 lastLen = 0;
             }

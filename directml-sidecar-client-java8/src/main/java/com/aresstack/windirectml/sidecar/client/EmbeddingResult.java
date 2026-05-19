@@ -45,12 +45,29 @@ public final class EmbeddingResult {
         return new EmbeddingResult(values, dim, model, normalized, elapsedMillis, raw);
     }
 
-    public float[] getVector()     { return vector; }
-    public int getDimension()      { return dimension; }
-    public String getModel()       { return model; }
-    public boolean isNormalized()  { return normalized; }
-    public long getElapsedMillis() { return elapsedMillis; }
-    public String getRaw()         { return raw; }
+    public float[] getVector() {
+        return vector;
+    }
+
+    public int getDimension() {
+        return dimension;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public boolean isNormalized() {
+        return normalized;
+    }
+
+    public long getElapsedMillis() {
+        return elapsedMillis;
+    }
+
+    public String getRaw() {
+        return raw;
+    }
 
     /**
      * Compute cosine similarity between two embedding vectors.
@@ -62,8 +79,8 @@ public final class EmbeddingResult {
         double dot = 0, na = 0, nb = 0;
         for (int i = 0; i < n; i++) {
             dot += (double) a[i] * b[i];
-            na  += (double) a[i] * a[i];
-            nb  += (double) b[i] * b[i];
+            na += (double) a[i] * a[i];
+            nb += (double) b[i] * b[i];
         }
         if (na == 0 || nb == 0) return 0.0;
         return dot / (Math.sqrt(na) * Math.sqrt(nb));

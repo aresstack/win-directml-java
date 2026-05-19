@@ -28,7 +28,8 @@ class WorkbenchFrameSmokeTest {
                 "Skipping Swing smoke test in headless environment");
         final AtomicReference<WorkbenchFrame> ref = new AtomicReference<WorkbenchFrame>();
         SwingUtilities.invokeAndWait(new Runnable() {
-            @Override public void run() {
+            @Override
+            public void run() {
                 ref.set(new WorkbenchFrame());
             }
         });
@@ -40,7 +41,10 @@ class WorkbenchFrameSmokeTest {
         assertFalse(f.getModelForTesting().isRunning());
         // The frame should not block the EDT; dispose returns immediately.
         SwingUtilities.invokeAndWait(new Runnable() {
-            @Override public void run() { f.dispose(); }
+            @Override
+            public void run() {
+                f.dispose();
+            }
         });
         assertTrue(true);
     }

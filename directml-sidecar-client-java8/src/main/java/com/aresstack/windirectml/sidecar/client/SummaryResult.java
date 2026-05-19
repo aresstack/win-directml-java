@@ -38,11 +38,28 @@ public final class SummaryResult {
         return new SummaryResult(text, finishReason, prompt, output, sidecarElapsed, raw);
     }
 
-    public String getText()         { return text; }
-    public String getFinishReason() { return finishReason; }
-    public int getPromptTokens()    { return promptTokens; }
-    public int getOutputTokens()    { return outputTokens; }
-    public long getElapsedMillis()  { return elapsedMillis; }
-    public String getRaw()          { return raw; }
+    public String getText() {
+        return text;
+    }
+
+    public String getFinishReason() {
+        return finishReason;
+    }
+
+    public int getPromptTokens() {
+        return promptTokens;
+    }
+
+    public int getOutputTokens() {
+        return outputTokens;
+    }
+
+    public long getElapsedMillis() {
+        return elapsedMillis;
+    }
+
+    public String getRaw() {
+        return raw;
+    }
 }
 

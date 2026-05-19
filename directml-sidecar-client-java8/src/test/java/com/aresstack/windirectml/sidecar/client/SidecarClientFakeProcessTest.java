@@ -24,16 +24,20 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 class SidecarClientFakeProcessTest {
 
-    /** Drop-in replacement for {@link SidecarProcess} that pipes lines
-     *  through in-memory queues and lets the test script the responses. */
+    /**
+     * Drop-in replacement for {@link SidecarProcess} that pipes lines
+     * through in-memory queues and lets the test script the responses.
+     */
     static final class FakeSidecarProcess extends SidecarProcess {
         private final LinkedBlockingDeque<String> stdoutQueue = new LinkedBlockingDeque<String>();
-        private final LinkedBlockingDeque<String> stdinQueue  = new LinkedBlockingDeque<String>();
+        private final LinkedBlockingDeque<String> stdinQueue = new LinkedBlockingDeque<String>();
         private final AtomicBoolean alive = new AtomicBoolean(false);
         private final AtomicInteger exitCode = new AtomicInteger(-1);
         private final StringBuilder stderr = new StringBuilder();
 
-        FakeSidecarProcess() { super(defaultCfg()); }
+        FakeSidecarProcess() {
+            super(defaultCfg());
+        }
 
         private static SidecarClientConfig defaultCfg() {
             SidecarClientConfig c = new SidecarClientConfig();
@@ -41,14 +45,19 @@ class SidecarClientFakeProcessTest {
             return c;
         }
 
-        @Override public synchronized void start() {
+        @Override
+        public synchronized void start() {
             alive.set(true);
         }
-        @Override public synchronized void writeLine(String line) throws IOException {
+
+        @Override
+        public synchronized void writeLine(String line) throws IOException {
             if (!alive.get()) throw new IOException("fake process not running");
             stdinQueue.offerLast(line);
         }
-        @Override public String readLine() throws IOException {
+
+        @Override
+        public String readLine() throws IOException {
             try {
                 String s = stdoutQueue.pollFirst(5, TimeUnit.SECONDS);
                 if (s == null) {
@@ -61,14 +70,30 @@ class SidecarClientFakeProcessTest {
                 throw new IOException("interrupted", e);
             }
         }
-        @Override public synchronized void stop(long timeoutMillis) {
+
+        @Override
+        public synchronized void stop(long timeoutMillis) {
             alive.set(false);
             stdoutQueue.offerLast("<<EOF>>");
         }
-        @Override public boolean isRunning() { return alive.get(); }
-        @Override public int exitValue() { return alive.get() ? -1 : exitCode.get(); }
-        @Override public String getStderrSnapshot() { return stderr.toString(); }
-        @Override public List<String> getCommandLine() {
+
+        @Override
+        public boolean isRunning() {
+            return alive.get();
+        }
+
+        @Override
+        public int exitValue() {
+            return alive.get() ? -1 : exitCode.get();
+        }
+
+        @Override
+        public String getStderrSnapshot() {
+            return stderr.toString();
+        }
+
+        @Override
+        public List<String> getCommandLine() {
             return java.util.Collections.singletonList("fake");
         }
 
@@ -78,9 +103,18 @@ class SidecarClientFakeProcessTest {
             assertNotNull(s, "expected sidecar to receive a request");
             return s;
         }
-        void enqueueLine(String s) { stdoutQueue.offerLast(s); }
-        void setExitCode(int code) { exitCode.set(code); }
-        void appendStderr(String s) { stderr.append(s); }
+
+        void enqueueLine(String s) {
+            stdoutQueue.offerLast(s);
+        }
+
+        void setExitCode(int code) {
+            exitCode.set(code);
+        }
+
+        void appendStderr(String s) {
+            stderr.append(s);
+        }
     }
 
     private SidecarClient client;
@@ -104,7 +138,8 @@ class SidecarClientFakeProcessTest {
 
         // Run health() on a worker thread so we can script the response.
         Thread t = new Thread(new Runnable() {
-            @Override public void run() {
+            @Override
+            public void run() {
                 try {
                     HealthResult r = client.health();
                     assertEquals("directml", r.getEmbeddingBackend());
@@ -143,7 +178,10 @@ class SidecarClientFakeProcessTest {
 
         // Never enqueue a response. health() must throw a timeout.
         assertThrows(SidecarTimeoutException.class, new org.junit.jupiter.api.function.Executable() {
-            @Override public void execute() throws Throwable { client.health(); }
+            @Override
+            public void execute() throws Throwable {
+                client.health();
+            }
         });
     }
 
@@ -157,7 +195,8 @@ class SidecarClientFakeProcessTest {
         client.start();
 
         Thread t = new Thread(new Runnable() {
-            @Override public void run() {
+            @Override
+            public void run() {
                 try {
                     client.embed("hello");
                     fail("expected JsonRpcError");

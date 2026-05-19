@@ -24,10 +24,10 @@ public final class EmbeddingsPanel extends JPanel {
 
     private final JTextArea textA = new JTextArea(4, 60);
     private final JTextArea textB = new JTextArea(4, 60);
-    private final JLabel    dimLbl = new JLabel("dimension: —");
-    private final JLabel    backendLbl = new JLabel("backend: —");
-    private final JLabel    timingLbl = new JLabel("timing: —");
-    private final JLabel    cosineLbl = new JLabel("cos(A,B): —");
+    private final JLabel dimLbl = new JLabel("dimension: —");
+    private final JLabel backendLbl = new JLabel("backend: —");
+    private final JLabel timingLbl = new JLabel("timing: —");
+    private final JLabel cosineLbl = new JLabel("cos(A,B): —");
     private final JTextArea preview = new JTextArea(8, 60);
 
     private float[] vecA;
@@ -50,13 +50,20 @@ public final class EmbeddingsPanel extends JPanel {
         JButton cosineBtn = new JButton("Cosine Similarity");
 
         embedA.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) { embed(textA.getText(), true); }
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                embed(textA.getText(), true);
+            }
         });
         embedB.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) { embed(textB.getText(), false); }
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                embed(textB.getText(), false);
+            }
         });
         cosineBtn.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
+            @Override
+            public void actionPerformed(ActionEvent e) {
                 if (vecA == null || vecB == null) {
                     cosineLbl.setText("cos(A,B): — (embed both first)");
                 } else {
@@ -101,13 +108,17 @@ public final class EmbeddingsPanel extends JPanel {
             return;
         }
         new SwingWorker<EmbeddingResult, Void>() {
-            @Override protected EmbeddingResult doInBackground() throws Exception {
+            @Override
+            protected EmbeddingResult doInBackground() throws Exception {
                 return model.embed(text);
             }
-            @Override protected void done() {
+
+            @Override
+            protected void done() {
                 try {
                     EmbeddingResult r = get();
-                    if (isA) vecA = r.getVector(); else vecB = r.getVector();
+                    if (isA) vecA = r.getVector();
+                    else vecB = r.getVector();
                     dimLbl.setText("dimension: " + r.getDimension());
                     backendLbl.setText("backend: " + safe(r.getModel()));
                     timingLbl.setText("timing: " + r.getElapsedMillis() + " ms");
@@ -129,6 +140,8 @@ public final class EmbeddingsPanel extends JPanel {
         }.execute();
     }
 
-    private static String safe(String s) { return s == null ? "—" : s; }
+    private static String safe(String s) {
+        return s == null ? "—" : s;
+    }
 }
 

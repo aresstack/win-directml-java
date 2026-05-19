@@ -21,13 +21,13 @@ public final class HealthPanel extends JPanel {
     private static final long serialVersionUID = 1L;
 
     private final WorkbenchModel model;
-    private final JLabel sidecarRunning   = new JLabel("—");
-    private final JLabel embeddingReady   = new JLabel("—");
+    private final JLabel sidecarRunning = new JLabel("—");
+    private final JLabel embeddingReady = new JLabel("—");
     private final JLabel embeddingBackend = new JLabel("—");
-    private final JLabel modelLoaded      = new JLabel("—");
-    private final JLabel mode             = new JLabel("—");
-    private final JLabel lastError        = new JLabel("—");
-    private final JTextArea rawArea       = new JTextArea(8, 60);
+    private final JLabel modelLoaded = new JLabel("—");
+    private final JLabel mode = new JLabel("—");
+    private final JLabel lastError = new JLabel("—");
+    private final JTextArea rawArea = new JTextArea(8, 60);
 
     public HealthPanel(WorkbenchModel model) {
         this.model = model;
@@ -36,16 +36,25 @@ public final class HealthPanel extends JPanel {
 
         JPanel grid = new JPanel(new GridLayout(0, 2, 6, 4));
         grid.setBorder(BorderFactory.createTitledBorder("Status"));
-        grid.add(new JLabel("sidecar running:"));   grid.add(sidecarRunning);
-        grid.add(new JLabel("embeddingReady:"));    grid.add(embeddingReady);
-        grid.add(new JLabel("embeddingBackend:"));  grid.add(embeddingBackend);
-        grid.add(new JLabel("modelLoaded:"));       grid.add(modelLoaded);
-        grid.add(new JLabel("mode:"));              grid.add(mode);
-        grid.add(new JLabel("lastError:"));         grid.add(lastError);
+        grid.add(new JLabel("sidecar running:"));
+        grid.add(sidecarRunning);
+        grid.add(new JLabel("embeddingReady:"));
+        grid.add(embeddingReady);
+        grid.add(new JLabel("embeddingBackend:"));
+        grid.add(embeddingBackend);
+        grid.add(new JLabel("modelLoaded:"));
+        grid.add(modelLoaded);
+        grid.add(new JLabel("mode:"));
+        grid.add(mode);
+        grid.add(new JLabel("lastError:"));
+        grid.add(lastError);
 
         JButton refreshBtn = new JButton("Refresh");
         refreshBtn.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) { refresh(); }
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                refresh();
+            }
         });
 
         JPanel top = new JPanel(new BorderLayout());
@@ -73,10 +82,13 @@ public final class HealthPanel extends JPanel {
             return;
         }
         new SwingWorker<HealthResult, Void>() {
-            @Override protected HealthResult doInBackground() throws Exception {
+            @Override
+            protected HealthResult doInBackground() throws Exception {
                 return model.health();
             }
-            @Override protected void done() {
+
+            @Override
+            protected void done() {
                 try {
                     HealthResult h = get();
                     embeddingReady.setText(Boolean.toString(h.isEmbeddingReady()));
@@ -93,6 +105,8 @@ public final class HealthPanel extends JPanel {
         }.execute();
     }
 
-    private static String safe(String s) { return s == null ? "—" : s; }
+    private static String safe(String s) {
+        return s == null ? "—" : s;
+    }
 }
 

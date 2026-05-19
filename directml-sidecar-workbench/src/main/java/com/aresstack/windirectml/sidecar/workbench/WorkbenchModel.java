@@ -18,7 +18,9 @@ public final class WorkbenchModel {
     private final SidecarClientConfig config = new SidecarClientConfig();
     private SidecarClient client;
 
-    public SidecarClientConfig getConfig() { return config; }
+    public SidecarClientConfig getConfig() {
+        return config;
+    }
 
     public synchronized boolean isRunning() {
         return client != null && client.isRunning();

@@ -72,9 +72,9 @@ class JsonRpcRequestTest {
 
     @Test
     void cosineComputesUnitVectors() {
-        float[] a = { 1f, 0f, 0f };
-        float[] b = { 1f, 0f, 0f };
-        float[] c = { 0f, 1f, 0f };
+        float[] a = {1f, 0f, 0f};
+        float[] b = {1f, 0f, 0f};
+        float[] c = {0f, 1f, 0f};
         assertEquals(1.0, EmbeddingResult.cosine(a, b), 1e-6);
         assertEquals(0.0, EmbeddingResult.cosine(a, c), 1e-6);
     }

@@ -30,7 +30,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class SidecarProcess {
 
-    /** UTF-8 explicit; the sidecar emits UTF-8 regardless of platform default. */
+    /**
+     * UTF-8 explicit; the sidecar emits UTF-8 regardless of platform default.
+     */
     private static final Charset UTF8 = Charset.forName("UTF-8");
 
     private final SidecarClientConfig config;
@@ -82,7 +84,8 @@ public class SidecarProcess {
         final BufferedReader stderrReader = new BufferedReader(
                 new InputStreamReader(process.getErrorStream(), UTF8));
         stderrPump = new Thread(new Runnable() {
-            @Override public void run() {
+            @Override
+            public void run() {
                 try {
                     String line;
                     while ((line = stderrReader.readLine()) != null) {
@@ -97,7 +100,9 @@ public class SidecarProcess {
                 } catch (IOException ignored) {
                     // Stream closed when the process exits – normal shutdown.
                 } finally {
-                    try { stderrReader.close(); } catch (IOException ignored2) { /* ignore */ }
+                    try {
+                        stderrReader.close();
+                    } catch (IOException ignored2) { /* ignore */ }
                 }
             }
         }, "sidecar-stderr-pump");
@@ -134,11 +139,17 @@ public class SidecarProcess {
         return p != null && p.isAlive();
     }
 
-    /** Process exit code or {@code -1} if still running. */
+    /**
+     * Process exit code or {@code -1} if still running.
+     */
     public int exitValue() {
         Process p = process;
         if (p == null || p.isAlive()) return -1;
-        try { return p.exitValue(); } catch (IllegalThreadStateException e) { return -1; }
+        try {
+            return p.exitValue();
+        } catch (IllegalThreadStateException e) {
+            return -1;
+        }
     }
 
     /**
@@ -149,8 +160,12 @@ public class SidecarProcess {
     public synchronized void stop(long timeoutMillis) {
         if (!running.compareAndSet(true, false)) return;
         // Close stdin first so the sidecar's main loop sees EOF.
-        try { if (stdin != null) stdin.close(); } catch (IOException ignored) { /* ignore */ }
-        try { if (stdout != null) stdout.close(); } catch (IOException ignored) { /* ignore */ }
+        try {
+            if (stdin != null) stdin.close();
+        } catch (IOException ignored) { /* ignore */ }
+        try {
+            if (stdout != null) stdout.close();
+        } catch (IOException ignored) { /* ignore */ }
         Process p = process;
         if (p == null) return;
         try {
@@ -163,14 +178,18 @@ public class SidecarProcess {
             p.destroyForcibly();
         }
         if (stderrPump != null) {
-            try { stderrPump.join(500); } catch (InterruptedException ignored) {
+            try {
+                stderrPump.join(500);
+            } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
             }
         }
     }
 
     public String getStderrSnapshot() {
-        synchronized (stderrLock) { return stderrBuffer.toString(); }
+        synchronized (stderrLock) {
+            return stderrBuffer.toString();
+        }
     }
 
     public List<String> getCommandLine() {
