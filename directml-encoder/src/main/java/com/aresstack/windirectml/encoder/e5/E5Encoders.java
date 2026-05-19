@@ -112,18 +112,25 @@ public final class E5Encoders {
      * Resolve the effective {@link BertEncoderConfig} for {@code modelDir}
      * given a requested {@link E5Variant}.
      * <p>
-     * If {@code config.json} is present, it is parsed and verified to
-     * match the variant's declared dimensions. The on-disk config wins
-     * for the soft fields ({@code modelName}, {@code maxPositionEmbeddings}).
-     * If no {@code config.json} exists, the variant's preset config is
-     * used unchanged.
+     * The on-disk {@code config.json} is <b>required</b> for E5 model
+     * directories: the soft fields ({@code modelName},
+     * {@code maxPositionEmbeddings}) come from the file, and the
+     * shape-relevant axes are then verified against the variant's
+     * declared dimensions. If the directory has no {@code config.json},
+     * a hard {@link EmbeddingException} is thrown – we refuse to load
+     * E5 weights "blindly" against a hard-coded variant config because
+     * that is exactly how silent path/config mismatches sneak in.
      */
     public static BertEncoderConfig resolveConfig(Path modelDir, E5Variant variant)
             throws EmbeddingException {
         BertEncoderConfig declared = variant.config();
         Path configJson = modelDir.resolve("config.json");
         if (!Files.exists(configJson)) {
-            return declared;
+            throw new EmbeddingException(
+                    "E5 model directory is missing config.json: " + modelDir
+                            + " (E5 requires config.json so path and -De5.model="
+                            + variant.token() + " can be verified against each other; "
+                            + "re-run scripts/download-e5.ps1 -Variant " + variant.token() + ")");
         }
         BertEncoderConfig onDisk = BertConfigJson.read(modelDir, declared.modelName(),
                 PoolingStrategy.MEAN, /* normalize */ true);

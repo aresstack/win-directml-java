@@ -166,21 +166,37 @@ Response:
 
 ### `embed`
 
-Wenn ein MiniLM-Modell unter `model/all-MiniLM-L6-v2/` (oder via
-`-Dminilm.modelDir=<path>`) gefunden wird, lädt der Sidecar einen
-Embedding-Encoder. Welche Variante geladen wird, steuert das
-Systemproperty `-Dembed.backend`:
+Der Sidecar unterstützt zwei BERT-style Encoder-Familien hinter demselben
+JSON-RPC-Endpunkt. Welche Familie geladen wird, steuert das Systemproperty
+`-Dembed.model`:
 
-| Modus                            | Verhalten                                                                                                                                                                                   |
-|----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `-Dembed.backend=cpu`            | `CpuMiniLmEncoder` erzwingen. Fehler beim Laden ⇒ Sidecar beendet sich mit Exit-Code `3` (sichtbarer Fehler).                                                                               |
-| `-Dembed.backend=directml`       | `DirectMlMiniLmEncoder` erzwingen. Wenn DirectML nicht verfügbar ist (kein Windows/D3D12, keine kompatible Karte), beendet sich der Sidecar mit Exit-Code `3`. **Keinen** stillen Fallback. |
-| `-Dembed.backend=auto` (Default) | Erst DirectML versuchen, bei Fehler sauber auf CPU zurückfallen. Die Fallback-Warnung wird auf `stderr`/Log geschrieben und ist als `lastError` im `health`-Result sichtbar.                |
+| Property                        | Werte                                                          | Default          | Wirkung                                                                                                                                                                                       |
+|---------------------------------|----------------------------------------------------------------|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-Dembed.model`                 | `minilm`, `e5`                                                 | `minilm`         | Wählt die Encoder-Familie. Unbekannte Werte ⇒ Exit-Code `2`.                                                                                                                                  |
+| `-Dminilm.modelDir`             | Pfad                                                           | auto-discovery   | Pfad zum MiniLM-Modellordner. Auto: `model/all-MiniLM-L6-v2/`.                                                                                                                                |
+| `-De5.model`                    | `small-v2`, `base-v2`, `large-v2`, `base-sts-en-de`            | `base-sts-en-de` | E5-Variante. Pinnt `BertEncoderConfig` (hiddenSize/numLayers/…). Unbekannt ⇒ Exit-Code `2`.                                                                                                   |
+| `-De5.modelDir`                 | Pfad                                                           | auto-discovery   | Pfad zum E5-Modellordner. Auto: variant-spezifische Hints (z. B. `model/e5-base-sts-en-de/`).                                                                                                 |
+| `-Dembed.backend`               | `auto`, `directml`, `cpu`                                      | `auto`           | Wählt das Backend innerhalb der Familie. `directml`/`cpu` ⇒ Exit-Code `3` bei Fehlern; `auto` fällt sauber auf CPU zurück und schreibt die Warnung in `health.lastError`. Unbekannt ⇒ Exit `2`. |
 
-Fehlt das MiniLM-Modellverzeichnis komplett (weder `-Dminilm.modelDir`
-noch `model/all-MiniLM-L6-v2/` aufgelöst), gilt dieselbe Regel:
-`cpu`/`directml` ⇒ Exit-Code `3`, `auto` ⇒ Sidecar startet weiter, aber
-`embed` antwortet `-32005 Not implemented`.
+Für E5 ist `config.json` im Modellordner **Pflicht** – die Datei wird gegen
+die gewählte Variante geprüft (`hidden_size`, `num_hidden_layers`,
+`num_attention_heads`, `intermediate_size`, `vocab_size`, `type_vocab_size`).
+Eine Diskrepanz zwischen `-De5.model` und der `config.json` ist ein harter
+Fehler – kein stilles Re-Shape.
+
+Innerhalb einer Familie steuert `-Dembed.backend`, welches konkrete Backend
+verwendet wird:
+
+| Modus                            | Verhalten                                                                                                                                                                                                  |
+|----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-Dembed.backend=cpu`            | Reine Java-CPU-Variante erzwingen (`CpuMiniLmEncoder` bzw. `CpuBertEncoder` für E5). Fehler beim Laden ⇒ Sidecar beendet sich mit Exit-Code `3` (sichtbarer Fehler).                                       |
+| `-Dembed.backend=directml`       | DirectML-Variante erzwingen (`DirectMlMiniLmEncoder` bzw. `DirectMlBertEncoder` für E5). Wenn DirectML nicht verfügbar ist (kein Windows/D3D12, keine kompatible Karte), Exit-Code `3`. Kein stiller Fallback. |
+| `-Dembed.backend=auto` (Default) | Erst DirectML versuchen, bei Fehler sauber auf CPU zurückfallen. Die Fallback-Warnung steht auf `stderr`/Log und ist als `lastError` im `health`-Result sichtbar.                                          |
+
+Fehlt das Modellverzeichnis komplett (weder die Override-Property
+`-Dminilm.modelDir` / `-De5.modelDir` noch ein Auto-Discovery-Pfad),
+gilt dieselbe Regel: `cpu`/`directml` ⇒ Exit-Code `3`, `auto` ⇒ Sidecar
+startet weiter, aber `embed` antwortet `-32005 Not implemented`.
 
 Der aktiv geladene Backend-Name wird in `health` ausgegeben:
 
@@ -202,6 +218,16 @@ Request:
 }
 ```
 
+`prefix` ist optional. Für E5 erwartet die Familie konventionsgemäß
+`"query: "` für Suchanfragen und `"passage: "` für indizierte Dokumente
+(siehe `E5Prefixes.QUERY` / `E5Prefixes.PASSAGE`). Beispiel:
+
+```json
+{ "jsonrpc": "2.0", "id": "e2", "method": "embed",
+  "params": { "text": "Welche Hauptstadt hat Frankreich?",
+              "normalize": true, "prefix": "query: " } }
+```
+
 Response:
 
 ```json
@@ -217,7 +243,7 @@ Response:
 }
 ```
 
-Solange kein MiniLM-Modell gefunden wird, antwortet `embed` mit
+Solange kein Embedding-Modell gefunden wird, antwortet `embed` mit
 `-32005 Not implemented`.
 
 ### `shutdown`

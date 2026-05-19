@@ -38,7 +38,13 @@ public final class ConfigPanel extends JPanel {
             + java.io.File.separator + "bin" + java.io.File.separator + "java");
     private final JTextField jarPathField = new JTextField(
             "directml-sidecar/build/libs/directml-sidecar-0.1.0-SNAPSHOT-all.jar");
+    private final JComboBox<String> embedModelBox =
+            new JComboBox<String>(new String[]{"minilm", "e5"});
     private final JTextField modelDirField = new JTextField("model/all-MiniLM-L6-v2");
+    private final JComboBox<String> e5VariantBox =
+            new JComboBox<String>(new String[]{
+                    "base-sts-en-de", "small-v2", "base-v2", "large-v2"});
+    private final JTextField e5ModelDirField = new JTextField("");
     private final JComboBox<String> backendBox =
             new JComboBox<String>(new String[]{"auto", "directml", "cpu"});
     private final JCheckBox debugBox = new JCheckBox("windirectml.debug=true");
@@ -70,7 +76,10 @@ public final class ConfigPanel extends JPanel {
         int row = 0;
         addRow(form, c, row++, "Java executable", javaExeField);
         addRow(form, c, row++, "Sidecar jar path", jarPathField);
-        addRow(form, c, row++, "Model directory", modelDirField);
+        addRow(form, c, row++, "embed.model", embedModelBox);
+        addRow(form, c, row++, "MiniLM directory", modelDirField);
+        addRow(form, c, row++, "E5 variant", e5VariantBox);
+        addRow(form, c, row++, "E5 directory (optional)", e5ModelDirField);
         addRow(form, c, row++, "embed.backend", backendBox);
         addRow(form, c, row++, "DirectML.dll override", dllOverrideField);
         addRow(form, c, row++, "Extra JVM args", extraJvmField);
@@ -133,6 +142,8 @@ public final class ConfigPanel extends JPanel {
         };
         backendBox.addActionListener(applyAndPreview);
         debugBox.addActionListener(applyAndPreview);
+        embedModelBox.addActionListener(applyAndPreview);
+        e5VariantBox.addActionListener(applyAndPreview);
 
         startBtn.addActionListener(new ActionListener() {
             @Override
@@ -200,6 +211,9 @@ public final class ConfigPanel extends JPanel {
         cfg.setJavaExecutable(javaExeField.getText().trim());
         cfg.setSidecarJarPath(jarPathField.getText().trim());
         cfg.setModelDirectory(modelDirField.getText().trim());
+        cfg.setEmbedModel((String) embedModelBox.getSelectedItem());
+        cfg.setE5Variant((String) e5VariantBox.getSelectedItem());
+        cfg.setE5ModelDirectory(e5ModelDirField.getText().trim());
         cfg.setEmbedBackend((String) backendBox.getSelectedItem());
         cfg.setDirectmlDebug(debugBox.isSelected());
         cfg.setDirectmlDllOverride(dllOverrideField.getText().trim());

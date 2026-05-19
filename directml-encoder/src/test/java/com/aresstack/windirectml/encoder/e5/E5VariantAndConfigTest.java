@@ -150,6 +150,18 @@ class E5VariantAndConfigTest {
                 BertConfigJson.verifyMatches(E5Variant.BASE_V2.config(), onDisk, tmp));
     }
 
+    @Test
+    void resolveConfigRequiresConfigJsonForE5(@TempDir Path tmp) {
+        // Empty directory – no config.json. E5 must refuse to load
+        // blindly, even though a variant is named explicitly.
+        EmbeddingException ex = assertThrows(EmbeddingException.class,
+                () -> E5Encoders.resolveConfig(tmp, E5Variant.BASE_STS_EN_DE));
+        assertTrue(ex.getMessage().contains("config.json"),
+                "must mention config.json: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("base-sts-en-de"),
+                "must mention the requested variant: " + ex.getMessage());
+    }
+
     // ── strict validate() invariants ───────────────────────────────────
 
     @Test

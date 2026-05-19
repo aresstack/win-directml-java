@@ -149,7 +149,14 @@ public final class DirectMlPhi3Sidecar {
             System.exit(2);
             return;
         }
-        String embedFamily = embedFamily(System.getProperty("embed.model"));
+        String embedFamily;
+        try {
+            embedFamily = embedFamily(System.getProperty("embed.model"));
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid -Dembed.model value: {}", e.getMessage());
+            System.exit(2);
+            return;
+        }
 
         Path embedModelDir;
         EmbeddingBackendSelector.EncoderLoader cpuLoader;

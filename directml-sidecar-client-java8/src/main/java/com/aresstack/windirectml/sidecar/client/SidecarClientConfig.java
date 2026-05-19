@@ -24,6 +24,25 @@ public final class SidecarClientConfig {
      * {@code auto} (default), {@code directml}, {@code cpu}.
      */
     private String embedBackend = "auto";
+    /**
+     * Encoder family: {@code minilm} (default) or {@code e5}.
+     * Forwarded to the sidecar as {@code -Dembed.model=<value>}.
+     */
+    private String embedModel = "minilm";
+    /**
+     * E5 variant token when {@link #embedModel} is {@code e5}:
+     * {@code small-v2}, {@code base-v2}, {@code large-v2}, or
+     * {@code base-sts-en-de} (default). Forwarded as
+     * {@code -De5.model=<value>}.
+     */
+    private String e5Variant = "base-sts-en-de";
+    /**
+     * Filesystem path to the E5 model directory. Forwarded as
+     * {@code -De5.modelDir=<value>}. When blank, the sidecar
+     * auto-discovers from the variant's directory hints (e.g.
+     * {@code model/e5-base-sts-en-de}).
+     */
+    private String e5ModelDirectory;
     private boolean directmlDebug = false;
     /**
      * Optional override DLL path forwarded as {@code -Dwindirectml.directml.dll}.
@@ -71,6 +90,30 @@ public final class SidecarClientConfig {
 
     public void setEmbedBackend(String v) {
         this.embedBackend = v;
+    }
+
+    public String getEmbedModel() {
+        return embedModel;
+    }
+
+    public void setEmbedModel(String v) {
+        this.embedModel = v;
+    }
+
+    public String getE5Variant() {
+        return e5Variant;
+    }
+
+    public void setE5Variant(String v) {
+        this.e5Variant = v;
+    }
+
+    public String getE5ModelDirectory() {
+        return e5ModelDirectory;
+    }
+
+    public void setE5ModelDirectory(String v) {
+        this.e5ModelDirectory = v;
     }
 
     public boolean isDirectmlDebug() {

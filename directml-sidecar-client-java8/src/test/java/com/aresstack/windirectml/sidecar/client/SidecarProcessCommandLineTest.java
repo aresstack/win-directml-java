@@ -64,5 +64,33 @@ class SidecarProcessCommandLineTest {
                     "expected error to mention sidecarJarPath, was: " + e.getMessage());
         }
     }
+
+    @Test
+    void buildsCommandLineWithMiniLmDefaults() {
+        SidecarClientConfig cfg = new SidecarClientConfig();
+        cfg.setSidecarJarPath("directml-sidecar.jar");
+        List<String> cmd = SidecarProcess.buildCommandLine(cfg);
+        // Default family is minilm, so -Dembed.model=minilm must be set.
+        assertTrue(cmd.contains("-Dembed.model=minilm"),
+                "default embed.model must be 'minilm', cmd=" + cmd);
+        // No -De5.modelDir unless configured.
+        for (String s : cmd) {
+            assertFalse(s.startsWith("-De5.modelDir="),
+                    "must not include -De5.modelDir unless configured");
+        }
+    }
+
+    @Test
+    void buildsCommandLineWithE5SelectionAndVariant() {
+        SidecarClientConfig cfg = new SidecarClientConfig();
+        cfg.setSidecarJarPath("directml-sidecar.jar");
+        cfg.setEmbedModel("e5");
+        cfg.setE5Variant("small-v2");
+        cfg.setE5ModelDirectory("model/e5-small-v2");
+        List<String> cmd = SidecarProcess.buildCommandLine(cfg);
+        assertTrue(cmd.contains("-Dembed.model=e5"));
+        assertTrue(cmd.contains("-De5.model=small-v2"));
+        assertTrue(cmd.contains("-De5.modelDir=model/e5-small-v2"));
+    }
 }
 

@@ -48,7 +48,7 @@ directml-sidecar           JSON-RPC 2.0 sidecar entry point + dispatcher + handl
 | Phi-3 summarizer                                        | ✅ working (CPU + DirectML hybrid)                                                                                                                                                                                                                                                                                                                                    |
 | JSON-RPC protocol                                       | ✅ formalized (`directml-sidecar/PROTOCOL.md`)                                                                                                                                                                                                                                                                                                                        |
 | `health`, `summarize`, `shutdown`, `cancel`             | ✅ wired                                                                                                                                                                                                                                                                                                                                                              |
-| `embed`                                                 | ✅ wired through the backend switch – `CpuMiniLmEncoder` and `DirectMlMiniLmEncoder` selectable via `-Dembed.backend=cpu\|directml\|auto`; both return real 384-dim L2-normalised vectors                                                                                                                                                                              |
+| `embed`                                                 | ✅ wired through the family + backend switch – MiniLM (`CpuMiniLmEncoder` / `DirectMlMiniLmEncoder`) and E5 (`CpuBertEncoder` / `DirectMlBertEncoder`) selectable via `-Dembed.model=minilm\|e5` (default `minilm`) and `-Dembed.backend=cpu\|directml\|auto`; `-De5.model=small-v2\|base-v2\|large-v2\|base-sts-en-de` picks the E5 variant; both families return real L2-normalised vectors                                                                                                                                                                              |
 | Runtime-Core API (D3D12/DML context, Tensor, GpuBuffer) | ✅ `DirectMlContextImpl` + `DefaultGpuBuffer` (GPU roundtrip-tested)                                                                                                                                                                                                                                                                                                  |
 | DirectML kernels (`Linear`, `LayerNorm`, `GELU`)        | ✅ `DirectMlLinearKernel`, `DirectMlLayerNormKernel`, `GeluKernel.create(...)` – picks `DirectMlGeluKernel` (native `DML_OPERATOR_ACTIVATION_GELU`, FL ≥ 5.1) on modern DLLs and `DirectMlCompositeGeluKernel` (`ERF + IDENTITY + MULTIPLY`, FL 2.0) on the in-box Windows-11 RTM `DirectML.dll` 1.8.0. Both paths CPU-reference-tested on real GPU (cos = 1.000000). |
 | DirectML kernels (`Softmax`)                            | ✅ `DirectMlSoftmaxKernel` (`DML_OPERATOR_ACTIVATION_SOFTMAX`, FL 2.0) – row-wise, CPU-reference-tested, runs on every shipped `DirectML.dll`                                                                                                                                                                                                                         |
@@ -205,56 +205,78 @@ Documentation: [`WORKBENCH.md`](WORKBENCH.md).
 
 ## Embeddings (`embed`)
 
-`embed` is backed by `sentence-transformers/all-MiniLM-L6-v2`. Two
-interchangeable encoder implementations exist behind the same
-`EmbeddingModel` API:
+`embed` is backed by a generic BERT-style encoder runtime
+(`encoder.bert.*`) that today supports two model families behind the
+same `EmbeddingModel` API:
 
-* **`DirectMlMiniLmEncoder`** – the intended product path. Hybrid
-  CPU/GPU pipeline:
+* **`minilm`** – `sentence-transformers/all-MiniLM-L6-v2`. Produces
+  384-dim, L2-normalised vectors.
+* **`e5`** – `intfloat/e5-small-v2` / `e5-base-v2` / `e5-large-v2`
+  and `danielheinz/e5-base-sts-en-de` (English/German fine-tune).
+  Produces 384/768/1024-dim, L2-normalised vectors depending on the
+  variant. Uses the conventional `"query: "` / `"passage: "` input
+  prefixes (`E5Prefixes.QUERY`, `E5Prefixes.PASSAGE`).
+
+For each family both backends exist behind the same API:
+
+* **`DirectMl…Encoder`** – the intended product path. Hybrid CPU/GPU
+  pipeline:
   * **CPU**: tokenization + word/position/tokenType embedding lookup
     (small int→float gather, no benefit from GPU dispatch).
-  * **DirectML**: embedding LayerNorm + the full 6-layer BERT encoder
+  * **DirectML**: embedding LayerNorm + the full BERT encoder
     (Q/K/V/Linear + composite/native GELU + LayerNorm, head-layout
     reshuffles, attention, MLP, residuals) + mean-pool over
-    `attentionMask` (`DirectMlMeanPoolKernel`, GEMM FL-1.0) + L2-normalize
-    (`DirectMlL2NormalizeKernel`, GEMM-square-sum + SQRT-with-ε² + broadcast
-    DIVIDE, FL-1.0 composite).
-  * **CPU**: download the already-normalised 384-float vector – the only
-    PCIe read-back per inference.
+    `attentionMask` + L2-Normalize, all fused FL 1.0 / FL 2.0 kernels.
+* **`Cpu…Encoder`** – pure-Java CPU reference / debug / fallback path.
+  Correct-first, fast-later.
 
-  Reference test `DirectMlMiniLmEmbeddingReferenceTest` confirms
-  `cos(CPU, DirectML) = 1.000000` over the full corpus. Works on every
-  shipped `DirectML.dll`, including Windows 11 RTM in-box 1.8.0 (FL 5.0),
-  via the composite GELU fallback in `GeluKernel.create(...)`.
-* **`CpuMiniLmEncoder`** – pure-Java CPU reference / debug / fallback.
-  Correct-first, fast-later: a single sentence at sequence length ≤ 128
-  takes < 100 ms on a modern desktop.
-
-Fetch the model once (≈ 90 MB):
+Fetch the models once (≈ 90 MB each):
 
 ```powershell
-pwsh scripts/download-minilm.ps1
+pwsh scripts/download-minilm.ps1                          # MiniLM (default 384-dim)
+pwsh scripts/download-e5.ps1 -Variant base-sts-en-de      # E5 de/en STS (768-dim)
+pwsh scripts/download-e5.ps1 -Variant small-v2            # E5 small (384-dim)
+pwsh scripts/download-e5.ps1 -Variant base-v2             # E5 base (768-dim)
+pwsh scripts/download-e5.ps1 -Variant large-v2            # E5 large (1024-dim)
 ```
 
-`embed("…")` then returns a real 384-dim, L2-normalised vector regardless
-of the active backend.
+`embed("…")` then returns a real L2-normalised vector regardless of the
+active family or backend.
 
-### Backend selection
+### Family and backend selection
 
-The sidecar picks between the two encoders via `-Dembed.backend`:
+The sidecar picks the family via `-Dembed.model` and the backend via
+`-Dembed.backend`:
 
 ```powershell
-./gradlew.bat :directml-sidecar:run -Dembed.backend=auto       # default: try DirectML, fall back to CPU with warn log
-./gradlew.bat :directml-sidecar:run -Dembed.backend=directml   # force DirectMlMiniLmEncoder; exit code 3 if unavailable
-./gradlew.bat :directml-sidecar:run -Dembed.backend=cpu        # force CpuMiniLmEncoder (reference / debug path)
+# MiniLM (default family)
+./gradlew.bat :directml-sidecar:run -Dembed.backend=auto        # default: try DirectML, fall back to CPU
+./gradlew.bat :directml-sidecar:run -Dembed.backend=directml    # force DirectMlMiniLmEncoder; exit 3 if unavailable
+./gradlew.bat :directml-sidecar:run -Dembed.backend=cpu         # force CpuMiniLmEncoder
+
+# E5 (variant must match the on-disk config.json)
+./gradlew.bat :directml-sidecar:run `
+    -Dembed.model=e5 `
+    -De5.model=base-sts-en-de `
+    -De5.modelDir=model/e5-base-sts-en-de `
+    -Dembed.backend=auto
 ```
 
-A forced mode (`cpu` or `directml`) exits with code `3` if its encoder
-cannot be loaded – including the case where no MiniLM model directory is
-present at all. `auto` falls back silently to CPU and records the
-DirectML error message in `lastError`. The active backend is reported in
-the `health` response as `embeddingBackend` (`cpu`, `directml`, `none`,
-or `error`) together with `embeddingReady`.
+`-Dembed.model` accepts `minilm` (default) or `e5`. `-De5.model`
+accepts `small-v2`, `base-v2`, `large-v2`, or `base-sts-en-de`
+(default). Unknown values for either property fail visibly with
+exit code `2`. For E5, `config.json` is required in the model
+directory and is verified against the chosen variant
+(`hidden_size`, `num_hidden_layers`, `num_attention_heads`,
+`intermediate_size`, `vocab_size`, `type_vocab_size`); a mismatch
+is a hard error, never a silent reshape.
+
+A forced backend (`cpu` or `directml`) exits with code `3` if its
+encoder cannot be loaded – including the case where no model directory
+is present at all. `auto` falls back silently to CPU and records the
+DirectML error message in `lastError`. The active backend is reported
+in the `health` response as `embeddingBackend` (`cpu`, `directml`,
+`none`, or `error`) together with `embeddingReady`.
 
 ## Roadmap
 
@@ -342,9 +364,33 @@ or `error`) together with `embeddingReady`.
     CPU↔DirectML cosine > 0.999 on a synthetic E5 shape (2 layers / hidden 24 / heads 4 /
     inter 48) on real Windows 11 in-box FL 5.0 DirectML, plus a separate test that verifies
     the `query:` / `passage:` prefixes flow through the request pipeline.
-17. ⏳ Reranker (cross-encoder) support – takes a query+document pair, returns a relevance
+17. ✅ E5 real-model hardening – `E5Variant` enum with strict
+    `-De5.model=small-v2|base-v2|large-v2|base-sts-en-de` parser
+    (exit code `2` on unknown), `BertConfigJson` reader for the
+    on-disk `config.json` and `BertConfigJson.verifyMatches` that
+    rejects any mismatch between the requested variant and the
+    on-disk shape (`hidden_size`, `num_hidden_layers`,
+    `num_attention_heads`, `intermediate_size`, `vocab_size`,
+    `type_vocab_size`). `BertEncoderConfig.validate()` is now strict
+    on the runtime invariants (`hiddenAct=gelu`, `poolingStrategy=MEAN`,
+    `outputDimension=hiddenSize`). `E5Encoders.resolveConfig` requires
+    `config.json` to be present – no silent "trust the variant"
+    fallback. The sidecar wires the full pipeline:
+    `-Dembed.model=minilm|e5` (unknown ⇒ exit `2`), `-De5.model=…`
+    (unknown ⇒ exit `2`), `-De5.modelDir=…`. The Java-8 client
+    (`SidecarClientConfig.embedModel` / `e5Variant` /
+    `e5ModelDirectory`, propagated by `SidecarProcess.buildCommandLine`)
+    and the Workbench expose the same three knobs. A new
+    `E5RealModelReferenceTest` loads a real E5 checkpoint when
+    present (`-De5.testModelDir` or any of the variant directory
+    hints), validates `cos(CPU, DirectML) > 0.99` across an EN/DE
+    corpus, asserts the `query:` / `passage:` prefixes propagate
+    consistently CPU↔DirectML, and skips cleanly on machines without
+    Windows/D3D12 or without a downloaded model. `scripts/download-e5.ps1`
+    drives the four supported variants. Tests: 138 / 0 fail / 9 skip.
+18. ⏳ Reranker (cross-encoder) support – takes a query+document pair, returns a relevance
     score via a classification head.
-18. ⏳ SentencePiece-BPE tokenizer for XLM-R-based multilingual E5 variants
+19. ⏳ SentencePiece-BPE tokenizer for XLM-R-based multilingual E5 variants
     (`multilingual-e5-large-instruct`, JinaBERT v3, …).
 
 Issue backlog: [`win-directml-java-issues.md`](win-directml-java-issues.md).
