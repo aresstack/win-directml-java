@@ -131,6 +131,19 @@ Response:
 
 Erzeugt eine Zusammenfassung mit dem Phi-3-Modell.
 
+> **Experimentell / optional.** Der Summarizer-Pfad ist Phi-3-spezifisch
+> und gehört **nicht** zum Maven-Central-Core-Release (`directml-inference`
+> wird für `0.1.0-beta.1` nicht auf Central publiziert). Ist kein
+> Phi-3-Modellverzeichnis vorhanden, antwortet der Sidecar mit
+> `-32005 Not implemented` (statt einem Crash). Fehlt nur eine einzelne
+> Datei (`config.json`, `tokenizer.json`, `model.onnx`,
+> `model.onnx.data`), so benennt die `sidecar.modelLoadFailed`-Notification
+> die fehlende Datei (z. B. `Phi-3 model directory is missing tokenizer.json`),
+> und `summarize` antwortet bis zum erfolgreichen Laden mit
+> `-32001 MODEL_NOT_READY`. Konfiguration: `-Dphi3.modelDir=<Pfad>` und
+> `-Dphi3.backend=auto|directml|cpu` (Default `auto`). CPU funktioniert
+> als Fallback, intendierter Pfad ist DirectML.
+
 Request:
 
 ```json

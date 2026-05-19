@@ -55,6 +55,21 @@ permissively licensed — read
 https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-onnx
 before redistributing anything you build on top of them.
 
+> **Summarization is experimental.** The `summarize` JSON-RPC method is
+> backed exclusively by the Phi-3 runtime above and is **not part of the
+> first Maven Central core release**. `directml-inference` is sidecar-only
+> for `0.1.0-beta.1` and is *not* published to Central. Embeddings and
+> reranking are the primary supported release use cases. Decoder models
+> are not part of the published core artifacts. When no Phi-3 model
+> directory is present the sidecar starts cleanly and `summarize` replies
+> with `-32005 Not implemented`; when files are missing the
+> `sidecar.modelLoadFailed` notification names the specific missing file
+> (e.g. `Phi-3 model directory is missing tokenizer.json`).
+> CPU-only summarization is supported by the Phi-3 runtime, but the
+> intended acceleration path is DirectML – pass `-Dphi3.backend=auto`
+> (default) or `-Dphi3.backend=directml`; `-Dphi3.backend=cpu` works as a
+> local fallback.
+
 ## 4. Sidecar / JSON-RPC
 
 The `directml-sidecar` module exposes the embedding, reranking and

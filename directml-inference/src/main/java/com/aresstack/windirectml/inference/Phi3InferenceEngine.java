@@ -269,12 +269,40 @@ public class Phi3InferenceEngine implements InferenceEngine {
      * Looks for the 4 required files.
      */
     public static boolean isValidModelDir(Path dir) {
-        return dir != null
-                && Files.isDirectory(dir)
-                && Files.exists(dir.resolve("config.json"))
-                && Files.exists(dir.resolve("tokenizer.json"))
-                && Files.exists(dir.resolve("model.onnx"))
-                && Files.exists(dir.resolve("model.onnx.data"));
+        return describeMissingModelFile(dir) == null;
+    }
+
+    /**
+     * Diagnose why a directory is not a valid Phi-3 model directory.
+     * Returns {@code null} when the directory is valid; otherwise a
+     * human-readable message naming the first missing piece.
+     *
+     * <p>The Phi-3 summarizer is an optional, experimental sidecar
+     * feature; this helper exists so the sidecar can report which file
+     * the user still needs to download instead of a generic
+     * "invalid or incomplete" message.</p>
+     */
+    public static String describeMissingModelFile(Path dir) {
+        if (dir == null) {
+            return "Phi-3 model directory is null";
+        }
+        if (!Files.isDirectory(dir)) {
+            return "Phi-3 model directory does not exist: " + dir;
+        }
+        // Order matches the user-visible setup steps:
+        // config + tokenizer first, then the weights themselves.
+        String[] required = {
+                "config.json",
+                "tokenizer.json",
+                "model.onnx",
+                "model.onnx.data",
+        };
+        for (String name : required) {
+            if (!Files.exists(dir.resolve(name))) {
+                return "Phi-3 model directory is missing " + name + " (looked in " + dir + ")";
+            }
+        }
+        return null;
     }
 }
 

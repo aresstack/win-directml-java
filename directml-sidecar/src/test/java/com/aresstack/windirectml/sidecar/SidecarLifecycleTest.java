@@ -178,6 +178,38 @@ class SidecarLifecycleTest {
     }
 
     @Test
+    void summarizeReturnsNotImplementedWhenNoSummarizerConfigured() throws Exception {
+        // Drive the sidecar without injecting any Summarizer. This is
+        // the production fallback path when the Phi-3 model directory
+        // is missing entirely – clients must still see a clean
+        // -32005 NOT_IMPLEMENTED instead of a stack trace, matching
+        // the embed / rerank "no model" behaviour.
+        String input = """
+                {"jsonrpc":"2.0","id":"s","method":"summarize","params":{"text":"hello"}}
+                {"jsonrpc":"2.0","id":"x","method":"shutdown"}
+                """;
+        ByteArrayInputStream in = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        DirectMlPhi3Sidecar sidecar = new DirectMlPhi3Sidecar(
+                in, out, Path.of("nonexistent"), "cpu", 128, false);
+        // intentionally no withSummarizer(...)
+        assertEquals(0, sidecar.run());
+
+        List<JsonNode> messages = new ArrayList<>();
+        for (String line : out.toString(StandardCharsets.UTF_8).split("\\R")) {
+            if (line.isBlank()) continue;
+            messages.add(mapper.readTree(line));
+        }
+
+        JsonNode resp = messages.get(1);
+        assertEquals("s", resp.path("id").asText());
+        assertNotNull(resp.get("error"));
+        assertEquals(-32005, resp.get("error").get("code").asInt());
+        assertTrue(resp.get("error").get("message").asText().toLowerCase().contains("not implemented")
+                || resp.get("error").get("message").asText().toLowerCase().contains("phi-3"));
+    }
+
+    @Test
     void embedReturnsNotImplementedWithoutEncoder() throws Exception {
         String input = """
                 {"jsonrpc":"2.0","id":"e","method":"embed","params":{"text":"hi"}}

@@ -493,9 +493,15 @@ public final class DirectMlPhi3Sidecar {
         if (summarizer != null) {
             dispatcher.register("summarize", new SummarizeHandler(summarizer, status));
         } else {
+            // No Phi-3 summarizer was configured at all (model directory
+            // missing or autoLoadModel=false in tests). Match the embed /
+            // rerank fallback pattern: report NOT_IMPLEMENTED so clients
+            // can degrade gracefully instead of seeing a stack trace.
             dispatcher.register("summarize", params -> {
                 throw new com.aresstack.windirectml.sidecar.jsonrpc.JsonRpcMethodException(
-                        JsonRpcErrorCode.MODEL_NOT_READY, "Summarizer not configured");
+                        JsonRpcErrorCode.NOT_IMPLEMENTED,
+                        "summarize not implemented: no Phi-3 summarizer configured "
+                                + "(summarizer support is experimental and Phi-3-only)");
             });
         }
         dispatcher.register("embed", new EmbedHandler(embeddingModel::get, status));
@@ -508,12 +514,12 @@ public final class DirectMlPhi3Sidecar {
     private void loadModel(JsonRpcMessageWriter writer) {
         try {
             log.info("Loading Phi-3 model from {} (backend={})", modelDir, backend);
-            if (!Phi3InferenceEngine.isValidModelDir(modelDir)) {
-                String msg = "Model directory invalid or incomplete: " + modelDir;
-                log.error(msg);
-                status.setLastError(msg);
+            String missing = Phi3InferenceEngine.describeMissingModelFile(modelDir);
+            if (missing != null) {
+                log.error("{}", missing);
+                status.setLastError(missing);
                 writer.writeNotification(JsonRpcNotification.of("sidecar.modelLoadFailed",
-                        Map.of("error", msg, "modelDir", modelDir.toString())));
+                        Map.of("error", missing, "modelDir", modelDir.toString())));
                 return;
             }
             long t0 = System.currentTimeMillis();
