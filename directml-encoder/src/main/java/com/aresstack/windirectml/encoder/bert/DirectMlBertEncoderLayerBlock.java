@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.encoder.bert;
 
 import com.aresstack.windirectml.runtime.DirectMlContextImpl;
+import com.aresstack.windirectml.runtime.DirectMlGpuBatch;
 import com.aresstack.windirectml.runtime.DirectMlRuntimeException;
 import com.aresstack.windirectml.runtime.DirectMlTensor;
 import com.aresstack.windirectml.runtime.GpuBuffer;
@@ -14,8 +15,14 @@ import com.aresstack.windirectml.runtime.kernels.DirectMlHeadLayoutKernel;
 import com.aresstack.windirectml.runtime.kernels.DirectMlLayerNormKernel;
 import com.aresstack.windirectml.runtime.kernels.DirectMlLinearKernel;
 import com.aresstack.windirectml.runtime.kernels.GeluKernel;
+import com.aresstack.windirectml.windows.D3D12Bindings;
+import com.aresstack.windirectml.windows.DxgiBindings;
+import com.aresstack.windirectml.windows.WindowsNativeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
 
 /**
  * One full BERT-style transformer encoder block on DirectML – the
@@ -253,46 +260,103 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
         DirectMlTensor qT = hidden2D(qBuf);
         DirectMlTensor kT = hidden2D(kBuf);
         DirectMlTensor vT = hidden2D(vBuf);
-        qLinear.dispatch(xIn, weight2D(w.qWeight(), hidden, hidden), bias1D(w.qBias(), hidden), qT);
-        kLinear.dispatch(xIn, weight2D(w.kWeight(), hidden, hidden), bias1D(w.kBias(), hidden), kT);
-        vLinear.dispatch(xIn, weight2D(w.vWeight(), hidden, hidden), bias1D(w.vBias(), hidden), vT);
-
         DirectMlTensor qHT = headMajor(qH);
         DirectMlTensor kHT = headMajor(kH);
         DirectMlTensor vHT = headMajor(vH);
-        layoutSeqToHeadQ.dispatch(qT, qHT);
-        layoutSeqToHeadK.dispatch(kT, kHT);
-        layoutSeqToHeadV.dispatch(vT, vHT);
-
         DirectMlTensor attnHT = headMajor(attnH);
-        attention.dispatch(qHT, kHT, vHT, mask, attnHT, (float) (1.0 / Math.sqrt(headDim)));
-
         DirectMlTensor attnMergedT = hidden2D(attnMerged);
-        layoutHeadToSeq.dispatch(attnHT, attnMergedT);
-
         DirectMlTensor attnOutT = hidden2D(attnOutBuf);
-        attnOutLinear.dispatch(attnMergedT,
-                weight2D(w.attnOutWeight(), hidden, hidden),
-                bias1D(w.attnOutBias(), hidden), attnOutT);
-
         DirectMlTensor residual1T = hidden2D(residual1);
-        residualAdd1.dispatch(xIn, attnOutT, residual1T);
         DirectMlTensor xMidT = hidden2D(xMid);
-        attnLayerNorm.dispatch(residual1T, bias1D(w.attnLnGamma(), hidden),
-                bias1D(w.attnLnBeta(), hidden), xMidT, eps);
-
         DirectMlTensor interT = intermediate2D(mlpInter);
-        mlpInterLinear.dispatch(xMidT, weight2D(w.mlpInterWeight(), intermediate, hidden),
-                bias1D(w.mlpInterBias(), intermediate), interT);
-        gelu.dispatch(interT, interT);
         DirectMlTensor mlpOutT = hidden2D(mlpOutBuf);
-        mlpOutLinear.dispatch(interT, weight2D(w.mlpOutWeight(), hidden, intermediate),
-                bias1D(w.mlpOutBias(), hidden), mlpOutT);
-
         DirectMlTensor residual2T = hidden2D(residual2);
-        residualAdd2.dispatch(xMidT, mlpOutT, residual2T);
-        outLayerNorm.dispatch(residual2T, bias1D(w.outLnGamma(), hidden),
-                bias1D(w.outLnBeta(), hidden), xOut, eps);
+
+        // ── Per-layer command-list coalescing ─────────────────────────────
+        // Fold all ~15 sub-ops into ONE command list. Without this we'd
+        // pay ~15 ExecuteCommandLists (and ~15 SetDescriptorHeaps flushes)
+        // per layer; with it we pay exactly one. The active
+        // DirectMlGpuBatch additionally defers the fence wait to the end
+        // of the encoder stack.
+        MemorySegment dev = ctx.bindings().getD3d12Device();
+        MemorySegment q = ctx.bindings().getCommandQueue();
+        try (Arena scratch = Arena.ofConfined()) {
+            MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
+                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
+            MemorySegment cl = null;
+            try {
+                cl = D3D12Bindings.createCommandList(dev,
+                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
+
+                // Q, K, V projections – read xIn, write into independent
+                // scratch buffers, can run concurrently on the GPU.
+                qLinear.recordOnto(cl, scratch, xIn,
+                        weight2D(w.qWeight(), hidden, hidden), bias1D(w.qBias(), hidden), qT);
+                kLinear.recordOnto(cl, scratch, xIn,
+                        weight2D(w.kWeight(), hidden, hidden), bias1D(w.kBias(), hidden), kT);
+                vLinear.recordOnto(cl, scratch, xIn,
+                        weight2D(w.vWeight(), hidden, hidden), bias1D(w.vBias(), hidden), vT);
+                D3D12Bindings.uavBarrier(cl, scratch);
+
+                // Layout SEQ→HEAD for each of Q, K, V.
+                layoutSeqToHeadQ.recordOnto(cl, scratch, qT, qHT);
+                layoutSeqToHeadK.recordOnto(cl, scratch, kT, kHT);
+                layoutSeqToHeadV.recordOnto(cl, scratch, vT, vHT);
+                D3D12Bindings.uavBarrier(cl, scratch);
+
+                // Multi-head attention sub-graph (4 internal stages with
+                // their own UAV barriers, see DirectMlAttentionKernel).
+                attention.recordOnto(cl, scratch, qHT, kHT, vHT, mask, attnHT,
+                        (float) (1.0 / Math.sqrt(headDim)));
+                D3D12Bindings.uavBarrier(cl, scratch);
+
+                // Layout HEAD→SEQ.
+                layoutHeadToSeq.recordOnto(cl, scratch, attnHT, attnMergedT);
+                D3D12Bindings.uavBarrier(cl, scratch);
+
+                // Output projection of the attention block.
+                attnOutLinear.recordOnto(cl, scratch, attnMergedT,
+                        weight2D(w.attnOutWeight(), hidden, hidden),
+                        bias1D(w.attnOutBias(), hidden), attnOutT);
+                D3D12Bindings.uavBarrier(cl, scratch);
+
+                // First residual + LayerNorm (post-attention).
+                residualAdd1.recordOnto(cl, scratch, xIn, attnOutT, residual1T);
+                D3D12Bindings.uavBarrier(cl, scratch);
+                attnLayerNorm.recordOnto(cl, scratch, residual1T,
+                        bias1D(w.attnLnGamma(), hidden), bias1D(w.attnLnBeta(), hidden),
+                        xMidT, eps);
+                D3D12Bindings.uavBarrier(cl, scratch);
+
+                // MLP: intermediate Linear → GELU → out Linear.
+                mlpInterLinear.recordOnto(cl, scratch, xMidT,
+                        weight2D(w.mlpInterWeight(), intermediate, hidden),
+                        bias1D(w.mlpInterBias(), intermediate), interT);
+                D3D12Bindings.uavBarrier(cl, scratch);
+                gelu.recordOnto(cl, scratch, interT, interT);
+                D3D12Bindings.uavBarrier(cl, scratch);
+                mlpOutLinear.recordOnto(cl, scratch, interT,
+                        weight2D(w.mlpOutWeight(), hidden, intermediate),
+                        bias1D(w.mlpOutBias(), hidden), mlpOutT);
+                D3D12Bindings.uavBarrier(cl, scratch);
+
+                // Second residual + LayerNorm (post-MLP) – writes xOut.
+                residualAdd2.recordOnto(cl, scratch, xMidT, mlpOutT, residual2T);
+                D3D12Bindings.uavBarrier(cl, scratch);
+                outLayerNorm.recordOnto(cl, scratch, residual2T,
+                        bias1D(w.outLnGamma(), hidden), bias1D(w.outLnBeta(), hidden),
+                        xOut, eps);
+
+                D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
+                DirectMlGpuBatch.recordCoalescedLayerSubmission();
+            } finally {
+                if (cl != null) DxgiBindings.release(cl);
+                DxgiBindings.release(alloc);
+            }
+        } catch (WindowsNativeException e) {
+            throw new DirectMlRuntimeException(
+                    "DirectMlBertEncoderLayerBlock.dispatch failed", e);
+        }
     }
 
     private DirectMlTensor hidden2D(GpuBuffer buf) {

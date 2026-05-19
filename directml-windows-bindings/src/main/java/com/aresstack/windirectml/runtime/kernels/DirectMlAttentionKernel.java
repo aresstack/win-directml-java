@@ -367,6 +367,37 @@ public final class DirectMlAttentionKernel implements AttentionKernel, AutoClose
                          DirectMlTensor mask, DirectMlTensor y, float dispatchScale)
             throws DirectMlRuntimeException {
         ensureOpen();
+        MemorySegment dev = wb.getD3d12Device();
+        MemorySegment qm = wb.getCommandQueue();
+        try (Arena scratch = Arena.ofConfined()) {
+            MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
+                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
+            MemorySegment cl = null;
+            try {
+                cl = D3D12Bindings.createCommandList(dev,
+                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
+                recordOnto(cl, scratch, q, k, v, mask, y, dispatchScale);
+                D3D12Bindings.executeOrDefer(dev, qm, cl, alloc, scratch);
+            } finally {
+                if (cl != null) DxgiBindings.release(cl);
+                DxgiBindings.release(alloc);
+            }
+        } catch (WindowsNativeException e) {
+            throw new DirectMlRuntimeException(
+                    "DirectMlAttentionKernel.dispatch failed" + formatDebugMessages(wb), e);
+        }
+    }
+
+    /**
+     * Records the full 4-stage attention pipeline (Q·Kᵀ → +mask → softmax →
+     * ·V) into the caller-supplied command list. Used by encoder coalescing
+     * to fold the attention sub-graph into the per-layer command list.
+     */
+    public void recordOnto(MemorySegment cl, Arena scratch,
+                           DirectMlTensor q, DirectMlTensor k, DirectMlTensor v,
+                           DirectMlTensor mask, DirectMlTensor y, float dispatchScale)
+            throws DirectMlRuntimeException {
+        ensureOpen();
         if (dispatchScale != scale) {
             throw new DirectMlRuntimeException("scale mismatch: kernel compiled with "
                     + scale + ", got " + dispatchScale);
@@ -392,20 +423,15 @@ public final class DirectMlAttentionKernel implements AttentionKernel, AutoClose
         DefaultGpuBuffer yb = unwrap(y.buffer(), "y");
         DefaultGpuBuffer mb = (mask != null) ? unwrap(mask.buffer(), "mask") : null;
 
-        MemorySegment dml = wb.getDmlDevice();
-        MemorySegment dev = wb.getD3d12Device();
-        MemorySegment qm = wb.getCommandQueue();
-
         long qkvBytes = (long) B * H * S * D * Float.BYTES;
 
-        try (Arena scratch = Arena.ofConfined()) {
-            // Pre-build binding tables for every stage.
-            MemorySegment btQk = buildGemmBindingTable(scratch, stageQk,
+        MemorySegment btQk = null, btMask = null, btSoftmax = null, btOut = null;
+        try {
+            btQk = buildGemmBindingTable(scratch, stageQk,
                     qb.resource(), qkvBytes,
                     kb.resource(), qkvBytes,
                     scoresBuffer, scoresBytes);
 
-            MemorySegment btMask = null;
             if (stageMask != null) {
                 btMask = buildAddBindingTable(scratch, stageMask,
                         scoresBuffer, scoresBytes,
@@ -413,62 +439,50 @@ public final class DirectMlAttentionKernel implements AttentionKernel, AutoClose
                         scoresBuffer, scoresBytes);
             }
 
-            MemorySegment btSoftmax = buildUnaryBindingTable(scratch, stageSoftmax,
+            btSoftmax = buildUnaryBindingTable(scratch, stageSoftmax,
                     scoresBuffer, scoresBytes,
                     probsBuffer, probsBytes);
 
-            MemorySegment btOut = buildGemmBindingTable(scratch, stageOut,
+            btOut = buildGemmBindingTable(scratch, stageOut,
                     probsBuffer, probsBytes,
                     vb.resource(), qkvBytes,
                     yb.resource(), qkvBytes);
 
-            MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
-                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
-            MemorySegment cl = null;
-            try {
-                cl = D3D12Bindings.createCommandList(dev,
-                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
+            // All caller-visible buffers must be UAV before dispatch.
+            transitionToUav(cl, qb, scratch);
+            transitionToUav(cl, kb, scratch);
+            transitionToUav(cl, vb, scratch);
+            transitionToUav(cl, yb, scratch);
+            if (mb != null) transitionToUav(cl, mb, scratch);
 
-                // All caller-visible buffers must be UAV before dispatch.
-                transitionToUav(cl, qb, scratch);
-                transitionToUav(cl, kb, scratch);
-                transitionToUav(cl, vb, scratch);
-                transitionToUav(cl, yb, scratch);
-                if (mb != null) transitionToUav(cl, mb, scratch);
+            // Stage 1 – Q · Kᵀ · scale → scores
+            D3D12Bindings.setDescriptorHeaps(cl, stageQk.descHeap(), scratch);
+            DirectMlBindings.recordDispatch(cmdRecorder, cl, stageQk.compiled(), btQk);
+            D3D12Bindings.uavBarrier(cl, scratch);
 
-                // Stage 1 – Q · Kᵀ · scale → scores
-                D3D12Bindings.setDescriptorHeaps(cl, stageQk.descHeap(), scratch);
-                DirectMlBindings.recordDispatch(cmdRecorder, cl, stageQk.compiled(), btQk);
+            // Stage 2 (optional) – scores += mask
+            if (stageMask != null) {
+                D3D12Bindings.setDescriptorHeaps(cl, stageMask.descHeap(), scratch);
+                DirectMlBindings.recordDispatch(cmdRecorder, cl, stageMask.compiled(), btMask);
                 D3D12Bindings.uavBarrier(cl, scratch);
-
-                // Stage 2 (optional) – scores += mask
-                if (stageMask != null) {
-                    D3D12Bindings.setDescriptorHeaps(cl, stageMask.descHeap(), scratch);
-                    DirectMlBindings.recordDispatch(cmdRecorder, cl, stageMask.compiled(), btMask);
-                    D3D12Bindings.uavBarrier(cl, scratch);
-                }
-
-                // Stage 3 – probs = softmax(scores)
-                D3D12Bindings.setDescriptorHeaps(cl, stageSoftmax.descHeap(), scratch);
-                DirectMlBindings.recordDispatch(cmdRecorder, cl, stageSoftmax.compiled(), btSoftmax);
-                D3D12Bindings.uavBarrier(cl, scratch);
-
-                // Stage 4 – y = probs · V
-                D3D12Bindings.setDescriptorHeaps(cl, stageOut.descHeap(), scratch);
-                DirectMlBindings.recordDispatch(cmdRecorder, cl, stageOut.compiled(), btOut);
-
-                D3D12Bindings.executeOrDefer(dev, qm, cl, alloc, scratch);
-            } finally {
-                if (cl != null) DxgiBindings.release(cl);
-                DxgiBindings.release(alloc);
-                DxgiBindings.release(btQk);
-                if (btMask != null) DxgiBindings.release(btMask);
-                DxgiBindings.release(btSoftmax);
-                DxgiBindings.release(btOut);
             }
+
+            // Stage 3 – probs = softmax(scores)
+            D3D12Bindings.setDescriptorHeaps(cl, stageSoftmax.descHeap(), scratch);
+            DirectMlBindings.recordDispatch(cmdRecorder, cl, stageSoftmax.compiled(), btSoftmax);
+            D3D12Bindings.uavBarrier(cl, scratch);
+
+            // Stage 4 – y = probs · V
+            D3D12Bindings.setDescriptorHeaps(cl, stageOut.descHeap(), scratch);
+            DirectMlBindings.recordDispatch(cmdRecorder, cl, stageOut.compiled(), btOut);
         } catch (WindowsNativeException e) {
             throw new DirectMlRuntimeException(
-                    "DirectMlAttentionKernel.dispatch failed" + formatDebugMessages(wb), e);
+                    "DirectMlAttentionKernel.recordOnto failed" + formatDebugMessages(wb), e);
+        } finally {
+            if (btQk != null) DxgiBindings.release(btQk);
+            if (btMask != null) DxgiBindings.release(btMask);
+            if (btSoftmax != null) DxgiBindings.release(btSoftmax);
+            if (btOut != null) DxgiBindings.release(btOut);
         }
     }
 

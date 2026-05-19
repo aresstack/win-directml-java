@@ -219,6 +219,31 @@ public final class DirectMlGeluKernel implements GeluKernel, AutoCloseable {
     @Override
     public void dispatch(DirectMlTensor x, DirectMlTensor y) throws DirectMlRuntimeException {
         ensureOpen();
+        MemorySegment dev = wb.getD3d12Device();
+        MemorySegment q = wb.getCommandQueue();
+        try (Arena scratch = Arena.ofConfined()) {
+            MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
+                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
+            MemorySegment cl = null;
+            try {
+                cl = D3D12Bindings.createCommandList(dev,
+                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
+                recordOnto(cl, scratch, x, y);
+                D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
+            } finally {
+                if (cl != null) DxgiBindings.release(cl);
+                DxgiBindings.release(alloc);
+            }
+        } catch (WindowsNativeException e) {
+            throw new DirectMlRuntimeException(
+                    "DirectMlGeluKernel.dispatch failed" + formatDebugMessages(wb), e);
+        }
+    }
+
+    @Override
+    public void recordOnto(MemorySegment cl, Arena scratch,
+                           DirectMlTensor x, DirectMlTensor y) throws DirectMlRuntimeException {
+        ensureOpen();
         validate(x, "x");
         validate(y, "y");
 
@@ -226,17 +251,13 @@ public final class DirectMlGeluKernel implements GeluKernel, AutoCloseable {
         DefaultGpuBuffer yb = unwrap(y.buffer(), "y");
 
         MemorySegment dml = wb.getDmlDevice();
-        MemorySegment dev = wb.getD3d12Device();
-        MemorySegment q = wb.getCommandQueue();
-
-        try (Arena scratch = Arena.ofConfined()) {
+        try {
             long cpuStart = D3D12Bindings.getCpuDescriptorHandleForHeapStart(descriptorHeap, scratch);
             long gpuStart = D3D12Bindings.getGpuDescriptorHandleForHeapStart(descriptorHeap, scratch);
             MemorySegment btDesc = DirectMlBindings.allocBindingTableDesc(scratch, compiled,
                     cpuStart, gpuStart, descriptorCount);
             MemorySegment bt = DirectMlBindings.createBindingTable(dml, btDesc, scratch);
             try {
-                // GELU has exactly 1 input slot.
                 MemorySegment inputs = scratch.allocate(16, 8);
                 setBufferBinding(scratch, inputs, 0, xb.resource(), (long) N * Float.BYTES);
                 DirectMlBindings.bindInputs(bt, 1, inputs);
@@ -260,27 +281,16 @@ public final class DirectMlGeluKernel implements GeluKernel, AutoCloseable {
                                     DirectMlBindings.DML_BINDING_TYPE_BUFFER, binding));
                 }
 
-                MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
-                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
-                MemorySegment cl = null;
-                try {
-                    cl = D3D12Bindings.createCommandList(dev,
-                            D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
-                    transitionToUav(cl, xb, scratch);
-                    transitionToUav(cl, yb, scratch);
-                    D3D12Bindings.setDescriptorHeaps(cl, descriptorHeap, scratch);
-                    DirectMlBindings.recordDispatch(cmdRecorder, cl, compiled, bt);
-                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
-                } finally {
-                    if (cl != null) DxgiBindings.release(cl);
-                    DxgiBindings.release(alloc);
-                }
+                transitionToUav(cl, xb, scratch);
+                transitionToUav(cl, yb, scratch);
+                D3D12Bindings.setDescriptorHeaps(cl, descriptorHeap, scratch);
+                DirectMlBindings.recordDispatch(cmdRecorder, cl, compiled, bt);
             } finally {
                 DxgiBindings.release(bt);
             }
         } catch (WindowsNativeException e) {
             throw new DirectMlRuntimeException(
-                    "DirectMlGeluKernel.dispatch failed" + formatDebugMessages(wb), e);
+                    "DirectMlGeluKernel.recordOnto failed" + formatDebugMessages(wb), e);
         }
     }
 

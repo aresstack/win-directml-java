@@ -5,6 +5,9 @@ import com.aresstack.windirectml.runtime.DirectMlTensor;
 import com.aresstack.windirectml.runtime.DirectMlRuntimeException;
 import com.aresstack.windirectml.windows.DirectMlBindings;
 
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+
 /**
  * GELU-Aktivierung (elementweise). Verwendet von BERT, MiniLM, JinaBERT.
  * <p>
@@ -23,6 +26,15 @@ import com.aresstack.windirectml.windows.DirectMlBindings;
 public interface GeluKernel extends AutoCloseable {
 
     void dispatch(DirectMlTensor x, DirectMlTensor y) throws DirectMlRuntimeException;
+
+    /**
+     * Records the GELU dispatch into the caller-supplied command list
+     * without submitting or waiting. Used by the encoder-coalescing path
+     * in {@code DirectMlBertEncoderLayerBlock} to fold many sub-ops into
+     * a single per-layer command list.
+     */
+    void recordOnto(MemorySegment cl, Arena scratch,
+                    DirectMlTensor x, DirectMlTensor y) throws DirectMlRuntimeException;
 
     @Override
     void close();

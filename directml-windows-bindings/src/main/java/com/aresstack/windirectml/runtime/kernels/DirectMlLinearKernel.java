@@ -220,6 +220,38 @@ public final class DirectMlLinearKernel implements LinearKernel, AutoCloseable {
     public void dispatch(DirectMlTensor x, DirectMlTensor weight, DirectMlTensor bias,
                          DirectMlTensor y) throws DirectMlRuntimeException {
         ensureOpen();
+        MemorySegment dev = wb.getD3d12Device();
+        MemorySegment q = wb.getCommandQueue();
+        try (Arena scratch = Arena.ofConfined()) {
+            MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
+                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
+            MemorySegment cl = null;
+            try {
+                cl = D3D12Bindings.createCommandList(dev,
+                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
+                recordOnto(cl, scratch, x, weight, bias, y);
+                D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
+            } finally {
+                if (cl != null) DxgiBindings.release(cl);
+                DxgiBindings.release(alloc);
+            }
+        } catch (WindowsNativeException e) {
+            throw new DirectMlRuntimeException("DirectMlLinearKernel.dispatch failed", e);
+        }
+    }
+
+    /**
+     * Records the GEMM dispatch into the caller-supplied command list
+     * {@code cl}. Does <b>not</b> create allocator/list and does <b>not</b>
+     * submit or wait. Used by encoder coalescing to fold many sub-ops into
+     * a single per-layer command list. The caller is responsible for inserting
+     * UAV barriers between dependent stages.
+     */
+    public void recordOnto(MemorySegment cl, Arena scratch,
+                           DirectMlTensor x, DirectMlTensor weight,
+                           DirectMlTensor bias, DirectMlTensor y)
+            throws DirectMlRuntimeException {
+        ensureOpen();
         validateShape(x, M, K, "x");
         validateShape(weight, N, K, "weight");
         if (hasBias) {
@@ -232,30 +264,19 @@ public final class DirectMlLinearKernel implements LinearKernel, AutoCloseable {
         }
         validateShape(y, M, N, "y");
 
-        // Ensure all bound resources are in UAV state. Inputs that came from
-        // upload() are already UAV; freshly allocated outputs may still be in
-        // COMMON. We patch this up with explicit transitions before dispatch.
         DefaultGpuBuffer xb = unwrap(x.buffer(), "x");
         DefaultGpuBuffer wb_ = unwrap(weight.buffer(), "weight");
         DefaultGpuBuffer yb = unwrap(y.buffer(), "y");
         DefaultGpuBuffer bb = (bias != null) ? unwrap(bias.buffer(), "bias") : null;
 
         MemorySegment dml = wb.getDmlDevice();
-        MemorySegment dev = wb.getD3d12Device();
-        MemorySegment q = wb.getCommandQueue();
-
-        try (Arena scratch = Arena.ofConfined()) {
-            // Binding table on the kernel's descriptor heap.
+        try {
             long cpuStart = D3D12Bindings.getCpuDescriptorHandleForHeapStart(descriptorHeap, scratch);
             long gpuStart = D3D12Bindings.getGpuDescriptorHandleForHeapStart(descriptorHeap, scratch);
             MemorySegment btDesc = DirectMlBindings.allocBindingTableDesc(scratch, compiled,
                     cpuStart, gpuStart, descriptorCount);
             MemorySegment bt = DirectMlBindings.createBindingTable(dml, btDesc, scratch);
-
             try {
-                // DML_OPERATOR_GEMM has 3 fixed input slots (A, B, C). The C
-                // slot must always be present – if the operator was built with
-                // CTensor=NULL we bind it as DML_BINDING_TYPE_NONE.
                 MemorySegment inputs = scratch.allocate(16L * 3, 8);
                 setBufferBinding(scratch, inputs, 0, xb.resource(), (long) M * K * Float.BYTES);
                 setBufferBinding(scratch, inputs, 1, wb_.resource(), (long) N * K * Float.BYTES);
@@ -287,31 +308,18 @@ public final class DirectMlLinearKernel implements LinearKernel, AutoCloseable {
                                     DirectMlBindings.DML_BINDING_TYPE_BUFFER, bbPer));
                 }
 
-                MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
-                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
-                MemorySegment cl = null;
-                try {
-                    cl = D3D12Bindings.createCommandList(dev,
-                            D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
+                transitionToUav(cl, yb, scratch);
+                transitionToUav(cl, xb, scratch);
+                transitionToUav(cl, wb_, scratch);
+                if (bb != null) transitionToUav(cl, bb, scratch);
 
-                    // Promote freshly allocated output to UAV before dispatch.
-                    transitionToUav(cl, yb, scratch);
-                    transitionToUav(cl, xb, scratch);
-                    transitionToUav(cl, wb_, scratch);
-                    if (bb != null) transitionToUav(cl, bb, scratch);
-
-                    D3D12Bindings.setDescriptorHeaps(cl, descriptorHeap, scratch);
-                    DirectMlBindings.recordDispatch(cmdRecorder, cl, compiled, bt);
-                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
-                } finally {
-                    if (cl != null) DxgiBindings.release(cl);
-                    DxgiBindings.release(alloc);
-                }
+                D3D12Bindings.setDescriptorHeaps(cl, descriptorHeap, scratch);
+                DirectMlBindings.recordDispatch(cmdRecorder, cl, compiled, bt);
             } finally {
                 DxgiBindings.release(bt);
             }
         } catch (WindowsNativeException e) {
-            throw new DirectMlRuntimeException("DirectMlLinearKernel.dispatch failed", e);
+            throw new DirectMlRuntimeException("DirectMlLinearKernel.recordOnto failed", e);
         }
     }
 

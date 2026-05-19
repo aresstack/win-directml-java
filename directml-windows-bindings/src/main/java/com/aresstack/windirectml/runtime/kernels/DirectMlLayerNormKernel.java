@@ -254,9 +254,35 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
     public void dispatch(DirectMlTensor x, DirectMlTensor gamma, DirectMlTensor beta,
                          DirectMlTensor y, float eps) throws DirectMlRuntimeException {
         ensureOpen();
+        MemorySegment dev = wb.getD3d12Device();
+        MemorySegment q = wb.getCommandQueue();
+        try (Arena scratch = Arena.ofConfined()) {
+            MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
+                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
+            MemorySegment cl = null;
+            try {
+                cl = D3D12Bindings.createCommandList(dev,
+                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
+                recordOnto(cl, scratch, x, gamma, beta, y, eps);
+                D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
+            } finally {
+                if (cl != null) DxgiBindings.release(cl);
+                DxgiBindings.release(alloc);
+            }
+        } catch (WindowsNativeException e) {
+            throw new DirectMlRuntimeException("DirectMlLayerNormKernel.dispatch failed", e);
+        }
+    }
+
+    /**
+     * Records the LayerNorm dispatch into the caller-supplied command list.
+     * See {@link DirectMlLinearKernel#recordOnto} for the contract.
+     */
+    public void recordOnto(MemorySegment cl, Arena scratch,
+                           DirectMlTensor x, DirectMlTensor gamma, DirectMlTensor beta,
+                           DirectMlTensor y, float eps) throws DirectMlRuntimeException {
+        ensureOpen();
         if (eps != epsilon) {
-            // Epsilon ist im Operator einkompiliert. Falls der Caller einen
-            // anderen Wert braucht, muss ein neuer Kernel erzeugt werden.
             throw new DirectMlRuntimeException(
                     "epsilon mismatch: kernel compiled with " + epsilon + ", got " + eps);
         }
@@ -271,10 +297,7 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
         DefaultGpuBuffer yb = unwrap(y.buffer(), "y");
 
         MemorySegment dml = wb.getDmlDevice();
-        MemorySegment dev = wb.getD3d12Device();
-        MemorySegment q = wb.getCommandQueue();
-
-        try (Arena scratch = Arena.ofConfined()) {
+        try {
             long cpuStart = D3D12Bindings.getCpuDescriptorHandleForHeapStart(descriptorHeap, scratch);
             long gpuStart = D3D12Bindings.getGpuDescriptorHandleForHeapStart(descriptorHeap, scratch);
             MemorySegment btDesc = DirectMlBindings.allocBindingTableDesc(scratch, compiled,
@@ -306,28 +329,17 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
                                     DirectMlBindings.DML_BINDING_TYPE_BUFFER, binding));
                 }
 
-                MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
-                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
-                MemorySegment cl = null;
-                try {
-                    cl = D3D12Bindings.createCommandList(dev,
-                            D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
-                    transitionToUav(cl, xb, scratch);
-                    transitionToUav(cl, gb, scratch);
-                    transitionToUav(cl, bb, scratch);
-                    transitionToUav(cl, yb, scratch);
-                    D3D12Bindings.setDescriptorHeaps(cl, descriptorHeap, scratch);
-                    DirectMlBindings.recordDispatch(cmdRecorder, cl, compiled, bt);
-                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
-                } finally {
-                    if (cl != null) DxgiBindings.release(cl);
-                    DxgiBindings.release(alloc);
-                }
+                transitionToUav(cl, xb, scratch);
+                transitionToUav(cl, gb, scratch);
+                transitionToUav(cl, bb, scratch);
+                transitionToUav(cl, yb, scratch);
+                D3D12Bindings.setDescriptorHeaps(cl, descriptorHeap, scratch);
+                DirectMlBindings.recordDispatch(cmdRecorder, cl, compiled, bt);
             } finally {
                 DxgiBindings.release(bt);
             }
         } catch (WindowsNativeException e) {
-            throw new DirectMlRuntimeException("DirectMlLayerNormKernel.dispatch failed", e);
+            throw new DirectMlRuntimeException("DirectMlLayerNormKernel.recordOnto failed", e);
         }
     }
 

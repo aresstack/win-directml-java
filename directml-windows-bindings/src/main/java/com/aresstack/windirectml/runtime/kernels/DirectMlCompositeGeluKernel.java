@@ -312,144 +312,132 @@ public final class DirectMlCompositeGeluKernel implements GeluKernel, AutoClosea
         validate(x, "x");
         validate(y, "y");
 
-        DefaultGpuBuffer xb = unwrap(x.buffer(), "x");
-        DefaultGpuBuffer yb = unwrap(y.buffer(), "y");
-
-        try {
-            // 1. tmpA = erf(x / √2)            (uses ScaleBias on input)
-            runUnary(erf, xb.resource(), xb, tmpA, /* outIsInternal */ true,
-                    /* outStateAccessor */ () -> tmpAState,
-                    /* outStateSetter   */ s -> tmpAState = s);
-
-            // 2. tmpB = 0.5*tmpA + 0.5         (ScaleBias on input again)
-            runUnary(identity, tmpA, /* inputBuf */ null, tmpB, /* outIsInternal */ true,
-                    () -> tmpBState, s -> tmpBState = s,
-                    /* inStateAccessor */ () -> tmpAState,
-                    /* inStateSetter   */ s -> tmpAState = s);
-
-            // 3. y = x * tmpB                   (binary)
-            runBinaryMul(xb, tmpB, yb);
+        MemorySegment dev = wb.getD3d12Device();
+        MemorySegment q = wb.getCommandQueue();
+        try (Arena scratch = Arena.ofConfined()) {
+            MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
+                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
+            MemorySegment cl = null;
+            try {
+                cl = D3D12Bindings.createCommandList(dev,
+                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
+                recordOnto(cl, scratch, x, y);
+                D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
+            } finally {
+                if (cl != null) DxgiBindings.release(cl);
+                DxgiBindings.release(alloc);
+            }
         } catch (WindowsNativeException e) {
             throw new DirectMlRuntimeException(
                     "DirectMlCompositeGeluKernel.dispatch failed" + formatDebugMessages(wb), e);
         }
     }
 
-    /**
-     * Unary dispatch with external input resource that is a DefaultGpuBuffer.
-     */
-    private void runUnary(MiniOp op,
-                          MemorySegment inputRes, DefaultGpuBuffer inputBuf,
-                          MemorySegment outputRes, boolean outIsInternal,
-                          java.util.function.IntSupplier getOutState,
-                          java.util.function.IntConsumer setOutState) throws WindowsNativeException {
-        runUnary(op, inputRes, inputBuf, outputRes, outIsInternal,
-                getOutState, setOutState,
-                /* inStateAccessor */ null, /* inStateSetter */ null);
-    }
+    @Override
+    public void recordOnto(MemorySegment cl, Arena scratch,
+                           DirectMlTensor x, DirectMlTensor y) throws DirectMlRuntimeException {
+        ensureOpen();
+        validate(x, "x");
+        validate(y, "y");
 
-    /**
-     * Unary dispatch with internal input resource (tracked state).
-     */
-    private void runUnary(MiniOp op,
-                          MemorySegment inputRes, DefaultGpuBuffer inputBuf,
-                          MemorySegment outputRes, boolean outIsInternal,
-                          java.util.function.IntSupplier getOutState,
-                          java.util.function.IntConsumer setOutState,
-                          java.util.function.IntSupplier getInState,
-                          java.util.function.IntConsumer setInState) throws WindowsNativeException {
-        MemorySegment dml = wb.getDmlDevice();
-        MemorySegment dev = wb.getD3d12Device();
-        MemorySegment q = wb.getCommandQueue();
+        DefaultGpuBuffer xb = unwrap(x.buffer(), "x");
+        DefaultGpuBuffer yb = unwrap(y.buffer(), "y");
 
-        try (Arena scratch = Arena.ofConfined()) {
-            long cpuStart = D3D12Bindings.getCpuDescriptorHandleForHeapStart(op.descriptorHeap, scratch);
-            long gpuStart = D3D12Bindings.getGpuDescriptorHandleForHeapStart(op.descriptorHeap, scratch);
-            MemorySegment btDesc = DirectMlBindings.allocBindingTableDesc(scratch, op.compiled,
-                    cpuStart, gpuStart, op.descriptorCount);
-            MemorySegment bt = DirectMlBindings.createBindingTable(dml, btDesc, scratch);
-            try {
-                MemorySegment inputs = scratch.allocate(16, 8);
-                setBufferBinding(scratch, inputs, 0, inputRes, (long) N * Float.BYTES);
-                DirectMlBindings.bindInputs(bt, 1, inputs);
+        try {
+            // 1. tmpA = erf(x / √2)            (uses ScaleBias on input)
+            recordUnary(cl, scratch, erf, xb.resource(), xb, tmpA, /* outIsInternal */ true,
+                    () -> tmpAState, s -> tmpAState = s,
+                    /* inStateAccessor */ null, /* inStateSetter */ null);
+            D3D12Bindings.uavBarrier(cl, scratch);
 
-                MemorySegment outputs = scratch.allocate(16, 8);
-                setBufferBinding(scratch, outputs, 0, outputRes, (long) N * Float.BYTES);
-                DirectMlBindings.bindOutputs(bt, 1, outputs);
+            // 2. tmpB = 0.5*tmpA + 0.5         (ScaleBias on input again)
+            recordUnary(cl, scratch, identity, tmpA, /* inputBuf */ null, tmpB, /* outIsInternal */ true,
+                    () -> tmpBState, s -> tmpBState = s,
+                    /* inStateAccessor */ () -> tmpAState,
+                    /* inStateSetter   */ s -> tmpAState = s);
+            D3D12Bindings.uavBarrier(cl, scratch);
 
-                bindTempPersist(scratch, bt, op);
-
-                MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
-                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
-                MemorySegment cl = null;
-                try {
-                    cl = D3D12Bindings.createCommandList(dev,
-                            D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
-                    if (inputBuf != null) {
-                        transitionToUav(cl, inputBuf, scratch);
-                    } else if (getInState != null) {
-                        transitionInternalToUav(cl, inputRes, getInState, setInState, scratch);
-                    }
-                    transitionInternalToUav(cl, outputRes, getOutState, setOutState, scratch);
-                    D3D12Bindings.setDescriptorHeaps(cl, op.descriptorHeap, scratch);
-                    DirectMlBindings.recordDispatch(cmdRecorder, cl, op.compiled, bt);
-                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
-                } finally {
-                    if (cl != null) DxgiBindings.release(cl);
-                    DxgiBindings.release(alloc);
-                }
-            } finally {
-                DxgiBindings.release(bt);
-            }
+            // 3. y = x * tmpB                   (binary)
+            recordBinaryMul(cl, scratch, xb, tmpB, yb);
+        } catch (WindowsNativeException e) {
+            throw new DirectMlRuntimeException(
+                    "DirectMlCompositeGeluKernel.recordOnto failed" + formatDebugMessages(wb), e);
         }
     }
 
     /**
-     * Final step: y = x * tmpB (binary multiply).
+     * Records a unary op into the caller-supplied command list. Does
+     * <b>not</b> create allocator/list and does <b>not</b> submit/wait.
      */
-    private void runBinaryMul(DefaultGpuBuffer xb, MemorySegment tmpBRes, DefaultGpuBuffer yb)
+    private void recordUnary(MemorySegment cl, Arena scratch, MiniOp op,
+                             MemorySegment inputRes, DefaultGpuBuffer inputBuf,
+                             MemorySegment outputRes, boolean outIsInternal,
+                             java.util.function.IntSupplier getOutState,
+                             java.util.function.IntConsumer setOutState,
+                             java.util.function.IntSupplier getInState,
+                             java.util.function.IntConsumer setInState) throws WindowsNativeException {
+        MemorySegment dml = wb.getDmlDevice();
+        long cpuStart = D3D12Bindings.getCpuDescriptorHandleForHeapStart(op.descriptorHeap, scratch);
+        long gpuStart = D3D12Bindings.getGpuDescriptorHandleForHeapStart(op.descriptorHeap, scratch);
+        MemorySegment btDesc = DirectMlBindings.allocBindingTableDesc(scratch, op.compiled,
+                cpuStart, gpuStart, op.descriptorCount);
+        MemorySegment bt = DirectMlBindings.createBindingTable(dml, btDesc, scratch);
+        try {
+            MemorySegment inputs = scratch.allocate(16, 8);
+            setBufferBinding(scratch, inputs, 0, inputRes, (long) N * Float.BYTES);
+            DirectMlBindings.bindInputs(bt, 1, inputs);
+
+            MemorySegment outputs = scratch.allocate(16, 8);
+            setBufferBinding(scratch, outputs, 0, outputRes, (long) N * Float.BYTES);
+            DirectMlBindings.bindOutputs(bt, 1, outputs);
+
+            bindTempPersist(scratch, bt, op);
+
+            if (inputBuf != null) {
+                transitionToUav(cl, inputBuf, scratch);
+            } else if (getInState != null) {
+                transitionInternalToUav(cl, inputRes, getInState, setInState, scratch);
+            }
+            transitionInternalToUav(cl, outputRes, getOutState, setOutState, scratch);
+            D3D12Bindings.setDescriptorHeaps(cl, op.descriptorHeap, scratch);
+            DirectMlBindings.recordDispatch(cmdRecorder, cl, op.compiled, bt);
+        } finally {
+            DxgiBindings.release(bt);
+        }
+    }
+
+    /**
+     * Records the final {@code y = x * tmpB} multiply into the
+     * caller-supplied command list.
+     */
+    private void recordBinaryMul(MemorySegment cl, Arena scratch,
+                                 DefaultGpuBuffer xb, MemorySegment tmpBRes, DefaultGpuBuffer yb)
             throws WindowsNativeException {
         MemorySegment dml = wb.getDmlDevice();
-        MemorySegment dev = wb.getD3d12Device();
-        MemorySegment q = wb.getCommandQueue();
+        long cpuStart = D3D12Bindings.getCpuDescriptorHandleForHeapStart(multiply.descriptorHeap, scratch);
+        long gpuStart = D3D12Bindings.getGpuDescriptorHandleForHeapStart(multiply.descriptorHeap, scratch);
+        MemorySegment btDesc = DirectMlBindings.allocBindingTableDesc(scratch, multiply.compiled,
+                cpuStart, gpuStart, multiply.descriptorCount);
+        MemorySegment bt = DirectMlBindings.createBindingTable(dml, btDesc, scratch);
+        try {
+            MemorySegment inputs = scratch.allocate(16L * 2, 8);
+            setBufferBinding(scratch, inputs, 0, xb.resource(), (long) N * Float.BYTES);
+            setBufferBinding(scratch, inputs, 1, tmpBRes, (long) N * Float.BYTES);
+            DirectMlBindings.bindInputs(bt, 2, inputs);
 
-        try (Arena scratch = Arena.ofConfined()) {
-            long cpuStart = D3D12Bindings.getCpuDescriptorHandleForHeapStart(multiply.descriptorHeap, scratch);
-            long gpuStart = D3D12Bindings.getGpuDescriptorHandleForHeapStart(multiply.descriptorHeap, scratch);
-            MemorySegment btDesc = DirectMlBindings.allocBindingTableDesc(scratch, multiply.compiled,
-                    cpuStart, gpuStart, multiply.descriptorCount);
-            MemorySegment bt = DirectMlBindings.createBindingTable(dml, btDesc, scratch);
-            try {
-                MemorySegment inputs = scratch.allocate(16L * 2, 8);
-                setBufferBinding(scratch, inputs, 0, xb.resource(), (long) N * Float.BYTES);
-                setBufferBinding(scratch, inputs, 1, tmpBRes, (long) N * Float.BYTES);
-                DirectMlBindings.bindInputs(bt, 2, inputs);
+            MemorySegment outputs = scratch.allocate(16, 8);
+            setBufferBinding(scratch, outputs, 0, yb.resource(), (long) N * Float.BYTES);
+            DirectMlBindings.bindOutputs(bt, 1, outputs);
 
-                MemorySegment outputs = scratch.allocate(16, 8);
-                setBufferBinding(scratch, outputs, 0, yb.resource(), (long) N * Float.BYTES);
-                DirectMlBindings.bindOutputs(bt, 1, outputs);
+            bindTempPersist(scratch, bt, multiply);
 
-                bindTempPersist(scratch, bt, multiply);
-
-                MemorySegment alloc = D3D12Bindings.createCommandAllocator(dev,
-                        D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, scratch);
-                MemorySegment cl = null;
-                try {
-                    cl = D3D12Bindings.createCommandList(dev,
-                            D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, scratch);
-                    transitionToUav(cl, xb, scratch);
-                    transitionInternalToUav(cl, tmpBRes, () -> tmpBState, s -> tmpBState = s, scratch);
-                    transitionToUav(cl, yb, scratch);
-                    D3D12Bindings.setDescriptorHeaps(cl, multiply.descriptorHeap, scratch);
-                    DirectMlBindings.recordDispatch(cmdRecorder, cl, multiply.compiled, bt);
-                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
-                } finally {
-                    if (cl != null) DxgiBindings.release(cl);
-                    DxgiBindings.release(alloc);
-                }
-            } finally {
-                DxgiBindings.release(bt);
-            }
+            transitionToUav(cl, xb, scratch);
+            transitionInternalToUav(cl, tmpBRes, () -> tmpBState, s -> tmpBState = s, scratch);
+            transitionToUav(cl, yb, scratch);
+            D3D12Bindings.setDescriptorHeaps(cl, multiply.descriptorHeap, scratch);
+            DirectMlBindings.recordDispatch(cmdRecorder, cl, multiply.compiled, bt);
+        } finally {
+            DxgiBindings.release(bt);
         }
     }
 

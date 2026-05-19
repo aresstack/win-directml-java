@@ -72,6 +72,8 @@ public class DirectMlGpuBatch implements AutoCloseable {
             new java.util.concurrent.atomic.AtomicLong();
     private static final java.util.concurrent.atomic.AtomicLong batchedSubmissions =
             new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong coalescedLayerSubmissions =
+            new java.util.concurrent.atomic.AtomicLong();
 
     private final WindowsBindings wb;
     private final List<MemorySegment> retainedCls = new ArrayList<>();
@@ -221,6 +223,26 @@ public class DirectMlGpuBatch implements AutoCloseable {
      */
     public static long batchedSubmissions() {
         return batchedSubmissions.get();
+    }
+
+    /**
+     * Cumulative number of per-encoder-layer coalesced submissions.
+     * Bumped once per
+     * {@code DirectMlBertEncoderLayerBlock.dispatch} – exactly once per
+     * encoder layer regardless of how many sub-ops the layer contains.
+     * Compare against {@link #batchedSubmissions()} (which counts every
+     * raw ExecuteCommandLists call) to verify per-layer coalescing.
+     */
+    public static long coalescedLayerSubmissions() {
+        return coalescedLayerSubmissions.get();
+    }
+
+    /**
+     * Increment {@link #coalescedLayerSubmissions}. Called from the
+     * encoder block at the end of its single per-layer ExecuteCommandLists.
+     */
+    public static void recordCoalescedLayerSubmission() {
+        coalescedLayerSubmissions.incrementAndGet();
     }
 
     /**
