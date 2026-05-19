@@ -98,6 +98,12 @@ public final class WorkbenchModel {
         return client.embed(text);
     }
 
+    public synchronized EmbeddingResult embed(String text, boolean normalize, String prefix)
+            throws SidecarException {
+        if (client == null) throw new SidecarException("Sidecar is not running");
+        return client.embed(text, normalize, prefix);
+    }
+
     public synchronized SummaryResult summarize(String text, int maxTokens) throws SidecarException {
         if (client == null) throw new SidecarException("Sidecar is not running");
         return client.summarize(text, maxTokens);

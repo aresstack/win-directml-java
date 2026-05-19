@@ -230,7 +230,8 @@ For each family both backends exist behind the same API:
 * **`Cpu…Encoder`** – pure-Java CPU reference / debug / fallback path.
   Correct-first, fast-later.
 
-Fetch the models once (≈ 90 MB each):
+Fetch the models once. Size depends on the selected variant
+(MiniLM ≈ 90 MB; E5 small ≈ 130 MB, base ≈ 440 MB, large ≈ 1.3 GB):
 
 ```powershell
 pwsh scripts/download-minilm.ps1                          # MiniLM (default 384-dim)
