@@ -84,6 +84,18 @@ class RerankHandlerTest {
     }
 
     @Test
+    void rejectsBlankDocumentEntry() {
+        RerankHandler h = new RerankHandler(StubReranker::new, new SidecarStatus());
+        JsonRpcMethodException ex = assertThrows(JsonRpcMethodException.class,
+                () -> h.handle(MAPPER.createObjectNode()
+                        .put("query", "q")
+                        .set("documents", MAPPER.createArrayNode().add("ok").add("   "))));
+        assertEquals(JsonRpcErrorCode.INVALID_PARAMS, ex.code());
+        assertTrue(ex.getMessage().contains("documents[1]"),
+                "error message should point at the offending index");
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void happyPathReturnsRankedItems() {
         StubReranker stub = new StubReranker();

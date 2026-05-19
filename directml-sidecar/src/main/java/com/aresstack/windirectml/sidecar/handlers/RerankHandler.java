@@ -81,7 +81,12 @@ public final class RerankHandler implements JsonRpcMethodHandler {
                 throw new JsonRpcMethodException(JsonRpcErrorCode.INVALID_PARAMS,
                         "documents[" + i + "] is not a string");
             }
-            docs.add(d.asText());
+            String text = d.asText();
+            if (text.isBlank()) {
+                throw new JsonRpcMethodException(JsonRpcErrorCode.INVALID_PARAMS,
+                        "documents[" + i + "] must not be blank");
+            }
+            docs.add(text);
         }
         int topN = params.hasNonNull("topN") ? params.get("topN").asInt(0) : 0;
 

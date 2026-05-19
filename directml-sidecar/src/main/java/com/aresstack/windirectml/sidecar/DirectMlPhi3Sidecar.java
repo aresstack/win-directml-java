@@ -284,6 +284,7 @@ public final class DirectMlPhi3Sidecar {
             Reranker rr = null;
             String rerankBackend = null;
             Exception forcedFailure = null;
+            String autoFallbackMsg = null;
             try {
                 if (rerankMode == RerankerBackendMode.DIRECTML
                         || rerankMode == RerankerBackendMode.AUTO) {
@@ -297,6 +298,8 @@ public final class DirectMlPhi3Sidecar {
                         }
                         log.warn("Reranker DirectML init failed ({}), falling back to CPU",
                                 gpuFail.getMessage());
+                        autoFallbackMsg = "rerank.backend=auto fell back to cpu: "
+                                + gpuFail.getMessage();
                     }
                 }
                 if (rr == null && (rerankMode == RerankerBackendMode.CPU
@@ -313,6 +316,12 @@ public final class DirectMlPhi3Sidecar {
                     }
                 }
                 sidecar.withRerankerBackend(rerankBackend, rr);
+                if (autoFallbackMsg != null) {
+                    // Surface the auto-fallback in the health endpoint so the
+                    // workbench shows *why* we are on CPU even though DirectML
+                    // is available on the box.
+                    sidecar.status.setLastError(autoFallbackMsg);
+                }
                 log.info("Reranker backend ready: mode={} backend={} modelDir={}",
                         rerankMode.token(), rerankBackend, rerankDir);
             } catch (Exception e) {

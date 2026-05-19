@@ -262,6 +262,12 @@ Konfiguration:
 -Drerank.backend=auto|directml|cpu   # Default auto: DirectML mit CPU-Fallback
 ```
 
+Validierung der `documents`-Liste: leere Arrays und leere/blank Einträge
+werden mit `INVALID_PARAMS` abgelehnt. Bei `rerank.backend=auto` und einem
+DirectML-Initialisierungsfehler fällt der Sidecar sichtbar auf CPU zurück
+(`health.rerankerBackend = "cpu"`,
+`health.lastError = "rerank.backend=auto fell back to cpu: …"`).
+
 Request:
 
 ```json
