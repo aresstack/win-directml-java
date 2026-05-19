@@ -37,7 +37,7 @@ public final class ConfigPanel extends JPanel {
     private final JTextField javaExeField = new JTextField(System.getProperty("java.home")
             + java.io.File.separator + "bin" + java.io.File.separator + "java");
     private final JTextField jarPathField = new JTextField(
-            "directml-sidecar/build/libs/directml-sidecar-0.1.0-SNAPSHOT.jar");
+            "directml-sidecar/build/libs/directml-sidecar-0.1.0-SNAPSHOT-all.jar");
     private final JTextField modelDirField = new JTextField("model/all-MiniLM-L6-v2");
     private final JComboBox<String> backendBox =
             new JComboBox<String>(new String[]{"auto", "directml", "cpu"});
