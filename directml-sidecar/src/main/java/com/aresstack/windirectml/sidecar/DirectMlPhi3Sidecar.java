@@ -3,7 +3,7 @@ package com.aresstack.windirectml.sidecar;
 import com.aresstack.windirectml.encoder.EmbeddingModel;
 import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
 import com.aresstack.windirectml.encoder.e5.E5Encoders;
-import com.aresstack.windirectml.encoder.e5.E5EncoderConfig;
+import com.aresstack.windirectml.encoder.e5.E5Variant;
 import com.aresstack.windirectml.encoder.minilm.CpuMiniLmEncoder;
 import com.aresstack.windirectml.encoder.minilm.DirectMlMiniLmEncoder;
 import com.aresstack.windirectml.inference.Phi3InferenceEngine;
@@ -157,12 +157,21 @@ public final class DirectMlPhi3Sidecar {
         String missingMsg;
         switch (embedFamily) {
             case "e5": {
-                embedModelDir = resolveE5Dir();
-                BertEncoderConfig e5Cfg = E5EncoderConfig.baseStsEnDe();
-                cpuLoader = dir -> E5Encoders.loadCpu(dir, e5Cfg);
-                dmlLoader = dir -> E5Encoders.loadDirectMl(dir, e5Cfg);
-                missingMsg = "No E5 model directory found "
-                        + "(checked -De5.modelDir and model/e5-base-sts-en-de/)";
+                E5Variant e5Variant;
+                try {
+                    e5Variant = E5Variant.parse(System.getProperty("e5.model"));
+                } catch (IllegalArgumentException e) {
+                    log.error("Invalid -De5.model value: {}", e.getMessage());
+                    System.exit(2);
+                    return;
+                }
+                embedModelDir = resolveE5Dir(e5Variant);
+                final E5Variant fv = e5Variant;
+                cpuLoader = dir -> E5Encoders.loadCpu(dir, fv);
+                dmlLoader = dir -> E5Encoders.loadDirectMl(dir, fv);
+                missingMsg = "No E5 model directory found for variant=" + e5Variant.token()
+                        + " (checked -De5.modelDir and " + e5Variant.directoryHints() + ")";
+                log.info("Embedding family=e5 variant={} (-De5.model)", e5Variant.token());
                 break;
             }
             case "minilm":
@@ -254,21 +263,14 @@ public final class DirectMlPhi3Sidecar {
         };
     }
 
-    private static Path resolveE5Dir() {
+    private static Path resolveE5Dir(E5Variant variant) {
         String override = System.getProperty("e5.modelDir");
         if (override != null && !override.isBlank()) {
             Path p = Path.of(override);
             return Files.exists(p.resolve("model.safetensors"))
                     && Files.exists(p.resolve("tokenizer.json")) ? p : null;
         }
-        for (Path candidate : new Path[]{
-                Path.of("model/e5-base-sts-en-de"),
-                Path.of("model/danielheinz/e5-base-sts-en-de"),
-                Path.of("model/e5-base-v2"),
-                Path.of("model/intfloat/e5-base-v2"),
-                Path.of("model/e5-small-v2"),
-                Path.of("model/intfloat/e5-small-v2"),
-        }) {
+        for (Path candidate : variant.directoryHints()) {
             if (Files.exists(candidate.resolve("model.safetensors"))
                     && Files.exists(candidate.resolve("tokenizer.json"))) {
                 return candidate;

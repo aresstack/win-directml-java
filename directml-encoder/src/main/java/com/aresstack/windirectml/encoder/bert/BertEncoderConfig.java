@@ -63,7 +63,21 @@ public record BertEncoderConfig(
     /**
      * Throws {@link IllegalArgumentException} for any structural value
      * the DirectML stack cannot honour (zero/negative sizes,
-     * {@code H % numHeads != 0}, etc.). Idempotent.
+     * {@code H % numHeads != 0}, etc.). Also enforces the invariants
+     * the current pipeline actually supports:
+     * <ul>
+     *   <li>{@code hiddenAct} must be {@code "gelu"} – the layer block
+     *       hard-wires {@code DirectMlGeluKernel} (FL 5.1 fused or the
+     *       composite ERF+IDENTITY+MULTIPLY fallback). Other
+     *       activations would need their own kernel path.</li>
+     *   <li>{@code poolingStrategy} must be {@link PoolingStrategy#MEAN}
+     *       – CLS/MAX pooling are tracked but not yet wired.</li>
+     *   <li>{@code outputDimension} must equal {@code hiddenSize} – the
+     *       sentence-transformer convention; a dense projection head
+     *       (E5 only ships the unprojected variant) is not implemented.</li>
+     * </ul>
+     * Idempotent. Fail-fast so a stale config does not silently produce
+     * garbage vectors.
      */
     public void validate() {
         if (hiddenSize <= 0 || numLayers <= 0 || numHeads <= 0
@@ -80,6 +94,22 @@ public record BertEncoderConfig(
         if (layerNormEps <= 0f) {
             throw new IllegalArgumentException(
                     "layerNormEps must be > 0, got " + layerNormEps);
+        }
+        if (!"gelu".equalsIgnoreCase(hiddenAct)) {
+            throw new IllegalArgumentException(
+                    "BertEncoderConfig.hiddenAct must be 'gelu', got '" + hiddenAct
+                            + "' (other activations require a new kernel path)");
+        }
+        if (poolingStrategy != PoolingStrategy.MEAN) {
+            throw new IllegalArgumentException(
+                    "BertEncoderConfig.poolingStrategy must be MEAN, got " + poolingStrategy
+                            + " (CLS/MAX pooling are not yet wired into the DirectML pipeline)");
+        }
+        if (outputDimension != hiddenSize) {
+            throw new IllegalArgumentException(
+                    "BertEncoderConfig.outputDimension (" + outputDimension
+                            + ") must equal hiddenSize (" + hiddenSize
+                            + "); a separate projection head is not implemented");
         }
     }
 

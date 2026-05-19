@@ -1,6 +1,8 @@
 package com.aresstack.windirectml.encoder.e5;
 
 import com.aresstack.windirectml.encoder.EmbeddingException;
+import com.aresstack.windirectml.encoder.PoolingStrategy;
+import com.aresstack.windirectml.encoder.bert.BertConfigJson;
 import com.aresstack.windirectml.encoder.bert.BertCpuEncoderWeights;
 import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
 import com.aresstack.windirectml.encoder.bert.CpuBertEncoder;
@@ -14,12 +16,20 @@ import java.nio.file.Path;
 /**
  * Family-specific convenience loaders for E5 sentence-embedding models.
  * <p>
- * Resolves {@code model.safetensors} and {@code tokenizer.json} from
- * {@code modelDir}, picks the matching {@link BertEncoderConfig}
- * (defaulting to {@link E5EncoderConfig#baseStsEnDe()} for the small
- * en-de variant the project initially targets) and instantiates either
- * the CPU or the DirectML implementation on the shared
+ * Each loader takes either an {@link E5Variant} (preset config) or a
+ * raw {@link BertEncoderConfig}, locates the required files in
+ * {@code modelDir} ({@code config.json}, {@code tokenizer.json},
+ * {@code model.safetensors}) and instantiates the corresponding
+ * implementation on the shared
  * {@link com.aresstack.windirectml.encoder.bert generic bert pipeline}.
+ * <p>
+ * If a {@code config.json} is present, the file is parsed and compared
+ * against the requested variant config – a mismatch on the shape-relevant
+ * axes ({@code hidden_size}, {@code num_hidden_layers},
+ * {@code num_attention_heads}, {@code intermediate_size},
+ * {@code vocab_size}, {@code type_vocab_size}) is surfaced as a hard
+ * {@link EmbeddingException} so the operator gets a clear "wrong
+ * variant for this directory" message instead of garbage embeddings.
  * <p>
  * Tokenisation re-uses the existing {@link WordPieceTokenizer}; the
  * SentencePiece path needed for {@code multilingual-e5-*} variants is
@@ -31,10 +41,22 @@ public final class E5Encoders {
     private E5Encoders() {}
 
     /**
-     * Load an E5 model into a {@link CpuBertEncoder}.
-     * @param modelDir model directory containing {@code config.json},
-     *                 {@code tokenizer.json} and {@code model.safetensors}.
-     * @param cfg      target architecture (use {@link E5EncoderConfig}).
+     * CPU loader for a specific {@link E5Variant}.
+     */
+    public static CpuBertEncoder loadCpu(Path modelDir, E5Variant variant) throws EmbeddingException {
+        return loadCpu(modelDir, resolveConfig(modelDir, variant));
+    }
+
+    /**
+     * DirectML loader for a specific {@link E5Variant}.
+     */
+    public static DirectMlBertEncoder loadDirectMl(Path modelDir, E5Variant variant)
+            throws EmbeddingException {
+        return loadDirectMl(modelDir, resolveConfig(modelDir, variant));
+    }
+
+    /**
+     * CPU loader for a raw {@link BertEncoderConfig}.
      */
     public static CpuBertEncoder loadCpu(Path modelDir, BertEncoderConfig cfg) throws EmbeddingException {
         verifyDir(modelDir);
@@ -50,10 +72,7 @@ public final class E5Encoders {
         }
     }
 
-    /**
-     * Load an E5 model into a {@link DirectMlBertEncoder} with its own
-     * {@link DirectMlContextImpl}.
-     */
+    /** DirectML loader for a raw {@link BertEncoderConfig}. */
     public static DirectMlBertEncoder loadDirectMl(Path modelDir, BertEncoderConfig cfg)
             throws EmbeddingException {
         verifyDir(modelDir);
@@ -78,16 +97,38 @@ public final class E5Encoders {
     }
 
     /**
-     * Loader bound to the {@code danielheinz/e5-base-sts-en-de} preset
-     * – the initial E5 target.
+     * Default loader: variant {@link E5Variant#BASE_STS_EN_DE}.
      */
     public static DirectMlBertEncoder loadDirectMl(Path modelDir) throws EmbeddingException {
-        return loadDirectMl(modelDir, E5EncoderConfig.baseStsEnDe());
+        return loadDirectMl(modelDir, E5Variant.BASE_STS_EN_DE);
     }
 
-    /** Same for the CPU side. */
+    /** CPU equivalent of {@link #loadDirectMl(Path)}. */
     public static CpuBertEncoder loadCpu(Path modelDir) throws EmbeddingException {
-        return loadCpu(modelDir, E5EncoderConfig.baseStsEnDe());
+        return loadCpu(modelDir, E5Variant.BASE_STS_EN_DE);
+    }
+
+    /**
+     * Resolve the effective {@link BertEncoderConfig} for {@code modelDir}
+     * given a requested {@link E5Variant}.
+     * <p>
+     * If {@code config.json} is present, it is parsed and verified to
+     * match the variant's declared dimensions. The on-disk config wins
+     * for the soft fields ({@code modelName}, {@code maxPositionEmbeddings}).
+     * If no {@code config.json} exists, the variant's preset config is
+     * used unchanged.
+     */
+    public static BertEncoderConfig resolveConfig(Path modelDir, E5Variant variant)
+            throws EmbeddingException {
+        BertEncoderConfig declared = variant.config();
+        Path configJson = modelDir.resolve("config.json");
+        if (!Files.exists(configJson)) {
+            return declared;
+        }
+        BertEncoderConfig onDisk = BertConfigJson.read(modelDir, declared.modelName(),
+                PoolingStrategy.MEAN, /* normalize */ true);
+        BertConfigJson.verifyMatches(declared, onDisk, modelDir);
+        return onDisk;
     }
 
     private static void verifyDir(Path modelDir) throws EmbeddingException {
@@ -102,4 +143,6 @@ public final class E5Encoders {
         }
     }
 }
+
+
 
