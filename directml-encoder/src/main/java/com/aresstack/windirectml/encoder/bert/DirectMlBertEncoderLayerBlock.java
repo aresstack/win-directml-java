@@ -49,7 +49,9 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(DirectMlBertEncoderLayerBlock.class);
 
     private final DirectMlContextImpl ctx;
+    private final int batch;
     private final int seq;
+    private final int rows;          // batch * seq – row count for row-wise kernels
     private final int hidden;
     private final int heads;
     private final int headDim;
@@ -83,18 +85,35 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
                                          int seq, int hidden, int heads, int headDim,
                                          int intermediate, float eps, boolean hasMask)
             throws DirectMlRuntimeException {
+        this(ctx, 1, seq, hidden, heads, headDim, intermediate, eps, hasMask);
+    }
+
+    /**
+     * Batched variant – row-wise sub-kernels (Linear/LayerNorm/GELU/Add)
+     * see {@code batch * seq} rows; the head-layout and attention kernels
+     * receive the real {@code batch} dimension and the mask is
+     * {@code [batch, seq]}. The construction with {@code batch = 1} is
+     * byte-identical to the legacy 8-arg constructor.
+     */
+    public DirectMlBertEncoderLayerBlock(DirectMlContextImpl ctx,
+                                         int batch, int seq, int hidden, int heads, int headDim,
+                                         int intermediate, float eps, boolean hasMask)
+            throws DirectMlRuntimeException {
         if (ctx == null || !ctx.isReady()) {
             throw new DirectMlRuntimeException("Context not ready");
         }
-        if (seq <= 0 || hidden <= 0 || heads <= 0 || headDim <= 0 || intermediate <= 0) {
-            throw new IllegalArgumentException("seq, hidden, heads, headDim, intermediate must be > 0");
+        if (batch <= 0 || seq <= 0 || hidden <= 0 || heads <= 0 || headDim <= 0 || intermediate <= 0) {
+            throw new IllegalArgumentException(
+                    "batch, seq, hidden, heads, headDim, intermediate must be > 0");
         }
         if (hidden != heads * headDim) {
             throw new IllegalArgumentException(
                     "hidden (" + hidden + ") must equal heads*headDim (" + heads + "*" + headDim + ")");
         }
         this.ctx = ctx;
+        this.batch = batch;
         this.seq = seq;
+        this.rows = batch * seq;
         this.hidden = hidden;
         this.heads = heads;
         this.headDim = headDim;
@@ -117,24 +136,24 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
         try {
             float scale = (float) (1.0 / Math.sqrt(headDim));
 
-            qL    = new DirectMlLinearKernel(ctx, seq, hidden, hidden, true);
-            kL    = new DirectMlLinearKernel(ctx, seq, hidden, hidden, true);
-            vL    = new DirectMlLinearKernel(ctx, seq, hidden, hidden, true);
-            oL    = new DirectMlLinearKernel(ctx, seq, hidden, hidden, true);
-            mlpI  = new DirectMlLinearKernel(ctx, seq, hidden, intermediate, true);
-            mlpO  = new DirectMlLinearKernel(ctx, seq, intermediate, hidden, true);
+            qL = new DirectMlLinearKernel(ctx, rows, hidden, hidden, true);
+            kL = new DirectMlLinearKernel(ctx, rows, hidden, hidden, true);
+            vL = new DirectMlLinearKernel(ctx, rows, hidden, hidden, true);
+            oL = new DirectMlLinearKernel(ctx, rows, hidden, hidden, true);
+            mlpI = new DirectMlLinearKernel(ctx, rows, hidden, intermediate, true);
+            mlpO = new DirectMlLinearKernel(ctx, rows, intermediate, hidden, true);
 
-            lFwd  = DirectMlHeadLayoutKernel.seqMajorToHeadMajor(ctx, seq, heads, headDim);
-            lBwd  = DirectMlHeadLayoutKernel.headMajorToSeqMajor(ctx, seq, heads, headDim);
+            lFwd = DirectMlHeadLayoutKernel.seqMajorToHeadMajor(ctx, batch, seq, heads, headDim);
+            lBwd = DirectMlHeadLayoutKernel.headMajorToSeqMajor(ctx, batch, seq, heads, headDim);
 
-            att   = new DirectMlAttentionKernel(ctx, 1, heads, seq, headDim, scale, hasMask);
-            ln1   = new DirectMlLayerNormKernel(ctx, seq, hidden, eps);
-            ln2   = new DirectMlLayerNormKernel(ctx, seq, hidden, eps);
-            g     = GeluKernel.create(ctx, seq * intermediate);
-            add   = new DirectMlAddKernel(ctx, seq * hidden);
+            att = new DirectMlAttentionKernel(ctx, batch, heads, seq, headDim, scale, hasMask);
+            ln1 = new DirectMlLayerNormKernel(ctx, rows, hidden, eps);
+            ln2 = new DirectMlLayerNormKernel(ctx, rows, hidden, eps);
+            g = GeluKernel.create(ctx, rows * intermediate);
+            add = new DirectMlAddKernel(ctx, rows * hidden);
 
-            long hiddenBytes       = (long) seq * hidden * Float.BYTES;
-            long intermediateBytes = (long) seq * intermediate * Float.BYTES;
+            long hiddenBytes = (long) rows * hidden * Float.BYTES;
+            long intermediateBytes = (long) rows * intermediate * Float.BYTES;
 
             bq      = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
             bk      = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
@@ -165,8 +184,8 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
             this.residual1 = bRes1; this.xMid = bMid;
             this.mlpInter = bInter; this.mlpOutBuf = bMlpOut; this.residual2 = bRes2;
 
-            log.info("DirectMlBertEncoderLayerBlock ready: seq={}, hidden={} (H={} × D={}), inter={}, hasMask={}",
-                    seq, hidden, heads, headDim, intermediate, hasMask);
+            log.info("DirectMlBertEncoderLayerBlock ready: batch={}, seq={}, hidden={} (H={} × D={}), inter={}, hasMask={}",
+                    batch, seq, hidden, heads, headDim, intermediate, hasMask);
         } catch (DirectMlRuntimeException | RuntimeException e) {
             closeQuiet(bRes2); closeQuiet(bMlpOut); closeQuiet(bInter);
             closeQuiet(bMid); closeQuiet(bRes1); closeQuiet(bOut); closeQuiet(bMerge);
@@ -181,11 +200,13 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
     }
 
     /**
-     * Forwards one encoder block on the GPU. {@code xIn} must be a
-     * {@code [seq, hidden]} float32 tensor; {@code xOut} receives the
-     * same shape after the full block. {@code mask} is {@code [seq]}
-     * additive float32 (-1e9 at padding, 0 elsewhere) iff the block
-     * was constructed with {@code hasMask=true}; otherwise pass null.
+     * Forwards one encoder block on the GPU. {@code xIn} must hold
+     * {@code batch * seq * hidden} float32 values laid out row-major as
+     * {@code [batch, seq, hidden]} (or, equivalently for the row-wise
+     * sub-kernels, {@code [batch * seq, hidden]}). {@code xOut} mirrors
+     * that. {@code mask} is {@code [batch, seq]} additive float32 –
+     * {@code -1e9} at padding, {@code 0} on valid positions – iff the
+     * block was constructed with {@code hasMask=true}.
      */
     public void dispatch(DirectMlTensor xIn,
                          BertGpuLayerWeights w,
@@ -197,8 +218,10 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
         if (hasMask) {
             if (mask == null) throw new DirectMlRuntimeException(
                     "block built with hasMask=true but mask=null");
-            if (mask.shape().elementCount() != seq) throw new DirectMlRuntimeException(
-                    "mask must hold " + seq + " elements, got " + mask.shape().elementCount());
+            long expectedMask = (long) batch * seq;
+            if (mask.shape().elementCount() != expectedMask) throw new DirectMlRuntimeException(
+                    "mask must hold " + expectedMask + " elements ([batch=" + batch
+                            + ", seq=" + seq + "]), got " + mask.shape().elementCount());
         } else if (mask != null) {
             throw new DirectMlRuntimeException("block built with hasMask=false but mask!=null");
         }
@@ -249,17 +272,17 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
     }
 
     private DirectMlTensor hidden2D(GpuBuffer buf) {
-        TensorShape s = TensorShape.of(seq, hidden);
+        TensorShape s = TensorShape.of(rows, hidden);
         return new DirectMlTensor(s, TensorLayout.rowMajor(s), TensorDataType.FLOAT32, buf);
     }
 
     private DirectMlTensor intermediate2D(GpuBuffer buf) {
-        TensorShape s = TensorShape.of(seq, intermediate);
+        TensorShape s = TensorShape.of(rows, intermediate);
         return new DirectMlTensor(s, TensorLayout.rowMajor(s), TensorDataType.FLOAT32, buf);
     }
 
     private DirectMlTensor headMajor(GpuBuffer buf) {
-        TensorShape s = TensorShape.of(1, heads, seq, headDim);
+        TensorShape s = TensorShape.of(batch, heads, seq, headDim);
         return new DirectMlTensor(s, TensorLayout.rowMajor(s), TensorDataType.FLOAT32, buf);
     }
 
@@ -278,9 +301,10 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
         if (t.dataType() != TensorDataType.FLOAT32) {
             throw new DirectMlRuntimeException(name + " must be FLOAT32");
         }
-        if (t.shape().elementCount() != (long) seq * hidden) {
-            throw new DirectMlRuntimeException(name + " expected " + (seq * hidden)
-                    + " elements ([seq=" + seq + ", hidden=" + hidden + "]), got "
+        long expected = (long) rows * hidden;
+        if (t.shape().elementCount() != expected) {
+            throw new DirectMlRuntimeException(name + " expected " + expected
+                    + " elements ([batch=" + batch + ", seq=" + seq + ", hidden=" + hidden + "]), got "
                     + t.shape().elementCount());
         }
     }
@@ -311,6 +335,10 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
     }
 
     public int seq()          { return seq; }
+
+    public int batch() {
+        return batch;
+    }
     public int hidden()       { return hidden; }
     public int heads()        { return heads; }
     public int headDim()      { return headDim; }

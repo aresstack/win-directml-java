@@ -39,7 +39,9 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(DirectMlBertEncoderStack.class);
 
     private final DirectMlContextImpl ctx;
+    private final int batch;
     private final int seq;
+    private final int rows;          // batch * seq
     private final int hidden;
     private final int heads;
     private final int headDim;
@@ -61,13 +63,27 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
                                     int intermediate, int numLayers,
                                     float eps, boolean hasMask)
             throws DirectMlRuntimeException {
+        this(ctx, 1, seq, hidden, heads, headDim, intermediate, numLayers, eps, hasMask);
+    }
+
+    /**
+     * Batched variant – every dispatched call processes {@code batch}
+     * independent sequences of {@code seq} tokens through the same set
+     * of weights. The legacy 9-arg constructor delegates here with
+     * {@code batch = 1} so existing call sites stay byte-identical.
+     */
+    public DirectMlBertEncoderStack(DirectMlContextImpl ctx,
+                                    int batch, int seq, int hidden, int heads, int headDim,
+                                    int intermediate, int numLayers,
+                                    float eps, boolean hasMask)
+            throws DirectMlRuntimeException {
         if (ctx == null || !ctx.isReady()) {
             throw new DirectMlRuntimeException("Context not ready");
         }
-        if (seq <= 0 || hidden <= 0 || heads <= 0 || headDim <= 0
+        if (batch <= 0 || seq <= 0 || hidden <= 0 || heads <= 0 || headDim <= 0
                 || intermediate <= 0 || numLayers <= 0) {
             throw new IllegalArgumentException(
-                    "seq, hidden, heads, headDim, intermediate, numLayers must be > 0");
+                    "batch, seq, hidden, heads, headDim, intermediate, numLayers must be > 0");
         }
         if (hidden != heads * headDim) {
             throw new IllegalArgumentException(
@@ -75,7 +91,9 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
                             + heads + "*" + headDim + ")");
         }
         this.ctx = ctx;
+        this.batch = batch;
         this.seq = seq;
+        this.rows = batch * seq;
         this.hidden = hidden;
         this.heads = heads;
         this.headDim = headDim;
@@ -89,9 +107,9 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
         GpuBuffer sA = null, sB = null;
 
         try {
-            embLn = new DirectMlLayerNormKernel(ctx, seq, hidden, eps);
+            embLn = new DirectMlLayerNormKernel(ctx, rows, hidden, eps);
 
-            long hiddenBytes = (long) seq * hidden * Float.BYTES;
+            long hiddenBytes = (long) rows * hidden * Float.BYTES;
             sA = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
             if (numLayers >= 2) {
                 sB = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
@@ -99,7 +117,7 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
 
             for (int i = 0; i < numLayers; i++) {
                 blockList.add(new DirectMlBertEncoderLayerBlock(
-                        ctx, seq, hidden, heads, headDim, intermediate, eps, hasMask));
+                        ctx, batch, seq, hidden, heads, headDim, intermediate, eps, hasMask));
             }
 
             this.embeddingLayerNorm = embLn;
@@ -107,8 +125,8 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
             this.scratchA = sA;
             this.scratchB = sB;
 
-            log.info("DirectMlBertEncoderStack ready: seq={}, hidden={} (H={} × D={}), inter={}, layers={}, hasMask={}",
-                    seq, hidden, heads, headDim, intermediate, numLayers, hasMask);
+            log.info("DirectMlBertEncoderStack ready: batch={}, seq={}, hidden={} (H={} × D={}), inter={}, layers={}, hasMask={}",
+                    batch, seq, hidden, heads, headDim, intermediate, numLayers, hasMask);
         } catch (DirectMlRuntimeException | RuntimeException e) {
             for (int i = blockList.size() - 1; i >= 0; i--) closeQuiet(blockList.get(i));
             closeQuiet(sB);
@@ -148,8 +166,10 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
         if (hasMask) {
             if (mask == null) throw new DirectMlRuntimeException(
                     "stack built with hasMask=true but mask=null");
-            if (mask.shape().elementCount() != seq) throw new DirectMlRuntimeException(
-                    "mask must hold " + seq + " elements, got " + mask.shape().elementCount());
+            long expectedMask = (long) batch * seq;
+            if (mask.shape().elementCount() != expectedMask) throw new DirectMlRuntimeException(
+                    "mask must hold " + expectedMask + " elements ([batch=" + batch
+                            + ", seq=" + seq + "]), got " + mask.shape().elementCount());
         } else if (mask != null) {
             throw new DirectMlRuntimeException("stack built with hasMask=false but mask!=null");
         }
@@ -171,7 +191,7 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
     }
 
     private DirectMlTensor hidden2D(GpuBuffer buf) {
-        TensorShape s = TensorShape.of(seq, hidden);
+        TensorShape s = TensorShape.of(rows, hidden);
         return new DirectMlTensor(s, TensorLayout.rowMajor(s), TensorDataType.FLOAT32, buf);
     }
 
@@ -180,9 +200,10 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
         if (t.dataType() != TensorDataType.FLOAT32) {
             throw new DirectMlRuntimeException(name + " must be FLOAT32");
         }
-        if (t.shape().elementCount() != (long) seq * hidden) {
-            throw new DirectMlRuntimeException(name + " expected " + (seq * hidden)
-                    + " elements ([seq=" + seq + ", hidden=" + hidden + "]), got "
+        long expected = (long) rows * hidden;
+        if (t.shape().elementCount() != expected) {
+            throw new DirectMlRuntimeException(name + " expected " + expected
+                    + " elements ([batch=" + batch + ", seq=" + seq + ", hidden=" + hidden + "]), got "
                     + t.shape().elementCount());
         }
     }
@@ -207,6 +228,10 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
     }
 
     public int seq()          { return seq; }
+
+    public int batch() {
+        return batch;
+    }
     public int hidden()       { return hidden; }
     public int heads()        { return heads; }
     public int headDim()      { return headDim; }

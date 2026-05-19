@@ -76,6 +76,7 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
     }
 
     private final WindowsBindings wb;
+    private final int batch;
     private final int seq;
     private final int heads;
     private final int headDim;
@@ -96,48 +97,67 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
 
     public static DirectMlHeadLayoutKernel seqMajorToHeadMajor(
             DirectMlContextImpl ctx, int seq, int heads, int headDim) throws DirectMlRuntimeException {
-        return new DirectMlHeadLayoutKernel(ctx, seq, heads, headDim, Direction.SEQ_TO_HEAD);
+        return new DirectMlHeadLayoutKernel(ctx, 1, seq, heads, headDim, Direction.SEQ_TO_HEAD);
     }
 
     public static DirectMlHeadLayoutKernel headMajorToSeqMajor(
             DirectMlContextImpl ctx, int seq, int heads, int headDim) throws DirectMlRuntimeException {
-        return new DirectMlHeadLayoutKernel(ctx, seq, heads, headDim, Direction.HEAD_TO_SEQ);
+        return new DirectMlHeadLayoutKernel(ctx, 1, seq, heads, headDim, Direction.HEAD_TO_SEQ);
     }
 
-    private DirectMlHeadLayoutKernel(DirectMlContextImpl ctx, int seq, int heads, int headDim,
+    /**
+     * Batched variant – produces / consumes {@code [B, H, S, D]} tensors
+     * (forward) respectively {@code [B, S, H, D]} (backward). For
+     * {@code batch == 1} this is byte-identical to the legacy 4-arg
+     * factory.
+     */
+    public static DirectMlHeadLayoutKernel seqMajorToHeadMajor(
+            DirectMlContextImpl ctx, int batch, int seq, int heads, int headDim) throws DirectMlRuntimeException {
+        return new DirectMlHeadLayoutKernel(ctx, batch, seq, heads, headDim, Direction.SEQ_TO_HEAD);
+    }
+
+    public static DirectMlHeadLayoutKernel headMajorToSeqMajor(
+            DirectMlContextImpl ctx, int batch, int seq, int heads, int headDim) throws DirectMlRuntimeException {
+        return new DirectMlHeadLayoutKernel(ctx, batch, seq, heads, headDim, Direction.HEAD_TO_SEQ);
+    }
+
+    private DirectMlHeadLayoutKernel(DirectMlContextImpl ctx, int batch, int seq, int heads, int headDim,
                                      Direction direction) throws DirectMlRuntimeException {
         if (ctx == null || !ctx.isReady()) {
             throw new DirectMlRuntimeException("Context not ready");
         }
-        if (seq <= 0 || heads <= 0 || headDim <= 0) {
-            throw new IllegalArgumentException("seq, heads, headDim must be > 0");
+        if (batch <= 0 || seq <= 0 || heads <= 0 || headDim <= 0) {
+            throw new IllegalArgumentException("batch, seq, heads, headDim must be > 0");
         }
         this.wb = ctx.bindings();
         if (!wb.hasDirectMl()) {
             throw new DirectMlRuntimeException("Context has no DirectML device");
         }
+        this.batch = batch;
         this.seq = seq;
         this.heads = heads;
         this.headDim = headDim;
-        this.elementCount = seq * heads * headDim;
+        this.elementCount = batch * seq * heads * headDim;
         this.direction = direction;
         this.arena = Arena.ofShared();
 
         try {
-            final int S = seq, H = heads, D = headDim;
+            final int B = batch, S = seq, H = heads, D = headDim;
             final long totalBytes = (long) elementCount * Float.BYTES;
             int[] logicalSizes;
             int[] inputStrides;
 
             if (direction == Direction.SEQ_TO_HEAD) {
-                // Input physically [S, H, D]: element (h, s, d) at offset s·H·D + h·D + d.
-                // Logical shape exposed to DML mirrors the OUTPUT layout [1, H, S, D].
-                logicalSizes = new int[]{1, H, S, D};
+                // Input physically [B, S, H, D]: element (b, h, s, d) at offset
+                //   b·S·H·D + s·H·D + h·D + d.
+                // Logical shape exposed to DML mirrors the OUTPUT layout [B, H, S, D].
+                logicalSizes = new int[]{B, H, S, D};
                 inputStrides = new int[]{S * H * D, D, H * D, 1};
             } else {
-                // Input physically [H, S, D]: element (s, h, d) at offset h·S·D + s·D + d.
-                // Logical shape exposed to DML mirrors the OUTPUT layout [1, S, H, D].
-                logicalSizes = new int[]{1, S, H, D};
+                // Input physically [B, H, S, D]: element (b, s, h, d) at offset
+                //   b·S·H·D + h·S·D + s·D + d.
+                // Logical shape exposed to DML mirrors the OUTPUT layout [B, S, H, D].
+                logicalSizes = new int[]{B, S, H, D};
                 inputStrides = new int[]{S * H * D, D, S * D, 1};
             }
 
@@ -180,8 +200,8 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
                 initializeOperator();
             }
 
-            log.info("DirectMlHeadLayoutKernel ready: dir={}, S={}, H={}, D={}, desc={}, temp={}B, persist={}B",
-                    direction, S, H, D, descriptorCount, tempSize, persistSize);
+            log.info("DirectMlHeadLayoutKernel ready: dir={}, B={}, S={}, H={}, D={}, desc={}, temp={}B, persist={}B",
+                    direction, B, S, H, D, descriptorCount, tempSize, persistSize);
         } catch (WindowsNativeException e) {
             String dbg = formatDebugMessages(wb);
             arena.close();
@@ -389,6 +409,10 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
     }
 
     public Direction direction() { return direction; }
+
+    public int batch() {
+        return batch;
+    }
     public int seq() { return seq; }
     public int heads() { return heads; }
     public int headDim() { return headDim; }
