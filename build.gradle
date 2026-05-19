@@ -1,6 +1,7 @@
 plugins {
     id 'java'
     id 'com.gradleup.nmcp' version '0.1.5' apply false
+    id 'com.gradleup.nmcp.aggregation' version '0.1.5' apply false
 }
 
 allprojects {
@@ -92,10 +93,10 @@ subprojects { sub ->
 // --------------------------------------------------------------------
 //
 // Triggers:
-//   ./gradlew publishToMavenLocal                  # local install for testing
-//   ./gradlew publishAggregationToCentralPortal    # upload all publishable
-//                                                    modules to Central
-//                                                    Portal (CI release job)
+//   ./gradlew publishToMavenLocal                       # local install for testing
+//   ./gradlew publishAllPublicationsToCentralPortal     # upload all publishable
+//                                                         modules to Central
+//                                                         Portal (CI release job)
 //
 // Required environment / Gradle properties for a real release:
 //   ORG_GRADLE_PROJECT_centralUsername       Sonatype Central Portal user-token
@@ -106,7 +107,7 @@ subprojects { sub ->
 // Signing is skipped automatically for SNAPSHOT builds and when the
 // signing key is absent (so `publishToMavenLocal` works without any
 // secrets).
-apply plugin: 'com.gradleup.nmcp'
+apply plugin: 'com.gradleup.nmcp.aggregation'
 apply plugin: 'maven-publish'
 ext.pomMetadata = { pom, prj ->
     pom.name = provider { prj.findProperty('POM_NAME') ?: prj.name }
@@ -185,8 +186,10 @@ configure(subprojects.findAll { it.name in publishableModules }) {
             def signingKey = providers.gradleProperty('signingInMemoryKey').orNull
             def signingPwd = providers.gradleProperty('signingInMemoryKeyPassword').orNull
             required = {
-                gradle.taskGraph.hasTask("publishAggregationToCentralPortal")
-                        && !version.toString().endsWith('-SNAPSHOT')
+                gradle.taskGraph.allTasks.any { task ->
+                    task.name == 'publishAllPublicationsToCentralPortal'
+                            || task.path.endsWith(':publishAllPublicationsToCentralPortal')
+                } && !version.toString().endsWith('-SNAPSHOT')
             }
             if (signingKey != null) {
                 useInMemoryPgpKeys(signingKey, signingPwd)
@@ -196,11 +199,12 @@ configure(subprojects.findAll { it.name in publishableModules }) {
     }
 }
 // Aggregate-publish all publishable modules to the Sonatype Central
-// Portal in one upload. Configured via `centralPortal { }` at the
-// root project; credentials come from
-// ORG_GRADLE_PROJECT_centralUsername / centralPassword.
-nmcp {
-    centralPortal {
+// Portal in one upload. The nmcp.aggregation plugin registers
+// `publishAllPublicationsToCentralPortal` via
+// `publishAllProjectsProbablyBreakingProjectIsolation`; credentials come
+// from ORG_GRADLE_PROJECT_centralUsername / centralPassword.
+nmcpAggregation {
+    publishAllProjectsProbablyBreakingProjectIsolation {
         username = providers.gradleProperty('centralUsername')
         password = providers.gradleProperty('centralPassword')
         // Auto-publish after validation passes. Set to 'USER_MANAGED'
