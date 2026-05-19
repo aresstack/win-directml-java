@@ -13,6 +13,8 @@ import com.aresstack.windirectml.runtime.GpuBuffer;
 import com.aresstack.windirectml.runtime.TensorDataType;
 import com.aresstack.windirectml.runtime.TensorLayout;
 import com.aresstack.windirectml.runtime.TensorShape;
+import com.aresstack.windirectml.runtime.kernels.DirectMlBatchedL2NormalizeKernel;
+import com.aresstack.windirectml.runtime.kernels.DirectMlBatchedMeanPoolKernel;
 import com.aresstack.windirectml.runtime.kernels.DirectMlL2NormalizeKernel;
 import com.aresstack.windirectml.runtime.kernels.DirectMlMeanPoolKernel;
 import com.aresstack.windirectml.windows.DirectMlBindings;
@@ -109,21 +111,57 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
 
     /**
      * Per-{@code (bucket, batch)} resources for the batched
-     * {@link #embedBatch(List)} path. Mean-pool and L2 are performed on
-     * the CPU after a single {@code [batch * bucket, hidden]} readback –
-     * that keeps the GPU graph form-bound to existing kernels and avoids
-     * cache explosion that a batched mean-pool kernel keyed by
-     * {@code (batch, bucket, hidden)} would introduce.
+     * {@link #embedBatch(List)} path. Mean-pool and L2 normalisation
+     * both run on the GPU via {@link DirectMlBatchedMeanPoolKernel} and
+     * {@link DirectMlBatchedL2NormalizeKernel}, so the readback shrinks
+     * from {@code [N*S, H]} (encoder output stack) to {@code [N, H]}
+     * (pooled / normalised vectors).
      */
     private record BatchStackEntry(int bucket, int batch,
                                    DirectMlBertEncoderStack stack,
                                    GpuBuffer xIn, GpuBuffer xOut, GpuBuffer mask,
-                                   CpuTensor readback) implements AutoCloseable {
+                                   GpuBuffer meanWeights, GpuBuffer pooled, GpuBuffer normalized,
+                                   DirectMlBatchedMeanPoolKernel meanPool,
+                                   DirectMlBatchedL2NormalizeKernel l2,
+                                   CpuTensor pooledReadback,
+                                   CpuTensor normalizedReadback) implements AutoCloseable {
         @Override public void close() {
-            try { stack.close(); } catch (Exception ignored) {}
-            try { xIn.close();   } catch (Exception ignored) {}
-            try { xOut.close();  } catch (Exception ignored) {}
-            try { mask.close();  } catch (Exception ignored) {}
+            try {
+                l2.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                meanPool.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                stack.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                xIn.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                xOut.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                mask.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                meanWeights.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                pooled.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                normalized.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -293,12 +331,12 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
 
     /**
      * Bucket-batched embedding path: groups requests by pad-bucket and
-     * runs <strong>one</strong> DirectML encoder forward per bucket on a
+     * runs <strong>one</strong> DirectML encoder forward + one batched
+     * mean-pool + (optionally) one batched L2-normalise per bucket on a
      * {@code [N, S, H]} stack instead of {@code N} separate forwards.
-     * Mean-pool and L2-normalisation are CPU-side per row after a single
-     * {@code [N*S, H]} readback – the heavy cost (encoder stack) is what
-     * batches; mean-pool/L2 cost {@code O(N*S*H)} + {@code O(N*H)} which
-     * is negligible relative to the saved {@code (N-1)} stack dispatches.
+     * The PCIe read-back shrinks to {@code [N, H]} per dispatched bucket
+     * (plus a second {@code [N, H]} download only for buckets with
+     * mixed {@code normalize} flags).
      */
     @Override
     public List<EmbeddingVector> embedBatch(List<EmbeddingRequest> requests) throws EmbeddingException {
@@ -335,7 +373,9 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
 
             float[] xBatch = new float[N * B * H];
             float[] maskBatch = new float[N * B];
-            float[][] meanWeights = new float[N][];
+            float[] meanWeightsBatch = new float[N * B];
+            boolean anyNormalize = false;
+            boolean allNormalize = true;
             for (int gi = 0; gi < N; gi++) {
                 int i = group.get(gi);
                 EncoderTokenizer.Encoded enc = encs[i];
@@ -345,11 +385,16 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
                 System.arraycopy(xi, 0, xBatch, gi * B * H, B * H);
                 float[] mi = BertPoolingWeights.additiveMask(enc.attentionMask(), enc.length(), B);
                 System.arraycopy(mi, 0, maskBatch, gi * B, B);
+                float[] wi;
                 try {
-                    meanWeights[gi] = BertPoolingWeights.mean(enc.attentionMask(), enc.length(), B);
+                    wi = BertPoolingWeights.mean(enc.attentionMask(), enc.length(), B);
                 } catch (IllegalStateException ise) {
                     throw new EmbeddingException(ise.getMessage());
                 }
+                System.arraycopy(wi, 0, meanWeightsBatch, gi * B, B);
+                boolean norm = requests.get(i).normalize();
+                anyNormalize |= norm;
+                allNormalize &= norm;
             }
 
             BatchStackEntry entry;
@@ -363,43 +408,51 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
             try {
                 CpuTensor xCpu = CpuTensor.float32(TensorShape.of(N * B, H), xBatch);
                 CpuTensor mCpu = CpuTensor.float32(TensorShape.of(N * B), maskBatch);
+                CpuTensor wCpu = CpuTensor.float32(TensorShape.of(N, B), meanWeightsBatch);
                 entry.xIn.upload(xCpu);
                 entry.mask.upload(mCpu);
+                entry.meanWeights.upload(wCpu);
 
-                DirectMlTensor xInT  = tensorOf(entry.xIn,  N * B, H);
+                DirectMlTensor xInT = tensorOf(entry.xIn, N * B, H);
                 DirectMlTensor xOutT = tensorOf(entry.xOut, N * B, H);
                 DirectMlTensor maskT = tensorOf(entry.mask, N * B);
+                DirectMlTensor wT = tensorOf(entry.meanWeights, N, B);
+                DirectMlTensor pooledT = tensorOf(entry.pooled, N, H);
                 DirectMlTensor embGT = tensorOf(embLnGammaBuf, H);
-                DirectMlTensor embBT = tensorOf(embLnBetaBuf,  H);
+                DirectMlTensor embBT = tensorOf(embLnBetaBuf, H);
 
+                // GPU: encoder stack → batched mean-pool [N,H].
                 entry.stack.dispatch(xInT, embGT, embBT, gpuLayers, maskT, xOutT);
-                entry.xOut.download(entry.readback);
+                entry.meanPool.dispatch(xOutT, wT, pooledT);
 
-                FloatBuffer fv = entry.readback.data().duplicate()
-                        .order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
+                // GPU: batched L2 only if any row in this bucket asks for it.
+                if (anyNormalize) {
+                    DirectMlTensor normT = tensorOf(entry.normalized, N, H);
+                    entry.l2.dispatch(pooledT, normT, 1e-12f);
+                }
+
+                // Read back only the [N, H] vectors we actually need.
+                FloatBuffer pooledFv = null;
+                if (!allNormalize) {
+                    entry.pooled.download(entry.pooledReadback);
+                    pooledFv = entry.pooledReadback.data().duplicate()
+                            .order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
+                }
+                FloatBuffer normFv = null;
+                if (anyNormalize) {
+                    entry.normalized.download(entry.normalizedReadback);
+                    normFv = entry.normalizedReadback.data().duplicate()
+                            .order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
+                }
+
                 for (int gi = 0; gi < N; gi++) {
                     int i = group.get(gi);
                     boolean normalize = requests.get(i).normalize();
-                    float[] pooled = new float[H];
-                    // CPU mean-pool over the gi-th [B, H] block using
-                    // the pre-normalised mean weights (already 1/Σm scaled).
-                    float[] w = meanWeights[gi];
-                    int base = gi * B * H;
-                    for (int t = 0; t < B; t++) {
-                        float wt = w[t];
-                        if (wt == 0f) continue;
-                        fv.position(base + t * H);
-                        for (int h = 0; h < H; h++) {
-                            pooled[h] += wt * fv.get();
-                        }
-                    }
-                    if (normalize) {
-                        double sq = 0d;
-                        for (float v : pooled) sq += (double) v * v;
-                        double inv = 1d / Math.sqrt(Math.max(sq, 1e-24d));
-                        for (int h = 0; h < H; h++) pooled[h] = (float) (pooled[h] * inv);
-                    }
-                    out[i] = new EmbeddingVector(pooled, H, cfg.modelName(), normalize);
+                    float[] vec = new float[H];
+                    FloatBuffer src = normalize ? normFv : pooledFv;
+                    src.position(gi * H);
+                    src.get(vec, 0, H);
+                    out[i] = new EmbeddingVector(vec, H, cfg.modelName(), normalize);
                 }
             } catch (DirectMlRuntimeException de) {
                 throw new EmbeddingException("Batched DirectML dispatch failed for bucket="
@@ -462,29 +515,73 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
         int H = cfg.hiddenSize();
         long rowsBytes = (long) batch * bucket * H * Float.BYTES;
         long maskBytes = (long) batch * bucket * Float.BYTES;
+        long pooledBytes = (long) batch * H * Float.BYTES;
 
         GpuBuffer xIn = null, xOut = null, mask = null;
+        GpuBuffer meanWeights = null, pooled = null, normalized = null;
         DirectMlBertEncoderStack stack = null;
+        DirectMlBatchedMeanPoolKernel meanPool = null;
+        DirectMlBatchedL2NormalizeKernel l2 = null;
         try {
-            xIn  = ctx.allocateBuffer(rowsBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            xIn = ctx.allocateBuffer(rowsBytes, GpuBuffer.BufferUsage.ACTIVATION);
             xOut = ctx.allocateBuffer(rowsBytes, GpuBuffer.BufferUsage.ACTIVATION);
             mask = ctx.allocateBuffer(maskBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            meanWeights = ctx.allocateBuffer(maskBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            pooled = ctx.allocateBuffer(pooledBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            normalized = ctx.allocateBuffer(pooledBytes, GpuBuffer.BufferUsage.ACTIVATION);
             stack = new DirectMlBertEncoderStack(
                     ctx, batch, bucket, H,
                     cfg.numHeads(), cfg.headDim(),
                     cfg.intermediateSize(), cfg.numLayers(),
                     cfg.layerNormEps(), /* hasMask */ true);
-            CpuTensor readback = emptyCpuTensor(batch * bucket * H);
-            BatchStackEntry entry = new BatchStackEntry(bucket, batch, stack, xIn, xOut, mask, readback);
+            meanPool = new DirectMlBatchedMeanPoolKernel(ctx, batch, bucket, H);
+            l2 = new DirectMlBatchedL2NormalizeKernel(ctx, batch, H, 1e-12f);
+            CpuTensor pooledReadback = emptyCpuTensor(batch * H);
+            CpuTensor normalizedReadback = emptyCpuTensor(batch * H);
+            BatchStackEntry entry = new BatchStackEntry(bucket, batch, stack,
+                    xIn, xOut, mask, meanWeights, pooled, normalized,
+                    meanPool, l2, pooledReadback, normalizedReadback);
             batchStackCache.put(key, entry);
             log.info("DirectMlBertEncoder({}) batched stack ready for bucket S={}, batch N={} (cached so far: {})",
                     cfg.modelName(), bucket, batch, batchStackCache.size());
             return entry;
         } catch (DirectMlRuntimeException | RuntimeException ex) {
-            if (stack != null) try { stack.close(); } catch (Exception ignored) {}
-            if (mask != null)  try { mask.close();  } catch (Exception ignored) {}
-            if (xOut != null)  try { xOut.close();  } catch (Exception ignored) {}
-            if (xIn != null)   try { xIn.close();   } catch (Exception ignored) {}
+            if (l2 != null) try {
+                l2.close();
+            } catch (Exception ignored) {
+            }
+            if (meanPool != null) try {
+                meanPool.close();
+            } catch (Exception ignored) {
+            }
+            if (stack != null) try {
+                stack.close();
+            } catch (Exception ignored) {
+            }
+            if (normalized != null) try {
+                normalized.close();
+            } catch (Exception ignored) {
+            }
+            if (pooled != null) try {
+                pooled.close();
+            } catch (Exception ignored) {
+            }
+            if (meanWeights != null) try {
+                meanWeights.close();
+            } catch (Exception ignored) {
+            }
+            if (mask != null) try {
+                mask.close();
+            } catch (Exception ignored) {
+            }
+            if (xOut != null) try {
+                xOut.close();
+            } catch (Exception ignored) {
+            }
+            if (xIn != null) try {
+                xIn.close();
+            } catch (Exception ignored) {
+            }
             throw (ex instanceof DirectMlRuntimeException d) ? d
                     : new DirectMlRuntimeException("Failed to allocate batched stack for bucket="
                             + bucket + ", batch=" + batch, ex);
