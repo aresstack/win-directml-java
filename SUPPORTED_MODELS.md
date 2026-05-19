@@ -76,11 +76,11 @@ wire format.
 | Java 21 (host)                     | code uses the FFM API                                                                                     |
 | Java 8 (sidecar client only)       | the sidecar client artifact is compiled with `-release 8`                                                 |
 
-CPU-only is supported for parity testing and for callers that can
-tolerate the ~30× slowdown vs DirectML — every embedding and reranker
-ships with a `CpuXxxEncoder` reference implementation that is
-byte-identical to the GPU path on the per-element tolerance documented
-in the test suite.
+CPU backends are supported as a local fallback and for smaller local
+workloads — every embedding and reranker ships with a `CpuXxxEncoder`
+implementation that is byte-identical to the GPU path on the per-element
+tolerance documented in the test suite, making it suitable for use
+without a DirectML-capable GPU.
 
 ## 6. Roadmap
 
