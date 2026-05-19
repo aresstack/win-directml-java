@@ -443,3 +443,73 @@ See `directml-sidecar/PROTOCOL.md` for the full request/response shape.
     (`multilingual-e5-large-instruct`, JinaBERT v3, …).
 
 Issue backlog: [`win-directml-java-issues.md`](win-directml-java-issues.md).
+
+## Releases / Maven Central
+
+Published artefacts under `com.aresstack:` (Sonatype Central Portal):
+
+```gradle
+dependencies {
+    implementation 'com.aresstack:directml-config:0.1.0-beta.1'
+    implementation 'com.aresstack:directml-windows-bindings:0.1.0-beta.1'
+    implementation 'com.aresstack:directml-encoder:0.1.0-beta.1'
+    implementation 'com.aresstack:directml-inference:0.1.0-beta.1'
+    // Pure-Java-8 client for the sidecar (separate JVM):
+    implementation 'com.aresstack:directml-sidecar-client-java8:0.1.0-beta.1'
+}
+```
+
+```xml
+<dependency>
+    <groupId>com.aresstack</groupId>
+    <artifactId>directml-encoder</artifactId>
+    <version>0.1.0-beta.1</version>
+</dependency>
+```
+
+Module overview (see [`SUPPORTED_MODELS.md`](SUPPORTED_MODELS.md) and
+[`MODEL_LICENSES.md`](MODEL_LICENSES.md) for what runs on what):
+| Coordinate | Java | Purpose |
+|---|---|---|
+| `com.aresstack:directml-config` | 21 | Backend / feature-level / GPU-adapter configuration types. |
+| `com.aresstack:directml-windows-bindings` | 21 (preview) | FFM bindings to D3D12 / DXGI / DirectML + low-level kernel
+primitives. |
+| `com.aresstack:directml-encoder` | 21 (preview) | MiniLM, E5, cross-encoder reranker pipelines with CPU + DirectML
+parity. |
+| `com.aresstack:directml-inference` | 21 (preview) | Phi-3-mini DirectML inference pipeline. |
+| `com.aresstack:directml-sidecar-client-java8` | 8 | JSON-RPC client to talk to the sidecar from a Java-8 host JVM. |
+The `directml-sidecar` server application is **not** on Maven Central;
+it is shipped as a self-contained distribution zip via the
+[GitHub Releases](https://github.com/aresstack/win-directml-java/releases)
+page on every `v*` tag.
+
+### Releasing a new version
+
+Locally:
+
+```powershell
+# 1. Make sure the suite is green.
+./gradlew :directml-windows-bindings:test :directml-encoder:test `
+          :directml-sidecar-client-java8:test :directml-sidecar:test
+# 2. Cut and push the tag (updates README, commits, tags, pushes).
+.\release.ps1 0.1.0-beta.1
+```
+
+The `.github/workflows/release.yml` workflow then runs
+
+```
+./gradlew -Pversion=$Version -x test publishAggregationToCentralPortal
+```
+
+against the Sonatype Central Portal (autoPublish=true). The sidecar
+distribution zip is attached to the matching GitHub Release.
+Required GitHub-Actions secrets on the `aresstack/win-directml-java` repo:
+| Secret | Source |
+|---|---|
+| `CENTRAL_USERNAME` | Sonatype Central Portal user-token |
+| `CENTRAL_PASSWORD` | Sonatype Central Portal password-token |
+| `GPG_PRIVATE_KEY` | `gpg --armor --export-secret-keys <KEY_ID>` |
+| `GPG_PASSPHRASE` | passphrase of the above key |
+The publishing configuration itself lives in the root `build.gradle`
+(plugin `com.gradleup.nmcp` 0.1.5) and is applied to every module
+listed under `ext.publishableModules`.

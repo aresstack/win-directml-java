@@ -1,0 +1,55 @@
+win-directml-java
+Copyright (c) 2026 AresStack
+
+This product includes software developed by AresStack
+(https://github.com/aresstack/win-directml-java).
+
+Licensed under the MIT License. See LICENSE for the full text.
+
+================================================================================
+Third-party components
+================================================================================
+
+This project links against the following third-party libraries at runtime.
+Each is governed by its own license; the texts are linked from the upstream
+projects.
+
+  * SLF4J – api (org.slf4j:slf4j-api)
+      https://www.slf4j.org/
+      MIT License
+
+  * Logback (test runtime only; ch.qos.logback:logback-classic)
+      https://logback.qos.ch/
+      Dual EPL-1.0 / LGPL-2.1
+
+  * Jackson Databind (com.fasterxml.jackson.core:jackson-databind, used by
+    directml-sidecar-client-java8 and the inference / encoder JSON loaders)
+      https://github.com/FasterXML/jackson
+      Apache License 2.0
+
+  * JUnit Jupiter (test scope only)
+      https://junit.org/junit5/
+      Eclipse Public License 2.0
+
+================================================================================
+Microsoft DirectML runtime
+================================================================================
+
+win-directml-java loads the Microsoft DirectML runtime (DirectML.dll) and
+the Direct3D 12 runtime that ship with Windows 10 / Windows 11 or with a
+side-by-side DirectML redistributable. These binaries are NOT shipped with
+this project; they are loaded from the host operating system or from a
+user-supplied directory configured via the `windirectml.directml.dll`
+system property. Their license terms are governed by Microsoft.
+
+================================================================================
+Bundled and downloadable model checkpoints
+================================================================================
+
+Model weights downloaded by the `scripts/download-*.ps1` helpers and any
+weights bundled under `model/` are licensed by their respective upstream
+projects. See `MODEL_LICENSES.md` for the per-model attribution and
+license terms (sentence-transformers MiniLM, intfloat E5, cross-encoder
+MS-MARCO MiniLM, Microsoft Phi-3-mini). The win-directml-java
+artifacts published to Maven Central do NOT include any model weights.
+

@@ -1,14 +1,28 @@
 plugins {
     id 'java'
+    id 'com.gradleup.nmcp' version '0.1.5' apply false
 }
 
 allprojects {
     group = 'com.aresstack'
-    version = '0.1.0-SNAPSHOT'
+    version = project.findProperty('version') == 'unspecified'
+            ? '0.1.0-SNAPSHOT' : project.version
     repositories {
         mavenCentral()
     }
 }
+
+// ── Publishable modules ─────────────────────────────────────────────
+// Modules that get published to Maven Central as separate artifacts.
+// Sidecar/Workbench applications are shipped as zips via GitHub Releases
+// (`./gradlew :directml-sidecar:distZip`) and are not on Central.
+ext.publishableModules = [
+        'directml-config',
+        'directml-windows-bindings',
+        'directml-inference',
+        'directml-encoder',
+        'directml-sidecar-client-java8',
+]
 
 subprojects {
     apply plugin: 'java-library'
@@ -72,5 +86,127 @@ subprojects { sub ->
             testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
             testRuntimeOnly 'ch.qos.logback:logback-classic:1.5.6'
         }
+    }
+}
+// --------------------------------------------------------------------
+// Maven Central publishing (Sonatype Central Portal via nmcp)
+// --------------------------------------------------------------------
+//
+// Triggers:
+//   ./gradlew publishToMavenLocal                  # local install for testing
+//   ./gradlew publishAggregationToCentralPortal    # upload all publishable
+//                                                    modules to Central
+//                                                    Portal (CI release job)
+//
+// Required environment / Gradle properties for a real release:
+//   ORG_GRADLE_PROJECT_centralUsername       Sonatype Central Portal user-token
+//   ORG_GRADLE_PROJECT_centralPassword       Sonatype Central Portal password-token
+//   ORG_GRADLE_PROJECT_signingInMemoryKey    ASCII-armored GPG private key
+//   ORG_GRADLE_PROJECT_signingInMemoryKeyPassword   GPG passphrase
+//
+// Signing is skipped automatically for SNAPSHOT builds and when the
+// signing key is absent (so `publishToMavenLocal` works without any
+// secrets).
+apply plugin: 'com.gradleup.nmcp'
+apply plugin: 'maven-publish'
+ext.pomMetadata = { pom, prj ->
+    pom.name = provider { prj.findProperty('POM_NAME') ?: prj.name }
+    pom.description = provider {
+        prj.findProperty('POM_DESCRIPTION')
+                ?: 'Pure-Java DirectML runtime, encoders and sidecar for Windows.'
+    }
+    pom.url = 'https://github.com/aresstack/win-directml-java'
+    pom.licenses {
+        license {
+            name = 'MIT'
+            url = 'https://opensource.org/licenses/MIT'
+            distribution = 'repo'
+        }
+    }
+    pom.developers {
+        developer {
+            id = 'miguel0888'
+            name = 'miguel0888'
+        }
+    }
+    pom.scm {
+        connection = 'scm:git:git://github.com/aresstack/win-directml-java.git'
+        developerConnection = 'scm:git:ssh://git@github.com/aresstack/win-directml-java.git'
+        url = 'https://github.com/aresstack/win-directml-java'
+        tag = 'HEAD'
+    }
+    pom.issueManagement {
+        system = 'GitHub'
+        url = 'https://github.com/aresstack/win-directml-java/issues'
+    }
+}
+configure(subprojects.findAll { it.name in publishableModules }) {
+    apply plugin: 'maven-publish'
+    apply plugin: 'signing'
+    java {
+        withSourcesJar()
+        withJavadocJar()
+    }
+    // Bundle LICENSE + NOTICE into every published jar so downstream
+    // consumers always see the attribution required by section 4 of
+    // the MIT License.
+    tasks.withType(Jar).configureEach {
+        from(rootProject.file('LICENSE')) { into 'META-INF' }
+        from(rootProject.file('NOTICE')) { into 'META-INF' }
+    }
+    // Real-model BERT weights and large internal Javadoc make
+    // `doclint` too noisy to enforce – mirror the win-proxy-java setup
+    // and run javadoc with lenient settings.
+    tasks.withType(Javadoc).configureEach {
+        options.encoding = 'UTF-8'
+        if (options instanceof org.gradle.external.javadoc.StandardJavadocDocletOptions) {
+            options.addStringOption('Xdoclint:none', '-quiet')
+            // Java-21 modules use FFM preview APIs (Arena, MemorySegment).
+            // Javadoc must be told explicitly – the compiler flag set in
+            // the per-module config does not propagate to the javadoc tool.
+            if (project.findProperty('java8Module') != true) {
+                options.addBooleanOption('-enable-preview', true)
+                options.addStringOption('-source', '21')
+            }
+        }
+    }
+    afterEvaluate {
+        publishing {
+            publications {
+                maven(MavenPublication) {
+                    from components.java
+                    artifactId = project.name
+                    pom { p ->
+                        rootProject.ext.pomMetadata(p, project)
+                    }
+                }
+            }
+        }
+        signing {
+            def signingKey = providers.gradleProperty('signingInMemoryKey').orNull
+            def signingPwd = providers.gradleProperty('signingInMemoryKeyPassword').orNull
+            required = {
+                gradle.taskGraph.hasTask("publishAggregationToCentralPortal")
+                        && !version.toString().endsWith('-SNAPSHOT')
+            }
+            if (signingKey != null) {
+                useInMemoryPgpKeys(signingKey, signingPwd)
+            }
+            sign publishing.publications.maven
+        }
+    }
+}
+// Aggregate-publish all publishable modules to the Sonatype Central
+// Portal in one upload. Configured via `centralPortal { � }` at the
+// root project; credentials come from
+// ORG_GRADLE_PROJECT_centralUsername / centralPassword.
+nmcp {
+    centralPortal {
+        username = providers.gradleProperty('centralUsername')
+        password = providers.gradleProperty('centralPassword')
+        // Auto-publish after validation passes. Set to 'USER_MANAGED'
+        // for a stop-the-line manual sanity check in the Central Portal
+        // web UI before going live.
+        publishingType = 'AUTOMATIC'
     }
 }

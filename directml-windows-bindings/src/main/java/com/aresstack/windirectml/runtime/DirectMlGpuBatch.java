@@ -51,8 +51,10 @@ import java.util.List;
  *       block.dispatch(xIn, w, mask, xOut);
  *   }
  * }</pre>
- * Batches are <b>not</b> re-entrant – attempting to {@link #begin}
- * inside an active batch throws.
+ * Batches are <b>re-entrant</b>: a nested {@link #begin(WindowsBindings)}
+ * call on the same thread returns a no-op handle that shares state with
+ * the outer batch; only the outermost {@link #close()} drains the fence
+ * and releases the retained command lists.
  */
 public class DirectMlGpuBatch implements AutoCloseable {
 
