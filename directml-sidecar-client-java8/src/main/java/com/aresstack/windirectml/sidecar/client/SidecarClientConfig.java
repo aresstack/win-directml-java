@@ -43,6 +43,20 @@ public final class SidecarClientConfig {
      * {@code model/e5-base-sts-en-de}).
      */
     private String e5ModelDirectory;
+    /**
+     * Backend selector for the cross-encoder reranker, forwarded as
+     * {@code -Drerank.backend=<value>}. Accepted values:
+     * {@code auto} (default), {@code directml}, {@code cpu}. Unknown
+     * values cause the sidecar to exit with code 2.
+     */
+    private String rerankBackend = "auto";
+    /**
+     * Filesystem path to the cross-encoder reranker model directory,
+     * forwarded as {@code -Drerank.modelDir=<value>}. When blank, the
+     * sidecar auto-discovers conventional locations under {@code model/}
+     * (e.g. {@code model/cross-encoder-ms-marco-MiniLM-L-6-v2}).
+     */
+    private String rerankModelDirectory;
     private boolean directmlDebug = false;
     /**
      * Optional override DLL path forwarded as {@code -Dwindirectml.directml.dll}.
@@ -114,6 +128,22 @@ public final class SidecarClientConfig {
 
     public void setE5ModelDirectory(String v) {
         this.e5ModelDirectory = v;
+    }
+
+    public String getRerankBackend() {
+        return rerankBackend;
+    }
+
+    public void setRerankBackend(String v) {
+        this.rerankBackend = v;
+    }
+
+    public String getRerankModelDirectory() {
+        return rerankModelDirectory;
+    }
+
+    public void setRerankModelDirectory(String v) {
+        this.rerankModelDirectory = v;
     }
 
     public boolean isDirectmlDebug() {

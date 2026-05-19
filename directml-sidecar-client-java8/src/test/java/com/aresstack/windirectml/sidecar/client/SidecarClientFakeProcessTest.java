@@ -232,5 +232,72 @@ class SidecarClientFakeProcessTest {
         assertFalse(client.isRunning());
         assertEquals(3, client.exitValue());
     }
+
+    @Test
+    void rerankRoundTripParsesResult() throws Exception {
+        FakeSidecarProcess fake = new FakeSidecarProcess();
+        SidecarClientConfig cfg = new SidecarClientConfig();
+        cfg.setSidecarJarPath("fake");
+        cfg.setRequestTimeoutMillis(2000L);
+        client = new SidecarClient(cfg, fake);
+        client.start();
+
+        final RerankResult[] captured = new RerankResult[1];
+        final Throwable[] failure = new Throwable[1];
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    java.util.List<String> docs = java.util.Arrays.asList(
+                            "first candidate document",
+                            "second candidate document",
+                            "third candidate document");
+                    captured[0] = client.rerank("what is the query?", docs, 2);
+                } catch (Throwable e) {
+                    failure[0] = e;
+                }
+            }
+        });
+        t.start();
+
+        String reqLine = fake.waitForRequest();
+        // method must be "rerank"
+        assertTrue(reqLine.contains("\"method\":\"rerank\""),
+                "expected method=rerank, got: " + reqLine);
+        // query/documents/topN must be serialised in params
+        com.fasterxml.jackson.databind.JsonNode req = client.getMapperForTesting().readTree(reqLine);
+        com.fasterxml.jackson.databind.JsonNode params = req.get("params");
+        assertNotNull(params, "rerank request must have params");
+        assertEquals("what is the query?", params.get("query").asText());
+        com.fasterxml.jackson.databind.JsonNode docsNode = params.get("documents");
+        assertNotNull(docsNode, "documents must be serialised");
+        assertTrue(docsNode.isArray());
+        assertEquals(3, docsNode.size());
+        assertEquals("first candidate document", docsNode.get(0).asText());
+        assertEquals("third candidate document", docsNode.get(2).asText());
+        assertEquals(2, params.get("topN").asInt());
+
+        // Reply with a scripted ranked result (already sorted by score desc on the sidecar).
+        long id = req.get("id").asLong();
+        fake.enqueueLine("{\"jsonrpc\":\"2.0\",\"id\":" + id
+                + ",\"result\":{"
+                + "\"model\":\"cross-encoder/ms-marco-MiniLM-L-6-v2\","
+                + "\"results\":["
+                + "{\"index\":2,\"score\":4.25},"
+                + "{\"index\":0,\"score\":-0.5}"
+                + "]}}");
+        t.join(3000L);
+        if (failure[0] != null) {
+            fail("rerank() threw: " + failure[0].getMessage());
+        }
+        RerankResult r = captured[0];
+        assertNotNull(r, "rerank() returned null");
+        assertEquals("cross-encoder/ms-marco-MiniLM-L-6-v2", r.getModel());
+        assertEquals(2, r.getItems().size());
+        assertEquals(2, r.getItems().get(0).getIndex());
+        assertEquals(4.25, r.getItems().get(0).getScore(), 1e-9);
+        assertEquals(0, r.getItems().get(1).getIndex());
+        assertEquals(-0.5, r.getItems().get(1).getScore(), 1e-9);
+    }
 }
 

@@ -47,6 +47,9 @@ public final class ConfigPanel extends JPanel {
     private final JTextField e5ModelDirField = new JTextField("");
     private final JComboBox<String> backendBox =
             new JComboBox<String>(new String[]{"auto", "directml", "cpu"});
+    private final JTextField rerankModelDirField = new JTextField("");
+    private final JComboBox<String> rerankBackendBox =
+            new JComboBox<String>(new String[]{"auto", "directml", "cpu"});
     private final JCheckBox debugBox = new JCheckBox("windirectml.debug=true");
     private final JTextField dllOverrideField = new JTextField("");
     private final JTextField timeoutField = new JTextField("30000");
@@ -81,6 +84,8 @@ public final class ConfigPanel extends JPanel {
         addRow(form, c, row++, "E5 variant", e5VariantBox);
         addRow(form, c, row++, "E5 directory (optional)", e5ModelDirField);
         addRow(form, c, row++, "embed.backend", backendBox);
+        addRow(form, c, row++, "Reranker directory (optional)", rerankModelDirField);
+        addRow(form, c, row++, "rerank.backend", rerankBackendBox);
         addRow(form, c, row++, "DirectML.dll override", dllOverrideField);
         addRow(form, c, row++, "Extra JVM args", extraJvmField);
         addRow(form, c, row++, "Request timeout (ms)", timeoutField);
@@ -141,6 +146,7 @@ public final class ConfigPanel extends JPanel {
             }
         };
         backendBox.addActionListener(applyAndPreview);
+        rerankBackendBox.addActionListener(applyAndPreview);
         debugBox.addActionListener(applyAndPreview);
         embedModelBox.addActionListener(applyAndPreview);
         e5VariantBox.addActionListener(applyAndPreview);
@@ -215,6 +221,8 @@ public final class ConfigPanel extends JPanel {
         cfg.setE5Variant((String) e5VariantBox.getSelectedItem());
         cfg.setE5ModelDirectory(e5ModelDirField.getText().trim());
         cfg.setEmbedBackend((String) backendBox.getSelectedItem());
+        cfg.setRerankModelDirectory(rerankModelDirField.getText().trim());
+        cfg.setRerankBackend((String) rerankBackendBox.getSelectedItem());
         cfg.setDirectmlDebug(debugBox.isSelected());
         cfg.setDirectmlDllOverride(dllOverrideField.getText().trim());
         cfg.setExtraJvmArgs(extraJvmField.getText().trim());

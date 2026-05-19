@@ -250,44 +250,84 @@ public final class DirectMlPhi3Sidecar {
             }
         }
 
-        // Reranker (optional). When no model directory is present the
-        // rerank handler stays in NOT_IMPLEMENTED mode – same fallback
-        // pattern as embed. Only DirectML is offered for now; if the
-        // GPU adapter cannot serve DirectML we fall back to the CPU
-        // reranker rather than refusing to start.
+        // Reranker (optional). When no model directory is present and
+        // backend=auto, the rerank handler stays in NOT_IMPLEMENTED mode –
+        // same fallback pattern as embed. Forced modes (cpu/directml) fail
+        // visibly (exit 3) when the model is missing or the backend cannot
+        // be loaded; an unknown -Drerank.backend value aborts with exit 2.
+        RerankerBackendMode rerankMode;
+        try {
+            rerankMode = RerankerBackendMode.parse(System.getProperty("rerank.backend"));
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid -Drerank.backend value: {}", e.getMessage());
+            System.exit(2);
+            return;
+        }
         Path rerankDir = resolveRerankerDir();
+        String rerankMissingMsg = "No reranker model directory found "
+                + "(checked -Drerank.modelDir and "
+                + "model/cross-encoder-ms-marco-MiniLM-L-6-v2/)";
         if (rerankDir == null) {
-            log.info("No reranker model directory found "
-                    + "(checked -Drerank.modelDir and model/cross-encoder-ms-marco-MiniLM-L-6-v2/) "
-                    + "– rerank handler will report not-implemented");
+            if (rerankMode == RerankerBackendMode.CPU
+                    || rerankMode == RerankerBackendMode.DIRECTML) {
+                log.error("rerank.backend={} requested but {}",
+                        rerankMode.token(), rerankMissingMsg);
+                sidecar.status.setRerankerBackend("error");
+                sidecar.status.setRerankerReady(false);
+                sidecar.status.setLastError("rerank.backend=" + rerankMode.token()
+                        + " requested but " + rerankMissingMsg.toLowerCase(java.util.Locale.ROOT));
+                System.exit(3);
+                return;
+            }
+            log.info("{} – rerank handler will report not-implemented", rerankMissingMsg);
         } else {
-            String want = System.getProperty("rerank.backend", "auto").trim().toLowerCase(java.util.Locale.ROOT);
             Reranker rr = null;
             String rerankBackend = null;
+            Exception forcedFailure = null;
             try {
-                if (!"cpu".equals(want)) {
+                if (rerankMode == RerankerBackendMode.DIRECTML
+                        || rerankMode == RerankerBackendMode.AUTO) {
                     try {
                         rr = BertCrossEncoderRerankers.loadDirectMl(rerankDir);
                         rerankBackend = "directml";
                     } catch (Exception gpuFail) {
-                        if ("directml".equals(want)) {
+                        if (rerankMode == RerankerBackendMode.DIRECTML) {
+                            forcedFailure = gpuFail;
                             throw gpuFail;
                         }
                         log.warn("Reranker DirectML init failed ({}), falling back to CPU",
                                 gpuFail.getMessage());
                     }
                 }
-                if (rr == null) {
-                    rr = BertCrossEncoderRerankers.loadCpu(rerankDir);
-                    rerankBackend = "cpu";
+                if (rr == null && (rerankMode == RerankerBackendMode.CPU
+                        || rerankMode == RerankerBackendMode.AUTO)) {
+                    try {
+                        rr = BertCrossEncoderRerankers.loadCpu(rerankDir);
+                        rerankBackend = "cpu";
+                    } catch (Exception cpuFail) {
+                        if (rerankMode == RerankerBackendMode.CPU) {
+                            forcedFailure = cpuFail;
+                            throw cpuFail;
+                        }
+                        throw cpuFail;
+                    }
                 }
                 sidecar.withRerankerBackend(rerankBackend, rr);
-                log.info("Reranker backend ready: backend={} modelDir={}", rerankBackend, rerankDir);
+                log.info("Reranker backend ready: mode={} backend={} modelDir={}",
+                        rerankMode.token(), rerankBackend, rerankDir);
             } catch (Exception e) {
-                log.error("Reranker initialisation failed: {}", e.getMessage(), e);
+                log.error("Reranker initialisation failed (mode={}): {}",
+                        rerankMode.token(), e.getMessage(), e);
                 sidecar.status.setRerankerBackend("error");
                 sidecar.status.setRerankerReady(false);
-                sidecar.status.setLastError("rerank initialisation failed: " + e.getMessage());
+                sidecar.status.setLastError("rerank.backend=" + rerankMode.token()
+                        + " failed: " + e.getMessage());
+                if (forcedFailure != null
+                        || rerankMode == RerankerBackendMode.CPU
+                        || rerankMode == RerankerBackendMode.DIRECTML) {
+                    System.exit(3);
+                    return;
+                }
             }
         }
 

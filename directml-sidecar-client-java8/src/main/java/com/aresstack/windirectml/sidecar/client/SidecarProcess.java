@@ -265,6 +265,12 @@ public class SidecarProcess {
         if (!isBlank(cfg.getE5ModelDirectory())) {
             cmd.add("-De5.modelDir=" + cfg.getE5ModelDirectory());
         }
+        if (!isBlank(cfg.getRerankBackend())) {
+            cmd.add("-Drerank.backend=" + cfg.getRerankBackend());
+        }
+        if (!isBlank(cfg.getRerankModelDirectory())) {
+            cmd.add("-Drerank.modelDir=" + cfg.getRerankModelDirectory());
+        }
         cmd.add("-Dwindirectml.debug=" + Boolean.toString(cfg.isDirectmlDebug()));
         if (!isBlank(cfg.getDirectmlDllOverride())) {
             cmd.add("-Dwindirectml.directml.dll=" + cfg.getDirectmlDllOverride());
