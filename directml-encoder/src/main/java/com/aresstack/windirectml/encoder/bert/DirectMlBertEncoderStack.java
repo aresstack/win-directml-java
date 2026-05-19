@@ -140,13 +140,13 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
     /**
      * Dispatch the full encoder pipeline.
      *
-     * @param xIn          pre-summed embeddings {@code [seq, hidden]} F32.
+     * @param xIn          pre-summed embeddings {@code [batch * seq, hidden]} F32.
      * @param embLnGamma   embedding-LN gain {@code [hidden]}.
      * @param embLnBeta    embedding-LN bias {@code [hidden]}.
      * @param layerWeights per-layer weights ({@code size() == numLayers}).
-     * @param mask         additive float mask {@code [seq]} (0 / -1e9) if
+     * @param mask         additive float mask {@code [batch * seq]} (0 / -1e9) if
      *                     {@code hasMask=true}, else null.
-     * @param xOut         destination {@code [seq, hidden]} after the
+     * @param xOut         destination {@code [batch * seq, hidden]} after the
      *                     last LayerNorm.
      */
     public void dispatch(DirectMlTensor xIn,

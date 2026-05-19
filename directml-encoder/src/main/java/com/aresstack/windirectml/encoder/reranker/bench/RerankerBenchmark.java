@@ -31,7 +31,7 @@ import java.util.Locale;
  * </pre>
  * The benchmark is intentionally simple – no JMH, no statistical
  * smoothing – it only needs to make the order-of-magnitude difference
- * between sequential and CLS-only readback visible.
+ * between sequential per-pair execution and bucket-batched DirectML reranking visible.
  */
 public final class RerankerBenchmark {
 
