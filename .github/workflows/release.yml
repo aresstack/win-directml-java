@@ -42,7 +42,7 @@ jobs:
             -Pversion=${{ steps.ver.outputs.version }} \
             --no-daemon \
             -x test \
-            publishAggregationToCentralPortal
+            publishAllPublicationsToCentralPortal
 
       - name: Build sidecar distribution zip
         run: ./gradlew --no-daemon -Pversion=${{ steps.ver.outputs.version }} :directml-sidecar:distZip
@@ -58,4 +58,3 @@ jobs:
             directml-sidecar-workbench/build/distributions/*.zip
           tag_name: ${{ github.ref_name }}
           fail_on_unmatched_files: true
-
