@@ -61,13 +61,22 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
 
     private final DirectMlLinearKernel qLinear, kLinear, vLinear, attnOutLinear;
     private final DirectMlLinearKernel mlpInterLinear, mlpOutLinear;
-    private final DirectMlHeadLayoutKernel layoutSeqToHead;
+    // Three independent SEQ→HEAD layout kernels for Q/K/V – needed so the
+    // submission-coalescing batch (DirectMlGpuBatch) can fire three
+    // back-to-back layout dispatches without one overwriting the previous
+    // call's descriptor-heap slots before the GPU has consumed them.
+    private final DirectMlHeadLayoutKernel layoutSeqToHeadQ;
+    private final DirectMlHeadLayoutKernel layoutSeqToHeadK;
+    private final DirectMlHeadLayoutKernel layoutSeqToHeadV;
     private final DirectMlHeadLayoutKernel layoutHeadToSeq;
     private final DirectMlAttentionKernel attention;
     private final DirectMlLayerNormKernel attnLayerNorm;
     private final DirectMlLayerNormKernel outLayerNorm;
     private final GeluKernel gelu;
-    private final DirectMlAddKernel residualAdd;
+    // Two residual-add kernels (post-attention, post-MLP) – same rationale
+    // as the three layout kernels above.
+    private final DirectMlAddKernel residualAdd1;
+    private final DirectMlAddKernel residualAdd2;
 
     private final GpuBuffer qBuf, kBuf, vBuf;
     private final GpuBuffer qH, kH, vH, attnH;
@@ -122,11 +131,11 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
         this.hasMask = hasMask;
 
         DirectMlLinearKernel qL = null, kL = null, vL = null, oL = null, mlpI = null, mlpO = null;
-        DirectMlHeadLayoutKernel lFwd = null, lBwd = null;
+        DirectMlHeadLayoutKernel lFwdQ = null, lFwdK = null, lFwdV = null, lBwd = null;
         DirectMlAttentionKernel att = null;
         DirectMlLayerNormKernel ln1 = null, ln2 = null;
         GeluKernel g = null;
-        DirectMlAddKernel add = null;
+        DirectMlAddKernel add1 = null, add2 = null;
 
         GpuBuffer bq = null, bk = null, bv = null;
         GpuBuffer bqH = null, bkH = null, bvH = null, baH = null;
@@ -143,14 +152,17 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
             mlpI = new DirectMlLinearKernel(ctx, rows, hidden, intermediate, true);
             mlpO = new DirectMlLinearKernel(ctx, rows, intermediate, hidden, true);
 
-            lFwd = DirectMlHeadLayoutKernel.seqMajorToHeadMajor(ctx, batch, seq, heads, headDim);
+            lFwdQ = DirectMlHeadLayoutKernel.seqMajorToHeadMajor(ctx, batch, seq, heads, headDim);
+            lFwdK = DirectMlHeadLayoutKernel.seqMajorToHeadMajor(ctx, batch, seq, heads, headDim);
+            lFwdV = DirectMlHeadLayoutKernel.seqMajorToHeadMajor(ctx, batch, seq, heads, headDim);
             lBwd = DirectMlHeadLayoutKernel.headMajorToSeqMajor(ctx, batch, seq, heads, headDim);
 
             att = new DirectMlAttentionKernel(ctx, batch, heads, seq, headDim, scale, hasMask);
             ln1 = new DirectMlLayerNormKernel(ctx, rows, hidden, eps);
             ln2 = new DirectMlLayerNormKernel(ctx, rows, hidden, eps);
             g = GeluKernel.create(ctx, rows * intermediate);
-            add = new DirectMlAddKernel(ctx, rows * hidden);
+            add1 = new DirectMlAddKernel(ctx, rows * hidden);
+            add2 = new DirectMlAddKernel(ctx, rows * hidden);
 
             long hiddenBytes = (long) rows * hidden * Float.BYTES;
             long intermediateBytes = (long) rows * intermediate * Float.BYTES;
@@ -172,11 +184,15 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
 
             this.qLinear = qL; this.kLinear = kL; this.vLinear = vL; this.attnOutLinear = oL;
             this.mlpInterLinear = mlpI; this.mlpOutLinear = mlpO;
-            this.layoutSeqToHead = lFwd; this.layoutHeadToSeq = lBwd;
+            this.layoutSeqToHeadQ = lFwdQ;
+            this.layoutSeqToHeadK = lFwdK;
+            this.layoutSeqToHeadV = lFwdV;
+            this.layoutHeadToSeq = lBwd;
             this.attention = att;
             this.attnLayerNorm = ln1; this.outLayerNorm = ln2;
             this.gelu = g;
-            this.residualAdd = add;
+            this.residualAdd1 = add1;
+            this.residualAdd2 = add2;
 
             this.qBuf = bq; this.kBuf = bk; this.vBuf = bv;
             this.qH = bqH; this.kH = bkH; this.vH = bvH; this.attnH = baH;
@@ -191,8 +207,16 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
             closeQuiet(bMid); closeQuiet(bRes1); closeQuiet(bOut); closeQuiet(bMerge);
             closeQuiet(baH); closeQuiet(bvH); closeQuiet(bkH); closeQuiet(bqH);
             closeQuiet(bv); closeQuiet(bk); closeQuiet(bq);
-            closeQuiet(add); closeQuiet(g); closeQuiet(ln2); closeQuiet(ln1); closeQuiet(att);
-            closeQuiet(lBwd); closeQuiet(lFwd);
+            closeQuiet(add2);
+            closeQuiet(add1);
+            closeQuiet(g);
+            closeQuiet(ln2);
+            closeQuiet(ln1);
+            closeQuiet(att);
+            closeQuiet(lBwd);
+            closeQuiet(lFwdV);
+            closeQuiet(lFwdK);
+            closeQuiet(lFwdQ);
             closeQuiet(mlpO); closeQuiet(mlpI); closeQuiet(oL); closeQuiet(vL); closeQuiet(kL); closeQuiet(qL);
             throw (e instanceof DirectMlRuntimeException d) ? d
                     : new DirectMlRuntimeException("Failed to build DirectMlBertEncoderLayerBlock", e);
@@ -236,9 +260,9 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
         DirectMlTensor qHT = headMajor(qH);
         DirectMlTensor kHT = headMajor(kH);
         DirectMlTensor vHT = headMajor(vH);
-        layoutSeqToHead.dispatch(qT, qHT);
-        layoutSeqToHead.dispatch(kT, kHT);
-        layoutSeqToHead.dispatch(vT, vHT);
+        layoutSeqToHeadQ.dispatch(qT, qHT);
+        layoutSeqToHeadK.dispatch(kT, kHT);
+        layoutSeqToHeadV.dispatch(vT, vHT);
 
         DirectMlTensor attnHT = headMajor(attnH);
         attention.dispatch(qHT, kHT, vHT, mask, attnHT, (float) (1.0 / Math.sqrt(headDim)));
@@ -252,7 +276,7 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
                 bias1D(w.attnOutBias(), hidden), attnOutT);
 
         DirectMlTensor residual1T = hidden2D(residual1);
-        residualAdd.dispatch(xIn, attnOutT, residual1T);
+        residualAdd1.dispatch(xIn, attnOutT, residual1T);
         DirectMlTensor xMidT = hidden2D(xMid);
         attnLayerNorm.dispatch(residual1T, bias1D(w.attnLnGamma(), hidden),
                 bias1D(w.attnLnBeta(), hidden), xMidT, eps);
@@ -266,7 +290,7 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
                 bias1D(w.mlpOutBias(), hidden), mlpOutT);
 
         DirectMlTensor residual2T = hidden2D(residual2);
-        residualAdd.dispatch(xMidT, mlpOutT, residual2T);
+        residualAdd2.dispatch(xMidT, mlpOutT, residual2T);
         outLayerNorm.dispatch(residual2T, bias1D(w.outLnGamma(), hidden),
                 bias1D(w.outLnBeta(), hidden), xOut, eps);
     }
@@ -321,10 +345,15 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
         closeQuiet(xMid); closeQuiet(residual1); closeQuiet(attnOutBuf); closeQuiet(attnMerged);
         closeQuiet(attnH); closeQuiet(vH); closeQuiet(kH); closeQuiet(qH);
         closeQuiet(vBuf); closeQuiet(kBuf); closeQuiet(qBuf);
-        closeQuiet(residualAdd); closeQuiet(gelu);
+        closeQuiet(residualAdd2);
+        closeQuiet(residualAdd1);
+        closeQuiet(gelu);
         closeQuiet(outLayerNorm); closeQuiet(attnLayerNorm);
         closeQuiet(attention);
-        closeQuiet(layoutHeadToSeq); closeQuiet(layoutSeqToHead);
+        closeQuiet(layoutHeadToSeq);
+        closeQuiet(layoutSeqToHeadV);
+        closeQuiet(layoutSeqToHeadK);
+        closeQuiet(layoutSeqToHeadQ);
         closeQuiet(mlpOutLinear); closeQuiet(mlpInterLinear);
         closeQuiet(attnOutLinear); closeQuiet(vLinear); closeQuiet(kLinear); closeQuiet(qLinear);
     }

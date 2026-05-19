@@ -457,7 +457,7 @@ public final class DirectMlAttentionKernel implements AttentionKernel, AutoClose
                 D3D12Bindings.setDescriptorHeaps(cl, stageOut.descHeap(), scratch);
                 DirectMlBindings.recordDispatch(cmdRecorder, cl, stageOut.compiled(), btOut);
 
-                D3D12Bindings.executeAndWait(dev, qm, cl, scratch);
+                D3D12Bindings.executeOrDefer(dev, qm, cl, alloc, scratch);
             } finally {
                 if (cl != null) DxgiBindings.release(cl);
                 DxgiBindings.release(alloc);

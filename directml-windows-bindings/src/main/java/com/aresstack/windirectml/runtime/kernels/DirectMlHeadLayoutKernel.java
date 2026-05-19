@@ -330,7 +330,7 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
                     transitionToUav(cl, yb, scratch);
                     D3D12Bindings.setDescriptorHeaps(cl, descriptorHeap, scratch);
                     DirectMlBindings.recordDispatch(cmdRecorder, cl, compiled, bt);
-                    D3D12Bindings.executeAndWait(dev, q, cl, scratch);
+                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
                 } finally {
                     if (cl != null) DxgiBindings.release(cl);
                     DxgiBindings.release(alloc);

@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.encoder.bert;
 
 import com.aresstack.windirectml.runtime.DirectMlContextImpl;
+import com.aresstack.windirectml.runtime.DirectMlGpuBatch;
 import com.aresstack.windirectml.runtime.DirectMlRuntimeException;
 import com.aresstack.windirectml.runtime.DirectMlTensor;
 import com.aresstack.windirectml.runtime.GpuBuffer;
@@ -174,19 +175,32 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
             throw new DirectMlRuntimeException("stack built with hasMask=false but mask!=null");
         }
 
-        // 1. Embedding-LN: xIn → scratchA
-        DirectMlTensor curT = hidden2D(scratchA);
-        embeddingLayerNorm.dispatch(xIn, embLnGamma, embLnBeta, curT, eps);
+        // ── Submission coalescing ──────────────────────────────────────────
+        // Every per-kernel dispatch below would normally pay its own fence
+        // wait inside D3D12Bindings.executeAndWait (~80–100 fences/text for
+        // MiniLM, which dominates the ~44 ms/text baseline). By wrapping the
+        // whole forward pass in a DirectMlGpuBatch, all kernels submit their
+        // command lists fire-and-forget; a single fence drain happens once
+        // in the try-with-resources close at the end.
+        try (DirectMlGpuBatch batch = DirectMlGpuBatch.begin(ctx.bindings())) {
+            // 1. Embedding-LN: xIn → scratchA
+            DirectMlTensor curT = hidden2D(scratchA);
+            embeddingLayerNorm.dispatch(xIn, embLnGamma, embLnBeta, curT, eps);
 
-        // 2. Layer cascade with ping-pong
-        GpuBuffer curBuf = scratchA;
-        for (int i = 0; i < numLayers; i++) {
-            boolean last = (i == numLayers - 1);
-            GpuBuffer nextBuf = last ? null : (curBuf == scratchA ? scratchB : scratchA);
-            DirectMlTensor inT  = hidden2D(curBuf);
-            DirectMlTensor outT = last ? xOut : hidden2D(nextBuf);
-            blocks.get(i).dispatch(inT, layerWeights.get(i), mask, outT);
-            curBuf = nextBuf;
+            // 2. Layer cascade with ping-pong
+            GpuBuffer curBuf = scratchA;
+            for (int i = 0; i < numLayers; i++) {
+                boolean last = (i == numLayers - 1);
+                GpuBuffer nextBuf = last ? null : (curBuf == scratchA ? scratchB : scratchA);
+                DirectMlTensor inT = hidden2D(curBuf);
+                DirectMlTensor outT = last ? xOut : hidden2D(nextBuf);
+                blocks.get(i).dispatch(inT, layerWeights.get(i), mask, outT);
+                curBuf = nextBuf;
+            }
+            if (log.isDebugEnabled()) {
+                log.debug("DirectMlBertEncoderStack.dispatch coalesced {} GPU submissions",
+                        batch.submissions());
+            }
         }
     }
 

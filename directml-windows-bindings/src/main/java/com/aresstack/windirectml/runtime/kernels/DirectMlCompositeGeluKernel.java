@@ -393,7 +393,7 @@ public final class DirectMlCompositeGeluKernel implements GeluKernel, AutoClosea
                     transitionInternalToUav(cl, outputRes, getOutState, setOutState, scratch);
                     D3D12Bindings.setDescriptorHeaps(cl, op.descriptorHeap, scratch);
                     DirectMlBindings.recordDispatch(cmdRecorder, cl, op.compiled, bt);
-                    D3D12Bindings.executeAndWait(dev, q, cl, scratch);
+                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
                 } finally {
                     if (cl != null) DxgiBindings.release(cl);
                     DxgiBindings.release(alloc);
@@ -442,7 +442,7 @@ public final class DirectMlCompositeGeluKernel implements GeluKernel, AutoClosea
                     transitionToUav(cl, yb, scratch);
                     D3D12Bindings.setDescriptorHeaps(cl, multiply.descriptorHeap, scratch);
                     DirectMlBindings.recordDispatch(cmdRecorder, cl, multiply.compiled, bt);
-                    D3D12Bindings.executeAndWait(dev, q, cl, scratch);
+                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
                 } finally {
                     if (cl != null) DxgiBindings.release(cl);
                     DxgiBindings.release(alloc);

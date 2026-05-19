@@ -418,7 +418,7 @@ public final class DirectMlL2NormalizeKernel implements L2NormalizeKernel, AutoC
                     transitionInternalToUav(cl, sBuf, () -> sBufState, s -> sBufState = s, scratch);
                     D3D12Bindings.setDescriptorHeaps(cl, sumSqOp.descriptorHeap, scratch);
                     DirectMlBindings.recordDispatch(cmdRecorder, cl, sumSqOp.compiled, bt);
-                    D3D12Bindings.executeAndWait(dev, q, cl, scratch);
+                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
                 } finally {
                     if (cl != null) DxgiBindings.release(cl);
                     DxgiBindings.release(alloc);
@@ -461,7 +461,7 @@ public final class DirectMlL2NormalizeKernel implements L2NormalizeKernel, AutoC
                     transitionInternalToUav(cl, nBuf, () -> nBufState, s -> nBufState = s, scratch);
                     D3D12Bindings.setDescriptorHeaps(cl, sqrtOp.descriptorHeap, scratch);
                     DirectMlBindings.recordDispatch(cmdRecorder, cl, sqrtOp.compiled, bt);
-                    D3D12Bindings.executeAndWait(dev, q, cl, scratch);
+                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
                 } finally {
                     if (cl != null) DxgiBindings.release(cl);
                     DxgiBindings.release(alloc);
@@ -507,7 +507,7 @@ public final class DirectMlL2NormalizeKernel implements L2NormalizeKernel, AutoC
                     transitionToUav(cl, yb, scratch);
                     D3D12Bindings.setDescriptorHeaps(cl, divideOp.descriptorHeap, scratch);
                     DirectMlBindings.recordDispatch(cmdRecorder, cl, divideOp.compiled, bt);
-                    D3D12Bindings.executeAndWait(dev, q, cl, scratch);
+                    D3D12Bindings.executeOrDefer(dev, q, cl, alloc, scratch);
                 } finally {
                     if (cl != null) DxgiBindings.release(cl);
                     DxgiBindings.release(alloc);

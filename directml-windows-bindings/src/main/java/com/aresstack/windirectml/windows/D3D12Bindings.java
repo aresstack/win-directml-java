@@ -727,9 +727,38 @@ public final class D3D12Bindings {
                 }
                 Thread.onSpinWait();
             }
+            com.aresstack.windirectml.runtime.DirectMlGpuBatch.recordStandaloneFenceWait();
         } finally {
             DxgiBindings.release(fence);
         }
+    }
+
+    /**
+     * Submit {@code cmdList} for execution. When a
+     * {@link com.aresstack.windirectml.runtime.DirectMlGpuBatch} is
+     * active on the calling thread the submission is fire-and-forget –
+     * the command list and {@code cmdAllocator} are {@code AddRef}'d so
+     * they outlive the kernel's local lifecycle, a global UAV barrier
+     * is recorded onto the list to enforce memory visibility to the next
+     * submission, and the actual fence wait is deferred to
+     * {@link com.aresstack.windirectml.runtime.DirectMlGpuBatch#close()}.
+     * Without an active batch this behaves exactly like
+     * {@link #executeAndWait(MemorySegment, MemorySegment, MemorySegment, Arena)}.
+     */
+    public static void executeOrDefer(MemorySegment device, MemorySegment queue,
+                                      MemorySegment cmdList, MemorySegment cmdAllocator,
+                                      Arena arena) throws WindowsNativeException {
+        com.aresstack.windirectml.runtime.DirectMlGpuBatch batch =
+                com.aresstack.windirectml.runtime.DirectMlGpuBatch.current();
+        if (batch == null) {
+            executeAndWait(device, queue, cmdList, arena);
+            return;
+        }
+        // Flush UAV writes so the next batched submission observes them.
+        uavBarrier(cmdList, arena);
+        closeCommandList(cmdList);
+        executeCommandLists(queue, cmdList, arena);
+        batch.retain(cmdList, cmdAllocator);
     }
 
     /**

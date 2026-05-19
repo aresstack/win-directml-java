@@ -47,6 +47,7 @@ public final class DxgiBindings {
     // IDXGIObject: SetPrivateData(3), SetPrivateDataInterface(4), GetPrivateData(5), GetParent(6)
     // IDXGIFactory: EnumAdapters(7), MakeWindowAssociation(8), GetWindowAssociation(9), CreateSwapChain(10), CreateSoftwareAdapter(11)
     // IDXGIFactory1: EnumAdapters1(12), IsCurrent(13)
+    static final int VTABLE_ADDREF = 1;
     static final int VTABLE_RELEASE = 2;
     static final int VTABLE_ENUM_ADAPTERS1 = 12;
 
@@ -150,6 +151,23 @@ public final class DxgiBindings {
             log.trace("Release → refCount={}", refCount);
         } catch (Throwable t) {
             log.warn("COM Release failed", t);
+        }
+    }
+
+    /**
+     * Call {@code IUnknown::AddRef} on a COM object. Used by
+     * {@link com.aresstack.windirectml.runtime.DirectMlGpuBatch} to keep
+     * command-lists and allocators alive past the kernel's local
+     * {@code try/finally} until the deferred GPU drain completes.
+     */
+    public static void addRef(MemorySegment comObject) {
+        try {
+            MethodHandle addRefHandle = vtableMethod(comObject, VTABLE_ADDREF,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+            int refCount = (int) addRefHandle.invokeExact(comObject);
+            log.trace("AddRef → refCount={}", refCount);
+        } catch (Throwable t) {
+            log.warn("COM AddRef failed", t);
         }
     }
 
