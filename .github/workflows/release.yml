@@ -15,7 +15,7 @@ jobs:
     # before tagging.
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Check out sources
@@ -47,10 +47,15 @@ jobs:
       - name: Build sidecar distribution zip
         run: ./gradlew --no-daemon -Pversion=${{ steps.ver.outputs.version }} :directml-sidecar:distZip
 
-      - name: Attach sidecar zip to GitHub Release
+      - name: Build workbench distribution zip
+        run: ./gradlew --no-daemon -Pversion=${{ steps.ver.outputs.version }} :directml-sidecar-workbench:distZip
+
+      - name: Attach sidecar and workbench zips to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: directml-sidecar/build/distributions/*.zip
+          files: |
+            directml-sidecar/build/distributions/*.zip
+            directml-sidecar-workbench/build/distributions/*.zip
           tag_name: ${{ github.ref_name }}
           fail_on_unmatched_files: true
 

@@ -69,7 +69,7 @@ wire format.
 
 | Requirement                        | Why                                                                                                       |
 |------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| Windows 10 21H1+ / Windows 11      | DirectML in-box (1.10+); side-by-side `DirectML.dll` is also supported via `-Dwindirectml.directml.dll=…` |
+| Windows 10 21H1+ / Windows 11      | DirectML in-box (1.8+); side-by-side `DirectML.dll` is also supported via `-Dwindirectml.directml.dll=…`. Some optional fast paths use newer DirectML feature levels when available. |
 | A DirectX-12-capable GPU           | every shipped backend dispatches via D3D12 + DirectML                                                     |
 | Feature level ≥ DirectML 1.0 / 2.0 | all encoder kernels stay on the FL 1.0 / 2.0 baseline (composite GELU fallback for FL < 5.1)              |
 | ≥ 2 GB free GPU memory             | comfortable headroom for E5-base + bucketed batch padding                                                 |

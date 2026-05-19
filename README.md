@@ -27,9 +27,6 @@ Windows 11 DirectML / D3D12 / DXGI
 - No ONNX Runtime
 - No JNA, no JNI
 - No universal ONNX/GGUF/Transformers runner
-- No *production* Java CPU transformer runtime. The CPU MiniLM path
-  (`CpuMiniLmEncoder`) exists **only as a correctness reference** for the
-  DirectML migration and is not intended to scale.
 
 ## Modules
 
@@ -229,8 +226,10 @@ For each family both backends exist behind the same API:
     (Q/K/V/Linear + composite/native GELU + LayerNorm, head-layout
     reshuffles, attention, MLP, residuals) + mean-pool over
     `attentionMask` + L2-Normalize, all fused FL 1.0 / FL 2.0 kernels.
-* **`Cpu…Encoder`** – pure-Java CPU reference / debug / fallback path.
-  Correct-first, fast-later.
+* **`Cpu…Encoder`** – pure-Java CPU backend. Supported as a local
+  fallback and for smaller local workloads without a DirectML-capable GPU.
+  DirectML is the intended acceleration path on Windows, but CPU-only
+  usage is fully supported.
 
 Fetch the models once. Size depends on the selected variant
 (MiniLM ≈ 90 MB; E5 small ≈ 130 MB, base ≈ 440 MB, large ≈ 1.3 GB):
@@ -453,7 +452,6 @@ dependencies {
     implementation 'com.aresstack:directml-config:0.1.0-beta.1'
     implementation 'com.aresstack:directml-windows-bindings:0.1.0-beta.1'
     implementation 'com.aresstack:directml-encoder:0.1.0-beta.1'
-    implementation 'com.aresstack:directml-inference:0.1.0-beta.1'
     // Pure-Java-8 client for the sidecar (separate JVM):
     implementation 'com.aresstack:directml-sidecar-client-java8:0.1.0-beta.1'
 }
@@ -476,10 +474,9 @@ Module overview (see [`SUPPORTED_MODELS.md`](SUPPORTED_MODELS.md) and
 primitives. |
 | `com.aresstack:directml-encoder` | 21 (preview) | MiniLM, E5, cross-encoder reranker pipelines with CPU + DirectML
 parity. |
-| `com.aresstack:directml-inference` | 21 (preview) | Phi-3-mini DirectML inference pipeline. |
 | `com.aresstack:directml-sidecar-client-java8` | 8 | JSON-RPC client to talk to the sidecar from a Java-8 host JVM. |
-The `directml-sidecar` server application is **not** on Maven Central;
-it is shipped as a self-contained distribution zip via the
+The `directml-sidecar` and `directml-sidecar-workbench` applications are **not** on Maven Central;
+they are shipped as self-contained distribution zips via the
 [GitHub Releases](https://github.com/aresstack/win-directml-java/releases)
 page on every `v*` tag.
 
@@ -502,7 +499,7 @@ The `.github/workflows/release.yml` workflow then runs
 ```
 
 against the Sonatype Central Portal (autoPublish=true). The sidecar
-distribution zip is attached to the matching GitHub Release.
+and workbench distribution zips are attached to the matching GitHub Release.
 Required GitHub-Actions secrets on the `aresstack/win-directml-java` repo:
 | Secret | Source |
 |---|---|
