@@ -5,15 +5,18 @@ import com.aresstack.windirectml.encoder.EmbeddingModel;
 import com.aresstack.windirectml.encoder.EmbeddingRequest;
 import com.aresstack.windirectml.encoder.EmbeddingVector;
 import com.aresstack.windirectml.encoder.e5.E5Encoders;
+import com.aresstack.windirectml.encoder.e5.E5Variant;
 import com.aresstack.windirectml.encoder.minilm.CpuMiniLmEncoder;
 import com.aresstack.windirectml.encoder.minilm.DirectMlMiniLmEncoder;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Throughput benchmark for the bucket-batched
@@ -58,6 +61,15 @@ import java.util.Objects;
  */
 public final class EmbedBatchBenchmark {
 
+    private static final Set<String> ALLOWED_WHICH = Set.of("minilm", "e5", "both");
+    private static final Set<String> ALLOWED_BACKEND = Set.of("cpu", "dml", "both");
+
+    /**
+     * Pairs a discovered E5 model directory with its matching {@link E5Variant}.
+     */
+    private record E5BenchmarkModel(Path dir, E5Variant variant) {
+    }
+
     private EmbedBatchBenchmark() {
     }
 
@@ -68,11 +80,32 @@ public final class EmbedBatchBenchmark {
         int warmup = args.length > 3 ? Integer.parseInt(args[3]) : 1;
         int[] sizes = args.length > 4 ? parseCsv(args[4]) : new int[]{10, 50, 100, 500};
 
+        if (!ALLOWED_WHICH.contains(which)) {
+            throw new IllegalArgumentException(
+                    "which must be one of " + ALLOWED_WHICH + ", was '" + which + "'");
+        }
+        if (!ALLOWED_BACKEND.contains(backend)) {
+            throw new IllegalArgumentException(
+                    "backend must be one of " + ALLOWED_BACKEND + ", was '" + backend + "'");
+        }
+        if (warmup < 0) {
+            throw new IllegalArgumentException("warmup must be >= 0, was " + warmup);
+        }
+        if (sizes.length == 0) {
+            throw new IllegalArgumentException("sizes must contain at least one entry");
+        }
+        for (int n : sizes) {
+            if (n <= 0) {
+                throw new IllegalArgumentException("every size must be > 0, was " + n
+                        + " in " + csv(sizes));
+            }
+        }
+
         System.out.printf(Locale.ROOT,
                 "EmbedBatchBenchmark: modelRoot=%s which=%s backend=%s warmup=%d sizes=%s%n",
                 modelRoot, which, backend, warmup, csv(sizes));
 
-        int maxN = sizes[sizes.length - 1];
+        int maxN = Arrays.stream(sizes).max().orElseThrow();
         List<String> corpus = buildCorpus(maxN);
 
         boolean runMiniLm = which.equals("minilm") || which.equals("both");
@@ -90,12 +123,14 @@ public final class EmbedBatchBenchmark {
             }
         }
         if (runE5) {
-            Path dir = resolveE5Dir(modelRoot);
-            if (dir == null) {
+            E5BenchmarkModel e5 = resolveE5Model(modelRoot);
+            if (e5 == null) {
                 System.out.println("[skip] E5 model dir not found under " + modelRoot);
             } else {
-                if (runCpu) runCpuE5(dir, corpus, sizes, warmup);
-                if (runDml) runDmlE5(dir, corpus, sizes, warmup);
+                System.out.printf(Locale.ROOT, "E5 model: dir=%s variant=%s%n",
+                        e5.dir(), e5.variant().token());
+                if (runCpu) runCpuE5(e5, corpus, sizes, warmup);
+                if (runDml) runDmlE5(e5, corpus, sizes, warmup);
             }
         }
     }
@@ -118,8 +153,8 @@ public final class EmbedBatchBenchmark {
         }
     }
 
-    private static void runCpuE5(Path dir, List<String> corpus, int[] sizes, int warmup) {
-        try (var enc = E5Encoders.loadCpu(dir)) {
+    private static void runCpuE5(E5BenchmarkModel model, List<String> corpus, int[] sizes, int warmup) {
+        try (var enc = E5Encoders.loadCpu(model.dir(), model.variant())) {
             // E5 expects a task prefix; "passage:" matches the embed sidecar default.
             runOne("cpu", "e5", enc, "passage: ", corpus, sizes, warmup);
         } catch (EmbeddingException e) {
@@ -127,8 +162,8 @@ public final class EmbedBatchBenchmark {
         }
     }
 
-    private static void runDmlE5(Path dir, List<String> corpus, int[] sizes, int warmup) {
-        try (var enc = E5Encoders.loadDirectMl(dir)) {
+    private static void runDmlE5(E5BenchmarkModel model, List<String> corpus, int[] sizes, int warmup) {
+        try (var enc = E5Encoders.loadDirectMl(model.dir(), model.variant())) {
             runOne("dml", "e5", enc, "passage: ", corpus, sizes, warmup);
         } catch (Exception e) {
             System.out.println("[skip] dml/e5: " + e.getMessage());
@@ -144,7 +179,7 @@ public final class EmbedBatchBenchmark {
                 "%n---- %s / %s ----%n", backend, model);
 
         // Warmup at max(N) so every pad-bucket cache entry is hot.
-        int hot = sizes[sizes.length - 1];
+        int hot = Arrays.stream(sizes).max().orElseThrow();
         try {
             List<EmbeddingRequest> hotReqs = toRequests(corpus.subList(0, hot), prefix);
             for (int i = 0; i < warmup; i++) {
@@ -224,18 +259,33 @@ public final class EmbedBatchBenchmark {
         return out;
     }
 
-    private static Path resolveE5Dir(Path modelRoot) {
-        // Mirror the directories the sidecar / scripts/download-e5.ps1 use.
-        String[] candidates = {
-                "e5-base-sts-en-de",
-                "multilingual-e5-base",
-                "multilingual-e5-small",
-                "e5-base-v2",
-                "e5-small-v2"
+    /**
+     * Walk every supported {@link E5Variant} in priority order and return
+     * the first variant whose directory hint resolves under
+     * {@code modelRoot}. The benchmark only considers WordPiece-tokenizer
+     * variants – SentencePiece-based {@code multilingual-e5-*} models are
+     * deliberately skipped because the tokenizer is not yet supported.
+     */
+    private static E5BenchmarkModel resolveE5Model(Path modelRoot) {
+        // Priority: prefer the small en/de model (project default), then
+        // the english v2 line from small to large.
+        E5Variant[] priority = {
+                E5Variant.BASE_STS_EN_DE,
+                E5Variant.SMALL_V2,
+                E5Variant.BASE_V2,
+                E5Variant.LARGE_V2
         };
-        for (String c : candidates) {
-            Path p = modelRoot.resolve(c);
-            if (Files.isDirectory(p)) return p;
+        for (E5Variant v : priority) {
+            for (Path hint : v.directoryHints()) {
+                // Directory hints are "model/<name>"; strip the leading
+                // "model/" so we can probe relative to the user-supplied
+                // modelRoot (which usually IS "model" but may not be).
+                Path tail = hint.getNameCount() > 1 ? hint.subpath(1, hint.getNameCount()) : hint;
+                Path candidate = modelRoot.resolve(tail);
+                if (Files.isDirectory(candidate)) {
+                    return new E5BenchmarkModel(candidate, v);
+                }
+            }
         }
         return null;
     }
