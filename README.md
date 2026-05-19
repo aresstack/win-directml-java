@@ -279,6 +279,33 @@ DirectML error message in `lastError`. The active backend is reported
 in the `health` response as `embeddingBackend` (`cpu`, `directml`,
 `none`, or `error`) together with `embeddingReady`.
 
+## Reranking (`rerank`)
+
+The sidecar additionally exposes a **cross-encoder reranker** that scores
+`(query, document)` pairs jointly through the same generic BERT compute
+graph used for embeddings. Typical workflow:
+
+1. Retrieve a candidate set (e.g. top-100 via the bi-encoder `embed` +
+   a vector store on the host side).
+2. Send `(query, documents, topN)` to `rerank` – the sidecar runs the
+   cross-encoder on every pair, sorts by raw classifier logit and
+   returns the top-N.
+
+Configuration:
+
+```text
+-Drerank.modelDir=<path>            # override the model directory
+-Drerank.backend=auto|directml|cpu  # default auto (DirectML with CPU fallback)
+```
+
+The default model location is `model/cross-encoder-ms-marco-MiniLM-L-6-v2/`.
+A typical checkpoint of that family is ~90 MB. As with the embedding
+encoders the rerank handler stays in `-32005 Not implemented` mode when
+no model directory is present – the rest of the sidecar continues to
+work normally.
+
+See `directml-sidecar/PROTOCOL.md` for the full request/response shape.
+
 ## Roadmap
 
 1. ✅ Phi-3 summarizer sidecar.

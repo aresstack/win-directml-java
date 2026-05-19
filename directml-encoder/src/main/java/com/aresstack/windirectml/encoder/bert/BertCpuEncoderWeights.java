@@ -86,7 +86,7 @@ public final class BertCpuEncoderWeights {
         }
     }
 
-    static BertCpuEncoderWeights loadFromReader(SafetensorsReader reader, BertEncoderConfig cfg)
+    public static BertCpuEncoderWeights loadFromReader(SafetensorsReader reader, BertEncoderConfig cfg)
             throws SafetensorsException, EmbeddingException {
         cfg.validate();
         String prefix = detectPrefix(reader, "embeddings.word_embeddings.weight");

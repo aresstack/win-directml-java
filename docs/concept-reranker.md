@@ -79,7 +79,26 @@ Der `EncoderRuntime` muss dafür Batch-Größe > 1 unterstützen.
 
 ## Planungsstatus
 
-Keine Implementierungspflicht in dieser Phase. Sobald MiniLM-Embeddings und
-ein erster Cross-Encoder lokal laufen, wird das Reranker-Modul
-`directml-reranker` mit der oben skizzierten API angelegt.
+**Status: implementiert.** Der Reranker läuft als `Reranker`-Interface
+in `directml-encoder` (Paket
+`com.aresstack.windirectml.encoder.reranker`) auf dem generischen
+`DirectMlBertEncoderStack` – kein separater Compute-Graph. Bereitgestellt
+werden `CpuReranker` und `DirectMlReranker`; der Classification-Head
+({@code [1, H]}) läuft bewusst auf der CPU, weil das ein vernachlässigbar
+billiger GEMM ist und der GPU-Pfad damit byte-identisch mit der
+Embedding-Pipeline bleibt.
+
+Wire-up:
+
+- JSON-RPC-Methode `rerank` im Sidecar (siehe
+  `directml-sidecar/PROTOCOL.md`).
+- Java-8-Client: `SidecarClient.rerank(query, documents, topN)`.
+- Workbench: Tab **Rerank**.
+- Default-Modell: `cross-encoder/ms-marco-MiniLM-L-6-v2`
+  (BERT-WordPiece, 6 Layer, hidden 384). Andere BERT-basierte
+  Cross-Encoder (z. B. bge-reranker-base) laden über
+  `-Drerank.modelDir=<path>` ohne Codeänderungen.
+- Parität: `DirectMlRerankerParityTest` vergleicht CPU- und
+  DirectML-Score auf identischen synthetischen Gewichten.
+
 

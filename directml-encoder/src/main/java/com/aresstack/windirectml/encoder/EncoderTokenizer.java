@@ -11,6 +11,22 @@ public interface EncoderTokenizer {
 
     Encoded encode(String text);
 
+    /**
+     * Cross-encoder / NSP-style pair encoding:
+     * {@code [CLS] textA [SEP] textB [SEP]} with {@code token_type_ids}
+     * {@code [0, 0, …, 0, 1, 1, …, 1]} – segment 0 for the {@code [CLS]}
+     * and the first half (incl. its trailing {@code [SEP]}), segment 1
+     * for the second half (incl. its trailing {@code [SEP]}).
+     * <p>
+     * The default throws {@link UnsupportedOperationException} so single-
+     * segment tokenizers (SentencePiece-only families) are not forced to
+     * implement it.
+     */
+    default Encoded encodePair(String textA, String textB) {
+        throw new UnsupportedOperationException(
+                getClass().getSimpleName() + " does not implement encodePair");
+    }
+
     int padTokenId();
 
     int clsTokenId();

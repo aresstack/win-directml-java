@@ -6,12 +6,15 @@ import com.aresstack.windirectml.encoder.e5.E5Encoders;
 import com.aresstack.windirectml.encoder.e5.E5Variant;
 import com.aresstack.windirectml.encoder.minilm.CpuMiniLmEncoder;
 import com.aresstack.windirectml.encoder.minilm.DirectMlMiniLmEncoder;
+import com.aresstack.windirectml.encoder.reranker.BertCrossEncoderRerankers;
+import com.aresstack.windirectml.encoder.reranker.Reranker;
 import com.aresstack.windirectml.inference.Phi3InferenceEngine;
 import com.aresstack.windirectml.inference.Phi3Summarizer;
 import com.aresstack.windirectml.inference.Summarizer;
 import com.aresstack.windirectml.sidecar.handlers.CancelHandler;
 import com.aresstack.windirectml.sidecar.handlers.EmbedHandler;
 import com.aresstack.windirectml.sidecar.handlers.HealthHandler;
+import com.aresstack.windirectml.sidecar.handlers.RerankHandler;
 import com.aresstack.windirectml.sidecar.handlers.ShutdownHandler;
 import com.aresstack.windirectml.sidecar.handlers.SummarizeHandler;
 import com.aresstack.windirectml.sidecar.jsonrpc.JsonRpcError;
@@ -64,6 +67,7 @@ public final class DirectMlPhi3Sidecar {
     private final SidecarStatus status = new SidecarStatus();
     private final SidecarCommandDispatcher dispatcher = new SidecarCommandDispatcher();
     private final AtomicReference<EmbeddingModel> embeddingModel = new AtomicReference<>();
+    private final AtomicReference<Reranker> reranker = new AtomicReference<>();
 
     private Phi3Summarizer ownedSummarizer;
     private Summarizer summarizer;
@@ -117,6 +121,19 @@ public final class DirectMlPhi3Sidecar {
         this.embeddingModel.set(model);
         status.setEmbeddingBackend(model != null ? backendName : null);
         status.setEmbeddingReady(model != null && model.isReady());
+        return this;
+    }
+
+    /**
+     * Register a {@link Reranker} so that {@code rerank} returns real
+     * scores. The backend name is reported in {@code health} as
+     * {@code rerankerBackend}.
+     */
+    public DirectMlPhi3Sidecar withRerankerBackend(String backendName, Reranker model) {
+        this.reranker.set(model);
+        status.setRerankerBackend(model != null ? backendName : null);
+        status.setRerankerReady(model != null && model.isReady());
+        status.setRerankerModel(model != null ? model.modelName() : null);
         return this;
     }
 
@@ -233,8 +250,76 @@ public final class DirectMlPhi3Sidecar {
             }
         }
 
+        // Reranker (optional). When no model directory is present the
+        // rerank handler stays in NOT_IMPLEMENTED mode – same fallback
+        // pattern as embed. Only DirectML is offered for now; if the
+        // GPU adapter cannot serve DirectML we fall back to the CPU
+        // reranker rather than refusing to start.
+        Path rerankDir = resolveRerankerDir();
+        if (rerankDir == null) {
+            log.info("No reranker model directory found "
+                    + "(checked -Drerank.modelDir and model/cross-encoder-ms-marco-MiniLM-L-6-v2/) "
+                    + "– rerank handler will report not-implemented");
+        } else {
+            String want = System.getProperty("rerank.backend", "auto").trim().toLowerCase(java.util.Locale.ROOT);
+            Reranker rr = null;
+            String rerankBackend = null;
+            try {
+                if (!"cpu".equals(want)) {
+                    try {
+                        rr = BertCrossEncoderRerankers.loadDirectMl(rerankDir);
+                        rerankBackend = "directml";
+                    } catch (Exception gpuFail) {
+                        if ("directml".equals(want)) {
+                            throw gpuFail;
+                        }
+                        log.warn("Reranker DirectML init failed ({}), falling back to CPU",
+                                gpuFail.getMessage());
+                    }
+                }
+                if (rr == null) {
+                    rr = BertCrossEncoderRerankers.loadCpu(rerankDir);
+                    rerankBackend = "cpu";
+                }
+                sidecar.withRerankerBackend(rerankBackend, rr);
+                log.info("Reranker backend ready: backend={} modelDir={}", rerankBackend, rerankDir);
+            } catch (Exception e) {
+                log.error("Reranker initialisation failed: {}", e.getMessage(), e);
+                sidecar.status.setRerankerBackend("error");
+                sidecar.status.setRerankerReady(false);
+                sidecar.status.setLastError("rerank initialisation failed: " + e.getMessage());
+            }
+        }
+
         int exitCode = sidecar.run();
         System.exit(exitCode);
+    }
+
+    /**
+     * Look up the reranker model directory.
+     * Honours {@code -Drerank.modelDir} first; otherwise probes a small
+     * list of conventional locations under {@code model/}.
+     */
+    private static Path resolveRerankerDir() {
+        String override = System.getProperty("rerank.modelDir");
+        if (override != null && !override.isBlank()) {
+            Path p = Path.of(override);
+            return Files.exists(p.resolve("model.safetensors"))
+                    && Files.exists(p.resolve("tokenizer.json"))
+                    && Files.exists(p.resolve("config.json")) ? p : null;
+        }
+        for (Path candidate : new Path[]{
+                Path.of("model/cross-encoder-ms-marco-MiniLM-L-6-v2"),
+                Path.of("model/cross-encoder/ms-marco-MiniLM-L-6-v2"),
+                Path.of("model/ms-marco-MiniLM-L-6-v2"),
+        }) {
+            if (Files.exists(candidate.resolve("model.safetensors"))
+                    && Files.exists(candidate.resolve("tokenizer.json"))
+                    && Files.exists(candidate.resolve("config.json"))) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private static Path resolveMiniLmDir() {
@@ -364,6 +449,7 @@ public final class DirectMlPhi3Sidecar {
             });
         }
         dispatcher.register("embed", new EmbedHandler(embeddingModel::get, status));
+        dispatcher.register("rerank", new RerankHandler(reranker::get, status));
         dispatcher.register("shutdown", new ShutdownHandler(status));
         dispatcher.register("cancel", new CancelHandler());
     }
@@ -402,12 +488,14 @@ public final class DirectMlPhi3Sidecar {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("name", "DirectMlPhi3Sidecar");
         m.put("protocol", "jsonrpc-2.0");
-        m.put("methods", new String[]{"health", "summarize", "embed", "shutdown", "cancel"});
+        m.put("methods", new String[]{"health", "summarize", "embed", "rerank", "shutdown", "cancel"});
         m.put("backend", backend);
         m.put("modelDir", modelDir.toString());
         m.put("autoLoadModel", autoLoadModel);
         m.put("embeddingBackend",
                 status.getEmbeddingBackend() != null ? status.getEmbeddingBackend() : "none");
+        m.put("rerankerBackend",
+                status.getRerankerBackend() != null ? status.getRerankerBackend() : "none");
         return m;
     }
 }

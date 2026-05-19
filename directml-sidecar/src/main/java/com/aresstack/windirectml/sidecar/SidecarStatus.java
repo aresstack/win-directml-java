@@ -23,6 +23,14 @@ public final class SidecarStatus {
     private volatile String embeddingBackend;
     private volatile boolean embeddingReady = false;
 
+    /**
+     * Aktiver Reranker-Backend-Name ({@code "cpu"}, {@code "directml"},
+     * {@code "custom"} oder {@code null} = keiner registriert).
+     */
+    private volatile String rerankerBackend;
+    private volatile boolean rerankerReady = false;
+    private volatile String rerankerModel;
+
     public boolean isReady() {
         return modelLoaded && !shuttingDown;
     }
@@ -82,5 +90,12 @@ public final class SidecarStatus {
     public void setEmbeddingReady(boolean embeddingReady) {
         this.embeddingReady = embeddingReady;
     }
+
+    public String getRerankerBackend() { return rerankerBackend; }
+    public void setRerankerBackend(String rerankerBackend) { this.rerankerBackend = rerankerBackend; }
+    public boolean isRerankerReady() { return rerankerReady; }
+    public void setRerankerReady(boolean rerankerReady) { this.rerankerReady = rerankerReady; }
+    public String getRerankerModel() { return rerankerModel; }
+    public void setRerankerModel(String rerankerModel) { this.rerankerModel = rerankerModel; }
 }
 

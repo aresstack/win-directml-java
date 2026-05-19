@@ -246,6 +246,70 @@ Response:
 Solange kein Embedding-Modell gefunden wird, antwortet `embed` mit
 `-32005 Not implemented`.
 
+### `rerank`
+
+Cross-Encoder-Reranking: bewertet `(query, document)`-Paare gemeinsam
+durch einen BERT-Cross-Encoder mit Classification-Head und liefert eine
+nach Score absteigend sortierte Liste zurück. Default-Familie:
+`cross-encoder/ms-marco-MiniLM-L-6-v2`. Tokenisierung erfolgt
+paarweise (`[CLS] query [SEP] document [SEP]` mit
+`token_type_ids = [0…0, 1…1]`).
+
+Konfiguration:
+
+```text
+-Drerank.modelDir=<path>     # Override für das Modellverzeichnis
+-Drerank.backend=auto|directml|cpu   # Default auto: DirectML mit CPU-Fallback
+```
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "x",
+  "method": "rerank",
+  "params": {
+    "query": "What is DirectML?",
+    "documents": [
+      "DirectML is a low-level Windows API for ML.",
+      "Python is a programming language.",
+      "Cross-encoders score (query, document) pairs."
+    ],
+    "topN": 2
+  }
+}
+```
+
+- `query` (string, Pflicht) – Suchanfrage, darf nicht leer sein.
+- `documents` (string[], Pflicht) – Kandidatenliste, mindestens ein Eintrag.
+- `topN` (int, optional) – Maximalzahl zurückgegebener Ergebnisse;
+  `0` oder Werte ≥ `documents.length` bedeuten "alle".
+
+Response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "x",
+  "result": {
+    "model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "results": [
+      { "index": 0, "score": 8.123 },
+      { "index": 2, "score": 1.456 }
+    ]
+  }
+}
+```
+
+`score` ist der rohe Classifier-Logit (höher = relevanter). Cross-Encoder-
+Logits sind nicht modellübergreifend kalibriert; Vergleiche sind nur
+innerhalb desselben Modells sinnvoll. `index` bezieht sich auf die
+ursprüngliche Reihenfolge in `documents` – der Host re-resolved den Text.
+
+Solange kein Reranker-Modell gefunden wird, antwortet `rerank` mit
+`-32005 Not implemented`.
+
 ### `shutdown`
 
 Setzt den Sidecar in den Shutdown-Modus. Nach der Response wird die

@@ -33,6 +33,10 @@ public final class HealthHandler implements JsonRpcMethodHandler {
         result.put("embeddingBackend",
                 status.getEmbeddingBackend() != null ? status.getEmbeddingBackend() : "none");
         result.put("embeddingReady", status.isEmbeddingReady());
+        result.put("rerankerBackend",
+                status.getRerankerBackend() != null ? status.getRerankerBackend() : "none");
+        result.put("rerankerReady", status.isRerankerReady());
+        if (status.getRerankerModel() != null) result.put("rerankerModel", status.getRerankerModel());
         if (status.getLastError() != null) result.put("lastError", status.getLastError());
         return result;
     }

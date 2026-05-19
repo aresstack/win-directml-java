@@ -2,6 +2,7 @@ package com.aresstack.windirectml.sidecar.workbench;
 
 import com.aresstack.windirectml.sidecar.client.EmbeddingResult;
 import com.aresstack.windirectml.sidecar.client.HealthResult;
+import com.aresstack.windirectml.sidecar.client.RerankResult;
 import com.aresstack.windirectml.sidecar.client.SidecarClient;
 import com.aresstack.windirectml.sidecar.client.SidecarClientConfig;
 import com.aresstack.windirectml.sidecar.client.SidecarException;
@@ -107,6 +108,12 @@ public final class WorkbenchModel {
     public synchronized SummaryResult summarize(String text, int maxTokens) throws SidecarException {
         if (client == null) throw new SidecarException("Sidecar is not running");
         return client.summarize(text, maxTokens);
+    }
+
+    public synchronized RerankResult rerank(String query, java.util.List<String> documents, int topN)
+            throws SidecarException {
+        if (client == null) throw new SidecarException("Sidecar is not running");
+        return client.rerank(query, documents, topN);
     }
 
     public synchronized String getLastRawRequest() {

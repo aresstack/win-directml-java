@@ -148,6 +148,45 @@ public final class WordPieceTokenizer implements EncoderTokenizer {
         return new Encoded(inputIds, mask, segments);
     }
 
+    /**
+     * BERT NSP-style pair tokenization:
+     * {@code [CLS] a [SEP] b [SEP]} with {@code token_type_ids = [0…0,1…1]}.
+     * Both segments are truncated longest-first until the joint length
+     * fits {@link #maxSequenceLength} (three special tokens reserved).
+     */
+    @Override
+    public Encoded encodePair(String textA, String textB) {
+        Objects.requireNonNull(textA, "textA");
+        Objects.requireNonNull(textB, "textB");
+
+        List<Integer> a = new ArrayList<>();
+        for (String word : preTokenize(normalize(textA))) wordPiece(word, a);
+        List<Integer> b = new ArrayList<>();
+        for (String word : preTokenize(normalize(textB))) wordPiece(word, b);
+
+        int reserved = 3; // [CLS] [SEP] [SEP]
+        int budget = Math.max(0, maxSequenceLength - reserved);
+        // Longest-first truncation – matches HuggingFace BertTokenizer's
+        // default `truncation_strategy=longest_first`.
+        while (a.size() + b.size() > budget) {
+            if (a.size() >= b.size()) a.remove(a.size() - 1);
+            else b.remove(b.size() - 1);
+        }
+
+        int n = 1 + a.size() + 1 + b.size() + 1;
+        int[] inputIds = new int[n];
+        int[] mask = new int[n];
+        int[] segments = new int[n];
+        int p = 0;
+        inputIds[p] = clsId; segments[p] = 0; p++;
+        for (int id : a) { inputIds[p] = id; segments[p] = 0; p++; }
+        inputIds[p] = sepId; segments[p] = 0; p++;
+        for (int id : b) { inputIds[p] = id; segments[p] = 1; p++; }
+        inputIds[p] = sepId; segments[p] = 1; p++;
+        for (int i = 0; i < n; i++) mask[i] = 1;
+        return new Encoded(inputIds, mask, segments);
+    }
+
     @Override public int padTokenId() { return padId; }
     @Override public int clsTokenId() { return clsId; }
     @Override public int sepTokenId() { return sepId; }

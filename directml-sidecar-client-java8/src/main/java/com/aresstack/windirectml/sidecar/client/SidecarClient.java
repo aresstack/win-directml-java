@@ -175,6 +175,32 @@ public final class SidecarClient {
         return SummaryResult.from(resp.getResult(), elapsed, resp.getRaw());
     }
 
+    /**
+     * Cross-encoder reranking. Sends {@code (query, documents, topN)}
+     * and returns the ranked list (already sorted by descending score).
+     *
+     * @param query    the search query.
+     * @param documents candidate documents.
+     * @param topN     {@code <= 0} ⇒ return all results.
+     */
+    public RerankResult rerank(String query, java.util.List<String> documents, int topN)
+            throws SidecarException {
+        if (query == null || query.length() == 0) {
+            throw new SidecarException("rerank: query must not be empty");
+        }
+        if (documents == null || documents.isEmpty()) {
+            throw new SidecarException("rerank: documents must not be empty");
+        }
+        Map<String, Object> params = new LinkedHashMap<String, Object>();
+        params.put("query", query);
+        params.put("documents", documents);
+        if (topN > 0) params.put("topN", topN);
+        long t0 = System.currentTimeMillis();
+        JsonRpcResponse resp = call("rerank", params);
+        long elapsed = System.currentTimeMillis() - t0;
+        return RerankResult.from(resp.getResult(), elapsed, resp.getRaw());
+    }
+
     // ── inspector accessors ─────────────────────────────────────────────
 
     public String getLastRawRequest() {

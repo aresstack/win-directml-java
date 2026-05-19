@@ -5,6 +5,7 @@ import com.aresstack.windirectml.sidecar.workbench.panels.EmbeddingsPanel;
 import com.aresstack.windirectml.sidecar.workbench.panels.HealthPanel;
 import com.aresstack.windirectml.sidecar.workbench.panels.InspectorPanel;
 import com.aresstack.windirectml.sidecar.workbench.panels.IntegrationHelpPanel;
+import com.aresstack.windirectml.sidecar.workbench.panels.RerankerPanel;
 import com.aresstack.windirectml.sidecar.workbench.panels.StderrPanel;
 import com.aresstack.windirectml.sidecar.workbench.panels.SummarizerPanel;
 
@@ -38,6 +39,7 @@ public final class WorkbenchFrame extends JFrame {
     private final HealthPanel healthPanel;
     private final EmbeddingsPanel embeddingsPanel;
     private final SummarizerPanel summarizerPanel;
+    private final RerankerPanel rerankerPanel;
     private final InspectorPanel inspectorPanel;
     private final StderrPanel stderrPanel;
     private final IntegrationHelpPanel integrationPanel;
@@ -52,6 +54,7 @@ public final class WorkbenchFrame extends JFrame {
         healthPanel = new HealthPanel(model);
         embeddingsPanel = new EmbeddingsPanel(model);
         summarizerPanel = new SummarizerPanel(model);
+        rerankerPanel = new RerankerPanel(model);
         inspectorPanel = new InspectorPanel(model);
         stderrPanel = new StderrPanel(model);
         integrationPanel = new IntegrationHelpPanel();
@@ -61,6 +64,7 @@ public final class WorkbenchFrame extends JFrame {
         tabs.addTab("Health", healthPanel);
         tabs.addTab("Embeddings", embeddingsPanel);
         tabs.addTab("Summarize", summarizerPanel);
+        tabs.addTab("Rerank", rerankerPanel);
         tabs.addTab("JSON-RPC Inspector", inspectorPanel);
         tabs.addTab("stderr Log", stderrPanel);
         tabs.addTab("Integration Help", integrationPanel);
