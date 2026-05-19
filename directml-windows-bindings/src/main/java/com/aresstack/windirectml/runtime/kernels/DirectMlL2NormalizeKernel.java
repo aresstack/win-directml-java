@@ -32,9 +32,12 @@ import java.lang.foreign.ValueLayout;
  * <ol>
  *   <li><b>Sum-of-squares über GEMM</b>
  *       (op {@link DirectMlBindings#DML_OPERATOR_GEMM}): GEMM
- *       {@code A[1,N] · B[N,1] = S[1,1]} mit {@code B = A} und
- *       {@code TransB = TRANSPOSE} liefert in einem einzigen Dispatch
- *       {@code s = Σ x_j²}. Kein expliziter REDUCE-Operator nötig.</li>
+ *       {@code A[1,N] · B[N,1] = S[1,1]} mit {@code B = A} und beiden
+ *       Transformationen auf {@code DML_MATRIX_TRANSFORM_NONE} – die
+ *       Spaltenform entsteht aus dem {@code B}-Tensor-Deskriptor
+ *       ({@code [1,1,N,1]}), nicht aus einem Laufzeit-Transpose. In einem
+ *       einzigen Dispatch ergibt sich {@code s = Σ x_j²}. Kein expliziter
+ *       REDUCE-Operator nötig.</li>
  *   <li><b>{@code sqrt(s + ε²)} via {@link DirectMlBindings#DML_OPERATOR_ELEMENT_WISE_SQRT}</b>
  *       mit gefaltetem {@code DML_SCALE_BIAS(scale=1, bias=ε²)} – ein
  *       weiterer Dispatch auf einem 1-Float-Tensor.</li>
@@ -174,10 +177,12 @@ public final class DirectMlL2NormalizeKernel implements L2NormalizeKernel, AutoC
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * GEMM with TransB=TRANSPOSE: {@code Y[1,1] = X[1,N] · X[N,1]} (the
-     * second operand is the same buffer re-interpreted as a column). The
-     * binding table feeds the same resource into both input slots; DML
-     * resolves the transpose via the tensor descriptor, not the data.
+     * Sum-of-squares via GEMM: {@code Y[1,1] = X[1,N] · X[N,1]}. Both
+     * GEMM transforms are {@code DML_MATRIX_TRANSFORM_NONE}; the column
+     * shape comes from the {@code B}-tensor descriptor itself
+     * ({@code [1,1,N,1]}), not from a runtime transpose. A and B alias
+     * the same underlying buffer, so a single dispatch yields
+     * {@code s = Σ x_j²} without an explicit REDUCE operator.
      */
     private MiniOp buildSumOfSquaresGemm(MemorySegment dml, MemorySegment dev)
             throws WindowsNativeException {

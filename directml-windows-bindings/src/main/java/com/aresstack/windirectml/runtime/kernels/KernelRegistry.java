@@ -36,11 +36,14 @@ package com.aresstack.windirectml.runtime.kernels;
  *       ({@code DML_OPERATOR_GEMM} FL 1.0, vorab CPU-normalisierte Gewichte
  *       {@code w[t]=m[t]/Σm}). GPU-getestet, läuft auf jeder ausgelieferten
  *       {@code DirectML.dll}.</li>
- *   <li>{@link L2NormalizeKernel} – ⏳ verbleibt CPU-seitig
- *       ({@code com.aresstack.windirectml.encoder.pooling.L2Normalize}),
- *       weil der Schritt auf einem {@code [H]}-Vektor (z. B. 384 Floats)
- *       Mikrosekunden kostet und auf FL-5.0 In-Box-DLLs keine garantierten
- *       Reduce/Divide-Operatoren existieren.</li>
+ *   <li>{@link L2NormalizeKernel} – ✅ {@link DirectMlL2NormalizeKernel}
+ *       (GEMM sum-of-squares {@code A[1,N] · B[N,1] → s[1,1]} +
+ *       {@code DML_OPERATOR_ELEMENT_WISE_SQRT} mit ε² in
+ *       {@code DML_SCALE_BIAS} + {@code DML_OPERATOR_ELEMENT_WISE_DIVIDE}
+ *       mit Broadcast über Nullstrides). Alle drei Sub-Ops sind FL 1.0 –
+ *       läuft auf jeder ausgelieferten {@code DirectML.dll}, einschließlich
+ *       Windows-11-In-Box 1.8.0. GPU-getestet; der finale 384-Float-Vektor
+ *       bleibt bis zum letzten Download komplett auf der GPU.</li>
  * </ul>
  *
  * <p><b>Decoder-Pflicht (Phi-3 / Llama – nicht für Encoder-Pfad benötigt):</b>

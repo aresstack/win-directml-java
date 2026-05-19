@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -36,7 +37,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * <p>
  * Erwartung: pro Eingabesatz cosine(CPU, DirectML) &gt; 0.99 und
  * Ausgabedimension exakt 384. Die L2-Norm der DirectML-Ausgabe muss
- * 1 ± 1e-3 sein.
+ * für {@code normalize=true} 1 ± 1e-3 sein und für {@code normalize=false}
+ * messbar davon abweichen.
  */
 @EnabledIf("modelPresent")
 class DirectMlMiniLmEmbeddingReferenceTest {
@@ -151,8 +153,57 @@ class DirectMlMiniLmEmbeddingReferenceTest {
                 "stack cache must never exceed the number of pad-buckets");
     }
 
+    /**
+     * {@code normalize=false} muss den GPU-L2-Schritt überspringen und
+     * stattdessen den rohen Mean-Pool-Vektor herunterladen. Akzeptanz:
+     * <ul>
+     *   <li>cosine(CPU, DML) &gt; 0.99 für jeden Eingabesatz,</li>
+     *   <li>die DirectML-Ausgabe ist <b>nicht</b> auf Einheitsnorm
+     *       skaliert (sonst würde sich {@code normalize=false} nicht von
+     *       {@code normalize=true} unterscheiden),</li>
+     *   <li>{@link EmbeddingVector#normalized()} ist {@code false}.</li>
+     * </ul>
+     */
+    @Test
+    void normalizeFalseReturnsUnnormalisedPooledVector() throws Exception {
+        double minSim = Double.POSITIVE_INFINITY;
+        double maxDeviationFromUnit = 0.0;
+        for (String text : CORPUS) {
+            EmbeddingRequest req = new EmbeddingRequest(text, /*normalize*/ false, null);
+
+            EmbeddingVector cpu = cpuModel.embed(req);
+            EmbeddingVector dml = dmlModel.embed(req);
+
+            assertEquals(384, dml.dimension());
+            assertFalse(dml.normalized(),
+                    "DirectML must propagate normalize=false through EmbeddingVector");
+
+            double sim = CosineSimilarity.compute(cpu.values(), dml.values());
+            System.out.printf("cos(CPU, DML) [normalize=false, %s] = %.6f%n",
+                    abbreviate(text), sim);
+            assertTrue(sim > 0.99,
+                    "cosine(CPU, DML) must exceed 0.99 with normalize=false for ["
+                            + text + "], got " + sim);
+            if (sim < minSim) minSim = sim;
+
+            double n2 = 0;
+            for (float f : dml.values()) n2 += (double) f * f;
+            double norm = Math.sqrt(n2);
+            double dev = Math.abs(norm - 1.0);
+            if (dev > maxDeviationFromUnit) maxDeviationFromUnit = dev;
+        }
+        // The raw mean-pool vectors must not coincidentally land on the
+        // unit sphere – otherwise the GPU path silently L2-normalized
+        // and the normalize=false branch is broken. MiniLM mean-pool
+        // norms are routinely in the 5–15 range, so 1e-2 is generous.
+        assertTrue(maxDeviationFromUnit > 1e-2,
+                "DirectML output with normalize=false must not be unit-norm, "
+                        + "max |‖x‖−1| across corpus was " + maxDeviationFromUnit);
+        System.out.printf("min cos(CPU, DML) [normalize=false] = %.6f, "
+                + "max |‖x‖−1| = %.6f%n", minSim, maxDeviationFromUnit);
+    }
+
     private static String abbreviate(String s) {
         return s.length() <= 32 ? s : s.substring(0, 29) + "...";
     }
 }
-
