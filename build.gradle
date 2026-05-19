@@ -19,7 +19,6 @@ allprojects {
 ext.publishableModules = [
         'directml-config',
         'directml-windows-bindings',
-        'directml-inference',
         'directml-encoder',
         'directml-sidecar-client-java8',
 ]
@@ -197,7 +196,7 @@ configure(subprojects.findAll { it.name in publishableModules }) {
     }
 }
 // Aggregate-publish all publishable modules to the Sonatype Central
-// Portal in one upload. Configured via `centralPortal { � }` at the
+// Portal in one upload. Configured via `centralPortal { }` at the
 // root project; credentials come from
 // ORG_GRADLE_PROJECT_centralUsername / centralPassword.
 nmcp {

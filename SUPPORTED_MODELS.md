@@ -69,18 +69,18 @@ wire format.
 
 | Requirement                        | Why                                                                                                       |
 |------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| Windows 10 21H1+ / Windows 11      | DirectML in-box (1.10+); side-by-side `DirectML.dll` is also supported via `-Dwindirectml.directml.dll=…` |
+| Windows 10 21H1+ / Windows 11      | DirectML in-box (1.8+); side-by-side `DirectML.dll` is also supported via `-Dwindirectml.directml.dll=…`. Some optional fast paths use newer DirectML feature levels when available. |
 | A DirectX-12-capable GPU           | every shipped backend dispatches via D3D12 + DirectML                                                     |
 | Feature level ≥ DirectML 1.0 / 2.0 | all encoder kernels stay on the FL 1.0 / 2.0 baseline (composite GELU fallback for FL < 5.1)              |
 | ≥ 2 GB free GPU memory             | comfortable headroom for E5-base + bucketed batch padding                                                 |
 | Java 21 (host)                     | code uses the FFM API                                                                                     |
 | Java 8 (sidecar client only)       | the sidecar client artifact is compiled with `-release 8`                                                 |
 
-CPU-only is supported for parity testing and for callers that can
-tolerate the ~30× slowdown vs DirectML — every embedding and reranker
-ships with a `CpuXxxEncoder` reference implementation that is
-byte-identical to the GPU path on the per-element tolerance documented
-in the test suite.
+CPU backends are supported as a local fallback and for smaller local
+workloads — every embedding and reranker ships with a `CpuXxxEncoder`
+implementation that is byte-identical to the GPU path on the per-element
+tolerance documented in the test suite, making it suitable for use
+without a DirectML-capable GPU.
 
 ## 6. Roadmap
 
