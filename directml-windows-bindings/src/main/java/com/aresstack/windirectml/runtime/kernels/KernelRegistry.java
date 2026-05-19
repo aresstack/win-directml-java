@@ -32,8 +32,15 @@ package com.aresstack.windirectml.runtime.kernels;
  *       Sub-Ops sind FL 2.0 – läuft auf jeder ausgelieferten
  *       {@code DirectML.dll}, einschließlich Windows-11-RTM
  *       In-Box 1.8.0. GPU-getestet (mit und ohne Mask).</li>
- *   <li>{@link MeanPoolingKernel} – ⏳ Encoder-Pflicht</li>
- *   <li>{@link L2NormalizeKernel} – ⏳ Encoder-Pflicht</li>
+ *   <li>{@link MeanPoolingKernel} – ✅ {@link DirectMlMeanPoolKernel}
+ *       ({@code DML_OPERATOR_GEMM} FL 1.0, vorab CPU-normalisierte Gewichte
+ *       {@code w[t]=m[t]/Σm}). GPU-getestet, läuft auf jeder ausgelieferten
+ *       {@code DirectML.dll}.</li>
+ *   <li>{@link L2NormalizeKernel} – ⏳ verbleibt CPU-seitig
+ *       ({@code com.aresstack.windirectml.encoder.pooling.L2Normalize}),
+ *       weil der Schritt auf einem {@code [H]}-Vektor (z. B. 384 Floats)
+ *       Mikrosekunden kostet und auf FL-5.0 In-Box-DLLs keine garantierten
+ *       Reduce/Divide-Operatoren existieren.</li>
  * </ul>
  *
  * <p><b>Decoder-Pflicht (Phi-3 / Llama – nicht für Encoder-Pfad benötigt):</b>

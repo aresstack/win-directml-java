@@ -6,7 +6,6 @@ import com.aresstack.windirectml.encoder.EmbeddingRequest;
 import com.aresstack.windirectml.encoder.EmbeddingVector;
 import com.aresstack.windirectml.encoder.EncoderTokenizer;
 import com.aresstack.windirectml.encoder.pooling.L2Normalize;
-import com.aresstack.windirectml.encoder.pooling.MeanPooling;
 import com.aresstack.windirectml.encoder.tokenizer.WordPieceTokenizer;
 import com.aresstack.windirectml.runtime.CpuTensor;
 import com.aresstack.windirectml.runtime.DirectMlContextImpl;
@@ -16,6 +15,7 @@ import com.aresstack.windirectml.runtime.GpuBuffer;
 import com.aresstack.windirectml.runtime.TensorDataType;
 import com.aresstack.windirectml.runtime.TensorLayout;
 import com.aresstack.windirectml.runtime.TensorShape;
+import com.aresstack.windirectml.runtime.kernels.DirectMlMeanPoolKernel;
 import com.aresstack.windirectml.windows.DirectMlBindings;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import org.slf4j.Logger;
@@ -41,11 +41,18 @@ import java.util.Objects;
  *     → CPU Embedding-Lookup (word + position + tokenType)
  *     → Upload nach GPU
  *     → DirectMlMiniLmEncoderStack (Embedding-LN + N Layer)
- *     → Download
- *     → MeanPool (CPU)
+ *     → DirectMlMeanPoolKernel (GEMM, w[t]=m[t]/Σm vorab CPU-normiert)
+ *     → Download [H]
  *     → L2-Normalize (CPU, optional je Request)
  *     → EmbeddingVector
  * </pre>
+ * Im Vergleich zum vorherigen Pfad (CPU-MeanPool nach Download des
+ * vollen {@code [B,H]}-Tensors) wandert das Pooling vollständig auf die
+ * GPU; pro Inferenz werden nur noch {@code H} statt {@code B·H} Floats
+ * über PCIe gelesen. L2 bleibt auf der CPU, weil die Operation auf einem
+ * {@code H}-Vektor (z. B. 384 Floats) ohnehin in Mikrosekunden läuft und
+ * keine Reduce-/Divide-Operatoren erfordert, die auf älteren In-Box-DLLs
+ * (FL 5.0) nicht garantiert sind.
  * Die DirectML-Stacks sind formgebunden auf {@code seq}. Eingaben werden
  * auf einen Pad-Bucket {@code S ∈ {64, 128, 256, 512}} aufgefüllt; der
  * Stack-Cache hält damit höchstens vier Einträge pro Encoder
@@ -113,12 +120,18 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
     private record StackEntry(DirectMlMiniLmEncoderStack stack,
                               GpuBuffer xIn,
                               GpuBuffer xOut,
-                              GpuBuffer mask) implements AutoCloseable {
+                              GpuBuffer mask,
+                              GpuBuffer meanWeights,
+                              GpuBuffer pooled,
+                              DirectMlMeanPoolKernel meanPool) implements AutoCloseable {
         @Override public void close() {
-            try { stack.close(); } catch (Exception ignored) {}
-            try { xIn.close();   } catch (Exception ignored) {}
-            try { xOut.close();  } catch (Exception ignored) {}
-            try { mask.close();  } catch (Exception ignored) {}
+            try { meanPool.close();   } catch (Exception ignored) {}
+            try { stack.close();      } catch (Exception ignored) {}
+            try { xIn.close();        } catch (Exception ignored) {}
+            try { xOut.close();       } catch (Exception ignored) {}
+            try { mask.close();       } catch (Exception ignored) {}
+            try { meanWeights.close();} catch (Exception ignored) {}
+            try { pooled.close();     } catch (Exception ignored) {}
         }
     }
 
@@ -279,41 +292,57 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
             mask[i] = -1e9f;
         }
 
-        // 4. Upload and dispatch.
-        float[] xOutGpu = new float[B * H];
+        // 3b. Pre-normalised mean-pool weights on CPU: w[t] = m[t] / Σm
+        // for the valid prefix [0, seqLen); padded positions stay 0.
+        // This collapses the GPU pooling to a single GEMM (FL 1.0) and
+        // removes the need for a reduce/divide on the device.
+        int validCount = 0;
+        for (int i = 0; i < seqLen; i++) {
+            if (encoded.attentionMask()[i] != 0) validCount++;
+        }
+        if (validCount == 0) {
+            throw new EmbeddingException("Attention mask is all zero – nothing to pool");
+        }
+        float invValid = 1.0f / validCount;
+        float[] meanWeights = new float[B];
+        for (int i = 0; i < seqLen; i++) {
+            if (encoded.attentionMask()[i] != 0) meanWeights[i] = invValid;
+        }
+
+        // 4. Upload and dispatch encoder stack + GPU mean-pool.
+        float[] pooled = new float[H];
         try {
             CpuTensor xCpu = CpuTensor.float32(TensorShape.of(B, H), x);
             CpuTensor maskCpu = CpuTensor.float32(TensorShape.of(B), mask);
+            CpuTensor wCpu = CpuTensor.float32(TensorShape.of(B), meanWeights);
             entry.xIn.upload(xCpu);
             entry.mask.upload(maskCpu);
+            entry.meanWeights.upload(wCpu);
 
             DirectMlTensor xInT = tensorOf(entry.xIn, B, H);
             DirectMlTensor xOutT = tensorOf(entry.xOut, B, H);
             DirectMlTensor maskT = tensorOf(entry.mask, B);
+            DirectMlTensor wT    = tensorOf(entry.meanWeights, B);
+            DirectMlTensor pooledT = tensorOf(entry.pooled, H);
             DirectMlTensor embGT  = tensorOf(embLnGammaBuf, H);
             DirectMlTensor embBT  = tensorOf(embLnBetaBuf,  H);
 
             entry.stack.dispatch(xInT, embGT, embBT, gpuLayers, maskT, xOutT);
+            entry.meanPool.dispatch(xOutT, wT, pooledT);
 
-            CpuTensor xOutCpu = emptyCpuTensor(B * H);
-            entry.xOut.download(xOutCpu);
-            FloatBuffer fv = xOutCpu.data().duplicate().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
+            // Read back only the pooled H-vector – the [B,H] hidden tensor
+            // never crosses the PCIe boundary anymore.
+            CpuTensor pooledCpu = emptyCpuTensor(H);
+            entry.pooled.download(pooledCpu);
+            FloatBuffer fv = pooledCpu.data().duplicate().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
             fv.position(0);
-            fv.get(xOutGpu, 0, B * H);
+            fv.get(pooled, 0, H);
         } catch (DirectMlRuntimeException e) {
             throw new EmbeddingException("DirectML dispatch failed for bucket=" + B
                     + " (seqLen=" + seqLen + ")", e);
         }
 
-        // 5. Mean-Pool over the original attention mask: copy only the
-        // valid first seqLen rows; padded rows are not pooled.
-        float[][] tokens = new float[seqLen][H];
-        for (int t = 0; t < seqLen; t++) {
-            System.arraycopy(xOutGpu, t * H, tokens[t], 0, H);
-        }
-        float[] pooled = MeanPooling.pool(tokens, encoded.attentionMask());
-
-        // 6. L2-Normalize.
+        // 5. L2-Normalize on the H-element vector (microseconds, last CPU step).
         if (request.normalize()) {
             L2Normalize.inPlace(pooled, 1e-12f);
         }
@@ -329,25 +358,33 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
         int H = config.hiddenSize();
         long hiddenBytes = (long) bucket * H * Float.BYTES;
         long maskBytes = (long) bucket * Float.BYTES;
+        long pooledBytes = (long) H * Float.BYTES;
 
-        GpuBuffer xIn = null, xOut = null, mask = null;
+        GpuBuffer xIn = null, xOut = null, mask = null, meanWeights = null, pooled = null;
         DirectMlMiniLmEncoderStack stack = null;
+        DirectMlMeanPoolKernel meanPool = null;
         try {
             xIn  = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
             xOut = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
             mask = ctx.allocateBuffer(maskBytes,   GpuBuffer.BufferUsage.ACTIVATION);
+            meanWeights = ctx.allocateBuffer(maskBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            pooled = ctx.allocateBuffer(pooledBytes, GpuBuffer.BufferUsage.ACTIVATION);
             stack = new DirectMlMiniLmEncoderStack(
                     ctx, bucket, H,
                     config.numAttentionHeads(), config.headDim(),
                     config.intermediateSize(),  config.numLayers(),
                     config.layerNormEps(),      /* hasMask */ true);
-            StackEntry entry = new StackEntry(stack, xIn, xOut, mask);
+            meanPool = new DirectMlMeanPoolKernel(ctx, bucket, H);
+            StackEntry entry = new StackEntry(stack, xIn, xOut, mask, meanWeights, pooled, meanPool);
             stackCache.put(bucket, entry);
             log.info("DirectMlMiniLmEncoder stack ready for bucket S={} (cached buckets so far: {})",
                     bucket, stackCache.size());
             return entry;
         } catch (DirectMlRuntimeException | RuntimeException e) {
+            if (meanPool != null) try { meanPool.close(); } catch (Exception ignored) {}
             if (stack != null) try { stack.close(); } catch (Exception ignored) {}
+            if (pooled != null)      try { pooled.close();      } catch (Exception ignored) {}
+            if (meanWeights != null) try { meanWeights.close(); } catch (Exception ignored) {}
             if (mask != null)  try { mask.close();  } catch (Exception ignored) {}
             if (xOut != null)  try { xOut.close();  } catch (Exception ignored) {}
             if (xIn != null)   try { xIn.close();   } catch (Exception ignored) {}

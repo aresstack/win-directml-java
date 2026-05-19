@@ -291,7 +291,13 @@ or `error`) together with `embeddingReady`.
     sequence length. Padded positions are masked out in attention (`-1e9`) and ignored by MeanPool via the original
     `attentionMask`, so `cos(CPU, DirectML)` is unchanged. Validated by `DirectMlMiniLmEncoderBucketTest` and the
     existing reference test (`cachedStackCount() == 1` for the short corpus).
-13. ⏳ Mean-pool + L2 on DirectML (eliminate the CPU read-back tail).
+13. ✅ Mean-pool on DirectML (`DirectMlMeanPoolKernel`, `DML_OPERATOR_GEMM` FL-1.0) – per-token weights
+    `w[t] = m[t]/Σm` are pre-normalised on the CPU, the GEMM `y[1,H] = w[1,S]·x[S,H]` then collapses the pooling
+    into a single FL-1.0 dispatch. The PCIe read-back per inference shrinks from `B·H` to `H` floats (≈ 256× less
+    on bucket `S=256, H=384`). L2-Normalize stays on the CPU because the operation on a single 384-float vector
+    is microseconds and would otherwise require Reduce/Divide ops that are not guaranteed on FL 5.0 in-box DLLs.
+    Validated by `DirectMlMeanPoolKernelTest` and the existing parity test against the CPU encoder
+    (`DirectMlMiniLmEmbeddingReferenceTest`).
 14. ⏳ E5 and JinaBERT encoders on the same runtime core.
 15. ⏳ Reranker encoder support.
 16. ⏳ Additional decoder LLM families after the encoder path is stable.
