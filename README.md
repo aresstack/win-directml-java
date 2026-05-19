@@ -190,6 +190,19 @@ Talk to it via JSON-RPC 2.0 (one message per line on stdout):
 
 Protocol details: [`directml-sidecar/PROTOCOL.md`](directml-sidecar/PROTOCOL.md).
 
+## Java-8 Workbench
+
+For interactive testing of the sidecar from a Java-8 host environment
+(stdin/stdout JSON-RPC, no FFM, no DirectML in the host), see the
+companion modules and Swing workbench:
+
+```powershell
+./gradlew.bat :directml-sidecar:jar
+./gradlew.bat :directml-sidecar-workbench:run
+```
+
+Documentation: [`WORKBENCH.md`](WORKBENCH.md).
+
 ## Embeddings (`embed`)
 
 `embed` is backed by `sentence-transformers/all-MiniLM-L6-v2`. Two

@@ -13,44 +13,59 @@ allprojects {
 subprojects {
     apply plugin: 'java-library'
 
-    java {
-        toolchain {
-            languageVersion = JavaLanguageVersion.of(21)
+    // Java-8-compatible modules (consumed by Java-8 host applications)
+    // opt out of the toolchain default + preview flags below by setting
+    // ext.java8Module = true in their own build.gradle.
+    ext.java8Module = false
+}
+
+subprojects { sub ->
+    afterEvaluate {
+        if (sub.ext.java8Module) {
+            // Configured per-module (see directml-sidecar-client-java8 and
+            // directml-sidecar-workbench build.gradle files).
+            return
         }
-    }
 
-    compileJava.options.encoding = 'UTF-8'
-    compileTestJava.options.encoding = 'UTF-8'
-    compileJava.options.compilerArgs += ['--enable-preview']
-    compileTestJava.options.compilerArgs += ['--enable-preview']
-
-    tasks.withType(Test).configureEach {
-        useJUnitPlatform()
-        jvmArgs '--enable-preview', '--enable-native-access=ALL-UNNAMED'
-        // Forward -Dwindirectml.* system properties from the Gradle invocation
-        // into the test JVM (e.g. -Dwindirectml.debug=true).
-        System.getProperties().each { k, v ->
-            if (k.toString().startsWith('windirectml.')) {
-                systemProperty(k.toString(), v.toString())
+        java {
+            toolchain {
+                languageVersion = JavaLanguageVersion.of(21)
             }
         }
-    }
 
-    tasks.withType(JavaExec).configureEach {
-        jvmArgs '--enable-preview', '--enable-native-access=ALL-UNNAMED'
-        // Forward -Dwindirectml.* system properties (e.g. windirectml.debug,
-        // windirectml.directml.dll) from the Gradle invocation into the JVM.
-        System.getProperties().each { k, v ->
-            if (k.toString().startsWith('windirectml.')) {
-                systemProperty(k.toString(), v.toString())
+        compileJava.options.encoding = 'UTF-8'
+        compileTestJava.options.encoding = 'UTF-8'
+        compileJava.options.compilerArgs += ['--enable-preview']
+        compileTestJava.options.compilerArgs += ['--enable-preview']
+
+        tasks.withType(Test).configureEach {
+            useJUnitPlatform()
+            jvmArgs '--enable-preview', '--enable-native-access=ALL-UNNAMED'
+            // Forward -Dwindirectml.* system properties from the Gradle invocation
+            // into the test JVM (e.g. -Dwindirectml.debug=true).
+            System.getProperties().each { k, v ->
+                if (k.toString().startsWith('windirectml.')) {
+                    systemProperty(k.toString(), v.toString())
+                }
             }
         }
-    }
 
-    dependencies {
-        implementation 'org.slf4j:slf4j-api:2.0.13'
-        testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
-        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-        testRuntimeOnly 'ch.qos.logback:logback-classic:1.5.6'
+        tasks.withType(JavaExec).configureEach {
+            jvmArgs '--enable-preview', '--enable-native-access=ALL-UNNAMED'
+            // Forward -Dwindirectml.* system properties (e.g. windirectml.debug,
+            // windirectml.directml.dll) from the Gradle invocation into the JVM.
+            System.getProperties().each { k, v ->
+                if (k.toString().startsWith('windirectml.')) {
+                    systemProperty(k.toString(), v.toString())
+                }
+            }
+        }
+
+        dependencies {
+            implementation 'org.slf4j:slf4j-api:2.0.13'
+            testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+            testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+            testRuntimeOnly 'ch.qos.logback:logback-classic:1.5.6'
+        }
     }
 }

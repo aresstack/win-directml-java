@@ -1,0 +1,39 @@
+// Pure Java-8 JSON-RPC client for the Java-21 DirectML sidecar.
+// Must not depend on any Java-9+ APIs and not on any windirectml runtime module.
+plugins {
+    id 'java-library'
+}
+
+ext.java8Module = true
+
+java {
+    // Compile against the Java 8 API surface. The Gradle toolchain JDK
+    // is still JDK 21 (run by Gradle itself), but `release = 8` enforces
+    // Java-8 bytecode and rejects any Java-9+ API usage at compile time.
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+compileTestJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+    // No --enable-preview here: pure Java-8 module.
+}
+
+dependencies {
+    api 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
+    // No SLF4J / logback: Java-8 host app brings its own logging.
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+

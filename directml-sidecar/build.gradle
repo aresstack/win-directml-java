@@ -14,3 +14,30 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
     runtimeOnly 'ch.qos.logback:logback-classic:1.5.6'
 }
+
+// Self-contained jar for the Java-8 workbench / host integration:
+//   java --enable-preview --enable-native-access=ALL-UNNAMED -jar directml-sidecar-all.jar
+// Bundles all runtime dependencies (Jackson, SLF4J/Logback, inference,
+// encoder, windows-bindings, config) into one redistributable file.
+tasks.register('fatJar', Jar) {
+    archiveClassifier.set('all')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    dependsOn configurations.runtimeClasspath
+    from sourceSets.main.output
+    from {
+        configurations.runtimeClasspath.findAll { it.name.endsWith('jar') }
+                .collect { zipTree(it) }
+    }
+    manifest {
+        attributes(
+                'Main-Class': 'com.aresstack.windirectml.sidecar.DirectMlPhi3Sidecar',
+                'Enable-Native-Access': 'ALL-UNNAMED'
+        )
+    }
+    // Drop META-INF signature files coming from signed third-party jars,
+    // otherwise the JVM will refuse to load the merged fat jar.
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+}
+
+assemble.dependsOn(fatJar)
+
