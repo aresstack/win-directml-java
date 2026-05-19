@@ -239,6 +239,12 @@ class DirectMlEmbedBatchParityTest {
                 PoolingStrategy.MEAN, true);
     }
 
+    private static String repeat(String s, int n) {
+        StringBuilder sb = new StringBuilder(s.length() * n);
+        for (int i = 0; i < n; i++) sb.append(s);
+        return sb.toString();
+    }
+
     @Test
     void batchedEmbedSpansMultipleBuckets() throws Exception {
         assumeTrue(WindowsBindings.isSupported(),
@@ -294,10 +300,116 @@ class DirectMlEmbedBatchParityTest {
         }
     }
 
-    private static String repeat(String s, int n) {
-        StringBuilder sb = new StringBuilder(s.length() * n);
-        for (int i = 0; i < n; i++) sb.append(s);
-        return sb.toString();
+    /**
+     * {@code embedBatch} with {@code normalize=false} for every row must
+     * skip the GPU L2 dispatch and return un-normalised pooled vectors
+     * that still match the CPU reference in direction (cos &gt; 0.999).
+     */
+    @Test
+    void batchedEmbedNormalizeFalseSkipsGpuL2() throws Exception {
+        assumeTrue(WindowsBindings.isSupported(),
+                "DirectML requires Windows + D3D12 on this host");
+        BertEncoderConfig cfg = tinyConfig();
+        BertCpuEncoderWeights w = randomWeights(cfg, 4242L);
+        TinyTokenizer tok = new TinyTokenizer(cfg.vocabSize());
+
+        List<EmbeddingRequest> reqs = new ArrayList<>();
+        for (String t : List.of("a", "ab", "abc", "abcd")) {
+            reqs.add(new EmbeddingRequest(t, /* normalize */ false, null));
+        }
+
+        try (DirectMlContextImpl ctx = new DirectMlContextImpl("embedBatch-normalize-false")) {
+            ctx.initialize();
+            assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
+                    "No DirectML device available on this adapter");
+
+            try (CpuBertEncoder cpu = new CpuBertEncoder(cfg, w, tok);
+                 DirectMlBertEncoder gpu = DirectMlBertEncoder.build(
+                         ctx, /* ownsCtx */ false, cfg, w, tok)) {
+
+                List<EmbeddingVector> cpuSeq = new ArrayList<>();
+                for (EmbeddingRequest r : reqs) cpuSeq.add(cpu.embed(r));
+
+                List<EmbeddingVector> gpuBatch = gpu.embedBatch(reqs);
+
+                assertEquals(reqs.size(), gpuBatch.size(),
+                        "embedBatch must return one vector per input");
+                for (int i = 0; i < reqs.size(); i++) {
+                    EmbeddingVector v = gpuBatch.get(i);
+                    assertEquals(cfg.outputDimension(), v.dimension());
+                    assertEquals(false, v.normalized(),
+                            "normalize=false row #" + i + " must report normalized() == false");
+                    double nrm = norm(v.values());
+                    assertTrue(Math.abs(nrm - 1.0) > 1e-3,
+                            "normalize=false row #" + i + " must NOT be unit-norm, was " + nrm);
+                    double cos = CosineSimilarity.compute(
+                            cpuSeq.get(i).values(), v.values());
+                    assertTrue(cos > 0.999,
+                            "CPU vs DML-batch cosine[" + i + "] (normalize=false) must be > 0.999, was " + cos);
+                }
+            }
+        }
+    }
+
+    /**
+     * Mixed {@code normalize} flags within one batch: rows flagged
+     * {@code true} must be unit-norm and rows flagged {@code false} must
+     * not be. Both groups must respect the original input order.
+     */
+    @Test
+    void batchedEmbedSupportsMixedNormalizeFlags() throws Exception {
+        assumeTrue(WindowsBindings.isSupported(),
+                "DirectML requires Windows + D3D12 on this host");
+        BertEncoderConfig cfg = tinyConfig();
+        BertCpuEncoderWeights w = randomWeights(cfg, 9999L);
+        TinyTokenizer tok = new TinyTokenizer(cfg.vocabSize());
+
+        // All inputs share the same pad bucket on purpose, so the mixed
+        // flags exercise the (anyNormalize && !allNormalize) double-readback
+        // branch in embedBatch().
+        List<EmbeddingRequest> reqs = List.of(
+                new EmbeddingRequest("alpha",   /* normalize */ true, null),
+                new EmbeddingRequest("beta",    /* normalize */ false, null),
+                new EmbeddingRequest("gamma",   /* normalize */ true, null),
+                new EmbeddingRequest("delta",   /* normalize */ false, null));
+
+        try (DirectMlContextImpl ctx = new DirectMlContextImpl("embedBatch-mixed-normalize")) {
+            ctx.initialize();
+            assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
+                    "No DirectML device available on this adapter");
+
+            try (CpuBertEncoder cpu = new CpuBertEncoder(cfg, w, tok);
+                 DirectMlBertEncoder gpu = DirectMlBertEncoder.build(
+                         ctx, /* ownsCtx */ false, cfg, w, tok)) {
+
+                // CPU reference per row, respecting each row's normalize flag.
+                List<EmbeddingVector> cpuSeq = new ArrayList<>();
+                for (EmbeddingRequest r : reqs) cpuSeq.add(cpu.embed(r));
+
+                List<EmbeddingVector> gpuBatch = gpu.embedBatch(reqs);
+
+                assertEquals(reqs.size(), gpuBatch.size(),
+                        "embedBatch must return one vector per input");
+                for (int i = 0; i < reqs.size(); i++) {
+                    boolean expectNormalized = reqs.get(i).normalize();
+                    EmbeddingVector v = gpuBatch.get(i);
+                    assertEquals(expectNormalized, v.normalized(),
+                            "row #" + i + " normalized() flag must match request");
+                    double nrm = norm(v.values());
+                    if (expectNormalized) {
+                        assertTrue(Math.abs(nrm - 1.0) < 1e-4,
+                                "normalize=true row #" + i + " must be unit-norm, was " + nrm);
+                    } else {
+                        assertTrue(Math.abs(nrm - 1.0) > 1e-3,
+                                "normalize=false row #" + i + " must NOT be unit-norm, was " + nrm);
+                    }
+                    double cos = CosineSimilarity.compute(
+                            cpuSeq.get(i).values(), v.values());
+                    assertTrue(cos > 0.999,
+                            "mixed-normalize batched cos[" + i + "] vs CPU must be > 0.999, was " + cos);
+                }
+            }
+        }
     }
 
     private static float[] rand(Random r, int n, float scale) {
