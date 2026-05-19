@@ -246,6 +246,62 @@ Response:
 Solange kein Embedding-Modell gefunden wird, antwortet `embed` mit
 `-32005 Not implemented`.
 
+### `embedBatch`
+
+Bettet **mehrere Texte in einem Aufruf** ein. Trägt das geladene
+Backend Bucket-Batching (z. B. `DirectMlBertEncoder`), werden alle
+Texte einer Pad-Länge in einem einzigen GPU-Dispatch verarbeitet – das
+ist der primäre Hebel für RAG-Ingestion und Multi-Chunk-Encoding.
+Backends ohne Batch-Override (z. B. CPU-Encoder) fallen transparent auf
+N sequentielle `embed`-Aufrufe zurück; die Antwort-Struktur ist
+identisch.
+
+`normalize` und `prefix` gelten **für alle Texte gemeinsam** – pro-Text
+Varianten sind aktuell nicht vorgesehen (Use-Case: gleichartige Chunks).
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "eb1",
+  "method": "embedBatch",
+  "params": {
+    "texts":     ["DirectML is a low-level Windows API for ML.",
+                  "Cross-encoders score (query, document) pairs.",
+                  "Python is a programming language."],
+    "normalize": true,
+    "prefix":    "passage: "
+  }
+}
+```
+
+- `texts` (string[], Pflicht) – nicht-leeres Array, keine leeren/blank Einträge.
+- `normalize` (boolean, optional, Default `true`) – L2-Normalisierung pro Vektor.
+- `prefix` (string, optional) – wird vor jedem Text appended (E5-Konvention).
+
+Response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "eb1",
+  "result": {
+    "vectors":   [[0.012, -0.083, ...],
+                  [0.041,  0.117, ...],
+                  [-0.005, 0.092, ...]],
+    "dimension": 384,
+    "model":     "all-MiniLM-L6-v2",
+    "normalized": true,
+    "count":     3
+  }
+}
+```
+
+Die Reihenfolge der Vektoren entspricht der Reihenfolge in `texts`.
+Solange kein Embedding-Modell geladen ist, antwortet `embedBatch`
+mit `-32005 Not implemented`.
+
 ### `rerank`
 
 Cross-Encoder-Reranking: bewertet `(query, document)`-Paare gemeinsam

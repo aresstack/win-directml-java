@@ -13,6 +13,7 @@ import com.aresstack.windirectml.inference.Phi3Summarizer;
 import com.aresstack.windirectml.inference.Summarizer;
 import com.aresstack.windirectml.sidecar.handlers.CancelHandler;
 import com.aresstack.windirectml.sidecar.handlers.EmbedHandler;
+import com.aresstack.windirectml.sidecar.handlers.EmbedBatchHandler;
 import com.aresstack.windirectml.sidecar.handlers.HealthHandler;
 import com.aresstack.windirectml.sidecar.handlers.RerankHandler;
 import com.aresstack.windirectml.sidecar.handlers.ShutdownHandler;
@@ -498,6 +499,7 @@ public final class DirectMlPhi3Sidecar {
             });
         }
         dispatcher.register("embed", new EmbedHandler(embeddingModel::get, status));
+        dispatcher.register("embedBatch", new EmbedBatchHandler(embeddingModel::get, status));
         dispatcher.register("rerank", new RerankHandler(reranker::get, status));
         dispatcher.register("shutdown", new ShutdownHandler(status));
         dispatcher.register("cancel", new CancelHandler());
@@ -537,7 +539,7 @@ public final class DirectMlPhi3Sidecar {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("name", "DirectMlPhi3Sidecar");
         m.put("protocol", "jsonrpc-2.0");
-        m.put("methods", new String[]{"health", "summarize", "embed", "rerank", "shutdown", "cancel"});
+        m.put("methods", new String[]{"health", "summarize", "embed", "embedBatch", "rerank", "shutdown", "cancel"});
         m.put("backend", backend);
         m.put("modelDir", modelDir.toString());
         m.put("autoLoadModel", autoLoadModel);
