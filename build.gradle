@@ -41,6 +41,11 @@ subprojects { sub ->
         tasks.withType(Test).configureEach {
             useJUnitPlatform()
             jvmArgs '--enable-preview', '--enable-native-access=ALL-UNNAMED'
+            // Real-model reference tests load BERT-class safetensors
+            // checkpoints (~90 MB for the reranker, ~130 MB for the
+            // e5-base-v2 weights) and run CPU + DirectML side by side –
+            // 512 MB (Gradle default) is not enough headroom.
+            maxHeapSize = '2g'
             // Forward -Dwindirectml.* system properties from the Gradle invocation
             // into the test JVM (e.g. -Dwindirectml.debug=true).
             System.getProperties().each { k, v ->
