@@ -299,5 +299,94 @@ class SidecarClientFakeProcessTest {
         assertEquals(0, r.getItems().get(1).getIndex());
         assertEquals(-0.5, r.getItems().get(1).getScore(), 1e-9);
     }
+
+    @Test
+    void embedBatchRoundTripParsesVectorsInOrder() throws Exception {
+        FakeSidecarProcess fake = new FakeSidecarProcess();
+        SidecarClientConfig cfg = new SidecarClientConfig();
+        cfg.setSidecarJarPath("fake");
+        cfg.setRequestTimeoutMillis(2000L);
+        client = new SidecarClient(cfg, fake);
+        client.start();
+
+        final BatchEmbeddingResult[] captured = new BatchEmbeddingResult[1];
+        final Throwable[] failure = new Throwable[1];
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    java.util.List<String> texts = java.util.Arrays.asList(
+                            "first chunk", "second chunk", "third chunk");
+                    captured[0] = client.embedBatch(texts, true, "passage: ");
+                } catch (Throwable e) {
+                    failure[0] = e;
+                }
+            }
+        });
+        t.start();
+
+        String reqLine = fake.waitForRequest();
+        assertTrue(reqLine.contains("\"method\":\"embedBatch\""),
+                "expected method=embedBatch, got: " + reqLine);
+
+        com.fasterxml.jackson.databind.JsonNode req = client.getMapperForTesting().readTree(reqLine);
+        com.fasterxml.jackson.databind.JsonNode params = req.get("params");
+        assertNotNull(params, "embedBatch must have params");
+        com.fasterxml.jackson.databind.JsonNode texts = params.get("texts");
+        assertNotNull(texts, "texts must be serialised");
+        assertTrue(texts.isArray());
+        assertEquals(3, texts.size());
+        assertEquals("first chunk", texts.get(0).asText());
+        assertEquals("third chunk", texts.get(2).asText());
+        assertTrue(params.get("normalize").asBoolean());
+        assertEquals("passage: ", params.get("prefix").asText());
+
+        long id = req.get("id").asLong();
+        fake.enqueueLine("{\"jsonrpc\":\"2.0\",\"id\":" + id
+                + ",\"result\":{"
+                + "\"vectors\":[[1.0,2.0,3.0,4.0],[0.5,0.5,0.5,0.5],[-1.0,-2.0,-3.0,-4.0]],"
+                + "\"dimension\":4,"
+                + "\"model\":\"stub/embed\","
+                + "\"normalized\":true,"
+                + "\"count\":3"
+                + "}}");
+        t.join(3000L);
+        if (failure[0] != null) {
+            fail("embedBatch() threw: " + failure[0].getMessage());
+        }
+
+        BatchEmbeddingResult r = captured[0];
+        assertNotNull(r, "embedBatch() returned null");
+        assertEquals("stub/embed", r.getModel());
+        assertEquals(4, r.getDimension());
+        assertEquals(3, r.getCount());
+        assertTrue(r.isNormalized());
+        assertEquals(3, r.getVectors().size());
+        assertEquals(1.0f, r.getVectors().get(0)[0], 1e-6f);
+        assertEquals(0.5f, r.getVectors().get(1)[0], 1e-6f);
+        assertEquals(-3.0f, r.getVectors().get(2)[2], 1e-6f);
+    }
+
+    @Test
+    void embedBatchRejectsEmptyTextsLocally() throws Exception {
+        FakeSidecarProcess fake = new FakeSidecarProcess();
+        SidecarClientConfig cfg = new SidecarClientConfig();
+        cfg.setSidecarJarPath("fake");
+        client = new SidecarClient(cfg, fake);
+        client.start();
+
+        assertThrows(SidecarException.class, new org.junit.jupiter.api.function.Executable() {
+            @Override
+            public void execute() throws Throwable {
+                client.embedBatch(java.util.Collections.<String>emptyList());
+            }
+        });
+        assertThrows(SidecarException.class, new org.junit.jupiter.api.function.Executable() {
+            @Override
+            public void execute() throws Throwable {
+                client.embedBatch(java.util.Arrays.asList("ok", ""));
+            }
+        });
+    }
 }
 

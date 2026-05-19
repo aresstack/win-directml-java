@@ -278,7 +278,7 @@ Request:
 
 - `texts` (string[], Pflicht) – nicht-leeres Array, keine leeren/blank Einträge.
 - `normalize` (boolean, optional, Default `true`) – L2-Normalisierung pro Vektor.
-- `prefix` (string, optional) – wird vor jedem Text appended (E5-Konvention).
+- `prefix` (string, optional) – wird jedem Text **vorangestellt** (prepended; E5-Konvention).
 
 Response:
 

@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.sidecar.workbench;
 
 import com.aresstack.windirectml.sidecar.client.EmbeddingResult;
+import com.aresstack.windirectml.sidecar.client.BatchEmbeddingResult;
 import com.aresstack.windirectml.sidecar.client.HealthResult;
 import com.aresstack.windirectml.sidecar.client.RerankResult;
 import com.aresstack.windirectml.sidecar.client.SidecarClient;
@@ -103,6 +104,13 @@ public final class WorkbenchModel {
             throws SidecarException {
         if (client == null) throw new SidecarException("Sidecar is not running");
         return client.embed(text, normalize, prefix);
+    }
+
+    public synchronized BatchEmbeddingResult embedBatch(java.util.List<String> texts,
+                                                        boolean normalize, String prefix)
+            throws SidecarException {
+        if (client == null) throw new SidecarException("Sidecar is not running");
+        return client.embedBatch(texts, normalize, prefix);
     }
 
     public synchronized SummaryResult summarize(String text, int maxTokens) throws SidecarException {

@@ -156,6 +156,43 @@ public final class SidecarClient {
         return EmbeddingResult.from(resp.getResult(), elapsed, resp.getRaw());
     }
 
+    /**
+     * Batch embedding. Sends all {@code texts} in a single JSON-RPC
+     * round-trip; bucket-batching DirectML backends coalesce them onto
+     * one GPU dispatch per pad-bucket. The result preserves input order.
+     *
+     * @param texts     non-null, non-empty list of non-blank texts.
+     * @param normalize L2-normalise every vector (default {@code true}
+     *                  in the JSON-RPC schema; pass explicitly here).
+     * @param prefix    optional prefix prepended to every text
+     *                  (e.g. {@code "passage: "} for E5).
+     */
+    public BatchEmbeddingResult embedBatch(List<String> texts, boolean normalize, String prefix)
+            throws SidecarException {
+        if (texts == null || texts.isEmpty()) {
+            throw new SidecarException("embedBatch: texts must not be empty");
+        }
+        for (int i = 0; i < texts.size(); i++) {
+            String t = texts.get(i);
+            if (t == null || t.length() == 0) {
+                throw new SidecarException("embedBatch: texts[" + i + "] must not be empty");
+            }
+        }
+        Map<String, Object> params = new LinkedHashMap<String, Object>();
+        params.put("texts", texts);
+        params.put("normalize", normalize);
+        if (prefix != null) params.put("prefix", prefix);
+        long t0 = System.currentTimeMillis();
+        JsonRpcResponse resp = call("embedBatch", params);
+        long elapsed = System.currentTimeMillis() - t0;
+        return BatchEmbeddingResult.from(resp.getResult(), elapsed, resp.getRaw());
+    }
+
+    /** Convenience overload: {@code normalize=true}, no prefix. */
+    public BatchEmbeddingResult embedBatch(List<String> texts) throws SidecarException {
+        return embedBatch(texts, true, null);
+    }
+
     public SummaryResult summarize(String text, int maxTokens) throws SidecarException {
         return summarize(text, maxTokens, null);
     }

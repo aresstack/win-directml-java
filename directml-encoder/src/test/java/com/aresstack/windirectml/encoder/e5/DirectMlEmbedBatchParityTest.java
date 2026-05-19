@@ -169,18 +169,18 @@ class DirectMlEmbedBatchParityTest {
     }
 
     @Test
-    void batchedEmbedHandlesMultipleBuckets() throws Exception {
+    void batchedEmbedUsesDistinctCacheEntriesForDifferentBatchSizes() throws Exception {
         assumeTrue(WindowsBindings.isSupported(),
                 "DirectML requires Windows + D3D12 on this host");
         BertEncoderConfig cfg = tinyConfig();
         BertCpuEncoderWeights w = randomWeights(cfg, 12345L);
         TinyTokenizer tok = new TinyTokenizer(cfg.vocabSize());
 
-        // The TinyTokenizer caps length at 8 → all inputs land in bucket=64.
-        // To force the multi-bucket path we instead vary N: feed the same
-        // request set twice with different batch sizes and assert the
-        // (bucket, batch) cache keys both materialise independently.
-        try (DirectMlContextImpl ctx = new DirectMlContextImpl("embedBatch-buckets")) {
+        // The TinyTokenizer caps length at 8 → all inputs land in the same
+        // bucket. To prove the (bucket, batch) cache really keys on both
+        // dimensions we feed the encoder twice with different N values and
+        // assert two distinct cache entries appear.
+        try (DirectMlContextImpl ctx = new DirectMlContextImpl("embedBatch-batch-sizes")) {
             ctx.initialize();
             assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
                     "No DirectML device available on this adapter");
@@ -201,9 +201,103 @@ class DirectMlEmbedBatchParityTest {
                 assertEquals(2, r2.size());
                 assertEquals(3, r3.size());
                 assertEquals(2, gpu.cachedBatchStackCount(),
-                        "two distinct (bucket, batch) keys expected");
+                        "two distinct (bucket=B, batch=2) and (bucket=B, batch=3) "
+                                + "entries expected, even though the bucket is identical");
             }
         }
+    }
+
+    /** Variable-length tokenizer used by the real multi-bucket test below. */
+    private static final class LengthTokenizer implements EncoderTokenizer {
+        private final int vocab;
+        private final int maxLen;
+        LengthTokenizer(int vocab, int maxLen) { this.vocab = vocab; this.maxLen = maxLen; }
+        @Override public Encoded encode(String text) {
+            int n = Math.min(text.length() + 2, maxLen);
+            int[] ids = new int[n];
+            int[] mask = new int[n];
+            int[] segs = new int[n];
+            ids[0] = 2;
+            for (int i = 1; i < n - 1; i++) ids[i] = 4 + ((text.charAt((i - 1) % text.length())) % (vocab - 5));
+            ids[n - 1] = 3;
+            for (int i = 0; i < n; i++) mask[i] = 1;
+            return new Encoded(ids, mask, segs);
+        }
+        @Override public int padTokenId() { return 0; }
+        @Override public int clsTokenId() { return 2; }
+        @Override public int sepTokenId() { return 3; }
+        @Override public int vocabSize()  { return vocab; }
+    }
+
+    /** Larger config that allows seqLen > 16 so we can land in multiple pad buckets. */
+    private static BertEncoderConfig multiBucketConfig() {
+        return new BertEncoderConfig(
+                "test/e5-multibucket",
+                24, 2, 4, 48,
+                /* maxPos */ 128, 2, 32,
+                1e-12f, "gelu", 24,
+                PoolingStrategy.MEAN, true);
+    }
+
+    @Test
+    void batchedEmbedSpansMultipleBuckets() throws Exception {
+        assumeTrue(WindowsBindings.isSupported(),
+                "DirectML requires Windows + D3D12 on this host");
+        BertEncoderConfig cfg = multiBucketConfig();
+        BertCpuEncoderWeights w = randomWeights(cfg, 77L);
+        LengthTokenizer tok = new LengthTokenizer(cfg.vocabSize(), cfg.maxPositionEmbeddings());
+
+        // Inputs deliberately straddle two pad buckets:
+        //   * short text  → seqLen ≈ 5  → bucket 64
+        //   * medium text → seqLen ≈ 100 → bucket 128
+        String shortText  = "abc";                                   // length 3 → 5 tokens
+        String mediumText = repeat("x", 100);                         // length 100 → 102 tokens
+        List<EmbeddingRequest> mixed = List.of(
+                new EmbeddingRequest(shortText,  true, null),
+                new EmbeddingRequest(mediumText, true, null),
+                new EmbeddingRequest(shortText  + "!", true, null),   // also bucket 64
+                new EmbeddingRequest(mediumText.substring(0, 80), true, null) // bucket 128
+        );
+
+        try (DirectMlContextImpl ctx = new DirectMlContextImpl("embedBatch-multi-bucket")) {
+            ctx.initialize();
+            assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
+                    "No DirectML device available on this adapter");
+
+            try (CpuBertEncoder cpu = new CpuBertEncoder(cfg, w, tok);
+                 DirectMlBertEncoder gpu = DirectMlBertEncoder.build(
+                         ctx, /* ownsCtx */ false, cfg, w, tok)) {
+
+                // Reference: CPU sequential. Establishes per-row truth.
+                List<EmbeddingVector> cpuSeq = new ArrayList<>();
+                for (EmbeddingRequest r : mixed) cpuSeq.add(cpu.embed(r));
+
+                // The batched call must dispatch once per active bucket.
+                int before = gpu.cachedBatchStackCount();
+                List<EmbeddingVector> gpuBatch = gpu.embedBatch(mixed);
+                int after = gpu.cachedBatchStackCount();
+
+                // Two short + two medium inputs → exactly two (bucket, N=2) entries.
+                assertEquals(before + 2, after,
+                        "two pad buckets in the input must materialise two batched stacks");
+
+                // Order preserved + parity with CPU.
+                assertEquals(mixed.size(), gpuBatch.size());
+                for (int i = 0; i < mixed.size(); i++) {
+                    assertEquals(cfg.outputDimension(), gpuBatch.get(i).dimension());
+                    double cos = CosineSimilarity.compute(
+                            cpuSeq.get(i).values(), gpuBatch.get(i).values());
+                    assertTrue(cos > 0.999,
+                            "multi-bucket batched cos[" + i + "] vs CPU must be > 0.999, was " + cos);
+                }
+            }
+        }
+    }
+
+    private static String repeat(String s, int n) {
+        StringBuilder sb = new StringBuilder(s.length() * n);
+        for (int i = 0; i < n; i++) sb.append(s);
+        return sb.toString();
     }
 
     private static float[] rand(Random r, int n, float scale) {
