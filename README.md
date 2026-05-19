@@ -313,8 +313,21 @@ or `error`) together with `embeddingReady`.
     `cos(CpuMiniLmEncoder, DirectMlMiniLmEncoder) = 1.000000` on Windows 11 in-box FL 5.0; standalone
     `DirectMlL2NormalizeKernelTest` validates parity against the CPU reference at ≤ 1e-5 and the unit-norm
     property of the output.
-15. ⏳ E5 and JinaBERT encoders on the same runtime core.
-16. ⏳ Reranker encoder support.
-17. ⏳ Additional decoder LLM families after the encoder path is stable.
+15. ✅ Encoder pipeline generalised for BERT-style models (`encoder.bert.*`) – introduces
+    `BertEncoderConfig` (hidden/numLayers/numHeads/intermediate/maxPos/typeVocab/vocab/LN-eps/hiddenAct/
+    outputDimension/poolingStrategy/normalize, with `headDim()` derivation and `validate()`),
+    `BertGpuLayerWeights` (16 GpuBuffer record consumed by the layer block), `BertEmbeddingLookup` (CPU
+    word+pos+tokenType gather → packed `[B,H]`), `BertPoolingWeights` (mean weights + additive mask),
+    `DirectMlBertEncoderLayerBlock` and `DirectMlBertEncoderStack` (model-agnostic Q/K/V → attention →
+    Wo+LN → MLP+GELU+LN pipeline). `DirectMlMiniLmEncoder` now drives the generic stack with a
+    MiniLM-specific adapter (`MiniLmConfigs.toBertConfig`) and a single upload step that converts the
+    MiniLM safetensors into `BertGpuLayerWeights`; the hot dispatch path no longer references any
+    MiniLM-specific class. The original `DirectMlMiniLmLayerBlock` / `DirectMlMiniLmEncoderStack` survive
+    as their own reference implementations so the existing standalone kernel-parity tests keep passing.
+    112 / 0 fail / 3 skip; reference test still reports `cos(CpuMiniLmEncoder, DirectMlMiniLmEncoder)
+    = 1.000000` on Windows 11 in-box FL 5.0.
+16. ⏳ E5 encoder on the generic stack (next sprint).
+17. ⏳ Reranker (cross-encoder) support.
+18. ⏳ JinaBERT and additional decoder LLM families.
 
 Issue backlog: [`win-directml-java-issues.md`](win-directml-java-issues.md).
