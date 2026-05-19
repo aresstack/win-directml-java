@@ -21,3 +21,19 @@ tasks.register('runRerankerBenchmark', JavaExec) {
     workingDir = rootProject.projectDir
 }
 
+// Throughput benchmark for the bucket-batched embedBatch() path of the
+// MiniLM and E5 encoders. Requires the matching real models under
+// `model/all-MiniLM-L6-v2/` and/or one of the E5 directories
+// (see scripts/download-minilm.ps1, scripts/download-e5.ps1).
+//
+//   gradle :directml-encoder:runEmbedBatchBenchmark
+//   gradle :directml-encoder:runEmbedBatchBenchmark --args="model minilm both 1 10,50,100,500"
+//   gradle :directml-encoder:runEmbedBatchBenchmark --args="model e5 dml 1 10,50,100"
+tasks.register('runEmbedBatchBenchmark', JavaExec) {
+    group = 'benchmark'
+    description = 'Runs the embedBatch throughput benchmark (CPU vs DirectML; MiniLM and E5).'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.aresstack.windirectml.encoder.bench.EmbedBatchBenchmark'
+    workingDir = rootProject.projectDir
+}
+
