@@ -5,7 +5,6 @@ import com.aresstack.windirectml.encoder.EmbeddingModel;
 import com.aresstack.windirectml.encoder.EmbeddingRequest;
 import com.aresstack.windirectml.encoder.EmbeddingVector;
 import com.aresstack.windirectml.encoder.EncoderTokenizer;
-import com.aresstack.windirectml.encoder.pooling.L2Normalize;
 import com.aresstack.windirectml.encoder.tokenizer.WordPieceTokenizer;
 import com.aresstack.windirectml.runtime.CpuTensor;
 import com.aresstack.windirectml.runtime.DirectMlContextImpl;
@@ -15,6 +14,7 @@ import com.aresstack.windirectml.runtime.GpuBuffer;
 import com.aresstack.windirectml.runtime.TensorDataType;
 import com.aresstack.windirectml.runtime.TensorLayout;
 import com.aresstack.windirectml.runtime.TensorShape;
+import com.aresstack.windirectml.runtime.kernels.DirectMlL2NormalizeKernel;
 import com.aresstack.windirectml.runtime.kernels.DirectMlMeanPoolKernel;
 import com.aresstack.windirectml.windows.DirectMlBindings;
 import com.aresstack.windirectml.windows.WindowsBindings;
@@ -42,17 +42,16 @@ import java.util.Objects;
  *     → Upload nach GPU
  *     → DirectMlMiniLmEncoderStack (Embedding-LN + N Layer)
  *     → DirectMlMeanPoolKernel (GEMM, w[t]=m[t]/Σm vorab CPU-normiert)
+ *     → DirectMlL2NormalizeKernel (GEMM-square-sum + SQRT(scale=1, bias=ε²) + DIVIDE-broadcast)
  *     → Download [H]
- *     → L2-Normalize (CPU, optional je Request)
  *     → EmbeddingVector
  * </pre>
- * Im Vergleich zum vorherigen Pfad (CPU-MeanPool nach Download des
- * vollen {@code [B,H]}-Tensors) wandert das Pooling vollständig auf die
- * GPU; pro Inferenz werden nur noch {@code H} statt {@code B·H} Floats
- * über PCIe gelesen. L2 bleibt auf der CPU, weil die Operation auf einem
- * {@code H}-Vektor (z. B. 384 Floats) ohnehin in Mikrosekunden läuft und
- * keine Reduce-/Divide-Operatoren erfordert, die auf älteren In-Box-DLLs
- * (FL 5.0) nicht garantiert sind.
+ * Pooling und L2-Normalisierung laufen damit beide auf der GPU; pro
+ * Inferenz werden nur noch {@code H} statt {@code B·H} Floats über PCIe
+ * gelesen, und der finale Vektor ist bereits normiert. Alle eingesetzten
+ * DirectML-Primitive (GEMM, ELEMENT_WISE_SQRT, ELEMENT_WISE_DIVIDE) sind
+ * FL-1.0-Baseline und in jeder ausgelieferten {@code DirectML.dll}
+ * (inkl. Windows 11 In-Box 1.8.0) vorhanden.
  * Die DirectML-Stacks sind formgebunden auf {@code seq}. Eingaben werden
  * auf einen Pad-Bucket {@code S ∈ {64, 128, 256, 512}} aufgefüllt; der
  * Stack-Cache hält damit höchstens vier Einträge pro Encoder
@@ -120,6 +119,20 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
     private final GpuBuffer embLnGammaBuf;
     private final GpuBuffer embLnBetaBuf;
     private final List<DirectMlMiniLmLayerBlock.LayerWeights> gpuLayers;
+
+    /**
+     * Shape-bound L2-normalize kernel ({@code N = hiddenSize},
+     * {@code ε = 1e-12f}). Shared across all pad-buckets since L2 only
+     * acts on the {@code [H]} pooled vector. {@code null} → not built yet
+     * (constructor failed before this line, see error path).
+     */
+    private final DirectMlL2NormalizeKernel l2Kernel;
+
+    /**
+     * H-Float GPU output buffer for the L2-normalised vector. Re-used
+     * across every {@code embed()} call; downloaded once per inference.
+     */
+    private final GpuBuffer normalizedBuf;
 
     // Per-bucket stack cache. Stacks are form-bound, so each bucket
     // size triggers exactly one entry; weights are shared across entries.
@@ -232,6 +245,27 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
                         iw, ib, mw, mb, og, ob2));
             }
             this.gpuLayers = List.copyOf(built);
+
+            // ── Shape-bound L2-normalize kernel + H-Float output buffer ─
+            // The L2 path is the same for every pad-bucket because it
+            // only operates on the [H] pooled vector. Built once here so
+            // the dispatch tail in embed() does not pay a per-call op
+            // construction cost. ε is baked into the SQRT-ScaleBias.
+            DirectMlL2NormalizeKernel builtL2 = null;
+            GpuBuffer builtNorm = null;
+            try {
+                builtL2 = new DirectMlL2NormalizeKernel(ctx, H, 1e-12f);
+                builtNorm = ctx.allocateBuffer((long) H * Float.BYTES,
+                        GpuBuffer.BufferUsage.ACTIVATION);
+            } catch (DirectMlRuntimeException | RuntimeException e) {
+                if (builtL2 != null) try { builtL2.close(); } catch (Exception ignored) {}
+                if (builtNorm != null) try { builtNorm.close(); } catch (Exception ignored) {}
+                throw e;
+            }
+            this.l2Kernel = builtL2;
+            this.normalizedBuf = builtNorm;
+            ownedGpuBuffers.add(normalizedBuf);
+
             this.ready = true;
             log.info("DirectMlMiniLmEncoder ready: layers={}, hidden={}, heads={}, inter={}, FL={}",
                     config.numLayers(), config.hiddenSize(),
@@ -340,10 +374,23 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
             entry.stack.dispatch(xInT, embGT, embBT, gpuLayers, maskT, xOutT);
             entry.meanPool.dispatch(xOutT, wT, pooledT);
 
-            // Read back only the pooled H-vector – the [B,H] hidden tensor
-            // never crosses the PCIe boundary anymore.
+            // Optional GPU L2-Normalize on the H-element pooled vector,
+            // composed from GEMM (sum-of-squares) + SQRT (ε² folded into
+            // ScaleBias) + DIVIDE (broadcast). The CPU now only sees the
+            // already-normalised H floats and never touches the result.
+            GpuBuffer downloadFrom;
+            if (request.normalize()) {
+                DirectMlTensor normT = tensorOf(normalizedBuf, H);
+                l2Kernel.dispatch(pooledT, normT, 1e-12f);
+                downloadFrom = normalizedBuf;
+            } else {
+                downloadFrom = entry.pooled;
+            }
+
+            // Read back only the (optionally normalised) H-vector – the
+            // [B,H] hidden tensor never crosses the PCIe boundary anymore.
             CpuTensor pooledCpu = emptyCpuTensor(H);
-            entry.pooled.download(pooledCpu);
+            downloadFrom.download(pooledCpu);
             FloatBuffer fv = pooledCpu.data().duplicate().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
             fv.position(0);
             fv.get(pooled, 0, H);
@@ -352,10 +399,6 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
                     + " (seqLen=" + seqLen + ")", e);
         }
 
-        // 5. L2-Normalize on the H-element vector (microseconds, last CPU step).
-        if (request.normalize()) {
-            L2Normalize.inPlace(pooled, 1e-12f);
-        }
         return new EmbeddingVector(pooled, H, MiniLmArchitecture.NAME, request.normalize());
     }
 
@@ -443,6 +486,9 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
         ready = false;
         for (StackEntry e : stackCache.values()) e.close();
         stackCache.clear();
+        if (l2Kernel != null) {
+            try { l2Kernel.close(); } catch (Exception ignored) {}
+        }
         closeOwnedQuietly();
         if (ownsCtx) {
             try { ctx.close(); } catch (Exception ignored) {}

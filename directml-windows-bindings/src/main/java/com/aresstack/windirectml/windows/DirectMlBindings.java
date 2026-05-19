@@ -41,7 +41,22 @@ public final class DirectMlBindings {
     // (see Git history of LayerNorm: MVN0 was 39, which is LEAKY_RELU).
     public static final int DML_OPERATOR_ELEMENT_WISE_IDENTITY = 1;
     public static final int DML_OPERATOR_ELEMENT_WISE_ADD = 4;
+    /**
+     * Element-wise binary divide ({@code y = a / b}) with broadcast support
+     * via zero strides. FL 1.0 baseline, present in every shipping
+     * {@code DirectML.dll}. Used by {@code DirectMlL2NormalizeKernel} to
+     * divide a per-vector input by its scalar L2-norm broadcast over the
+     * hidden axis.
+     */
+    public static final int DML_OPERATOR_ELEMENT_WISE_DIVIDE = 10;
     public static final int DML_OPERATOR_ELEMENT_WISE_MULTIPLY = 24;
+    /**
+     * Element-wise unary square-root ({@code y = sqrt(scale·x + bias)})
+     * with an optional {@code DML_SCALE_BIAS}. FL 1.0 baseline. Used by
+     * {@code DirectMlL2NormalizeKernel} to fold {@code sqrt(s² + ε²)}
+     * into a single dispatch.
+     */
+    public static final int DML_OPERATOR_ELEMENT_WISE_SQRT = 29;
     public static final int DML_OPERATOR_ACTIVATION_RELU = 44;
     /**
      * Softmax over the innermost dimension (FL 2.0). Applied to the last

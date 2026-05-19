@@ -57,7 +57,7 @@ directml-sidecar           JSON-RPC 2.0 sidecar entry point + dispatcher + handl
 | SafetensorsReader                                       | ✅ implemented + tested (F32/F16/BF16/I64/I32/I8/U8, lenient on unknown dtypes)                                                                                                                                                                                                                                                                                       |
 | WordPieceTokenizer                                      | ✅ implemented + tested (BERT-uncased family)                                                                                                                                                                                                                                                                                                                         |
 | Mean Pooling + L2                                       | ✅ CPU reference impl + tests                                                                                                                                                                                                                                                                                                                                         |
-| MiniLM encoder runtime                                  | ✅ `DirectMlMiniLmEncoder` implemented: 6-layer DirectML transformer stack active end-to-end (Q/K/V/Linear + composite/native GELU + LayerNorm + attention + MLP + residuals). Selectable via sidecar backend switch (`-Dembed.backend=cpu\|directml\|auto`). Pad-bucket cache (S ∈ {64,128,256,512}) coalesces tokenizer lengths onto ≤ 4 cached stacks. Reference test confirms `cos(CPU, DirectML) = 1.000000` on Windows 11 in-box FL 5.0. MeanPool runs on DirectML (`DirectMlMeanPoolKernel`, GEMM FL-1.0); L2 remains CPU-side on the final 384-float vector.                |
+| MiniLM encoder runtime                                  | ✅ `DirectMlMiniLmEncoder` implemented: 6-layer DirectML transformer stack active end-to-end (Q/K/V/Linear + composite/native GELU + LayerNorm + attention + MLP + residuals). Selectable via sidecar backend switch (`-Dembed.backend=cpu\|directml\|auto`). Pad-bucket cache (S ∈ {64,128,256,512}) coalesces tokenizer lengths onto ≤ 4 cached stacks. Reference test confirms `cos(CPU, DirectML) = 1.000000` on Windows 11 in-box FL 5.0. MeanPool (`DirectMlMeanPoolKernel`, GEMM FL-1.0) and L2-Normalize (`DirectMlL2NormalizeKernel`, GEMM + SQRT + DIVIDE composite, FL-1.0) both run on DirectML; the final 384-float vector is the only PCIe read-back per inference.                |
 | Sidecar lifecycle tests                                 | ✅ end-to-end via piped streams                                                                                                                                                                                                                                                                                                                                       |
 | Phi-3 benchmark harness                                 | ✅ runnable (`Phi3Benchmark`)                                                                                                                                                                                                                                                                                                                                         |
 | E5 / Reranker / further decoders                        | 📄 concept docs in `docs/`                                                                                                                                                                                                                                                                                                                                           |
@@ -215,9 +215,12 @@ interchangeable encoder implementations exist behind the same
     (small int→float gather, no benefit from GPU dispatch).
   * **DirectML**: embedding LayerNorm + the full 6-layer BERT encoder
     (Q/K/V/Linear + composite/native GELU + LayerNorm, head-layout
-    reshuffles, attention, MLP, residuals).
-  * **CPU**: mean-pool over `attentionMask` + L2 normalize (final
-    384-float vector) — scheduled to move to DirectML next.
+    reshuffles, attention, MLP, residuals) + mean-pool over
+    `attentionMask` (`DirectMlMeanPoolKernel`, GEMM FL-1.0) + L2-normalize
+    (`DirectMlL2NormalizeKernel`, GEMM-square-sum + SQRT-with-ε² + broadcast
+    DIVIDE, FL-1.0 composite).
+  * **CPU**: download the already-normalised 384-float vector – the only
+    PCIe read-back per inference.
 
   Reference test `DirectMlMiniLmEmbeddingReferenceTest` confirms
   `cos(CPU, DirectML) = 1.000000` over the full corpus. Works on every
@@ -299,13 +302,19 @@ or `error`) together with `embeddingReady`.
     existing reference test (`cachedStackCount() == 1` for the short corpus).
 13. ✅ Mean-pool on DirectML (`DirectMlMeanPoolKernel`, `DML_OPERATOR_GEMM` FL-1.0) – per-token weights
     `w[t] = m[t]/Σm` are pre-normalised on the CPU, the GEMM `y[1,H] = w[1,S]·x[S,H]` then collapses the pooling
-    into a single FL-1.0 dispatch. The PCIe read-back per inference shrinks from `B·H` to `H` floats (≈ 256× less
-    on bucket `S=256, H=384`). L2-Normalize stays on the CPU because the operation on a single 384-float vector
-    is microseconds and would otherwise require Reduce/Divide ops that are not guaranteed on FL 5.0 in-box DLLs.
-    Validated by `DirectMlMeanPoolKernelTest` and the existing parity test against the CPU encoder
-    (`DirectMlMiniLmEmbeddingReferenceTest`).
-14. ⏳ E5 and JinaBERT encoders on the same runtime core.
-15. ⏳ Reranker encoder support.
-16. ⏳ Additional decoder LLM families after the encoder path is stable.
+    into a single FL-1.0 dispatch. Validated by `DirectMlMeanPoolKernelTest` and the existing parity test
+    against the CPU encoder (`DirectMlMiniLmEmbeddingReferenceTest`).
+14. ✅ L2-Normalize on DirectML (`DirectMlL2NormalizeKernel`, FL-1.0 composite) – sum-of-squares via
+    `DML_OPERATOR_GEMM` (`A=x[1,N] · Bᵀ=x[N,1] → s[1,1]`), norm via `DML_OPERATOR_ELEMENT_WISE_SQRT` with
+    `ε²` folded into `DML_SCALE_BIAS` so `n = sqrt(s + ε²)` is a single dispatch, then a per-lane
+    `DML_OPERATOR_ELEMENT_WISE_DIVIDE` with broadcast strides `[0,0,0,0]` on the scalar norm. The encoder
+    now downloads `[H]` already-normalised floats per inference instead of `[B,H]` un-normalised –
+    ≈ 256× less PCIe traffic on bucket `S=256, H=384` and no CPU L2 tail. Reference test still reports
+    `cos(CpuMiniLmEncoder, DirectMlMiniLmEncoder) = 1.000000` on Windows 11 in-box FL 5.0; standalone
+    `DirectMlL2NormalizeKernelTest` validates parity against the CPU reference at ≤ 1e-5 and the unit-norm
+    property of the output.
+15. ⏳ E5 and JinaBERT encoders on the same runtime core.
+16. ⏳ Reranker encoder support.
+17. ⏳ Additional decoder LLM families after the encoder path is stable.
 
 Issue backlog: [`win-directml-java-issues.md`](win-directml-java-issues.md).
