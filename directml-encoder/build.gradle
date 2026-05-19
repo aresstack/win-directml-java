@@ -3,3 +3,21 @@ dependencies {
     implementation project(':directml-windows-bindings')
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
 }
+
+// Throughput benchmark for the cross-encoder reranker. Requires a
+// real model under `model/cross-encoder-ms-marco-MiniLM-L-6-v2/` (use
+// scripts/download-reranker.ps1).
+//
+//   gradle :directml-encoder:runRerankerBenchmark
+//   gradle :directml-encoder:runRerankerBenchmark --args="model/cross-encoder-ms-marco-MiniLM-L-6-v2 2 10,50,100"
+tasks.register('runRerankerBenchmark', JavaExec) {
+    group = 'benchmark'
+    description = 'Runs the cross-encoder reranker throughput benchmark (CPU vs DirectML).'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.aresstack.windirectml.encoder.reranker.bench.RerankerBenchmark'
+    // Run from the repo root so the default relative path
+    // model/cross-encoder-ms-marco-MiniLM-L-6-v2 resolves like in
+    // RerankerRealModelReferenceTest's auto-detection.
+    workingDir = rootProject.projectDir
+}
+

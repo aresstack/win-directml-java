@@ -243,6 +243,78 @@ class RerankerRealModelReferenceTest {
                 "results must be sorted by descending score");
     }
 
+    @Test
+    void stress32MixedLengthDocumentsStayBackendStable() throws Exception {
+        // Builds a 32-document corpus that mixes short DirectML-relevant
+        // docs with much longer off-topic paragraphs so several pad
+        // buckets (64/128/256) get exercised in a single rerank call.
+        // This is the closest synthetic to real top-N reranking
+        // workloads and would catch any CLS-readback regression caused
+        // by the partial-download path (it also exercises the cached
+        // [H] readback target on the DirectMlReranker).
+        String filler = "DirectML is a low-level Windows API for hardware-accelerated machine learning. "
+                + "It exposes Direct3D 12 device interfaces through IDMLDevice and IDMLOperator. "
+                + "ONNX Runtime, PyTorch-DirectML and TensorFlow-DirectML all build on top of it. "
+                + "The runtime supports CPU + GPU mixed graphs, shader-based fused ops and a stable "
+                + "feature-level negotiation surface for production deployments on Windows 11. ";
+        String offTopicFiller = "Paris is the capital and most populous city of France with an "
+                + "estimated population of 2,165,000 residents. It is renowned for its iconic "
+                + "landmarks like the Eiffel Tower and the Louvre, and for its strong cultural "
+                + "and culinary traditions stretching back to the 17th century. Python is a "
+                + "general-purpose programming language. ";
+        java.util.List<String> docs = new java.util.ArrayList<>(32);
+        for (int i = 0; i < 8; i++) {
+            docs.add(CORPUS[0]);                            // short, relevant
+            docs.add(CORPUS[1] + " (variant #" + i + ")");  // short, relevant, slightly different
+            docs.add(filler.repeat(2));                     // long, relevant
+            docs.add(offTopicFiller.repeat(2));             // long, unrelated
+        }
+        RerankRequest req = new RerankRequest(QUERY, docs, docs.size());
+        List<RerankResult> cpuRanked = cpuModel.rerank(req);
+        List<RerankResult> dmlRanked = dmlModel.rerank(req);
+
+        assertEquals(docs.size(), cpuRanked.size(), "CPU must score every document");
+        assertEquals(docs.size(), dmlRanked.size(), "DirectML must score every document");
+
+        double[] cpuByIdx = new double[docs.size()];
+        double[] dmlByIdx = new double[docs.size()];
+        for (RerankResult r : cpuRanked) cpuByIdx[r.originalIndex()] = r.score();
+        for (RerankResult r : dmlRanked) dmlByIdx[r.originalIndex()] = r.score();
+
+        double maxAbsDiff = 0.0;
+        for (int i = 0; i < docs.size(); i++) {
+            double diff = Math.abs(cpuByIdx[i] - dmlByIdx[i]);
+            if (diff > maxAbsDiff) maxAbsDiff = diff;
+        }
+        System.out.printf(Locale.ROOT,
+                "rerank stress(N=%d) max |cpu - dml| = %.6f (tolerance=%.6f) buckets=%d%n",
+                docs.size(), maxAbsDiff, SCORE_TOLERANCE, dmlModel.cachedStackCount());
+        assertTrue(maxAbsDiff < SCORE_TOLERANCE,
+                "32-doc stress: CPU and DirectML reranker scores must agree within "
+                        + SCORE_TOLERANCE + ", got max |diff|=" + maxAbsDiff);
+
+        // Top-N ordering must agree (using a strict prefix check: the
+        // top-3 indices must match between backends; small reorders
+        // deeper in the ranking might happen when scores are nearly
+        // identical and float ordering is unstable, but the tail is
+        // dominated by the off-topic filler anyway).
+        int[] cpuTop3 = cpuRanked.subList(0, 3).stream()
+                .mapToInt(RerankResult::originalIndex).toArray();
+        int[] dmlTop3 = dmlRanked.subList(0, 3).stream()
+                .mapToInt(RerankResult::originalIndex).toArray();
+        System.out.println("rerank stress CPU top3 = " + Arrays.toString(cpuTop3));
+        System.out.println("rerank stress DML top3 = " + Arrays.toString(dmlTop3));
+        assertArrayEqualsWithMsg(cpuTop3, dmlTop3,
+                "CPU and DirectML reranker must agree on the top-3 ranking under stress");
+
+        // Multiple pad buckets should have been instantiated: short
+        // pairs (idx % 4 == 0/1) live in the small bucket, the two
+        // long variants spill into larger ones. We expect ≥2.
+        assertTrue(dmlModel.cachedStackCount() >= 2,
+                "stress workload should populate at least 2 pad buckets, got "
+                        + dmlModel.cachedStackCount());
+    }
+
     private static void assertArrayEqualsWithMsg(int[] expected, int[] actual, String msg) {
         if (!Arrays.equals(expected, actual)) {
             throw new AssertionError(msg

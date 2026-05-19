@@ -276,8 +276,9 @@ is a hard error, never a silent reshape.
 
 A forced backend (`cpu` or `directml`) exits with code `3` if its
 encoder cannot be loaded – including the case where no model directory
-is present at all. `auto` falls back silently to CPU and records the
-DirectML error message in `lastError`. The active backend is reported
+is present at all. `auto` falls back to CPU and records the
+DirectML error message in `health.lastError`, so the workbench / clients
+can see why the CPU backend was chosen. The active backend is reported
 in the `health` response as `embeddingBackend` (`cpu`, `directml`,
 `none`, or `error`) together with `embeddingReady`.
 

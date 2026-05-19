@@ -43,8 +43,7 @@ import java.util.Objects;
  *   (query, doc) → tokenizer.encodePair → CPU embedding lookup
  *               → upload [B,H]
  *               → DirectMlBertEncoderStack (embLN + N layers)
- *               → download [B,H]
- *               → slice CLS row [H]
+ *               → CLS-only readback ([H] partial download from offset 0)
  *               → CPU classifier (W·cls + b)
  *               → score
  * </pre>
@@ -68,6 +67,23 @@ public final class DirectMlReranker implements Reranker {
     private final List<BertGpuLayerWeights> gpuLayers;
 
     private final Map<Integer, StackEntry> stackCache = new HashMap<>();
+
+    /**
+     * Pre-allocated readback target sized for a single hidden row {@code [H]}.
+     * The output tensor of the GPU stack is laid out row-major as
+     * {@code [B,H]} and the [CLS] vector lives at offset 0, so a partial
+     * download of just the first {@code H} floats is sufficient.
+     * <p>
+     * Reusing the buffer avoids a per-pair {@link ByteBuffer#allocateDirect}
+     * and – more importantly – shrinks the GPU→CPU copy from {@code B*H}
+     * floats (up to ~1.5 MB per pair at B=512, H=768) down to {@code H}
+     * floats (≤3 KB), turning the readback into a no-op compared to the
+     * encoder pass itself.
+     */
+    private final CpuTensor clsReadback;
+    /** Scratch float[H] used to project the readback into the CPU classifier. */
+    private final float[] clsScratch;
+
     private volatile boolean ready;
 
     private record StackEntry(DirectMlBertEncoderStack stack,
@@ -124,6 +140,8 @@ public final class DirectMlReranker implements Reranker {
                         uploadVec(l.outLnGamma(), H), uploadVec(l.outLnBeta(), H)));
             }
             this.gpuLayers = List.copyOf(built);
+            this.clsReadback = emptyCpuTensor(H);
+            this.clsScratch = new float[H];
             this.ready = true;
             log.info("DirectMlReranker ready: model={}, layers={}, hidden={}, heads={}, inter={}",
                     cfg.modelName(), cfg.numLayers(), cfg.hiddenSize(),
@@ -184,7 +202,6 @@ public final class DirectMlReranker implements Reranker {
         }
 
         float[] mask = BertPoolingWeights.additiveMask(enc.attentionMask(), seqLen, B);
-        float[] cls = new float[H];
         try {
             CpuTensor xCpu = CpuTensor.float32(TensorShape.of(B, H), x);
             CpuTensor maskCpu = CpuTensor.float32(TensorShape.of(B), mask);
@@ -198,21 +215,24 @@ public final class DirectMlReranker implements Reranker {
             DirectMlTensor embBT = tensorOf(embLnBetaBuf, H);
             entry.stack.dispatch(xInT, embGT, embBT, gpuLayers, maskT, xOutT);
 
-            // Download just the [CLS] row. The current GpuBuffer API does
-            // not expose partial download, so we materialise the full [B,H]
-            // and slice on the CPU; even at B=512, H=768 this is ~1.5 MB
-            // per pair – negligible compared to the encoder pass.
-            CpuTensor outCpu = emptyCpuTensor(B * H);
-            entry.xOut.download(outCpu);
-            FloatBuffer fv = outCpu.data().duplicate().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
+            // CLS-only readback. The encoder writes the [CLS] hidden row
+            // at offset 0 of the [B,H] output tensor and DefaultGpuBuffer
+            // forwards the destination's element count straight into a
+            // CopyBufferRegion(0, H*4) on the GPU side – so passing a
+            // pre-allocated [H]-sized CpuTensor turns the bandwidth-heavy
+            // [B,H] download into a tiny [H] copy without changing the
+            // semantics of the existing readback path.
+            entry.xOut.download(clsReadback);
+            FloatBuffer fv = clsReadback.data().duplicate()
+                    .order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
             fv.position(0);
-            fv.get(cls, 0, H);
+            fv.get(clsScratch, 0, H);
         } catch (DirectMlRuntimeException e) {
             throw new RerankException("DirectML dispatch failed for bucket=" + B
                     + " (seqLen=" + seqLen + ")", e);
         }
 
-        return applyClassifier(cls);
+        return applyClassifier(clsScratch);
     }
 
     private double applyClassifier(float[] clsHidden) {
