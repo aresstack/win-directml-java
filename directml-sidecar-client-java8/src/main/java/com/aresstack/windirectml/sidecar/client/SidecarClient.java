@@ -174,8 +174,8 @@ public final class SidecarClient {
         }
         for (int i = 0; i < texts.size(); i++) {
             String t = texts.get(i);
-            if (t == null || t.length() == 0) {
-                throw new SidecarException("embedBatch: texts[" + i + "] must not be empty");
+            if (t == null || t.trim().length() == 0) {
+                throw new SidecarException("embedBatch: texts[" + i + "] must not be blank");
             }
         }
         Map<String, Object> params = new LinkedHashMap<String, Object>();

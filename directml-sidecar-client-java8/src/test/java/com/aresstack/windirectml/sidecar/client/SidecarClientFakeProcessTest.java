@@ -387,6 +387,13 @@ class SidecarClientFakeProcessTest {
                 client.embedBatch(java.util.Arrays.asList("ok", ""));
             }
         });
+        // Blank entries (whitespace-only) must also be rejected locally now.
+        assertThrows(SidecarException.class, new org.junit.jupiter.api.function.Executable() {
+            @Override
+            public void execute() throws Throwable {
+                client.embedBatch(java.util.Arrays.asList("ok", "   "));
+            }
+        });
     }
 }
 
