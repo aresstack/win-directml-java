@@ -147,7 +147,7 @@ class DirectMlMiniLmEmbeddingReferenceTest {
         }
         assertEquals(1, dmlModel.cachedStackCount(),
                 "all CORPUS sentences must share a single pad-bucket (S=64)");
-        assertTrue(dmlModel.cachedStackCount() <= DirectMlMiniLmEncoder.BUCKETS.length,
+        assertTrue(dmlModel.cachedStackCount() <= DirectMlMiniLmEncoder.buckets().length,
                 "stack cache must never exceed the number of pad-buckets");
     }
 

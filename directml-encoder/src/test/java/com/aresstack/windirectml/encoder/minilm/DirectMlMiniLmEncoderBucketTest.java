@@ -45,11 +45,16 @@ class DirectMlMiniLmEncoderBucketTest {
 
     @Test
     void bucketsAreMonotonicallyIncreasing() {
-        int[] b = DirectMlMiniLmEncoder.BUCKETS;
+        int[] b = DirectMlMiniLmEncoder.buckets();
         for (int i = 1; i < b.length; i++) {
             assertTrue(b[i] > b[i - 1],
-                    "BUCKETS must be strictly increasing at index " + i);
+                    "buckets() must be strictly increasing at index " + i);
         }
+        // Defensive-copy contract: mutating the returned array must not
+        // affect subsequent calls.
+        b[0] = -1;
+        assertTrue(DirectMlMiniLmEncoder.buckets()[0] > 0,
+                "buckets() must return a defensive copy");
     }
 }
 

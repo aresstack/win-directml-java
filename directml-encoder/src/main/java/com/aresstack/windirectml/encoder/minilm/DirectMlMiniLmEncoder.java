@@ -83,8 +83,18 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
      * onto a small set of fixed DirectML stack shapes. Ordered ascending.
      * MiniLM's {@code maxPositionEmbeddings} is 512; any seqLen above the
      * largest bucket falls through to an exact-length stack (unbucketed).
+     * Kept private to prevent external mutation of the array contents;
+     * use {@link #buckets()} for read-only access.
      */
-    public static final int[] BUCKETS = {64, 128, 256, 512};
+    private static final int[] PAD_BUCKETS = {64, 128, 256, 512};
+
+    /**
+     * Returns a defensive copy of the configured pad-buckets. Callers may
+     * mutate the returned array without affecting the encoder.
+     */
+    public static int[] buckets() {
+        return PAD_BUCKETS.clone();
+    }
 
     /**
      * Selects the smallest bucket {@code b} such that {@code b >= seqLen}.
@@ -92,7 +102,7 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
      * still works (no bucketing benefit in that overflow case).
      */
     public static int bucketFor(int seqLen) {
-        for (int b : BUCKETS) {
+        for (int b : PAD_BUCKETS) {
             if (b >= seqLen) return b;
         }
         return seqLen;

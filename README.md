@@ -57,7 +57,7 @@ directml-sidecar           JSON-RPC 2.0 sidecar entry point + dispatcher + handl
 | SafetensorsReader                                       | ✅ implemented + tested (F32/F16/BF16/I64/I32/I8/U8, lenient on unknown dtypes)                                                                                                                                                                                                                                                                                       |
 | WordPieceTokenizer                                      | ✅ implemented + tested (BERT-uncased family)                                                                                                                                                                                                                                                                                                                         |
 | Mean Pooling + L2                                       | ✅ CPU reference impl + tests                                                                                                                                                                                                                                                                                                                                         |
-| MiniLM encoder runtime                                  | ✅ CPU forward pass (`CpuMiniLmEncoder`). DirectML migration in progress: ✅ `DirectMlMiniLmLayerBlock` (single encoder layer) passes CPU-vs-DirectML compare at tol 2e-3 on FL 5.1+; ⏳ multi-layer wiring + mean-pool + L2 next.                                                                                                                                      |
+| MiniLM encoder runtime                                  | ✅ `DirectMlMiniLmEncoder` implemented: 6-layer DirectML transformer stack active end-to-end (Q/K/V/Linear + composite/native GELU + LayerNorm + attention + MLP + residuals). Selectable via sidecar backend switch (`-Dembed.backend=cpu\|directml\|auto`). Pad-bucket cache (S ∈ {64,128,256,512}) coalesces tokenizer lengths onto ≤ 4 cached stacks. Reference test confirms `cos(CPU, DirectML) = 1.000000` on Windows 11 in-box FL 5.0. ⏳ MeanPool + L2 still CPU tail.                |
 | Sidecar lifecycle tests                                 | ✅ end-to-end via piped streams                                                                                                                                                                                                                                                                                                                                       |
 | Phi-3 benchmark harness                                 | ✅ runnable (`Phi3Benchmark`)                                                                                                                                                                                                                                                                                                                                         |
 | E5 / Reranker / further decoders                        | 📄 concept docs in `docs/`                                                                                                                                                                                                                                                                                                                                           |
@@ -209,11 +209,17 @@ Documentation: [`WORKBENCH.md`](WORKBENCH.md).
 interchangeable encoder implementations exist behind the same
 `EmbeddingModel` API:
 
-* **`DirectMlMiniLmEncoder`** – the intended product path. Runs the full
-  6-layer BERT encoder on DirectML: embedding lookup, per-layer
-  Q/K/V/Linear + composite/native GELU + LayerNorm, head-layout
-  reshuffles, attention, MLP, residuals. Reference test
-  `DirectMlMiniLmEmbeddingReferenceTest` confirms
+* **`DirectMlMiniLmEncoder`** – the intended product path. Hybrid
+  CPU/GPU pipeline:
+  * **CPU**: tokenization + word/position/tokenType embedding lookup
+    (small int→float gather, no benefit from GPU dispatch).
+  * **DirectML**: embedding LayerNorm + the full 6-layer BERT encoder
+    (Q/K/V/Linear + composite/native GELU + LayerNorm, head-layout
+    reshuffles, attention, MLP, residuals).
+  * **CPU**: mean-pool over `attentionMask` + L2 normalize (final
+    384-float vector) — scheduled to move to DirectML next.
+
+  Reference test `DirectMlMiniLmEmbeddingReferenceTest` confirms
   `cos(CPU, DirectML) = 1.000000` over the full corpus. Works on every
   shipped `DirectML.dll`, including Windows 11 RTM in-box 1.8.0 (FL 5.0),
   via the composite GELU fallback in `GeluKernel.create(...)`.
