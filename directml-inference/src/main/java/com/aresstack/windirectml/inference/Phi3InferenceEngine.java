@@ -182,6 +182,14 @@ public class Phi3InferenceEngine implements InferenceEngine {
         if (!ready) throw new InferenceException("Engine not initialized");
 
         try {
+            // Always reset the KV cache before a new generation.
+            // The incremental-prefill optimisation (reuse of cached token KVs from a
+            // previous call) can cause the model to continue from stale context when
+            // the user text changes between calls, producing the wrong "Text provided:"
+            // output.  For a one-shot summarizer each call is fully independent, so
+            // there is no benefit to reusing the cache.
+            runtime.resetCache();
+
             // Format the prompt using Phi-3 chat template
             String systemPrompt = request.getSystemPrompt();
             String userPrompt = request.getUserPrompt();
