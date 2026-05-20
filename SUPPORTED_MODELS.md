@@ -37,10 +37,15 @@ DirectML pooling and L2 normalisation are GPU-resident; only the final
 ### 1.1 In-house model list classification
 
 The embedding-pipeline classification of the in-house model catalogue is
-mirrored in `EmbeddingModelRegistry` (module `directml-sidecar`). The
-registry is the single source of truth for the `embed` gate: passing any
-of the model IDs below to `-Dembed.model` resolves through the registry,
-so decoder / summarizer IDs are rejected with an explicit
+mirrored in `EmbeddingModelRegistry` (module `directml-sidecar`). For
+now this registry is intentionally scoped to the sidecar `embed` gate;
+the Java-8 workbench and Java-8 client do **not** yet reuse it directly.
+A follow-up `#39` part-PR will move the shared classification into a
+Java-8-compatible module so workbench/client filtering can use the same
+`useCase=embedding` metadata. In the current PR, the registry is the
+single source of truth for the `embed` gate: passing any of the model IDs
+below to `-Dembed.model` resolves through the registry, so decoder /
+summarizer IDs are rejected with an explicit
 *"… is not an embedding model …"* error rather than being silently
 treated as an unknown family.
 
@@ -145,4 +150,3 @@ for a future minor:
 - Nomic-text-v1.5 with its custom positional embedding scheme.
 - Quantized weights for the BERT encoder family (INT8 GEMM via DML).
 - Speculative / batched decoding for Phi-3.
-
