@@ -22,8 +22,10 @@ Status legend:
 | `sentence-transformers/all-MiniLM-L6-v2` | yes     | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + optional L2                                      | ✅ shipped       | `directml-encoder` (`DirectMlMiniLmEncoder`, `CpuMiniLmEncoder`) |
 | `intfloat/e5-small-v2`                   | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | ✅ shipped       | `directml-encoder` (`E5Encoders.SMALL_V2`)                       |
 | `intfloat/e5-base-v2`                    | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | ✅ shipped       | `directml-encoder` (`E5Encoders.BASE_V2`)                        |
+| `danielheinz/e5-base-sts-en-de`          | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | ✅ shipped       | `directml-encoder` (`E5Encoders.BASE_STS_EN_DE`)                 |
 | `intfloat/e5-large-v2`                   | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | 🧪 experimental | `directml-encoder` (`E5Encoders.LARGE_V2`)                       |
-| `intfloat/multilingual-e5-*`             | no      | ❌        | ❌             | SentencePiece           | mean + L2 + prefix                                      | 🚧 planned      | –                                                                |
+| `intfloat/multilingual-e5-large-instruct`| no      | ❌        | ❌             | SentencePiece (XLM-R)   | mean + L2 + `Instruct: …\nQuery: …` prefix              | 🚧 planned      | – (needs SentencePiece + XLM-RoBERTa core)                       |
+| `jinaai/jina-embeddings-v2-base-de`      | no      | ❌        | ❌             | WordPiece (Jina-custom) | mean + L2; ALiBi positional bias                        | 🚧 planned      | – (needs custom Jina v2 attention path)                          |
 | `nomic-ai/nomic-embed-text-v1.5`         | no      | ❌        | ❌             | WordPiece               | mean + L2 + `search_query:` / `search_document:` prefix | 🚧 planned      | –                                                                |
 
 All shipped embedding models go through the same
@@ -31,6 +33,43 @@ All shipped embedding models go through the same
 batched `embedBatch(...)` path with bucket-padded sequence lengths.
 DirectML pooling and L2 normalisation are GPU-resident; only the final
 `[N, hidden]` matrix is read back to the host.
+
+### 1.1 In-house model list classification
+
+The embedding-pipeline classification of the in-house model catalogue is
+mirrored in `EmbeddingModelRegistry` (module `directml-sidecar`). The
+registry is the single source of truth for the `embed` gate: passing any
+of the model IDs below to `-Dembed.model` resolves through the registry,
+so decoder / summarizer IDs are rejected with an explicit
+*"… is not an embedding model …"* error rather than being silently
+treated as an unknown family.
+
+| `modelId`                                   | `useCase`  | `status`        | Backend support   | Notes                                                                                                                |
+|---------------------------------------------|------------|-----------------|-------------------|----------------------------------------------------------------------------------------------------------------------|
+| `sentence-transformers/all-MiniLM-L6-v2`    | embedding  | ✅ shipped       | CPU + DirectML    | Default fast embedding model (WordPiece, BERT-style).                                                                |
+| `danielheinz/e5-base-sts-en-de`             | embedding  | ✅ shipped       | CPU + DirectML    | German/English STS fine-tune; uses `"query: "` / `"passage: "` E5 prefixes.                                          |
+| `intfloat/multilingual-e5-large-instruct`   | embedding  | 🚧 planned      | – (planned)       | NOT compatible with the current WordPiece-only E5 path. Requires SentencePiece + XLM-RoBERTa core.                   |
+| `jinaai/jina-embeddings-v2-base-de`         | embedding  | 🚧 planned      | – (planned)       | Jina BERT v2 uses ALiBi positional bias; not a drop-in for the standard BERT core. Requires analysis before shipping.|
+| `openai/gpt-oss-120b`                       | decoder    | ⛔ unsupported  | – (not for embed) | Decoder-only LLM. Rejected by the `embed` endpoint.                                                                  |
+| `casperhansen/llama-3.3-70b-instruct-awq`   | decoder    | ⛔ unsupported  | – (not for embed) | Llama 3.3 70B AWQ-quantised decoder-only LLM. Rejected by the `embed` endpoint.                                      |
+| `ellamind/summarizer-v6-llama-v2`           | summarizer | ⛔ unsupported  | – (not for embed) | Llama-v2 summarizer fine-tune. Belongs to a future text-generation/summarize ticket, not the embed endpoint.         |
+
+Passing a decoder / summarizer ID to `-Dembed.model` fails with the
+following exact message (matched by both the registry test suite and any
+downstream tooling that parses sidecar errors):
+
+```
+Model openai/gpt-oss-120b is not an embedding model. Decoder models are not supported by the embed endpoint.
+```
+
+Passing an embedding ID that is currently `planned` (Jina v2,
+multilingual-E5-instruct) fails with a status-aware message that points
+at this file:
+
+```
+Model jinaai/jina-embeddings-v2-base-de is classified as an embedding model but has no runtime support in this build (status=planned). See SUPPORTED_MODELS.md for the current classification.
+```
+
 
 ## 2. Reranker models
 

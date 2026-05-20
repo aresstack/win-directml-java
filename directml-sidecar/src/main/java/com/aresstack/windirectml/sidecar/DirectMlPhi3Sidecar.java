@@ -395,10 +395,37 @@ public final class DirectMlPhi3Sidecar {
     /**
      * Parse {@code -Dembed.model} into a stable family token. Defaults
      * to {@code minilm}; supported: {@code minilm}, {@code e5}.
+     *
+     * <p>The parser also accepts the full Huggingface-style model IDs
+     * from the {@link EmbeddingModelRegistry}. Non-embedding IDs
+     * (decoder / summarizer) are rejected with the explicit
+     * "{@code … is not an embedding model …}" message; embedding IDs
+     * that are classified as {@code planned} / unimplemented are
+     * rejected with a registry-driven status message.
      */
     static String embedFamily(String raw) {
         if (raw == null || raw.isBlank()) return "minilm";
         String s = raw.trim().toLowerCase(java.util.Locale.ROOT);
+
+        // Registry-driven gate first: full model IDs from the company
+        // model list. This is where decoder / summarizer IDs get
+        // rejected with a clear use-case-specific message instead of
+        // falling through to the generic "Unknown embed.model" error.
+        java.util.Optional<EmbeddingModelRegistry.Entry> known =
+                EmbeddingModelRegistry.findByModelId(s);
+        if (known.isPresent()) {
+            EmbeddingModelRegistry.Entry e = known.get();
+            if (!e.isEmbedding()) {
+                throw new IllegalArgumentException(
+                        EmbeddingModelRegistry.nonEmbeddingErrorMessage(e));
+            }
+            if (e.embedFamily() == null) {
+                throw new IllegalArgumentException(
+                        EmbeddingModelRegistry.unimplementedEmbeddingErrorMessage(e));
+            }
+            return e.embedFamily();
+        }
+
         return switch (s) {
             case "minilm", "mini-lm", "minilm-l6", "all-minilm-l6-v2" -> "minilm";
             case "e5", "e5-base", "e5-base-sts", "e5-base-sts-en-de" -> "e5";
