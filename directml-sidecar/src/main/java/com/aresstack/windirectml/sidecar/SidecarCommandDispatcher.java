@@ -1,7 +1,9 @@
 package com.aresstack.windirectml.sidecar;
 
+import com.aresstack.windirectml.sidecar.jsonrpc.AsyncJsonRpcMethodHandler;
 import com.aresstack.windirectml.sidecar.jsonrpc.JsonRpcError;
 import com.aresstack.windirectml.sidecar.jsonrpc.JsonRpcErrorCode;
+import com.aresstack.windirectml.sidecar.jsonrpc.JsonRpcMessageWriter;
 import com.aresstack.windirectml.sidecar.jsonrpc.JsonRpcMethodException;
 import com.aresstack.windirectml.sidecar.jsonrpc.JsonRpcMethodHandler;
 import com.aresstack.windirectml.sidecar.jsonrpc.JsonRpcRequest;
@@ -15,14 +17,16 @@ import java.util.Map;
 /**
  * Dispatches incoming {@link JsonRpcRequest}s to registered method handlers.
  * <p>
- * Strictly isolates the JSON-RPC protocol layer from any inference-specific
- * details: handlers receive raw {@link JsonNode} parameters and return
- * arbitrary objects to be serialized by the shared {@code ObjectMapper}.
- * <p>
- * Unknown methods produce a standard {@code method not found} response;
- * any unchecked exception escaping a handler is translated to a generic
- * {@code internal error}. Handlers themselves should throw
- * {@link JsonRpcMethodException} for typed failures.
+ * Supports two handler kinds:
+ * <ul>
+ *   <li>{@link JsonRpcMethodHandler} – synchronous: {@code handle()} is called
+ *       on the dispatch thread and the result is returned as a
+ *       {@link JsonRpcResponse}.</li>
+ *   <li>{@link AsyncJsonRpcMethodHandler} – asynchronous: {@code handleAsync()}
+ *       is called, the handler is responsible for writing the response to the
+ *       supplied {@link JsonRpcMessageWriter} from any thread. The dispatcher
+ *       returns {@code null} to signal "response already handled".</li>
+ * </ul>
  */
 public final class SidecarCommandDispatcher {
 
@@ -43,13 +47,26 @@ public final class SidecarCommandDispatcher {
     }
 
     /**
-     * Dispatch a parsed request.
+     * Dispatch a parsed request (synchronous handlers only – legacy overload).
      *
      * @return a fully-formed {@link JsonRpcResponse}. For notifications the
-     * response is still returned but the caller should not write it
-     * to stdout (id is null).
+     *         response is still returned but the caller should not write it
+     *         to stdout (id is null).
      */
     public JsonRpcResponse dispatch(JsonRpcRequest request) {
+        return dispatch(request, null);
+    }
+
+    /**
+     * Dispatch a parsed request, optionally supporting async handlers.
+     *
+     * @param writer may be {@code null} if no async handlers are registered;
+     *               must be non-null when async handlers are expected.
+     * @return a fully-formed {@link JsonRpcResponse} for synchronous handlers,
+     * or {@code null} when an async handler has taken ownership of
+     * writing the response.
+     */
+    public JsonRpcResponse dispatch(JsonRpcRequest request, JsonRpcMessageWriter writer) {
         JsonNode id = request.id() != null ? request.id() : NullNode.getInstance();
 
         if (!request.isValid()) {
@@ -65,6 +82,20 @@ public final class SidecarCommandDispatcher {
                             "Method not found: " + request.method()));
         }
 
+        // Async handler: hand off to background thread, return null so the
+        // run-loop skips writing a response (the handler will do it itself).
+        if (handler instanceof AsyncJsonRpcMethodHandler && writer != null) {
+            try {
+                ((AsyncJsonRpcMethodHandler) handler).handleAsync(request.params(), id, writer);
+            } catch (Exception e) {
+                // handleAsync itself threw synchronously (e.g. validation).
+                return JsonRpcResponse.failure(id,
+                        new JsonRpcError(JsonRpcErrorCode.INTERNAL_ERROR,
+                                "Async dispatch failed: " + e.getMessage()));
+            }
+            return null; // response will be written by the handler
+        }
+
         try {
             Object result = handler.handle(request.params());
             return JsonRpcResponse.success(id, result);
@@ -78,4 +109,3 @@ public final class SidecarCommandDispatcher {
         }
     }
 }
-

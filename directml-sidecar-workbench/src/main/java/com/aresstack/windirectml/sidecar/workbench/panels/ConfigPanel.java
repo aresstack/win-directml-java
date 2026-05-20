@@ -60,6 +60,7 @@ public final class ConfigPanel extends JPanel {
     private final JCheckBox debugBox = new JCheckBox("windirectml.debug=true");
     private final JTextField dllOverrideField = new JTextField("");
     private final JTextField timeoutField = new JTextField("30000");
+    private final JTextField summarizeTimeoutField = new JTextField("300000");
     private final JTextField extraJvmField = new JTextField("-Xmx8g");
 
     private final JTextArea commandPreview = new JTextArea(4, 60);
@@ -99,6 +100,7 @@ public final class ConfigPanel extends JPanel {
         addRow(form, c, row++, "DirectML.dll override", dllOverrideField);
         addRow(form, c, row++, "Extra JVM args", extraJvmField);
         addRow(form, c, row++, "Request timeout (ms)", timeoutField);
+        addRow(form, c, row++, "Summarize timeout (ms)", summarizeTimeoutField);
         addRow(form, c, row++, "Debug", debugBox);
 
         JPanel buttons = new JPanel();
@@ -249,7 +251,11 @@ public final class ConfigPanel extends JPanel {
             long t = Long.parseLong(timeoutField.getText().trim());
             if (t > 0) cfg.setRequestTimeoutMillis(t);
         } catch (NumberFormatException ignored) {
-            // keep previous value
+        }
+        try {
+            long st = Long.parseLong(summarizeTimeoutField.getText().trim());
+            if (st > 0) cfg.setSummarizeTimeoutMillis(st);
+        } catch (NumberFormatException ignored) {
         }
     }
 

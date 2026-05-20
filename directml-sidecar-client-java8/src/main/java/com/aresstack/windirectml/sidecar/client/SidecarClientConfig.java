@@ -64,6 +64,14 @@ public final class SidecarClientConfig {
     private String directmlDllOverride;
     private long requestTimeoutMillis = 30_000L;
     /**
+     * Timeout for the {@code summarize} method in milliseconds.
+     * Phi-3 inference can take 60–180 s on CPU and 30–90 s on DirectML
+     * depending on input length and hardware. The default of 300 000 ms
+     * (5 minutes) gives enough headroom for first-run JIT warm-up and
+     * long inputs. Set to 0 to fall back to {@link #requestTimeoutMillis}.
+     */
+    private long summarizeTimeoutMillis = 300_000L;
+    /**
      * Working directory for the sidecar process; {@code null} = inherit.
      */
     private String workingDirectory;
@@ -190,6 +198,14 @@ public final class SidecarClientConfig {
 
     public void setRequestTimeoutMillis(long v) {
         this.requestTimeoutMillis = v;
+    }
+
+    public long getSummarizeTimeoutMillis() {
+        return summarizeTimeoutMillis > 0 ? summarizeTimeoutMillis : requestTimeoutMillis;
+    }
+
+    public void setSummarizeTimeoutMillis(long v) {
+        this.summarizeTimeoutMillis = v;
     }
 
     public String getWorkingDirectory() {

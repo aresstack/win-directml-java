@@ -487,8 +487,11 @@ public final class DirectMlPhi3Sidecar {
                     continue;
                 }
                 JsonRpcRequest request = raw.request();
-                JsonRpcResponse response = dispatcher.dispatch(request);
-                if (!request.isNotification()) {
+                // Pass writer so async handlers (e.g. SummarizeHandler) can respond
+                // from their own thread without blocking this dispatch loop.
+                JsonRpcResponse response = dispatcher.dispatch(request, writer);
+                if (!request.isNotification() && response != null) {
+                    // response == null → async handler already wrote the response
                     writer.writeResponse(response);
                 }
                 if (status.isShuttingDown()) break;
@@ -501,7 +504,8 @@ public final class DirectMlPhi3Sidecar {
         } finally {
             if (ownedSummarizer != null) {
                 try {
-                    ownedSummarizer.shutdown(); } catch (Exception e) {
+                    ownedSummarizer.shutdown();
+                } catch (Exception e) {
                     log.warn("Error during summarizer shutdown: {}", e.getMessage());
                 }
             }

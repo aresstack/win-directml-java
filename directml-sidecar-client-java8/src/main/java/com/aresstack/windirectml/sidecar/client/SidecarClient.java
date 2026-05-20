@@ -207,7 +207,10 @@ public final class SidecarClient {
         if (maxTokens > 0) params.put("maxTokens", maxTokens);
         if (systemPrompt != null) params.put("systemPrompt", systemPrompt);
         long t0 = System.currentTimeMillis();
-        JsonRpcResponse resp = call("summarize", params);
+        // Use the dedicated summarize timeout (default 300 s) instead of the
+        // general request timeout (default 30 s). Phi-3 inference is slow.
+        JsonRpcResponse resp = callWithTimeout("summarize", params,
+                config.getSummarizeTimeoutMillis());
         long elapsed = System.currentTimeMillis() - t0;
         return SummaryResult.from(resp.getResult(), elapsed, resp.getRaw());
     }
@@ -268,6 +271,14 @@ public final class SidecarClient {
      * {@link SidecarClientConfig#getRequestTimeoutMillis()}.
      */
     public JsonRpcResponse call(String method, Object params) throws SidecarException {
+        return callWithTimeout(method, params, config.getRequestTimeoutMillis());
+    }
+
+    /**
+     * Send a request and wait for the matching response with an explicit timeout.
+     */
+    private JsonRpcResponse callWithTimeout(String method, Object params, long timeoutMillis)
+            throws SidecarException {
         if (!isRunning()) {
             int code = process.exitValue();
             throw new SidecarException("Sidecar is not running (exit code "
@@ -287,11 +298,11 @@ public final class SidecarClient {
         }
         JsonRpcResponse resp;
         try {
-            resp = future.get(config.getRequestTimeoutMillis(), TimeUnit.MILLISECONDS);
+            resp = future.get(timeoutMillis, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             pending.remove(id);
             throw new SidecarTimeoutException("Sidecar did not respond to '" + method
-                    + "' within " + config.getRequestTimeoutMillis() + " ms");
+                    + "' within " + timeoutMillis + " ms");
         } catch (InterruptedException e) {
             pending.remove(id);
             Thread.currentThread().interrupt();
