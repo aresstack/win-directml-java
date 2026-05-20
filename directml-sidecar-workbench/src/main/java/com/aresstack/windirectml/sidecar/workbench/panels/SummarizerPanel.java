@@ -15,13 +15,19 @@ import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingWorker;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 
 public final class SummarizerPanel extends JPanel {
 
     private static final long serialVersionUID = 1L;
+
+    private static final String PLACEHOLDER = "Paste a paragraph here and click Summarize.";
 
     private final WorkbenchModel model;
     private final JTextArea inputArea = new JTextArea(8, 60);
@@ -31,12 +37,45 @@ public final class SummarizerPanel extends JPanel {
     private final JTextArea outputArea = new JTextArea(8, 60);
     private final JTextArea rawArea = new JTextArea(6, 60);
 
+    /** Whether the input area currently shows the grey placeholder text. */
+    private boolean showingPlaceholder = true;
+
     public SummarizerPanel(WorkbenchModel model) {
         this.model = model;
         setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
-        inputArea.setText("Paste a paragraph here and click Summarize.");
+        // ── Placeholder behaviour ────────────────────────────────────────
+        final Color normalFg    = inputArea.getForeground();
+        final Color placeholderFg = Color.GRAY;
+        final Font  normalFont  = inputArea.getFont();
+        final Font  placeholderFont = normalFont.deriveFont(Font.ITALIC);
+
+        inputArea.setForeground(placeholderFg);
+        inputArea.setFont(placeholderFont);
+        inputArea.setText(PLACEHOLDER);
+
+        inputArea.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusGained(FocusEvent e) {
+                if (showingPlaceholder) {
+                    showingPlaceholder = false;
+                    inputArea.setText("");
+                    inputArea.setForeground(normalFg);
+                    inputArea.setFont(normalFont);
+                }
+            }
+
+            @Override
+            public void focusLost(FocusEvent e) {
+                if (inputArea.getText().trim().isEmpty()) {
+                    showingPlaceholder = true;
+                    inputArea.setForeground(placeholderFg);
+                    inputArea.setFont(placeholderFont);
+                    inputArea.setText(PLACEHOLDER);
+                }
+            }
+        });
 
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         controls.add(new JLabel("maxTokens:"));
@@ -76,6 +115,13 @@ public final class SummarizerPanel extends JPanel {
     private void runSummarize() {
         if (!model.isRunning()) {
             outputArea.setText("sidecar not running");
+            return;
+        }
+        // Guard: reject the placeholder or empty input
+        if (showingPlaceholder || inputArea.getText().trim().isEmpty()) {
+            outputArea.setText("Please paste a text into the 'Input text' field first.");
+            timingLbl.setText("timing: —");
+            rawArea.setText("");
             return;
         }
         final String text = inputArea.getText();

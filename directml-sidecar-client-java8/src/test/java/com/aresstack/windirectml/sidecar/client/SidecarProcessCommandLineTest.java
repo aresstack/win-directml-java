@@ -92,5 +92,39 @@ class SidecarProcessCommandLineTest {
         assertTrue(cmd.contains("-De5.model=small-v2"));
         assertTrue(cmd.contains("-De5.modelDir=model/e5-small-v2"));
     }
-}
 
+    @Test
+    void buildsCommandLineWithPhi3ModelDir() {
+        SidecarClientConfig cfg = new SidecarClientConfig();
+        cfg.setSidecarJarPath("directml-sidecar.jar");
+        cfg.setPhi3ModelDirectory("model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128");
+        cfg.setPhi3Backend("directml");
+        cfg.setPhi3MaxTokens(256);
+
+        List<String> cmd = SidecarProcess.buildCommandLine(cfg);
+        assertTrue(cmd.contains(
+                "-Dphi3.modelDir=model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128"),
+                "must include -Dphi3.modelDir, cmd=" + cmd);
+        assertTrue(cmd.contains("-Dphi3.backend=directml"),
+                "must include -Dphi3.backend, cmd=" + cmd);
+        assertTrue(cmd.contains("-Dphi3.maxTokens=256"),
+                "must include -Dphi3.maxTokens, cmd=" + cmd);
+    }
+
+    @Test
+    void phi3DefaultsNotIncludedWhenBlank() {
+        SidecarClientConfig cfg = new SidecarClientConfig();
+        cfg.setSidecarJarPath("directml-sidecar.jar");
+        // phi3ModelDirectory is blank by default → no -Dphi3.modelDir arg
+        List<String> cmd = SidecarProcess.buildCommandLine(cfg);
+        for (String s : cmd) {
+            assertFalse(s.startsWith("-Dphi3.modelDir="),
+                    "must not include -Dphi3.modelDir when not configured, cmd=" + cmd);
+            assertFalse(s.startsWith("-Dphi3.maxTokens="),
+                    "must not include -Dphi3.maxTokens when 0 (default), cmd=" + cmd);
+        }
+        // phi3.backend=auto IS always included (non-blank default)
+        assertTrue(cmd.contains("-Dphi3.backend=auto"),
+                "must include -Dphi3.backend=auto by default, cmd=" + cmd);
+    }
+}

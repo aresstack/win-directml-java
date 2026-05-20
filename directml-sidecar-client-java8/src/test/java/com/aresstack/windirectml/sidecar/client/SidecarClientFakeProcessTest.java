@@ -395,5 +395,117 @@ class SidecarClientFakeProcessTest {
             }
         });
     }
+
+    @Test
+    void summarizeRoundTripParsesResult() throws Exception {
+        // End-to-end Java-8 client coverage for the optional/experimental
+        // Phi-3 summarizer JSON-RPC method: serialise the request, echo a
+        // scripted result back, parse it into a SummaryResult.
+        FakeSidecarProcess fake = new FakeSidecarProcess();
+        SidecarClientConfig cfg = new SidecarClientConfig();
+        cfg.setSidecarJarPath("fake");
+        cfg.setRequestTimeoutMillis(2000L);
+        client = new SidecarClient(cfg, fake);
+        client.start();
+
+        final SummaryResult[] captured = new SummaryResult[1];
+        final Throwable[] failure = new Throwable[1];
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    captured[0] = client.summarize("a long input text", 128, "be concise");
+                } catch (Throwable e) {
+                    failure[0] = e;
+                }
+            }
+        });
+        t.start();
+
+        String reqLine = fake.waitForRequest();
+        assertTrue(reqLine.contains("\"method\":\"summarize\""),
+                "expected method=summarize, got: " + reqLine);
+        com.fasterxml.jackson.databind.JsonNode req = client.getMapperForTesting().readTree(reqLine);
+        com.fasterxml.jackson.databind.JsonNode params = req.get("params");
+        assertNotNull(params, "summarize must have params");
+        assertEquals("a long input text", params.get("text").asText());
+        assertEquals(128, params.get("maxTokens").asInt());
+        assertEquals("be concise", params.get("systemPrompt").asText());
+
+        long id = req.get("id").asLong();
+        fake.enqueueLine("{\"jsonrpc\":\"2.0\",\"id\":" + id
+                + ",\"result\":{"
+                + "\"text\":\"a short summary\","
+                + "\"finishReason\":\"end_turn\","
+                + "\"promptTokens\":42,"
+                + "\"outputTokens\":7,"
+                + "\"elapsedMs\":123"
+                + "}}");
+        t.join(3000L);
+        if (failure[0] != null) {
+            fail("summarize() threw: " + failure[0].getMessage());
+        }
+
+        SummaryResult r = captured[0];
+        assertNotNull(r, "summarize() returned null");
+        assertEquals("a short summary", r.getText());
+        assertEquals("end_turn", r.getFinishReason());
+        assertEquals(42, r.getPromptTokens());
+        assertEquals(7, r.getOutputTokens());
+        assertEquals(123L, r.getElapsedMillis());
+        assertNotNull(r.getRaw());
+    }
+
+    @Test
+    void summarizeNotImplementedSurfacesAsJsonRpcError() throws Exception {
+        // When the sidecar has no Phi-3 model loaded, it returns
+        // -32005 NOT_IMPLEMENTED. The Java-8 client must surface that
+        // as a typed JsonRpcError so host applications can degrade
+        // gracefully (the summarizer is an optional, experimental
+        // feature and many deployments will not ship Phi-3 at all).
+        FakeSidecarProcess fake = new FakeSidecarProcess();
+        SidecarClientConfig cfg = new SidecarClientConfig();
+        cfg.setSidecarJarPath("fake");
+        cfg.setRequestTimeoutMillis(2000L);
+        client = new SidecarClient(cfg, fake);
+        client.start();
+
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    client.summarize("hello", 64);
+                    fail("expected JsonRpcError");
+                } catch (JsonRpcError e) {
+                    assertEquals(-32005, e.getCode());
+                } catch (Exception e) {
+                    fail("expected JsonRpcError, got " + e.getClass());
+                }
+            }
+        });
+        t.start();
+
+        String reqLine = fake.waitForRequest();
+        long id = client.getMapperForTesting().readTree(reqLine).get("id").asLong();
+        fake.enqueueLine("{\"jsonrpc\":\"2.0\",\"id\":" + id
+                + ",\"error\":{\"code\":-32005,\"message\":\"summarize not implemented\"}}");
+        t.join(3000L);
+    }
+
+    @Test
+    void summarizeRejectsEmptyTextLocally() throws Exception {
+        FakeSidecarProcess fake = new FakeSidecarProcess();
+        SidecarClientConfig cfg = new SidecarClientConfig();
+        cfg.setSidecarJarPath("fake");
+        client = new SidecarClient(cfg, fake);
+        client.start();
+
+        assertThrows(SidecarException.class, new org.junit.jupiter.api.function.Executable() {
+            @Override
+            public void execute() throws Throwable {
+                client.summarize("", 64);
+            }
+        });
+    }
 }
 

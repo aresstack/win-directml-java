@@ -37,8 +37,12 @@ public final class HealthHandler implements JsonRpcMethodHandler {
                 status.getRerankerBackend() != null ? status.getRerankerBackend() : "none");
         result.put("rerankerReady", status.isRerankerReady());
         if (status.getRerankerModel() != null) result.put("rerankerModel", status.getRerankerModel());
+        // Phi-3 summarizer
+        result.put("summarizerReady", status.isSummarizerReady());
+        result.put("summarizerBackend",
+                status.getSummarizerBackend() != null ? status.getSummarizerBackend() : "none");
+        if (status.getSummarizerModel() != null) result.put("summarizerModel", status.getSummarizerModel());
         if (status.getLastError() != null) result.put("lastError", status.getLastError());
         return result;
     }
 }
-

@@ -102,6 +102,8 @@ public final class DirectMlPhi3Sidecar {
         if (external != null && external.isReady()) {
             status.setModelLoaded(true);
             status.setMode("injected");
+            status.setSummarizerReady(true);
+            status.setSummarizerBackend("injected");
         }
         return this;
     }
@@ -443,7 +445,21 @@ public final class DirectMlPhi3Sidecar {
         try (JsonRpcMessageReader reader = new JsonRpcMessageReader(in, mapper);
              JsonRpcMessageWriter writer = new JsonRpcMessageWriter(out, mapper)) {
 
-            if (summarizer == null && autoLoadModel) {
+            // Probe the Phi-3 model directory *before* constructing a
+            // Phi3Summarizer. When the directory is missing or
+            // incomplete we deliberately do not register a real
+            // SummarizeHandler – the fallback handler then answers
+            // `summarize` with -32005 NOT_IMPLEMENTED, matching the
+            // embed / rerank "no model" semantics and the documented
+            // contract in README / PROTOCOL / SUPPORTED_MODELS. The
+            // specific missing file is still surfaced via
+            // `sidecar.modelLoadFailed` + `status.lastError` so the
+            // workbench can show it.
+            String missing = autoLoadModel && summarizer == null
+                    ? Phi3InferenceEngine.describeMissingModelFile(modelDir)
+                    : null;
+
+            if (summarizer == null && autoLoadModel && missing == null) {
                 ownedSummarizer = new Phi3Summarizer(modelDir, defaultMaxTokens, backend);
                 summarizer = ownedSummarizer;
             }
@@ -453,6 +469,11 @@ public final class DirectMlPhi3Sidecar {
                 Thread loader = new Thread(() -> loadModel(writer), "phi3-model-loader");
                 loader.setDaemon(true);
                 loader.start();
+            } else if (missing != null) {
+                log.warn("{} – summarize will respond with -32005 NOT_IMPLEMENTED", missing);
+                status.setLastError(missing);
+                writer.writeNotification(JsonRpcNotification.of("sidecar.modelLoadFailed",
+                        Map.of("error", missing, "modelDir", String.valueOf(modelDir))));
             }
 
             writer.writeNotification(JsonRpcNotification.of("sidecar.started", started()));
@@ -466,8 +487,11 @@ public final class DirectMlPhi3Sidecar {
                     continue;
                 }
                 JsonRpcRequest request = raw.request();
-                JsonRpcResponse response = dispatcher.dispatch(request);
-                if (!request.isNotification()) {
+                // Pass writer so async handlers (e.g. SummarizeHandler) can respond
+                // from their own thread without blocking this dispatch loop.
+                JsonRpcResponse response = dispatcher.dispatch(request, writer);
+                if (!request.isNotification() && response != null) {
+                    // response == null → async handler already wrote the response
                     writer.writeResponse(response);
                 }
                 if (status.isShuttingDown()) break;
@@ -480,7 +504,8 @@ public final class DirectMlPhi3Sidecar {
         } finally {
             if (ownedSummarizer != null) {
                 try {
-                    ownedSummarizer.shutdown(); } catch (Exception e) {
+                    ownedSummarizer.shutdown();
+                } catch (Exception e) {
                     log.warn("Error during summarizer shutdown: {}", e.getMessage());
                 }
             }
@@ -493,9 +518,15 @@ public final class DirectMlPhi3Sidecar {
         if (summarizer != null) {
             dispatcher.register("summarize", new SummarizeHandler(summarizer, status));
         } else {
+            // No Phi-3 summarizer was configured at all (model directory
+            // missing or autoLoadModel=false in tests). Match the embed /
+            // rerank fallback pattern: report NOT_IMPLEMENTED so clients
+            // can degrade gracefully instead of seeing a stack trace.
             dispatcher.register("summarize", params -> {
                 throw new com.aresstack.windirectml.sidecar.jsonrpc.JsonRpcMethodException(
-                        JsonRpcErrorCode.MODEL_NOT_READY, "Summarizer not configured");
+                        JsonRpcErrorCode.NOT_IMPLEMENTED,
+                        "summarize not implemented: no Phi-3 summarizer configured "
+                                + "(summarizer support is experimental and Phi-3-only)");
             });
         }
         dispatcher.register("embed", new EmbedHandler(embeddingModel::get, status));
@@ -508,12 +539,12 @@ public final class DirectMlPhi3Sidecar {
     private void loadModel(JsonRpcMessageWriter writer) {
         try {
             log.info("Loading Phi-3 model from {} (backend={})", modelDir, backend);
-            if (!Phi3InferenceEngine.isValidModelDir(modelDir)) {
-                String msg = "Model directory invalid or incomplete: " + modelDir;
-                log.error(msg);
-                status.setLastError(msg);
+            String missing = Phi3InferenceEngine.describeMissingModelFile(modelDir);
+            if (missing != null) {
+                log.error("{}", missing);
+                status.setLastError(missing);
                 writer.writeNotification(JsonRpcNotification.of("sidecar.modelLoadFailed",
-                        Map.of("error", msg, "modelDir", modelDir.toString())));
+                        Map.of("error", missing, "modelDir", String.valueOf(modelDir))));
                 return;
             }
             long t0 = System.currentTimeMillis();
@@ -521,6 +552,9 @@ public final class DirectMlPhi3Sidecar {
             long elapsed = System.currentTimeMillis() - t0;
             status.setModelLoaded(true);
             status.setMode("phi-3 (" + backend + ")");
+            status.setSummarizerReady(true);
+            status.setSummarizerBackend(backend);
+            status.setSummarizerModel("phi-3-mini-int4-" + backend);
             Map<String, Object> params = new LinkedHashMap<>();
             params.put("loadTimeMs", elapsed);
             params.put("backend", backend);
@@ -529,9 +563,11 @@ public final class DirectMlPhi3Sidecar {
             log.info("Phi-3 model loaded in {} ms", elapsed);
         } catch (Throwable t) {
             log.error("Model load failed", t);
-            status.setLastError(t.getMessage());
+            String msg = t.getMessage() != null ? t.getMessage() : t.getClass().getName();
+            status.setLastError(msg);
+            status.setSummarizerReady(false);
             writer.writeNotification(JsonRpcNotification.of("sidecar.modelLoadFailed",
-                    Map.of("error", String.valueOf(t.getMessage()))));
+                    Map.of("error", msg, "modelDir", String.valueOf(modelDir))));
         }
     }
 

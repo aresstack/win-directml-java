@@ -64,6 +64,14 @@ public final class SidecarClientConfig {
     private String directmlDllOverride;
     private long requestTimeoutMillis = 30_000L;
     /**
+     * Timeout for the {@code summarize} method in milliseconds.
+     * Phi-3 inference can take 60–180 s on CPU and 30–90 s on DirectML
+     * depending on input length and hardware. The default of 300 000 ms
+     * (5 minutes) gives enough headroom for first-run JIT warm-up and
+     * long inputs. Set to 0 to fall back to {@link #requestTimeoutMillis}.
+     */
+    private long summarizeTimeoutMillis = 300_000L;
+    /**
      * Working directory for the sidecar process; {@code null} = inherit.
      */
     private String workingDirectory;
@@ -71,6 +79,28 @@ public final class SidecarClientConfig {
      * Optional additional JVM args (free-form, e.g. {@code -Xmx2g}).
      */
     private String extraJvmArgs;
+
+    /**
+     * Filesystem path to the Phi-3 model directory, forwarded as
+     * {@code -Dphi3.modelDir=<value>}. When blank, the sidecar resolves
+     * the conventional location
+     * {@code model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128}.
+     */
+    private String phi3ModelDirectory;
+
+    /**
+     * Backend selector for the Phi-3 summarizer, forwarded as
+     * {@code -Dphi3.backend=<value>}. Accepted values:
+     * {@code auto} (default), {@code directml}, {@code cpu}.
+     */
+    private String phi3Backend = "auto";
+
+    /**
+     * Maximum number of generated tokens for the Phi-3 summarizer,
+     * forwarded as {@code -Dphi3.maxTokens=<value>}. 0 means "use sidecar
+     * default" (512).
+     */
+    private int phi3MaxTokens = 0;
 
     // ── getters / setters ───────────────────────────────────────────────
 
@@ -170,6 +200,14 @@ public final class SidecarClientConfig {
         this.requestTimeoutMillis = v;
     }
 
+    public long getSummarizeTimeoutMillis() {
+        return summarizeTimeoutMillis > 0 ? summarizeTimeoutMillis : requestTimeoutMillis;
+    }
+
+    public void setSummarizeTimeoutMillis(long v) {
+        this.summarizeTimeoutMillis = v;
+    }
+
     public String getWorkingDirectory() {
         return workingDirectory;
     }
@@ -185,5 +223,28 @@ public final class SidecarClientConfig {
     public void setExtraJvmArgs(String v) {
         this.extraJvmArgs = v;
     }
-}
 
+    public String getPhi3ModelDirectory() {
+        return phi3ModelDirectory;
+    }
+
+    public void setPhi3ModelDirectory(String v) {
+        this.phi3ModelDirectory = v;
+    }
+
+    public String getPhi3Backend() {
+        return phi3Backend;
+    }
+
+    public void setPhi3Backend(String v) {
+        this.phi3Backend = v;
+    }
+
+    public int getPhi3MaxTokens() {
+        return phi3MaxTokens;
+    }
+
+    public void setPhi3MaxTokens(int v) {
+        this.phi3MaxTokens = v;
+    }
+}

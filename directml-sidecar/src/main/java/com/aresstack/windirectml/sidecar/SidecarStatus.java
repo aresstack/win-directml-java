@@ -31,6 +31,24 @@ public final class SidecarStatus {
     private volatile boolean rerankerReady = false;
     private volatile String rerankerModel;
 
+    /**
+     * {@code true} when the Phi-3 summarizer has finished loading and is ready
+     * to process requests. Set from the phi3-model-loader thread.
+     */
+    private volatile boolean summarizerReady = false;
+
+    /**
+     * Active backend token for the Phi-3 summarizer ({@code "directml"},
+     * {@code "cpu"}, or {@code null} = not loaded yet / not configured).
+     */
+    private volatile String summarizerBackend;
+
+    /**
+     * Human-readable model identifier reported in {@code health} once the
+     * summarizer is ready, e.g. {@code "phi-3-mini-int4-directml"}.
+     */
+    private volatile String summarizerModel;
+
     public boolean isReady() {
         return modelLoaded && !shuttingDown;
     }
@@ -97,5 +115,13 @@ public final class SidecarStatus {
     public void setRerankerReady(boolean rerankerReady) { this.rerankerReady = rerankerReady; }
     public String getRerankerModel() { return rerankerModel; }
     public void setRerankerModel(String rerankerModel) { this.rerankerModel = rerankerModel; }
-}
 
+    public boolean isSummarizerReady() { return summarizerReady; }
+    public void setSummarizerReady(boolean v) { this.summarizerReady = v; }
+
+    public String getSummarizerBackend() { return summarizerBackend; }
+    public void setSummarizerBackend(String v) { this.summarizerBackend = v; }
+
+    public String getSummarizerModel() { return summarizerModel; }
+    public void setSummarizerModel(String v) { this.summarizerModel = v; }
+}

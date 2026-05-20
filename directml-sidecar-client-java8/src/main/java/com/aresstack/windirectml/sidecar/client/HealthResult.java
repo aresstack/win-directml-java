@@ -19,6 +19,9 @@ public final class HealthResult {
     private final String rerankerBackend;
     private final boolean rerankerReady;
     private final String rerankerModel;
+    private final boolean summarizerReady;
+    private final String summarizerBackend;
+    private final String summarizerModel;
     private final String lastError;
     private final String raw;
 
@@ -27,6 +30,7 @@ public final class HealthResult {
                          String mode, String embeddingBackend,
                          boolean embeddingReady,
                          String rerankerBackend, boolean rerankerReady, String rerankerModel,
+                         boolean summarizerReady, String summarizerBackend, String summarizerModel,
                          String lastError, String raw) {
         this.status = status;
         this.ready = ready;
@@ -39,13 +43,17 @@ public final class HealthResult {
         this.rerankerBackend = rerankerBackend;
         this.rerankerReady = rerankerReady;
         this.rerankerModel = rerankerModel;
+        this.summarizerReady = summarizerReady;
+        this.summarizerBackend = summarizerBackend;
+        this.summarizerModel = summarizerModel;
         this.lastError = lastError;
         this.raw = raw;
     }
 
     public static HealthResult from(JsonNode result, String raw) {
         if (result == null) return new HealthResult(null, false, false, false, false,
-                null, null, false, null, false, null, null, raw);
+                null, null, false, null, false, null,
+                false, null, null, null, raw);
         return new HealthResult(
                 asText(result, "status"),
                 asBool(result, "ready"),
@@ -58,6 +66,9 @@ public final class HealthResult {
                 asText(result, "rerankerBackend"),
                 asBool(result, "rerankerReady"),
                 asText(result, "rerankerModel"),
+                asBool(result, "summarizerReady"),
+                asText(result, "summarizerBackend"),
+                asText(result, "summarizerModel"),
                 asText(result, "lastError"),
                 raw);
     }
@@ -112,8 +123,11 @@ public final class HealthResult {
     public boolean isRerankerReady() { return rerankerReady; }
     public String getRerankerModel() { return rerankerModel; }
 
+    public boolean isSummarizerReady() { return summarizerReady; }
+    public String getSummarizerBackend() { return summarizerBackend; }
+    public String getSummarizerModel() { return summarizerModel; }
+
     public String getRaw() {
         return raw;
     }
 }
-
