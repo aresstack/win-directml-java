@@ -210,6 +210,99 @@ class SidecarLifecycleTest {
     }
 
     @Test
+    void summarizeReturnsNotImplementedWhenAutoLoadModelDirIsMissing() throws Exception {
+        // Production path: autoLoadModel=true but the Phi-3 model
+        // directory does not exist. The sidecar must NOT register a
+        // real SummarizeHandler in this case – `summarize` should
+        // answer with -32005 NOT_IMPLEMENTED, and the missing-file
+        // diagnostic must be surfaced via `sidecar.modelLoadFailed`
+        // and `health.lastError`.
+        String input = """
+                {"jsonrpc":"2.0","id":"s","method":"summarize","params":{"text":"hello"}}
+                {"jsonrpc":"2.0","id":"h","method":"health"}
+                {"jsonrpc":"2.0","id":"x","method":"shutdown"}
+                """;
+        ByteArrayInputStream in = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        DirectMlPhi3Sidecar sidecar = new DirectMlPhi3Sidecar(
+                in, out, Path.of("definitely-not-a-real-phi3-dir"), "cpu", 128, true);
+        assertEquals(0, sidecar.run());
+
+        List<JsonNode> messages = new ArrayList<>();
+        for (String line : out.toString(StandardCharsets.UTF_8).split("\\R")) {
+            if (line.isBlank()) continue;
+            messages.add(mapper.readTree(line));
+        }
+
+        // Find the modelLoadFailed notification – it may be emitted
+        // before sidecar.started.
+        JsonNode loadFailed = null;
+        for (JsonNode m : messages) {
+            if ("sidecar.modelLoadFailed".equals(m.path("method").asText())) {
+                loadFailed = m;
+                break;
+            }
+        }
+        assertNotNull(loadFailed, "expected sidecar.modelLoadFailed notification");
+        String err = loadFailed.path("params").path("error").asText();
+        assertTrue(err.toLowerCase().contains("phi-3"),
+                "modelLoadFailed must include a Phi-3 diagnostic, got: " + err);
+        assertTrue(err.contains("does not exist") || err.contains("missing"),
+                "modelLoadFailed must explain why the dir is invalid, got: " + err);
+
+        // summarize response must be -32005 NOT_IMPLEMENTED.
+        JsonNode summarizeResp = null;
+        JsonNode healthResp = null;
+        for (JsonNode m : messages) {
+            if ("s".equals(m.path("id").asText())) summarizeResp = m;
+            if ("h".equals(m.path("id").asText())) healthResp = m;
+        }
+        assertNotNull(summarizeResp);
+        assertNotNull(summarizeResp.get("error"));
+        assertEquals(-32005, summarizeResp.get("error").get("code").asInt());
+
+        // health.lastError must carry the same diagnostic.
+        assertNotNull(healthResp);
+        assertNotNull(healthResp.path("result").get("lastError"));
+        assertTrue(healthResp.path("result").path("lastError").asText().toLowerCase().contains("phi-3"));
+    }
+
+    @Test
+    void summarizeReturnsNotImplementedWhenAutoLoadModelDirIsIncomplete(@org.junit.jupiter.api.io.TempDir java.nio.file.Path tmp) throws Exception {
+        // Production path with an *incomplete* Phi-3 model directory:
+        // the missing file must be named in the diagnostic.
+        java.nio.file.Files.writeString(tmp.resolve("config.json"), "{}");
+        String input = """
+                {"jsonrpc":"2.0","id":"s","method":"summarize","params":{"text":"hello"}}
+                {"jsonrpc":"2.0","id":"x","method":"shutdown"}
+                """;
+        ByteArrayInputStream in = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        DirectMlPhi3Sidecar sidecar = new DirectMlPhi3Sidecar(
+                in, out, tmp, "cpu", 128, true);
+        assertEquals(0, sidecar.run());
+
+        List<JsonNode> messages = new ArrayList<>();
+        for (String line : out.toString(StandardCharsets.UTF_8).split("\\R")) {
+            if (line.isBlank()) continue;
+            messages.add(mapper.readTree(line));
+        }
+
+        JsonNode loadFailed = null;
+        JsonNode summarizeResp = null;
+        for (JsonNode m : messages) {
+            if ("sidecar.modelLoadFailed".equals(m.path("method").asText())) loadFailed = m;
+            if ("s".equals(m.path("id").asText())) summarizeResp = m;
+        }
+        assertNotNull(loadFailed, "expected sidecar.modelLoadFailed notification");
+        assertTrue(loadFailed.path("params").path("error").asText().contains("tokenizer.json"),
+                "modelLoadFailed must name tokenizer.json, got: "
+                        + loadFailed.path("params").path("error").asText());
+        assertNotNull(summarizeResp);
+        assertEquals(-32005, summarizeResp.get("error").get("code").asInt());
+    }
+
+    @Test
     void embedReturnsNotImplementedWithoutEncoder() throws Exception {
         String input = """
                 {"jsonrpc":"2.0","id":"e","method":"embed","params":{"text":"hi"}}

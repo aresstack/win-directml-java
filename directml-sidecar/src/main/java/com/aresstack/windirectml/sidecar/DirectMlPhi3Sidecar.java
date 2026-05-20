@@ -443,7 +443,21 @@ public final class DirectMlPhi3Sidecar {
         try (JsonRpcMessageReader reader = new JsonRpcMessageReader(in, mapper);
              JsonRpcMessageWriter writer = new JsonRpcMessageWriter(out, mapper)) {
 
-            if (summarizer == null && autoLoadModel) {
+            // Probe the Phi-3 model directory *before* constructing a
+            // Phi3Summarizer. When the directory is missing or
+            // incomplete we deliberately do not register a real
+            // SummarizeHandler – the fallback handler then answers
+            // `summarize` with -32005 NOT_IMPLEMENTED, matching the
+            // embed / rerank "no model" semantics and the documented
+            // contract in README / PROTOCOL / SUPPORTED_MODELS. The
+            // specific missing file is still surfaced via
+            // `sidecar.modelLoadFailed` + `status.lastError` so the
+            // workbench can show it.
+            String missing = autoLoadModel && summarizer == null
+                    ? Phi3InferenceEngine.describeMissingModelFile(modelDir)
+                    : null;
+
+            if (summarizer == null && autoLoadModel && missing == null) {
                 ownedSummarizer = new Phi3Summarizer(modelDir, defaultMaxTokens, backend);
                 summarizer = ownedSummarizer;
             }
@@ -453,6 +467,11 @@ public final class DirectMlPhi3Sidecar {
                 Thread loader = new Thread(() -> loadModel(writer), "phi3-model-loader");
                 loader.setDaemon(true);
                 loader.start();
+            } else if (missing != null) {
+                log.warn("{} – summarize will respond with -32005 NOT_IMPLEMENTED", missing);
+                status.setLastError(missing);
+                writer.writeNotification(JsonRpcNotification.of("sidecar.modelLoadFailed",
+                        Map.of("error", missing, "modelDir", String.valueOf(modelDir))));
             }
 
             writer.writeNotification(JsonRpcNotification.of("sidecar.started", started()));
@@ -519,7 +538,7 @@ public final class DirectMlPhi3Sidecar {
                 log.error("{}", missing);
                 status.setLastError(missing);
                 writer.writeNotification(JsonRpcNotification.of("sidecar.modelLoadFailed",
-                        Map.of("error", missing, "modelDir", modelDir.toString())));
+                        Map.of("error", missing, "modelDir", String.valueOf(modelDir))));
                 return;
             }
             long t0 = System.currentTimeMillis();
@@ -535,9 +554,10 @@ public final class DirectMlPhi3Sidecar {
             log.info("Phi-3 model loaded in {} ms", elapsed);
         } catch (Throwable t) {
             log.error("Model load failed", t);
-            status.setLastError(t.getMessage());
+            String msg = t.getMessage() != null ? t.getMessage() : t.getClass().getName();
+            status.setLastError(msg);
             writer.writeNotification(JsonRpcNotification.of("sidecar.modelLoadFailed",
-                    Map.of("error", String.valueOf(t.getMessage()))));
+                    Map.of("error", msg, "modelDir", String.valueOf(modelDir))));
         }
     }
 
