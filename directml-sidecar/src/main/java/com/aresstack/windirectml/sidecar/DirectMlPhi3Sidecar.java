@@ -102,6 +102,8 @@ public final class DirectMlPhi3Sidecar {
         if (external != null && external.isReady()) {
             status.setModelLoaded(true);
             status.setMode("injected");
+            status.setSummarizerReady(true);
+            status.setSummarizerBackend("injected");
         }
         return this;
     }
@@ -546,6 +548,9 @@ public final class DirectMlPhi3Sidecar {
             long elapsed = System.currentTimeMillis() - t0;
             status.setModelLoaded(true);
             status.setMode("phi-3 (" + backend + ")");
+            status.setSummarizerReady(true);
+            status.setSummarizerBackend(backend);
+            status.setSummarizerModel("phi-3-mini-int4-" + backend);
             Map<String, Object> params = new LinkedHashMap<>();
             params.put("loadTimeMs", elapsed);
             params.put("backend", backend);
@@ -556,6 +561,7 @@ public final class DirectMlPhi3Sidecar {
             log.error("Model load failed", t);
             String msg = t.getMessage() != null ? t.getMessage() : t.getClass().getName();
             status.setLastError(msg);
+            status.setSummarizerReady(false);
             writer.writeNotification(JsonRpcNotification.of("sidecar.modelLoadFailed",
                     Map.of("error", msg, "modelDir", String.valueOf(modelDir))));
         }

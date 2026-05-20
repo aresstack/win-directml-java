@@ -72,6 +72,28 @@ public final class SidecarClientConfig {
      */
     private String extraJvmArgs;
 
+    /**
+     * Filesystem path to the Phi-3 model directory, forwarded as
+     * {@code -Dphi3.modelDir=<value>}. When blank, the sidecar resolves
+     * the conventional location
+     * {@code model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128}.
+     */
+    private String phi3ModelDirectory;
+
+    /**
+     * Backend selector for the Phi-3 summarizer, forwarded as
+     * {@code -Dphi3.backend=<value>}. Accepted values:
+     * {@code auto} (default), {@code directml}, {@code cpu}.
+     */
+    private String phi3Backend = "auto";
+
+    /**
+     * Maximum number of generated tokens for the Phi-3 summarizer,
+     * forwarded as {@code -Dphi3.maxTokens=<value>}. 0 means "use sidecar
+     * default" (512).
+     */
+    private int phi3MaxTokens = 0;
+
     // ── getters / setters ───────────────────────────────────────────────
 
     public String getJavaExecutable() {
@@ -185,5 +207,28 @@ public final class SidecarClientConfig {
     public void setExtraJvmArgs(String v) {
         this.extraJvmArgs = v;
     }
-}
 
+    public String getPhi3ModelDirectory() {
+        return phi3ModelDirectory;
+    }
+
+    public void setPhi3ModelDirectory(String v) {
+        this.phi3ModelDirectory = v;
+    }
+
+    public String getPhi3Backend() {
+        return phi3Backend;
+    }
+
+    public void setPhi3Backend(String v) {
+        this.phi3Backend = v;
+    }
+
+    public int getPhi3MaxTokens() {
+        return phi3MaxTokens;
+    }
+
+    public void setPhi3MaxTokens(int v) {
+        this.phi3MaxTokens = v;
+    }
+}

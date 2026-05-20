@@ -271,6 +271,16 @@ public class SidecarProcess {
         if (!isBlank(cfg.getRerankModelDirectory())) {
             cmd.add("-Drerank.modelDir=" + cfg.getRerankModelDirectory());
         }
+        // Phi-3 summarizer wiring
+        if (!isBlank(cfg.getPhi3ModelDirectory())) {
+            cmd.add("-Dphi3.modelDir=" + cfg.getPhi3ModelDirectory());
+        }
+        if (!isBlank(cfg.getPhi3Backend())) {
+            cmd.add("-Dphi3.backend=" + cfg.getPhi3Backend());
+        }
+        if (cfg.getPhi3MaxTokens() > 0) {
+            cmd.add("-Dphi3.maxTokens=" + cfg.getPhi3MaxTokens());
+        }
         cmd.add("-Dwindirectml.debug=" + Boolean.toString(cfg.isDirectmlDebug()));
         if (!isBlank(cfg.getDirectmlDllOverride())) {
             cmd.add("-Dwindirectml.directml.dll=" + cfg.getDirectmlDllOverride());
@@ -291,4 +301,3 @@ public class SidecarProcess {
         return true;
     }
 }
-

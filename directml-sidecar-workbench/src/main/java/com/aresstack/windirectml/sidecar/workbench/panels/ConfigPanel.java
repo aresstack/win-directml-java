@@ -50,10 +50,17 @@ public final class ConfigPanel extends JPanel {
     private final JTextField rerankModelDirField = new JTextField("");
     private final JComboBox<String> rerankBackendBox =
             new JComboBox<String>(new String[]{"auto", "directml", "cpu"});
+    // ── Phi-3 Summarizer ────────────────────────────────────────────────
+    private final JTextField phi3ModelDirField = new JTextField(
+            "model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128");
+    private final JComboBox<String> phi3BackendBox =
+            new JComboBox<String>(new String[]{"auto", "directml", "cpu"});
+    private final JTextField phi3MaxTokensField = new JTextField("512");
+    // ────────────────────────────────────────────────────────────────────
     private final JCheckBox debugBox = new JCheckBox("windirectml.debug=true");
     private final JTextField dllOverrideField = new JTextField("");
     private final JTextField timeoutField = new JTextField("30000");
-    private final JTextField extraJvmField = new JTextField("");
+    private final JTextField extraJvmField = new JTextField("-Xmx8g");
 
     private final JTextArea commandPreview = new JTextArea(4, 60);
 
@@ -86,6 +93,9 @@ public final class ConfigPanel extends JPanel {
         addRow(form, c, row++, "embed.backend", backendBox);
         addRow(form, c, row++, "Reranker directory (optional)", rerankModelDirField);
         addRow(form, c, row++, "rerank.backend", rerankBackendBox);
+        addRow(form, c, row++, "Phi-3 directory (summarizer)", phi3ModelDirField);
+        addRow(form, c, row++, "phi3.backend", phi3BackendBox);
+        addRow(form, c, row++, "phi3.maxTokens", phi3MaxTokensField);
         addRow(form, c, row++, "DirectML.dll override", dllOverrideField);
         addRow(form, c, row++, "Extra JVM args", extraJvmField);
         addRow(form, c, row++, "Request timeout (ms)", timeoutField);
@@ -147,6 +157,7 @@ public final class ConfigPanel extends JPanel {
         };
         backendBox.addActionListener(applyAndPreview);
         rerankBackendBox.addActionListener(applyAndPreview);
+        phi3BackendBox.addActionListener(applyAndPreview);
         debugBox.addActionListener(applyAndPreview);
         embedModelBox.addActionListener(applyAndPreview);
         e5VariantBox.addActionListener(applyAndPreview);
@@ -198,8 +209,10 @@ public final class ConfigPanel extends JPanel {
                     @Override
                     public String call() throws SidecarException {
                         return "health → " + model.health().getStatus()
-                                + " (backend=" + model.health().getEmbeddingBackend()
-                                + ", ready=" + model.health().isEmbeddingReady() + ")";
+                                + " (embed=" + model.health().getEmbeddingBackend()
+                                + ", embedReady=" + model.health().isEmbeddingReady()
+                                + ", summarizer=" + model.health().getSummarizerBackend()
+                                + ", summarizerReady=" + model.health().isSummarizerReady() + ")";
                     }
                 });
             }
@@ -223,6 +236,12 @@ public final class ConfigPanel extends JPanel {
         cfg.setEmbedBackend((String) backendBox.getSelectedItem());
         cfg.setRerankModelDirectory(rerankModelDirField.getText().trim());
         cfg.setRerankBackend((String) rerankBackendBox.getSelectedItem());
+        cfg.setPhi3ModelDirectory(phi3ModelDirField.getText().trim());
+        cfg.setPhi3Backend((String) phi3BackendBox.getSelectedItem());
+        try {
+            int mt = Integer.parseInt(phi3MaxTokensField.getText().trim());
+            cfg.setPhi3MaxTokens(mt > 0 ? mt : 0);
+        } catch (NumberFormatException ignored) { /* keep previous */ }
         cfg.setDirectmlDebug(debugBox.isSelected());
         cfg.setDirectmlDllOverride(dllOverrideField.getText().trim());
         cfg.setExtraJvmArgs(extraJvmField.getText().trim());
@@ -286,4 +305,3 @@ public final class ConfigPanel extends JPanel {
         return d;
     }
 }
-

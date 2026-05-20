@@ -120,12 +120,38 @@ Response:
     "busy": false,
     "modelLoaded": true,
     "shuttingDown": false,
-    "mode": "phi-3 (auto)"
+    "mode": "phi-3 (auto)",
+    "embeddingBackend": "directml",
+    "embeddingReady": true,
+    "rerankerBackend": "directml",
+    "rerankerReady": true,
+    "rerankerModel": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "summarizerReady": true,
+    "summarizerBackend": "directml",
+    "summarizerModel": "phi-3-mini-int4-directml"
   }
 }
 ```
 
 `status` ∈ `starting | ok | shutting_down`.
+
+`summarizerReady` ist `false`, solange das Phi-3-Modell noch lädt oder
+kein gültiger Modellpfad konfiguriert ist. `summarizerBackend` und
+`summarizerModel` sind nur vorhanden, wenn der Summarizer bereit ist.
+
+### Phi-3-Summarizer-Konfiguration
+
+| Property | Werte | Default | Wirkung |
+|---|---|---|---|
+| `-Dphi3.modelDir` | Pfad | auto-discovery | Überschreibt den Standard-Suchpfad `model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128`. Muss `model.onnx`, `model.onnx.data`, `tokenizer.json` und `config.json` enthalten. |
+| `-Dphi3.backend` | `auto`, `directml`, `cpu` | `auto` | Backend für die Phi-3-Inferenz. `auto` wählt DirectML wenn verfügbar, fällt sonst auf CPU zurück. |
+| `-Dphi3.maxTokens` | int | `512` | Maximale Anzahl generierter Tokens je Zusammenfassung. |
+
+Fehlt das Modellverzeichnis, antwortet `summarize` mit `-32005 Not
+implemented` (kein Crash). Fehlt nur eine Datei, sendet der Sidecar die
+`sidecar.modelLoadFailed`-Notification mit dem Namen der fehlenden Datei,
+und `summarize` antwortet bis zum erfolgreichen Laden mit
+`-32001 MODEL_NOT_READY`.
 
 ### `summarize`
 
@@ -446,4 +472,3 @@ Cleanup (Phi-3-Engine, GPU-Ressourcen)
    ↓
 exit 0
 ```
-
