@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.sidecar;
 
+import com.aresstack.windirectml.config.models.EmbeddingModelRegistry;
 import com.aresstack.windirectml.encoder.EmbeddingModel;
 import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
 import com.aresstack.windirectml.encoder.e5.E5Encoders;
@@ -411,19 +412,17 @@ public final class DirectMlPhi3Sidecar {
         // model list. This is where decoder / summarizer IDs get
         // rejected with a clear use-case-specific message instead of
         // falling through to the generic "Unknown embed.model" error.
-        java.util.Optional<EmbeddingModelRegistry.Entry> known =
-                EmbeddingModelRegistry.findByModelId(s);
-        if (known.isPresent()) {
-            EmbeddingModelRegistry.Entry e = known.get();
-            if (!e.isEmbedding()) {
+        EmbeddingModelRegistry.Entry known = EmbeddingModelRegistry.findByModelId(s);
+        if (known != null) {
+            if (!known.isEmbedding()) {
                 throw new IllegalArgumentException(
-                        EmbeddingModelRegistry.nonEmbeddingErrorMessage(e));
+                        EmbeddingModelRegistry.nonEmbeddingErrorMessage(known));
             }
-            if (e.embedFamily() == null) {
+            if (known.embedFamily() == null) {
                 throw new IllegalArgumentException(
-                        EmbeddingModelRegistry.unimplementedEmbeddingErrorMessage(e));
+                        EmbeddingModelRegistry.unimplementedEmbeddingErrorMessage(known));
             }
-            return e.embedFamily();
+            return known.embedFamily();
         }
 
         return switch (s) {

@@ -8,6 +8,7 @@ application {
 }
 
 dependencies {
+    implementation project(':directml-config')
     implementation project(':directml-inference')
     implementation project(':directml-encoder')
     implementation project(':directml-windows-bindings')

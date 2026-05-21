@@ -1,2 +1,31 @@
+// Shared configuration + model-classification types consumed by both the
+// Java-21 runtime modules (sidecar/encoder/inference) and the Java-8
+// modules (sidecar-client-java8, sidecar-workbench). Must therefore stay
+// strictly Java-8-compatible: no records, no `var`, no switch-expressions,
+// no `List.of` / `Map.of`, no `String.isBlank`, etc.
+ext.java8Module = true
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+compileTestJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
 dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

@@ -39,7 +39,7 @@ public final class ConfigPanel extends JPanel {
     private final JTextField jarPathField = new JTextField(
             "directml-sidecar/build/libs/directml-sidecar-0.1.0-SNAPSHOT-all.jar");
     private final JComboBox<String> embedModelBox =
-            new JComboBox<String>(new String[]{"minilm", "e5"});
+            new JComboBox<String>(EmbedModelOptions.embeddingOptions().toArray(new String[0]));
     private final JTextField modelDirField = new JTextField("model/all-MiniLM-L6-v2");
     private final JComboBox<String> e5VariantBox =
             new JComboBox<String>(new String[]{
