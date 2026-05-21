@@ -178,7 +178,10 @@ class EmbeddingModelRegistryTest {
     void shippedEntriesCarryRequiredMetadata() {
         EmbeddingModelRegistry.Entry minilm = EmbeddingModelRegistry
                 .findByModelId("sentence-transformers/all-MiniLM-L6-v2");
+        EmbeddingModelRegistry.Entry e5 = EmbeddingModelRegistry
+                .findByModelId("danielheinz/e5-base-sts-en-de");
         assertNotNull(minilm.provider());
+        assertNotNull(e5);
         assertNotNull(minilm.architecture());
         assertNotNull(minilm.tokenizerType());
         assertNotNull(minilm.backendSupport());
@@ -186,6 +189,12 @@ class EmbeddingModelRegistryTest {
                 "shipped embedding entries must declare modelDirHints");
         assertNotNull(minilm.downloadScriptSupport());
         assertNotNull(minilm.realModelTestStatus());
+        assertEquals("cpu, directml", minilm.backendSupport());
+
+        assertEquals("cpu, directml", e5.backendSupport());
+        assertTrue(e5.notes().contains("query: "));
+        assertTrue(e5.notes().contains("passage: "));
+        assertTrue(e5.realModelTestStatus().contains("> 0.999"));
     }
 
     @Test

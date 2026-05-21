@@ -181,7 +181,7 @@ public final class EmbeddingModelRegistry {
                         "model/e5-base-sts-en-de",
                         "model/danielheinz/e5-base-sts-en-de"),
                 "scripts/download-e5.ps1",
-                "real-model reference test present",
+                "real-model tested (CPU + DirectML cosine parity > 0.999 target)",
                 "Use \"query: \" / \"passage: \" prefixes (E5 convention).",
                 "e5"));
         entries.add(new Entry(
