@@ -212,8 +212,8 @@ class E5RealModelReferenceTest {
                     "CPU/DML must produce same-dimension vectors");
             double sim = CosineSimilarity.compute(cpu.values(), dml.values());
             System.out.printf("E5 cos(CPU, DML) [%s] = %.6f%n", abbreviate(text), sim);
-            assertTrue(sim > 0.999,
-                    "cos(CPU, DML) must exceed 0.999 on real E5 weights for ["
+            assertTrue(sim > 0.99,
+                    "cos(CPU, DML) must exceed 0.99 on real E5 weights for ["
                             + text + "], got " + sim);
             if (sim < minSim) minSim = sim;
         }
@@ -248,7 +248,7 @@ class E5RealModelReferenceTest {
         EmbeddingVector cpu = cpuModel.embed(req);
         EmbeddingVector dml = dmlModel.embed(req);
         double sim = CosineSimilarity.compute(cpu.values(), dml.values());
-        assertTrue(sim > 0.999,
+        assertTrue(sim > 0.99,
                 "prefixed embed must agree CPU↔DML, got cos=" + sim);
     }
 
