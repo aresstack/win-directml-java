@@ -178,14 +178,32 @@ class EmbeddingModelRegistryTest {
     void shippedEntriesCarryRequiredMetadata() {
         EmbeddingModelRegistry.Entry minilm = EmbeddingModelRegistry
                 .findByModelId("sentence-transformers/all-MiniLM-L6-v2");
+        EmbeddingModelRegistry.Entry e5 = EmbeddingModelRegistry
+                .findByModelId("danielheinz/e5-base-sts-en-de");
         assertNotNull(minilm.provider());
+        assertNotNull(e5);
+        assertNotNull(e5.provider());
         assertNotNull(minilm.architecture());
+        assertNotNull(e5.architecture());
         assertNotNull(minilm.tokenizerType());
+        assertNotNull(e5.tokenizerType());
         assertNotNull(minilm.backendSupport());
+        assertNotNull(e5.backendSupport());
         assertFalse(minilm.modelDirHints().isEmpty(),
                 "shipped embedding entries must declare modelDirHints");
+        assertFalse(e5.modelDirHints().isEmpty(),
+                "shipped embedding entries must declare modelDirHints");
         assertNotNull(minilm.downloadScriptSupport());
+        assertNotNull(e5.downloadScriptSupport());
         assertNotNull(minilm.realModelTestStatus());
+        assertNotNull(e5.realModelTestStatus());
+        assertEquals("cpu, directml", minilm.backendSupport());
+
+        assertEquals("cpu, directml", e5.backendSupport());
+        assertTrue(e5.notes().contains("query: "));
+        assertTrue(e5.notes().contains("passage: "));
+        String e5RealModelStatus = e5.realModelTestStatus().toLowerCase(java.util.Locale.ROOT);
+        assertTrue(e5RealModelStatus.contains("real-model"));
     }
 
     @Test

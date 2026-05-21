@@ -269,4 +269,3 @@ class E5RealModelReferenceTest {
         return s.length() <= 40 ? s : s.substring(0, 37) + "...";
     }
 }
-

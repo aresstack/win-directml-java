@@ -34,6 +34,27 @@ batched `embedBatch(...)` path with bucket-padded sequence lengths.
 DirectML pooling and L2 normalisation are GPU-resident; only the final
 `[N, hidden]` matrix is read back to the host.
 
+### 1.0.1 MiniLM / E5 runtime selection and validation
+
+- **MiniLM (`sentence-transformers/all-MiniLM-L6-v2`)**
+  - Registry status: `shipped` (`embedFamily=minilm`, CPU + DirectML).
+  - `-Dembed.model` accepts both alias `minilm` and full model ID
+    `sentence-transformers/all-MiniLM-L6-v2`.
+  - Works through both `embed` and `embedBatch`.
+- **E5 (`danielheinz/e5-base-sts-en-de`)**
+  - Registry status: `shipped` (`embedFamily=e5`, CPU + DirectML).
+  - `-Dembed.model` accepts both alias `e5` and full model ID
+    `danielheinz/e5-base-sts-en-de`.
+  - `-De5.model=base-sts-en-de` selects the expected variant
+    (default for the E5 path).
+  - Query/document input should use E5 prefixes: `"query: "` /
+    `"passage: "` (for both `embed` and `embedBatch`).
+  - Real-model CPU-vs-DirectML parity target: cosine `> 0.999`
+    when real-model tests are runnable locally.
+- **Workbench**
+  - The `embed.model` dropdown always includes aliases `minilm`, `e5`
+    first and then all registry entries with `useCase=embedding`.
+
 ### 1.1 In-house model list classification
 
 The embedding-pipeline classification of the in-house model catalogue is
