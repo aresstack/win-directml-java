@@ -202,8 +202,8 @@ class EmbeddingModelRegistryTest {
         assertEquals("cpu, directml", e5.backendSupport());
         assertTrue(e5.notes().contains("query: "));
         assertTrue(e5.notes().contains("passage: "));
-        assertTrue(e5.realModelTestStatus().toLowerCase(java.util.Locale.ROOT)
-                .contains("real-model"));
+        String e5RealModelStatus = e5.realModelTestStatus().toLowerCase(java.util.Locale.ROOT);
+        assertTrue(e5RealModelStatus.contains("real-model"));
     }
 
     @Test
