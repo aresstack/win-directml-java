@@ -233,8 +233,9 @@ public final class EmbeddingModelRegistry {
                 "intfloat/multilingual-e5-large-instruct",
                 UseCase.EMBEDDING,
                 "Microsoft / intfloat",
-                "XLM-RoBERTa-large encoder (E5 instruct fine-tune)",
-                "SentencePiece (XLM-R)",
+                "XLM-RoBERTa-large encoder (24 layers, hidden=1024, "
+                        + "type_vocab_size=1); E5 instruct fine-tune",
+                "SentencePiece (XLM-R, sentencepiece.bpe.model)",
                 "planned",
                 Status.PLANNED,
                 Arrays.asList(
@@ -243,9 +244,19 @@ public final class EmbeddingModelRegistry {
                 "planned (current download-e5.ps1 only covers WordPiece variants)",
                 "not yet tested \u2013 blocked on SentencePiece/XLM-R support",
                 "NOT compatible with the current WordPiece-only E5 path. "
-                        + "Requires SentencePiece tokenizer and XLM-RoBERTa weight "
-                        + "naming \u2013 tracked separately. Uses an instruction-style "
-                        + "prefix (\"Instruct: ...\\nQuery: ...\").",
+                        + "Architecture is XLM-RoBERTa-large (config "
+                        + "model_type=xlm-roberta, weights under roberta.* with a "
+                        + "single-segment type_vocab_size=1 and a learned "
+                        + "positional embedding of 514). Tokenizer is SentencePiece "
+                        + "BPE (\u2581 word-boundary marker, <s>/</s>/<pad>/<unk> "
+                        + "specials). Pooling is mean + L2, identical to the "
+                        + "existing E5 core. Input format is the E5-instruct "
+                        + "prefix \"Instruct: {task}\\nQuery: {query}\" for queries; "
+                        + "passages are embedded without a prefix. See "
+                        + "SUPPORTED_MODELS.md section 1.1.1 for the full analysis. "
+                        + "Status stays planned until both SentencePiece and an "
+                        + "XLM-RoBERTa encoder path land and a CPU real-model test "
+                        + "is added.",
                 null));
         entries.add(new Entry(
                 "ellamind/summarizer-v6-llama-v2",

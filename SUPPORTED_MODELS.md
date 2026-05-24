@@ -103,6 +103,97 @@ at this file:
 Model jinaai/jina-embeddings-v2-base-de is classified as an embedding model but has no runtime support in this build (status=planned). See SUPPORTED_MODELS.md for the current classification.
 ```
 
+### 1.1.1 `intfloat/multilingual-e5-large-instruct` — support analysis
+
+This subsection records the analysis behind keeping
+`intfloat/multilingual-e5-large-instruct` at `status=planned`. The model
+is **visible** in the Workbench `embed.model` dropdown (it has
+`useCase=EMBEDDING` in the registry) and the SUPPORTED_MODELS table
+above marks it 🚧 planned with `DirectML ❌ / CPU ❌`, so it cannot be
+mistaken for a shipped option. Selecting it on `-Dembed.model` is
+rejected by the sidecar with the `status=planned` message shown above,
+which points back at this file.
+
+**Tokenizer.** SentencePiece BPE (`sentencepiece.bpe.model`, packaged
+inside Hugging Face's `tokenizer.json`). Uses `▁` as the word-boundary
+marker and the XLM-R special tokens `<s>`, `</s>`, `<pad>`, `<unk>`,
+`<mask>`. This is **incompatible** with the current WordPiece-only
+tokenizer used by the MiniLM / E5-WordPiece paths.
+
+**Architecture.** XLM-RoBERTa-large encoder (`config.model_type =
+"xlm-roberta"`), 24 layers, hidden size 1024, 16 attention heads,
+intermediate size 4096, learned absolute positional embeddings of length
+514 (RoBERTa convention: position ids start at `padding_idx + 1 = 2`).
+Not a drop-in for the existing BERT/E5-WordPiece core because of the
+RoBERTa-style positional embedding offset and the SentencePiece input
+pipeline.
+
+**Config fields that diverge from BERT/E5.**
+
+- `model_type = "xlm-roberta"` (not `"bert"`).
+- `type_vocab_size = 1` — only a single segment embedding row, so the
+  current BERT token-type-embedding code path cannot be reused without
+  guarding against a 1-row table.
+- `pad_token_id = 1`, `bos_token_id = 0`, `eos_token_id = 2` (RoBERTa
+  convention), not the BERT `[CLS]/[SEP]` IDs.
+- `max_position_embeddings = 514`, but effective max sequence length is
+  512 because of the `padding_idx + 1` offset.
+
+**Weight names.** Top-level prefix is `roberta.*` (e.g.
+`roberta.embeddings.word_embeddings.weight`,
+`roberta.encoder.layer.{i}.attention.self.query.weight`), not the
+`bert.*` prefix the existing encoder loader expects. A loader for this
+model must either accept a `roberta`-rooted state dict or be re-keyed
+on the fly.
+
+**Token-type embeddings.** The model ships with
+`type_vocab_size = 1`, so the existing assumption in the BERT/E5 core
+that `token_type_embeddings` has at least two rows does not hold; the
+DirectML path needs an explicit single-segment branch (or the segment
+embedding can be folded into the word embedding at load time).
+
+**Pooling.** Mean pooling over `attention_mask`, identical to the
+shipped MiniLM / E5-WordPiece pipeline. The existing
+`MeanPoolingKernel` is reusable as soon as the encoder produces the
+`[N, hidden=1024]` token-state matrix.
+
+**Normalization.** L2-normalisation of the pooled vector, identical to
+the shipped E5 path. The existing `L2NormalizeKernel` is reusable.
+
+**Prefix / instruction format.** The `-instruct` variant expects an
+instruction-style query prefix, **not** the plain `"query: "` /
+`"passage: "` E5 prefix:
+
+```text
+embed_query   = "Instruct: {task}\nQuery: {query}"
+embed_passage = "{passage}"   // passages are embedded without a prefix
+```
+
+`{task}` is a free-form natural-language description of the retrieval
+task (e.g. *"Given a web search query, retrieve relevant passages that
+answer the query"*). The existing `EmbeddingRequest.prefix` slot can
+carry the full `"Instruct: …\nQuery: "` string for queries, but the
+sidecar must not silently re-use the `"query: " / "passage: "` prefixes
+of the WordPiece-E5 path because they would produce off-distribution
+embeddings.
+
+**Compatibility decision.** Stays `planned`. The model needs **all** of
+the following before its status may be raised:
+
+1. A SentencePiece-BPE tokenizer (shared with future XLM-R / Llama
+   work).
+2. An XLM-RoBERTa-aware encoder path (RoBERTa positional offset,
+   `roberta.*` weight naming, `type_vocab_size = 1` handling).
+3. Explicit instruction-prefix handling on the sidecar / client side so
+   callers never accidentally embed with the wrong prefix.
+4. A CPU real-model test before `status=experimental`, **and** a
+   DirectML real-model test (or an explicit *CPU-only* marker) before
+   `status=shipped`.
+
+Until items 1–4 land, the registry entry, the SUPPORTED_MODELS table
+and the sidecar gate are the single source of truth: visible in the
+Workbench, advertised as planned, rejected at runtime.
+
 
 ## 2. Reranker models
 
