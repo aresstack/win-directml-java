@@ -291,6 +291,18 @@ can see why the CPU backend was chosen. The active backend is reported
 in the `health` response as `embeddingBackend` (`cpu`, `directml`,
 `none`, or `error`) together with `embeddingReady`.
 
+Full model IDs from `EmbeddingModelRegistry` are also accepted for
+`-Dembed.model` (for example
+`sentence-transformers/all-MiniLM-L6-v2` and
+`danielheinz/e5-base-sts-en-de`). Planned embedding IDs without runtime
+support (currently `jinaai/jina-embeddings-v2-base-de` and
+`intfloat/multilingual-e5-large-instruct`) are rejected with a
+status-aware message that points at `SUPPORTED_MODELS.md`.
+
+The Java-8 Workbench intentionally shows only runtime-selectable
+embedding IDs in its `embed.model` dropdown, so planned/unimplemented
+entries are not presented as runnable options.
+
 ## Reranking (`rerank`)
 
 The sidecar additionally exposes a **cross-encoder reranker** that scores

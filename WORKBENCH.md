@@ -62,6 +62,14 @@ through the JSON-RPC stream owned by `SidecarClient`.
 - buffers stderr separately for the UI
 - supports graceful stop (`destroy`) and force-stop (`destroyForcibly`)
 
+`embed.model` dropdown policy:
+
+- always includes legacy family aliases: `minilm`, `e5`
+- includes full model IDs only when they are runtime-selectable embeddings
+  (`useCase=embedding` and `embedFamily != null` in `EmbeddingModelRegistry`)
+- excludes decoder/summarizer IDs and planned/unimplemented embeddings so
+  the UI does not present non-runnable selections as valid
+
 `SidecarClient`:
 
 - monotonic request id → `CompletableFuture<JsonRpcResponse>` registry
@@ -144,4 +152,3 @@ No GPU is required. Both modules are tested headlessly:
 `options.release.set(8)` in their `build.gradle`, so the compiler rejects
 any accidental use of Java-9+ APIs. The library is therefore safe to
 consume from a Java-8 host application.
-

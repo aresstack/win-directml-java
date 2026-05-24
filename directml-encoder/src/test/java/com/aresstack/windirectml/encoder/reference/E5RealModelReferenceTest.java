@@ -18,6 +18,7 @@ import org.junit.jupiter.api.condition.EnabledIf;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -212,8 +213,8 @@ class E5RealModelReferenceTest {
                     "CPU/DML must produce same-dimension vectors");
             double sim = CosineSimilarity.compute(cpu.values(), dml.values());
             System.out.printf("E5 cos(CPU, DML) [%s] = %.6f%n", abbreviate(text), sim);
-            assertTrue(sim > 0.99,
-                    "cos(CPU, DML) must exceed 0.99 on real E5 weights for ["
+            assertTrue(sim > 0.999,
+                    "cos(CPU, DML) must exceed 0.999 on real E5 weights for ["
                             + text + "], got " + sim);
             if (sim < minSim) minSim = sim;
         }
@@ -248,8 +249,28 @@ class E5RealModelReferenceTest {
         EmbeddingVector cpu = cpuModel.embed(req);
         EmbeddingVector dml = dmlModel.embed(req);
         double sim = CosineSimilarity.compute(cpu.values(), dml.values());
-        assertTrue(sim > 0.99,
+        assertTrue(sim > 0.999,
                 "prefixed embed must agree CPU↔DML, got cos=" + sim);
+    }
+
+    @Test
+    void embedBatchAgreesCpuAndDirectMl() throws Exception {
+        List<EmbeddingRequest> reqs = List.of(
+                E5Prefixes.request(CORPUS[0], E5Prefixes.Role.PASSAGE, true),
+                E5Prefixes.request(CORPUS[1], E5Prefixes.Role.PASSAGE, true),
+                E5Prefixes.request(CORPUS[2], E5Prefixes.Role.PASSAGE, true),
+                E5Prefixes.request(CORPUS[3], E5Prefixes.Role.PASSAGE, true)
+        );
+        List<EmbeddingVector> cpu = cpuModel.embedBatch(reqs);
+        List<EmbeddingVector> dml = dmlModel.embedBatch(reqs);
+        assertEquals(cpu.size(), dml.size(), "embedBatch must keep row count");
+        for (int i = 0; i < cpu.size(); i++) {
+            assertEquals(cpu.get(i).dimension(), dml.get(i).dimension(),
+                    "embedBatch row " + i + " dimension mismatch");
+            double sim = CosineSimilarity.compute(cpu.get(i).values(), dml.get(i).values());
+            assertTrue(sim > 0.999,
+                    "embedBatch CPU↔DML cosine row " + i + " must be > 0.999, got " + sim);
+        }
     }
 
     @Test
@@ -269,4 +290,3 @@ class E5RealModelReferenceTest {
         return s.length() <= 40 ? s : s.substring(0, 37) + "...";
     }
 }
-

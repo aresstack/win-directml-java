@@ -211,7 +211,7 @@ JSON-RPC-Endpunkt. Welche Familie geladen wird, steuert das Systemproperty
 
 | Property                        | Werte                                                          | Default          | Wirkung                                                                                                                                                                                       |
 |---------------------------------|----------------------------------------------------------------|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `-Dembed.model`                 | `minilm`, `e5`                                                 | `minilm`         | Wählt die Encoder-Familie. Unbekannte Werte ⇒ Exit-Code `2`.                                                                                                                                  |
+| `-Dembed.model`                 | `minilm`, `e5` sowie bekannte Full-IDs aus der `EmbeddingModelRegistry` | `minilm`         | Wählt die Encoder-Familie. Full-IDs mit `embedFamily` werden auf `minilm`/`e5` gemappt; Decoder/Summarizer-IDs werden explizit abgelehnt; `planned`-Embedding-IDs ohne Runtime liefern eine statusbezogene Fehlermeldung. Unbekannte Werte ⇒ Exit-Code `2`. |
 | `-Dminilm.modelDir`             | Pfad                                                           | auto-discovery   | Pfad zum MiniLM-Modellordner. Auto: `model/all-MiniLM-L6-v2/`.                                                                                                                                |
 | `-De5.model`                    | `small-v2`, `base-v2`, `large-v2`, `base-sts-en-de`            | `base-sts-en-de` | E5-Variante. Pinnt `BertEncoderConfig` (hiddenSize/numLayers/…). Unbekannt ⇒ Exit-Code `2`.                                                                                                   |
 | `-De5.modelDir`                 | Pfad                                                           | auto-discovery   | Pfad zum E5-Modellordner. Auto: variant-spezifische Hints (z. B. `model/e5-base-sts-en-de/`).                                                                                                 |
@@ -222,6 +222,14 @@ die gewählte Variante geprüft (`hidden_size`, `num_hidden_layers`,
 `num_attention_heads`, `intermediate_size`, `vocab_size`, `type_vocab_size`).
 Eine Diskrepanz zwischen `-De5.model` und der `config.json` ist ein harter
 Fehler – kein stilles Re-Shape.
+
+`-Dembed.model` akzeptiert neben `minilm`/`e5` auch bekannte Full-IDs,
+z. B. `sentence-transformers/all-MiniLM-L6-v2` und
+`danielheinz/e5-base-sts-en-de`. Decoder-/Summarizer-IDs werden mit
+einer expliziten "not an embedding model"-Meldung abgelehnt.
+`planned`-Embedding-IDs ohne Runtime-Hook (aktuell Jina v2 und
+multilingual-E5-instruct) liefern eine statusbezogene
+"no runtime support in this build"-Meldung.
 
 Innerhalb einer Familie steuert `-Dembed.backend`, welches konkrete Backend
 verwendet wird:

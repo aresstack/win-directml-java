@@ -26,12 +26,14 @@ class EmbedModelOptionsTest {
     }
 
     @Test
-    void containsEveryEmbeddingModelIdFromTheRegistry() {
+    void containsEveryImplementedEmbeddingModelIdFromTheRegistry() {
         List<String> opts = EmbedModelOptions.embeddingOptions();
         for (EmbeddingModelRegistry.Entry e : EmbeddingModelRegistry
                 .entriesByUseCase(EmbeddingModelRegistry.UseCase.EMBEDDING)) {
-            assertTrue(opts.contains(e.modelId()),
-                    "embedding modelId missing from workbench dropdown: " + e.modelId());
+            if (e.embedFamily() != null) {
+                assertTrue(opts.contains(e.modelId()),
+                        "implemented embedding modelId missing from workbench dropdown: " + e.modelId());
+            }
         }
     }
 
@@ -48,6 +50,15 @@ class EmbedModelOptionsTest {
     }
 
     @Test
+    void plannedEmbeddingModelsWithoutRuntimeSupportAreNotSelectable() {
+        List<String> opts = EmbedModelOptions.embeddingOptions();
+        assertFalse(opts.contains("jinaai/jina-embeddings-v2-base-de"),
+                "planned Jina model must not appear in embedding dropdown");
+        assertFalse(opts.contains("intfloat/multilingual-e5-large-instruct"),
+                "planned multilingual E5 model must not appear in embedding dropdown");
+    }
+
+    @Test
     void everyOptionIsEitherAFamilyAliasOrAnEmbeddingRegistryEntry() {
         List<String> opts = EmbedModelOptions.embeddingOptions();
         for (String opt : opts) {
@@ -60,6 +71,8 @@ class EmbedModelOptionsTest {
                     "dropdown option not backed by a registry entry: " + opt);
             assertEquals(EmbeddingModelRegistry.UseCase.EMBEDDING, entry.useCase(),
                     "non-embedding option leaked into dropdown: " + opt);
+            assertTrue(entry.embedFamily() != null,
+                    "unimplemented planned embedding leaked into dropdown: " + opt);
         }
     }
 }

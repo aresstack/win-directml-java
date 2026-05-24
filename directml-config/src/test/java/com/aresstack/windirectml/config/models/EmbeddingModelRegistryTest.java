@@ -220,4 +220,20 @@ class EmbeddingModelRegistryTest {
         assertThrows(IllegalArgumentException.class,
                 () -> EmbeddingModelRegistry.entriesByUseCase(null));
     }
+
+    @Test
+    void embeddingStatusTransitionPolicyIsConsistent() {
+        for (EmbeddingModelRegistry.Entry e : EmbeddingModelRegistry.entriesByUseCase(
+                EmbeddingModelRegistry.UseCase.EMBEDDING)) {
+            if (e.status() == EmbeddingModelRegistry.Status.SHIPPED
+                    || e.status() == EmbeddingModelRegistry.Status.EXPERIMENTAL) {
+                assertNotNull(e.embedFamily(),
+                        "shipped/experimental embedding must be runtime-selectable: " + e.modelId());
+            }
+            if (e.status() == EmbeddingModelRegistry.Status.PLANNED) {
+                assertNull(e.embedFamily(),
+                        "planned embedding must not claim runtime support yet: " + e.modelId());
+            }
+        }
+    }
 }

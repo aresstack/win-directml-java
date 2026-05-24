@@ -10,13 +10,11 @@ import java.util.List;
  * Builds the option list for the Workbench {@code embed.model}
  * dropdown from the shared {@link EmbeddingModelRegistry}.
  *
- * <p>Only entries with {@code useCase == EMBEDDING} are exposed:
- * decoder, summarizer, reranker and unsupported entries from the
- * registry must never appear in the embedding selector because
- * choosing them would be rejected by the sidecar's {@code embed}
- * gate anyway (and the workbench should reflect that contract
- * up-front instead of letting the user assemble an invalid
- * command line).
+ * <p>Only entries with {@code useCase == EMBEDDING} <em>and</em> an
+ * implementation family are exposed. This means planned embeddings
+ * whose {@code embedFamily == null} (e.g. Jina/multilingual-E5 while
+ * analysis is still pending) are not shown as selectable options in
+ * the workbench.
  *
  * <p>The {@code minilm} / {@code e5} short aliases the sidecar
  * accepts on {@code -Dembed.model} are kept as the first two
@@ -39,8 +37,9 @@ final class EmbedModelOptions {
      * <ol>
      *   <li>{@code minilm}, {@code e5} family aliases (back-compat,
      *       always selectable),</li>
-     *   <li>every {@code useCase=embedding} full model ID from the
-     *       shared registry in declaration order.</li>
+     *   <li>every runtime-selectable embedding model ID from the
+     *       shared registry in declaration order
+     *       ({@code useCase=embedding && embedFamily!=null}).</li>
      * </ol>
      * Non-embedding registry entries (decoder, summarizer, &hellip;)
      * are deliberately omitted.
@@ -51,7 +50,9 @@ final class EmbedModelOptions {
         options.add(ALIAS_E5);
         for (EmbeddingModelRegistry.Entry e : EmbeddingModelRegistry
                 .entriesByUseCase(EmbeddingModelRegistry.UseCase.EMBEDDING)) {
-            options.add(e.modelId());
+            if (e.embedFamily() != null) {
+                options.add(e.modelId());
+            }
         }
         return Collections.unmodifiableList(options);
     }

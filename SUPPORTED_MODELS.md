@@ -51,10 +51,12 @@ status / embedFamily` classification without duplicating metadata.
   (Jina v2, multilingual-E5) are rejected with a status-aware message
   that points at this file.
 * **Workbench embedding selector** – the `embed.model` dropdown is
-  populated from `EmbeddingModelRegistry.entriesByUseCase(EMBEDDING)`,
-  so only embedding entries are selectable; decoder / summarizer IDs
-  are filtered out at the UI layer in addition to being rejected by
-  the sidecar gate.
+  populated from `EmbeddingModelRegistry` but only with
+  runtime-selectable embedding entries (`useCase=embedding` and
+  `embedFamily != null`). Decoder/summarizer IDs and planned embeddings
+  without an implementation hook (currently Jina v2 +
+  multilingual-E5-instruct) are filtered out in the UI in addition to
+  being rejected by the sidecar gate when passed explicitly.
 
 | `modelId`                                   | `useCase`  | `status`        | Backend support   | Notes                                                                                                                |
 |---------------------------------------------|------------|-----------------|-------------------|----------------------------------------------------------------------------------------------------------------------|
@@ -81,6 +83,26 @@ at this file:
 ```
 Model jinaai/jina-embeddings-v2-base-de is classified as an embedding model but has no runtime support in this build (status=planned). See SUPPORTED_MODELS.md for the current classification.
 ```
+
+### 1.2 Status transition rules for embedding entries
+
+The model registry and this document follow explicit promotion gates:
+
+- **planned → experimental**
+  - real-model CPU path runs end-to-end,
+  - model-specific docs and limitations are written,
+  - regression tests are added.
+- **experimental → shipped**
+  - CPU + DirectML parity is demonstrated on real weights,
+  - both `embed` and `embedBatch` contracts are validated,
+  - benchmark evidence is published,
+  - Windows smoke evidence is recorded.
+
+Analysis documents for the two remaining planned embeddings:
+
+- Jina: [`docs/model-analysis-jina-embeddings-v2-base-de.md`](docs/model-analysis-jina-embeddings-v2-base-de.md)
+- multilingual-E5-instruct:
+  [`docs/model-analysis-multilingual-e5-large-instruct.md`](docs/model-analysis-multilingual-e5-large-instruct.md)
 
 
 ## 2. Reranker models
