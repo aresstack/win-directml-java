@@ -75,26 +75,7 @@ class E5RealModelReferenceTest {
     private static DirectMlBertEncoder dmlModel;
 
     static boolean modelPresent() {
-        // TEMP DEBUG: print resolution/environment so we can see why tests skip.
-        try {
-            System.err.println("DEBUG E5: user.dir=" + System.getProperty("user.dir"));
-            System.err.println("DEBUG E5: e5.testModelDir=" + System.getProperty("e5.testModelDir"));
-            System.err.println("DEBUG E5: e5.testVariant=" + System.getProperty("e5.testVariant"));
-            Resolution r = resolveOrNull();
-            if (r == null) {
-                System.err.println("DEBUG E5: resolveOrNull() returned null");
-                return false;
-            }
-            Path dir = r.dir();
-            System.err.println("DEBUG E5: resolveOrNull() -> variant=" + r.variant() + ", dir=" + dir);
-            System.err.println("DEBUG E5: Files.isDirectory(dir)=" + Files.isDirectory(dir));
-            System.err.println("DEBUG E5: exists model.safetensors=" + Files.exists(dir.resolve("model.safetensors")));
-            System.err.println("DEBUG E5: exists tokenizer.json=" + Files.exists(dir.resolve("tokenizer.json")));
-            return true;
-        } catch (Throwable t) {
-            System.err.println("DEBUG E5: modelPresent() threw: " + t);
-            return false;
-        }
+        return resolveOrNull() != null;
     }
 
     /**
@@ -149,26 +130,9 @@ class E5RealModelReferenceTest {
 
     @BeforeAll
     static void load() throws Exception {
-        // TEMP DEBUG: report WindowsBindings and resolution info early so we
-        // can observe exactly which skip gate fires inside the test JVM.
-        try {
-            System.err.println("DEBUG E5: WindowsBindings.isSupported()=" + WindowsBindings.isSupported());
-        } catch (Throwable t) {
-            System.err.println("DEBUG E5: WindowsBindings.isSupported() threw: " + t);
-        }
-
         assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12");
 
         Resolution r = resolveOrNull();
-        if (r == null) {
-            System.err.println("DEBUG E5: resolveOrNull() in @BeforeAll returned null -> skipping");
-        } else {
-            System.err.println("DEBUG E5: @BeforeAll resolveOrNull() -> variant=" + r.variant() + ", dir=" + r.dir());
-            System.err.println("DEBUG E5: @BeforeAll Files.isDirectory=" + Files.isDirectory(r.dir()));
-            System.err.println("DEBUG E5: @BeforeAll has model.safetensors=" + Files.exists(r.dir().resolve("model.safetensors")));
-            System.err.println("DEBUG E5: @BeforeAll has tokenizer.json=" + Files.exists(r.dir().resolve("tokenizer.json")));
-        }
-
         assumeTrue(r != null, "No real E5 model found on disk – skipping.");
         modelDir = r.dir();
         variant = r.variant();
@@ -178,7 +142,6 @@ class E5RealModelReferenceTest {
         try {
             resolvedConfig = E5Encoders.resolveConfig(modelDir, variant);
         } catch (EmbeddingException e) {
-            System.err.println("DEBUG E5: E5Encoders.resolveConfig threw: " + e.getMessage());
             // Treat a directory/variant mismatch as a skip rather than a
             // failure: the user pointed us at a directory that does not
             // match the requested variant. The error message itself is
@@ -204,7 +167,6 @@ class E5RealModelReferenceTest {
             dmlModel = E5Encoders.loadDirectMl(modelDir, variant);
         } catch (Exception e) {
             String msg = e.getMessage() == null ? "" : e.getMessage();
-            System.err.println("DEBUG E5: E5Encoders.loadDirectMl threw: " + msg);
             if (msg.toLowerCase(Locale.ROOT).contains("directml")
                     || msg.toLowerCase(Locale.ROOT).contains("d3d12")) {
                 assumeTrue(false, "Skipping DirectML half: " + msg);

@@ -173,17 +173,21 @@ public final class EmbeddingModelRegistry {
                 "danielheinz/e5-base-sts-en-de",
                 UseCase.EMBEDDING,
                 "Daniel Heinz",
-                "BERT-base (E5 fine-tune, en/de STS)",
-                "WordPiece",
-                "cpu, directml",
-                Status.SHIPPED,
+                "XLM-RoBERTa / multilingual-E5 derivative",
+                "SentencePiece / XLM-R",
+                "planned",
+                Status.PLANNED,
                 Arrays.asList(
                         "model/e5-base-sts-en-de",
                         "model/danielheinz/e5-base-sts-en-de"),
                 "scripts/download-e5.ps1",
-                "real-model reference test present",
-                "Use \"query: \" / \"passage: \" prefixes (E5 convention).",
-                "e5"));
+                "config mismatch with current WordPiece E5 runtime; XLM-R support pending",
+                "Requires SentencePiece + XLM-R encoder path; belongs with "
+                        + "multilingual-E5 analysis. Upstream checkpoint at "
+                        + "huggingface.co/danielheinz/e5-base-sts-en-de hosts an "
+                        + "XLMRobertaModel (vocab=250002, type_vocab_size=1), not the "
+                        + "WordPiece BERT-base profile this runtime supports today.",
+                null));
         entries.add(new Entry(
                 "openai/gpt-oss-120b",
                 UseCase.DECODER,
