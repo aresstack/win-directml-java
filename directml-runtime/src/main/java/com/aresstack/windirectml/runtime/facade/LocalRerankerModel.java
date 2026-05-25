@@ -64,6 +64,18 @@ public final class LocalRerankerModel implements AutoCloseable {
         return delegate.isReady();
     }
 
+    /**
+     * Return the underlying {@link Reranker} delegate.
+     * <p>
+     * This is intended for adapter layers (e.g. the JSON-RPC sidecar) that
+     * need to bridge between the high-level runtime facade and internal
+     * handler interfaces. Application code should prefer the typed methods
+     * on this class instead.
+     */
+    public Reranker unwrapReranker() {
+        return delegate;
+    }
+
     @Override
     public void close() {
         delegate.close();
