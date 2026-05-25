@@ -20,6 +20,7 @@ public final class JsonRpcErrorCode {
     public static final int CANCELLED          = -32004;
     public static final int NOT_IMPLEMENTED    = -32005;
     public static final int UNSUPPORTED_BACKEND = -32006;
+    public static final int LIMIT_EXCEEDED       = -32007;
 
     private JsonRpcErrorCode() {}
 }

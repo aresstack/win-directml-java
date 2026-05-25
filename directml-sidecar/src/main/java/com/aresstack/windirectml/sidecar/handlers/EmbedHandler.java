@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.sidecar.handlers;
 
+import com.aresstack.windirectml.config.InputLimits;
 import com.aresstack.windirectml.encoder.EmbeddingException;
 import com.aresstack.windirectml.encoder.EmbeddingModel;
 import com.aresstack.windirectml.encoder.EmbeddingRequest;
@@ -61,6 +62,11 @@ public final class EmbedHandler implements JsonRpcMethodHandler {
         if (text.isBlank()) {
             throw new JsonRpcMethodException(JsonRpcErrorCode.INVALID_PARAMS,
                     "text must not be blank");
+        }
+        int maxLen = InputLimits.maxTextLength();
+        if (text.length() > maxLen) {
+            throw new JsonRpcMethodException(JsonRpcErrorCode.LIMIT_EXCEEDED,
+                    "text length " + text.length() + " exceeds maximum " + maxLen);
         }
         boolean normalize = !params.hasNonNull("normalize") || params.get("normalize").asBoolean(true);
         String prefix = params.hasNonNull("prefix") ? params.get("prefix").asText() : null;

@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.sidecar.workbench.panels;
 
+import com.aresstack.windirectml.config.InputLimits;
 import com.aresstack.windirectml.sidecar.client.BatchEmbeddingResult;
 import com.aresstack.windirectml.sidecar.client.EmbeddingResult;
 import com.aresstack.windirectml.sidecar.workbench.WorkbenchModel;
@@ -142,6 +143,19 @@ public final class BatchEmbeddingsPanel extends JPanel {
         if (texts.isEmpty()) {
             output.setText("no non-blank lines to embed");
             return;
+        }
+        int maxBatch = InputLimits.maxEmbedBatchSize();
+        if (texts.size() > maxBatch) {
+            output.setText("too many texts: " + texts.size() + " (max " + maxBatch + ")");
+            return;
+        }
+        int maxLen = InputLimits.maxTextLength();
+        for (int i = 0; i < texts.size(); i++) {
+            if (texts.get(i).length() > maxLen) {
+                output.setText("text line " + (i + 1) + " too long: "
+                        + texts.get(i).length() + " chars (max " + maxLen + ")");
+                return;
+            }
         }
         final String prefix = selectedPrefix(prefixBox);
 

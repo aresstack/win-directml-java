@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.sidecar.handlers;
 
+import com.aresstack.windirectml.config.InputLimits;
 import com.aresstack.windirectml.encoder.EmbeddingException;
 import com.aresstack.windirectml.encoder.EmbeddingModel;
 import com.aresstack.windirectml.encoder.EmbeddingRequest;
@@ -81,9 +82,15 @@ public final class EmbedBatchHandler implements JsonRpcMethodHandler {
             throw new JsonRpcMethodException(JsonRpcErrorCode.INVALID_PARAMS,
                     "texts must be a non-empty array of strings");
         }
+        int maxBatch = InputLimits.maxEmbedBatchSize();
+        if (textsNode.size() > maxBatch) {
+            throw new JsonRpcMethodException(JsonRpcErrorCode.LIMIT_EXCEEDED,
+                    "batch size " + textsNode.size() + " exceeds maximum " + maxBatch);
+        }
         boolean normalize = !params.hasNonNull("normalize") || params.get("normalize").asBoolean(true);
         String prefix = params.hasNonNull("prefix") ? params.get("prefix").asText() : null;
 
+        int maxLen = InputLimits.maxTextLength();
         List<EmbeddingRequest> requests = new ArrayList<>(textsNode.size());
         for (int i = 0; i < textsNode.size(); i++) {
             JsonNode t = textsNode.get(i);
@@ -95,6 +102,10 @@ public final class EmbedBatchHandler implements JsonRpcMethodHandler {
             if (text.isBlank()) {
                 throw new JsonRpcMethodException(JsonRpcErrorCode.INVALID_PARAMS,
                         "texts[" + i + "] must not be blank");
+            }
+            if (text.length() > maxLen) {
+                throw new JsonRpcMethodException(JsonRpcErrorCode.LIMIT_EXCEEDED,
+                        "texts[" + i + "] length " + text.length() + " exceeds maximum " + maxLen);
             }
             requests.add(new EmbeddingRequest(text, normalize, prefix));
         }

@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.sidecar.handlers;
 
+import com.aresstack.windirectml.config.InputLimits;
 import com.aresstack.windirectml.encoder.EmbeddingModel;
 import com.aresstack.windirectml.encoder.EmbeddingRequest;
 import com.aresstack.windirectml.encoder.EmbeddingVector;
@@ -144,6 +145,30 @@ class EmbedBatchHandlerTest {
                         .set("texts", MAPPER.createArrayNode().add("ok").add(42))));
         assertEquals(JsonRpcErrorCode.INVALID_PARAMS, ex.code());
         assertTrue(ex.getMessage().contains("texts[1]"));
+    }
+
+    @Test
+    void rejectsBatchSizeExceedingLimit() {
+        EmbedBatchHandler h = new EmbedBatchHandler(StubEmbedder::new, new SidecarStatus());
+        var textsNode = MAPPER.createArrayNode();
+        for (int i = 0; i <= InputLimits.maxEmbedBatchSize(); i++) {
+            textsNode.add("text " + i);
+        }
+        JsonRpcMethodException ex = assertThrows(JsonRpcMethodException.class,
+                () -> h.handle(MAPPER.createObjectNode().set("texts", textsNode)));
+        assertEquals(JsonRpcErrorCode.LIMIT_EXCEEDED, ex.code());
+        assertTrue(ex.getMessage().contains("exceeds maximum"));
+    }
+
+    @Test
+    void rejectsTextExceedingMaxLength() {
+        EmbedBatchHandler h = new EmbedBatchHandler(StubEmbedder::new, new SidecarStatus());
+        String longText = "x".repeat(InputLimits.maxTextLength() + 1);
+        JsonRpcMethodException ex = assertThrows(JsonRpcMethodException.class,
+                () -> h.handle(MAPPER.createObjectNode()
+                        .set("texts", MAPPER.createArrayNode().add(longText))));
+        assertEquals(JsonRpcErrorCode.LIMIT_EXCEEDED, ex.code());
+        assertTrue(ex.getMessage().contains("exceeds maximum"));
     }
 }
 
