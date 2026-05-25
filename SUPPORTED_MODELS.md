@@ -25,7 +25,7 @@ Status legend:
 | `danielheinz/e5-base-sts-en-de`          | no      | ❌        | ❌             | SentencePiece (XLM-R)   | mean + L2 (E5 prefixes when supported)                  | 🚧 planned      | – (XLM-R/SentencePiece pending; see §1.0.1)                       |
 | `intfloat/e5-large-v2`                   | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | 🧪 experimental | `directml-encoder` (`E5Encoders.LARGE_V2`)                       |
 | `intfloat/multilingual-e5-large-instruct`| no      | ❌        | ❌             | SentencePiece (XLM-R)   | mean + L2 + `Instruct: …\nQuery: …` prefix              | 🚧 planned      | – (needs SentencePiece + XLM-RoBERTa core)                       |
-| `jinaai/jina-embeddings-v2-base-de`      | no      | ❌        | ❌             | WordPiece (Jina-custom) | mean + L2; ALiBi positional bias                        | 🚧 planned      | – (needs custom Jina v2 attention path)                          |
+| `jinaai/jina-embeddings-v2-base-de`      | no      | ❌        | ❌             | WordPiece (Jina-custom) | mean + L2; ALiBi positional bias, max 8192 tokens       | 🚧 planned      | – (needs custom Jina v2 attention path; see §1.1.2)              |
 | `nomic-ai/nomic-embed-text-v1.5`         | no      | ❌        | ❌             | WordPiece               | mean + L2 + `search_query:` / `search_document:` prefix | 🚧 planned      | –                                                                |
 
 All shipped embedding models go through the same
@@ -95,7 +95,7 @@ status / embedFamily` classification without duplicating metadata.
 | `sentence-transformers/all-MiniLM-L6-v2`    | embedding  | ✅ shipped       | CPU + DirectML    | Default fast embedding model (WordPiece, BERT-style).                                                                |
 | `danielheinz/e5-base-sts-en-de`             | embedding  | 🚧 planned      | – (planned)       | Upstream checkpoint is an XLMRobertaModel (vocab=250002, type_vocab=1); needs SentencePiece + XLM-R, tracked with multilingual-E5.       |
 | `intfloat/multilingual-e5-large-instruct`   | embedding  | 🚧 planned      | – (planned)       | NOT compatible with the current WordPiece-only E5 path. Requires SentencePiece + XLM-RoBERTa core.                   |
-| `jinaai/jina-embeddings-v2-base-de`         | embedding  | 🚧 planned      | – (planned)       | Jina BERT v2 uses ALiBi positional bias; not a drop-in for the standard BERT core. Requires analysis before shipping.|
+| `jinaai/jina-embeddings-v2-base-de`         | embedding  | 🚧 planned      | – (planned)       | Jina BERT v2 uses ALiBi positional bias + GLU-style MLP; not a drop-in for the current BERT/MiniLM/E5 core. Stays planned, see §1.1.2.|
 | `openai/gpt-oss-120b`                       | decoder    | ⛔ unsupported  | – (not for embed) | Decoder-only LLM. Rejected by the `embed` endpoint.                                                                  |
 | `casperhansen/llama-3.3-70b-instruct-awq`   | decoder    | ⛔ unsupported  | – (not for embed) | Llama 3.3 70B AWQ-quantised decoder-only LLM. Rejected by the `embed` endpoint.                                      |
 | `ellamind/summarizer-v6-llama-v2`           | summarizer | ⛔ unsupported  | – (not for embed) | Llama-v2 summarizer fine-tune. Belongs to a future text-generation/summarize ticket, not the embed endpoint.         |
@@ -206,6 +206,109 @@ the following before its status may be raised:
 Until items 1–4 land, the registry entry, the SUPPORTED_MODELS table
 and the sidecar gate are the single source of truth: visible in the
 Workbench, advertised as planned, rejected at runtime.
+
+### 1.1.2 `jinaai/jina-embeddings-v2-base-de` — analysis and status decision
+
+This subsection records the architectural analysis behind the `planned`
+status of `jinaai/jina-embeddings-v2-base-de` in the registry. It is
+the source-of-truth referenced from the registry entry's `notes` field
+and from the unimplemented-embedding error message.
+
+**Source of truth.** The analysis is based on the public model card
+and `config.json` of
+[`jinaai/jina-embeddings-v2-base-de`](https://huggingface.co/jinaai/jina-embeddings-v2-base-de)
+(JinaBERT v2 architecture, custom modelling code released under
+`trust_remote_code=True`).
+
+| Property                  | Value                                                                                                |
+|---------------------------|------------------------------------------------------------------------------------------------------|
+| Architecture family       | JinaBERT v2 (BERT-base sized encoder; 12 layers / 768 hidden / 12 attention heads)                   |
+| Tokenizer                 | WordPiece (`tokenizer.json`, Jina-custom bilingual de/en vocab; not byte-identical to standard BERT) |
+| Max sequence length       | 8192 tokens (enabled by ALiBi extrapolation)                                                         |
+| Positional encoding       | **ALiBi** — Attention with Linear Biases; no learned `position_embeddings` weight in the checkpoint  |
+| Feed-forward block        | **GLU-style** MLP (gated linear unit) — differs from the single-projection + GELU used by BERT/MiniLM/E5 |
+| Pooling                   | Mean pooling over `last_hidden_state` with attention-mask weighting                                  |
+| Normalisation             | L2-normalised output embeddings (cosine similarity is the supported metric)                          |
+| Output dimension          | 768                                                                                                  |
+| Custom modeling code      | Yes (`trust_remote_code=True`; the checkpoint ships its own `modeling_bert.py`)                       |
+| Weight naming             | BERT-prefixed (`bert.encoder.layer.*`) but **without** `bert.embeddings.position_embeddings.weight`, **with** per-layer ALiBi slope tensors and **with** an extra MLP projection for the GLU gate |
+
+**Compatibility with the current BERT / MiniLM / E5 core**
+
+The current shipped encoder stack (`directml-encoder`'s
+`DirectMlBertEncoderLayerBlock` / `BertEncoderConfig` and the MiniLM /
+E5 runtimes) assumes:
+
+1. **Learned absolute positional embeddings** added at the embedding
+   layer (`bert.embeddings.position_embeddings`). Jina v2 has no such
+   weight; positions are injected as a per-head bias inside every
+   attention layer.
+2. **Vanilla BERT feed-forward** (`intermediate.dense` → GELU →
+   `output.dense`). Jina v2 uses a GLU variant, which roughly doubles
+   the intermediate parameter count and changes the wiring of the FFN.
+3. **Max sequence length ≤ 512** in the runtime bucket configuration.
+   Jina v2 advertises 8192 tokens; supporting that on DirectML would
+   require new bucket sizes and a memory-budget review.
+
+Because of (1)+(2), `jinaai/jina-embeddings-v2-base-de` is **not** a
+drop-in for the existing BERT core, neither for MiniLM nor for E5.
+
+**Implementation decision**
+
+- Status: **`planned`** (no runtime support in this build).
+- Adding Jina v2 requires either
+  - a Jina-specific attention path (ALiBi bias addition) **and**
+    a GLU feed-forward block on top of the existing
+    `DirectMlBertEncoderLayerBlock`, **or**
+  - a CPU-only starter path (Java reference implementation) before any
+    DirectML work, gated behind a real-model test.
+- Until at least the CPU-only path exists with a real-model reference
+  test, the status must not be promoted to `experimental`. Promotion
+  to `shipped` requires CPU + DirectML parity, matching the contract
+  documented for MiniLM and E5 above.
+
+**Workbench behaviour**
+
+The Workbench `embed.model` dropdown is populated from
+`EmbeddingModelRegistry.entriesByUseCase(EMBEDDING)`, so
+`jinaai/jina-embeddings-v2-base-de` is visible alongside the shipped
+embedding model IDs. It is not silently treated as `shipped`: the
+sidecar's `embed` gate rejects it at startup with the status-aware
+message shown above (`status=planned`, pointer to this file), so
+selecting it from the dropdown produces an explicit error rather than
+a partial-result success.
+
+**Download script**
+
+`scripts/download-jina.ps1` is intentionally **not added in this PR**.
+The download helpers (`download-minilm.ps1`, `download-e5.ps1`,
+`download-reranker.ps1`) exist to auto-enable real-model reference
+tests once weights are present locally; there is no Jina v2 runtime
+yet, so a download script would only fetch weights for code that
+cannot consume them. The script will be introduced together with the
+first CPU runtime path (the directory hints
+`model/jina-embeddings-v2-base-de` and
+`model/jinaai/jina-embeddings-v2-base-de` are reserved in the registry
+so the future script and runtime agree on the layout).
+
+**Required artefacts (for a future `download-jina.ps1`)**
+
+For reference, a future download script will need at least the
+following files from the HuggingFace repo (paths relative to the
+checkpoint root):
+
+- `model.safetensors` (or `pytorch_model.bin`)
+- `config.json`
+- `tokenizer.json`
+- `tokenizer_config.json`
+- `special_tokens_map.json`
+- `vocab.txt`
+- `modules.json` and `1_Pooling/config.json` (sentence-transformers
+  metadata, optional but useful to assert mean pooling)
+
+Missing-file errors must point at the specific artefact (mirroring
+the wording the Phi-3 loader uses: *"Jina v2 model directory is
+missing tokenizer.json"*) once the loader exists.
 
 
 ## 2. Reranker models
