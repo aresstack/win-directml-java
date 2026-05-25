@@ -68,19 +68,12 @@ class EmbeddingModelRegistryTest {
     void shippedEmbeddingsExposeAnImplementationFamily() {
         EmbeddingModelRegistry.Entry minilm = EmbeddingModelRegistry
                 .findByModelId("sentence-transformers/all-MiniLM-L6-v2");
-        EmbeddingModelRegistry.Entry e5 = EmbeddingModelRegistry
-                .findByModelId("danielheinz/e5-base-sts-en-de");
 
         assertNotNull(minilm);
-        assertNotNull(e5);
 
         assertEquals(EmbeddingModelRegistry.UseCase.EMBEDDING, minilm.useCase());
         assertEquals(EmbeddingModelRegistry.Status.SHIPPED, minilm.status());
         assertEquals("minilm", minilm.embedFamily());
-
-        assertEquals(EmbeddingModelRegistry.UseCase.EMBEDDING, e5.useCase());
-        assertEquals(EmbeddingModelRegistry.Status.SHIPPED, e5.status());
-        assertEquals("e5", e5.embedFamily());
     }
 
     @Test
@@ -89,9 +82,12 @@ class EmbeddingModelRegistryTest {
                 .findByModelId("jinaai/jina-embeddings-v2-base-de");
         EmbeddingModelRegistry.Entry mlE5 = EmbeddingModelRegistry
                 .findByModelId("intfloat/multilingual-e5-large-instruct");
+        EmbeddingModelRegistry.Entry e5DeEn = EmbeddingModelRegistry
+                .findByModelId("danielheinz/e5-base-sts-en-de");
 
         assertNotNull(jina);
         assertNotNull(mlE5);
+        assertNotNull(e5DeEn);
 
         assertEquals(EmbeddingModelRegistry.UseCase.EMBEDDING, jina.useCase());
         assertEquals(EmbeddingModelRegistry.Status.PLANNED, jina.status());
@@ -100,6 +96,15 @@ class EmbeddingModelRegistryTest {
         assertEquals(EmbeddingModelRegistry.UseCase.EMBEDDING, mlE5.useCase());
         assertEquals(EmbeddingModelRegistry.Status.PLANNED, mlE5.status());
         assertNull(mlE5.embedFamily());
+
+        // danielheinz/e5-base-sts-en-de upstream checkpoint is an
+        // XLMRobertaModel (vocab=250002, type_vocab_size=1) and does not
+        // run on the current WordPiece-only E5 path – reclassified to
+        // planned until SentencePiece / XLM-R support lands.
+        assertEquals(EmbeddingModelRegistry.UseCase.EMBEDDING, e5DeEn.useCase());
+        assertEquals(EmbeddingModelRegistry.Status.PLANNED, e5DeEn.status());
+        assertNull(e5DeEn.embedFamily(),
+                "e5-base-sts-en-de must not claim the e5 family while the runtime is WordPiece-only");
     }
 
     @Test
@@ -178,32 +183,48 @@ class EmbeddingModelRegistryTest {
     void shippedEntriesCarryRequiredMetadata() {
         EmbeddingModelRegistry.Entry minilm = EmbeddingModelRegistry
                 .findByModelId("sentence-transformers/all-MiniLM-L6-v2");
-        EmbeddingModelRegistry.Entry e5 = EmbeddingModelRegistry
-                .findByModelId("danielheinz/e5-base-sts-en-de");
         assertNotNull(minilm.provider());
-        assertNotNull(e5);
-        assertNotNull(e5.provider());
         assertNotNull(minilm.architecture());
-        assertNotNull(e5.architecture());
         assertNotNull(minilm.tokenizerType());
-        assertNotNull(e5.tokenizerType());
         assertNotNull(minilm.backendSupport());
-        assertNotNull(e5.backendSupport());
         assertFalse(minilm.modelDirHints().isEmpty(),
                 "shipped embedding entries must declare modelDirHints");
-        assertFalse(e5.modelDirHints().isEmpty(),
-                "shipped embedding entries must declare modelDirHints");
         assertNotNull(minilm.downloadScriptSupport());
-        assertNotNull(e5.downloadScriptSupport());
         assertNotNull(minilm.realModelTestStatus());
-        assertNotNull(e5.realModelTestStatus());
         assertEquals("cpu, directml", minilm.backendSupport());
+    }
 
-        assertEquals("cpu, directml", e5.backendSupport());
-        assertTrue(e5.notes().contains("query: "));
-        assertTrue(e5.notes().contains("passage: "));
-        String e5RealModelStatus = e5.realModelTestStatus().toLowerCase(java.util.Locale.ROOT);
-        assertTrue(e5RealModelStatus.contains("real-model"));
+    @Test
+    void danielheinzE5IsClassifiedAsPlannedXlmRDerivative() {
+        EmbeddingModelRegistry.Entry e5 = EmbeddingModelRegistry
+                .findByModelId("danielheinz/e5-base-sts-en-de");
+        assertNotNull(e5);
+        assertEquals(EmbeddingModelRegistry.Status.PLANNED, e5.status());
+        assertEquals("planned", e5.backendSupport());
+        assertNull(e5.embedFamily(),
+                "upstream checkpoint is XLM-R/SentencePiece – must not advertise the e5 family");
+
+        String arch = e5.architecture() == null
+                ? ""
+                : e5.architecture().toLowerCase(java.util.Locale.ROOT);
+        assertTrue(arch.contains("xlm-roberta") || arch.contains("xlm-r"),
+                "architecture must reflect the actual XLM-R derivative: " + e5.architecture());
+
+        String tok = e5.tokenizerType() == null
+                ? ""
+                : e5.tokenizerType().toLowerCase(java.util.Locale.ROOT);
+        assertTrue(tok.contains("sentencepiece") || tok.contains("xlm-r"),
+                "tokenizerType must reflect the actual SentencePiece/XLM-R tokenizer: "
+                        + e5.tokenizerType());
+
+        String status = e5.realModelTestStatus() == null
+                ? ""
+                : e5.realModelTestStatus().toLowerCase(java.util.Locale.ROOT);
+        assertTrue(status.contains("config mismatch")
+                        || status.contains("xlm-r")
+                        || status.contains("pending"),
+                "realModelTestStatus must explain why the current runtime cannot load it: "
+                        + e5.realModelTestStatus());
     }
 
     @Test
