@@ -24,6 +24,9 @@ public final class HealthPanel extends JPanel {
     private final JLabel sidecarRunning = new JLabel("—");
     private final JLabel embeddingReady = new JLabel("—");
     private final JLabel embeddingBackend = new JLabel("—");
+    private final JLabel embeddingFallback = new JLabel("—");
+    private final JLabel rerankerBackend = new JLabel("—");
+    private final JLabel rerankerFallback = new JLabel("—");
     private final JLabel modelLoaded = new JLabel("—");
     private final JLabel mode = new JLabel("—");
     private final JLabel lastError = new JLabel("—");
@@ -42,6 +45,12 @@ public final class HealthPanel extends JPanel {
         grid.add(embeddingReady);
         grid.add(new JLabel("embeddingBackend:"));
         grid.add(embeddingBackend);
+        grid.add(new JLabel("embeddingFallback:"));
+        grid.add(embeddingFallback);
+        grid.add(new JLabel("rerankerBackend:"));
+        grid.add(rerankerBackend);
+        grid.add(new JLabel("rerankerFallback:"));
+        grid.add(rerankerFallback);
         grid.add(new JLabel("modelLoaded:"));
         grid.add(modelLoaded);
         grid.add(new JLabel("mode:"));
@@ -76,6 +85,9 @@ public final class HealthPanel extends JPanel {
         if (!model.isRunning()) {
             embeddingReady.setText("—");
             embeddingBackend.setText("—");
+            embeddingFallback.setText("—");
+            rerankerBackend.setText("—");
+            rerankerFallback.setText("—");
             modelLoaded.setText("—");
             mode.setText("—");
             lastError.setText("—");
@@ -93,6 +105,11 @@ public final class HealthPanel extends JPanel {
                     HealthResult h = get();
                     embeddingReady.setText(Boolean.toString(h.isEmbeddingReady()));
                     embeddingBackend.setText(safe(h.getEmbeddingBackend()));
+                    embeddingFallback.setText(formatFallback(
+                            h.isEmbeddingFallback(), h.getEmbeddingFallbackReason()));
+                    rerankerBackend.setText(safe(h.getRerankerBackend()));
+                    rerankerFallback.setText(formatFallback(
+                            h.isRerankerFallback(), h.getRerankerFallbackReason()));
                     modelLoaded.setText(Boolean.toString(h.isModelLoaded()));
                     mode.setText(safe(h.getMode()));
                     lastError.setText(safe(h.getLastError()));
@@ -107,6 +124,11 @@ public final class HealthPanel extends JPanel {
 
     private static String safe(String s) {
         return s == null ? "—" : s;
+    }
+
+    static String formatFallback(boolean fallback, String reason) {
+        if (!fallback) return "false";
+        return reason == null || reason.isEmpty() ? "true" : "true – " + reason;
     }
 }
 
