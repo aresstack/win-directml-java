@@ -81,11 +81,17 @@ public final class RerankerPanel extends JPanel {
         controls.add(rerankBtn);
         controls.add(statusLbl);
 
+        JLabel scoreHint = new JLabel(
+                "<html><i>Scores are raw model logits. Compare them only within the same query, "
+                        + "not across models or queries.</i></html>");
+        scoreHint.setBorder(BorderFactory.createEmptyBorder(4, 2, 4, 2));
+
         JPanel center = new JPanel(new BorderLayout(0, 6));
         center.add(controls, BorderLayout.NORTH);
         JScrollPane tableScroll = new JScrollPane(resultTable);
         tableScroll.setBorder(BorderFactory.createTitledBorder("Ranked results"));
         center.add(tableScroll, BorderLayout.CENTER);
+        center.add(scoreHint, BorderLayout.SOUTH);
 
         add(north, BorderLayout.NORTH);
         add(center, BorderLayout.CENTER);
