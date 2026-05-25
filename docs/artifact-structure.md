@@ -1,6 +1,6 @@
 # Maven artifact structure
 
-This project now publishes only the Java 21 Windows inference core as new Maven Central artifacts. The JSON-RPC sidecar, Java 8 bridge, protocol module and workbench remain in the repository for compatibility with the previous beta line, but they are no longer part of new Maven Central releases.
+This project now publishes only the core inference artifacts as new Maven Central artifacts: the Java 21 runtime modules plus the shared `directml-config` module. The JSON-RPC sidecar, Java 8 bridge, protocol module and workbench remain in the repository for compatibility with the previous beta line, but they are no longer part of new Maven Central releases.
 
 The intended downstream architecture is:
 
@@ -9,6 +9,7 @@ Java 21 application / ACP sidecar / manager project
     -> directml-runtime
     -> directml-encoder
     -> directml-windows-bindings
+    -> directml-config
     -> Windows CPU / DirectML inference
 ```
 
@@ -52,7 +53,8 @@ New integration work should prefer a separate Java 21 ACP/manager project that d
 
 ## Compatibility rules
 
-- New releases focus on the Java 21 core API and Windows inference engine.
+- New releases focus on the core Java API and Windows inference engine.
+- The published core set contains Java 21 runtime modules plus the shared `directml-config` module.
 - Sidecar/protocol/workbench modules are legacy beta code unless explicitly reactivated later.
 - The Java 21 API must not require JSON-RPC, ACP, MCP, A2A or sidecar concepts.
 - Model weights are never shipped in Maven Central artifacts.
