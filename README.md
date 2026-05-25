@@ -1,19 +1,20 @@
 # win-directml-java
 
-Local **embeddings and reranking** for Java applications that want to reduce
-or replace cloud inference calls. A Java 8 host process talks JSON-RPC over
-stdin/stdout to a Java 21 sidecar that runs MiniLM, E5 and cross-encoder
-reranker workloads locally on CPU or, on Windows, with DirectML acceleration.
+Local **embeddings and reranking** for Java 21 applications that want to reduce
+or replace cloud inference calls. The core product is a pure Java API for a
+Windows CPU / DirectML inference engine. It can be embedded directly in another
+Java 21 application, such as an ACP sidecar or manager-agent project, without
+starting this repository's legacy JSON-RPC sidecar process.
 
 The supported release use case is a local RAG / search pipeline:
 
 ```text
-Java 8 application
-  -> chunk documents
-  -> create local embeddings
-  -> store/search vectors in your own vector index
-  -> rerank top-K candidates locally
-  -> keep sensitive text on-prem/offline
+Java 21 application / ACP sidecar / manager project
+  -> directml-runtime API
+  -> local embeddings
+  -> your vector index
+  -> local reranking
+  -> sensitive text stays on-prem/offline
 ```
 
 Use this when you want:
@@ -24,21 +25,22 @@ Use this when you want:
   of per-token/per-request cloud billing.
 - **Offline / on-prem operation:** CPU-only operation is supported; DirectML is
   an acceleration path, not a requirement.
-- **Java 8 integration:** the application uses a small Java 8 client artifact;
-  DirectML, Java FFM and model loading stay isolated in the Java 21 sidecar.
+- **Java 21 integration:** the inference engine is consumed as a normal Java
+  library. A sidecar/container/process wrapper is optional and belongs to the
+  consuming application architecture.
 
-Decoder LLMs are intentionally not the first release focus. The existing Phi-3
-summarizer path is experimental and sidecar-only. The primary supported product
-path is **local embeddings + local reranking**.
+Decoder LLMs, ACP/MCP/A2A orchestration and manager-agent logic are intentionally
+not part of this repository. Those belong in a separate ACP sidecar / manager
+project that consumes this library as a local ML capability.
 
 ## Recommended model choices
 
 | Need | Recommended path | Notes |
 |---|---|---|
-| Fast default embeddings | `sentence-transformers/all-MiniLM-L6-v2` via `embed.model=minilm` | Small, quick, good release baseline. |
-| Higher-quality E5-style retrieval | `intfloat/e5-base-v2` via `embed.model=e5`, `e5.model=base-v2` | Use `query: ` for queries and `passage: ` for indexed documents. |
+| Fast default embeddings | `sentence-transformers/all-MiniLM-L6-v2` | Small, quick, good release baseline. |
+| Higher-quality E5-style retrieval | `intfloat/e5-base-v2` | Use `query: ` for queries and `passage: ` for indexed documents. |
 | Maximum E5 capacity in current WordPiece path | `intfloat/e5-large-v2` | Experimental and much larger. |
-| Better final ordering after vector search | `cross-encoder/ms-marco-MiniLM-L-6-v2` via `rerank` | Scores query/document pairs jointly; best used on top-K candidates. |
+| Better final ordering after vector search | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Scores query/document pairs jointly; best used on top-K candidates. |
 | German E5 STS checkpoint | `danielheinz/e5-base-sts-en-de` | Planned only: current upstream is XLM-R/SentencePiece, not the shipped WordPiece E5 path. |
 
 See [`SUPPORTED_MODELS.md`](SUPPORTED_MODELS.md) for the full support matrix
@@ -50,15 +52,15 @@ and [`MODEL_LICENSES.md`](MODEL_LICENSES.md) for model license notes.
 
 | Mode | When to use it | Behavior |
 |---|---|---|
-| `-Dembed.backend=cpu` / `-Drerank.backend=cpu` | Servers, CI, VMs or desktops without a DirectML-capable GPU | Pure local CPU path. Not a failure mode. |
-| `-Dembed.backend=directml` / `-Drerank.backend=directml` | You require GPU acceleration and want failures to be visible | Fails fast if DirectML/model loading is unavailable. |
-| `-Dembed.backend=auto` / `-Drerank.backend=auto` | Default application mode | Tries DirectML first and falls back to CPU, reporting the reason in health/status. |
+| `Backend.CPU` | Servers, CI, VMs or desktops without a DirectML-capable GPU | Pure local CPU path. Not a failure mode. |
+| `Backend.DIRECTML` | You require GPU acceleration and want failures to be visible | Fails fast if DirectML/model loading is unavailable. |
+| `Backend.AUTO` | Default application mode | Tries DirectML first and falls back to CPU. |
 
 DirectML improves latency and throughput on Windows machines with suitable GPUs.
 CPU remains useful for small workloads, tests, offline environments and systems
 where GPU acceleration is not available. See [`BENCHMARK.md`](BENCHMARK.md)
 for reproducible throughput numbers and [`docs/fallback-policy.md`](docs/fallback-policy.md)
-for the full backend contract.
+for the backend contract.
 
 ## Typical local RAG pipeline
 
@@ -68,19 +70,16 @@ for the full backend contract.
 4. **Search top-K** by vector similarity.
 5. **Rerank top-K locally** with the cross-encoder reranker.
 6. Optionally pass the final context to a later local or remote summarization
-   layer. Decoder LLM support is future/experimental, not the core release path.
+   layer owned by your application.
 
 For E5, prefix query texts with `query: ` and indexed/passages with `passage: `.
 Reranker scores are raw model logits: compare them only within the same query,
 not across different queries or models. The `rerank` result is sorted descending
 by score.
 
-## Architecture
+## Direct Java 21 API
 
-### Direct Java 21 API (no sidecar)
-
-Java 21 applications can use embeddings and reranking directly in-process,
-without starting the JSON-RPC sidecar:
+Java 21 applications can use embeddings and reranking directly in-process:
 
 ```java
 import com.aresstack.windirectml.encoder.e5.E5Variant;
@@ -110,67 +109,60 @@ try (var reranker = runtime.loadRerankerModel(rerankCfg)) {
 ```
 
 Dependency (Gradle):
+
 ```groovy
 implementation 'com.aresstack:directml-runtime:<version>'
 ```
 
-The direct API hides sidecar transport details and does not require JSON-RPC or a
-separate process. Supported WordPiece E5 variants: `small-v2`, `base-v2`, `large-v2`.
-XLM-R/SentencePiece E5 models (e.g. `danielheinz/e5-base-sts-en-de`) remain planned
-but not ready; attempting to load them throws `UnsupportedModelException`.
+The API hides transport details and does not require JSON-RPC or a separate
+process. Supported WordPiece E5 variants: `small-v2`, `base-v2`, `large-v2`.
+XLM-R/SentencePiece E5 models (e.g. `danielheinz/e5-base-sts-en-de`) remain
+planned but not ready; attempting to load them throws `UnsupportedModelException`.
 
-### Sidecar architecture (Java 8 bridge/adapter)
+## Relationship to sidecars and ACP
 
-The sidecar is a thin JSON-RPC adapter over the `directml-runtime` API.
-It allows Java 8 host applications to access local ML capabilities without
-requiring Java 21 in the host process.
+This repository is a Windows inference library. It deliberately does not contain
+ACP, MCP, A2A, graph routing or manager-agent orchestration.
+
+A future ACP sidecar or manager-agent project should depend on `directml-runtime`
+and call the Java 21 API directly:
 
 ```text
-Java 8 host application
-    │ JSON-RPC 2.0, one message per line
-    │ stdin / stdout (logs on stderr)
-    ▼
-Java 21 DirectML sidecar (bridge/adapter over directml-runtime)
-    │ Java FFM preview API
-    ▼
-Windows 11 DirectML / D3D12 / DXGI
+ACP / manager project
+  -> directml-runtime
+  -> directml-encoder
+  -> directml-windows-bindings
+  -> Windows CPU / DirectML
 ```
 
-This repository is a cleaned extraction of the DirectML and inference-relevant
-code from `aresstack/win-acp-java`. ACP, MCP, graph routing and agent-host
-layers are intentionally **not** included.
-
-### Non-goals
-
-- No ACP or MCP runtime.
-- No ONNX Runtime dependency.
-- No JNA or JNI dependency.
-- No bundled model weights in Maven artifacts.
-- No generic ONNX/GGUF/Transformers runner in the first release.
-- No promise that decoder LLMs are production-ready in the core release.
+The older JSON-RPC sidecar, Java 8 client, protocol module and workbench remain
+in the source tree as beta-era compatibility code. They are no longer the primary
+product path and are not part of new Maven Central releases unless explicitly
+reactivated later.
 
 ## Modules
 
 ```text
-directml-config                     Minimal inference configuration
+directml-config                     Minimal inference configuration and registry types
 directml-windows-bindings           Java 21 FFM bindings for DXGI, D3D12, DirectML, COM/HRESULT
-directml-inference                  Experimental Phi-3 summarizer path
 directml-encoder                    MiniLM, E5 and reranker encoder/runtime code
-directml-runtime                    Public Java 21 facade for direct in-process use (no sidecar)
-directml-sidecar-protocol-java8     Shared protocol/validation types (Java 8 compatible)
-directml-sidecar                    JSON-RPC 2.0 sidecar – Java 8 bridge/adapter over directml-runtime
-directml-sidecar-client-java8       Pure Java 8 client for host applications
+directml-runtime                    Public Java 21 API for direct in-process use
+
+Legacy / beta-era modules kept in source, not published in new releases:
+directml-inference                  Experimental Phi-3 summarizer path
+directml-sidecar-protocol-java8     Shared protocol/validation types for old sidecar bridge
+directml-sidecar                    JSON-RPC 2.0 sidecar adapter over directml-runtime
+directml-sidecar-client-java8       Java 8 client for the old JSON-RPC sidecar
 directml-sidecar-workbench          Java 8 Swing workbench / diagnostics UI
 ```
 
 ## Requirements
 
 - Windows 11 for DirectML acceleration.
-- JDK 21 for the sidecar/runtime modules.
-- Java 8 or newer for the host application using `directml-sidecar-client-java8`.
+- JDK 21 for the runtime modules.
 - Downloaded model directories; model weights are not shipped in Maven artifacts.
 
-FFM is still a preview feature, so Java 21 sidecar/runtime execution uses:
+FFM is still a preview feature, so Java 21 runtime execution uses:
 
 ```text
 --enable-preview
@@ -206,111 +198,12 @@ Common script options:
 XLM-R/SentencePiece and is tracked as planned until the SentencePiece/XLM-R
 runtime path exists.
 
-## Run the sidecar
-
-```powershell
-./gradlew.bat :directml-sidecar:run
-```
-
-Minimal JSON-RPC traffic:
-
-```json
-{"jsonrpc":"2.0","id":"h1","method":"health","params":{}}
-{"jsonrpc":"2.0","id":"x","method":"shutdown","params":{}}
-```
-
-Protocol details: [`directml-sidecar/PROTOCOL.md`](directml-sidecar/PROTOCOL.md).
-
-### MiniLM default
-
-```powershell
-./gradlew.bat :directml-sidecar:run -Dembed.backend=auto
-```
-
-### E5 base-v2
-
-```powershell
-./gradlew.bat :directml-sidecar:run `
-    -Dembed.model=e5 `
-    -De5.model=base-v2 `
-    -De5.modelDir=model/e5-base-v2 `
-    -Dembed.backend=auto
-```
-
-### CPU-only
-
-```powershell
-./gradlew.bat :directml-sidecar:run `
-    -Dembed.backend=cpu `
-    -Drerank.backend=cpu
-```
-
-CPU-only mode is valid for local/offline use and CI. It should not be treated
-as an error just because DirectML is unavailable.
-
-## Java 8 host integration
-
-The host application uses `directml-sidecar-client-java8` and does not need FFM,
-DirectML bindings or Java 21 APIs on its own classpath. The Java 21 sidecar is
-resolved, copied or packaged separately and then started as a separate process.
-
-```gradle
-configurations {
-    directMlSidecarDistribution
-}
-
-dependencies {
-    implementation 'com.aresstack:directml-sidecar-client-java8:0.1.0-beta.1'
-    directMlSidecarDistribution 'com.aresstack:directml-sidecar:0.1.0-beta.1'
-}
-
-tasks.register('copyDirectMlSidecarDistribution', Copy) {
-    from configurations.directMlSidecarDistribution
-    into layout.buildDirectory.dir('directml-sidecar/lib')
-}
-```
-
-Do not put `directml-sidecar` on the Java 8 application's `implementation` or
-`runtimeOnly` classpath. It is a Java 21 sidecar artifact and belongs in a
-separate distribution/launcher path.
-
-Typical host flow:
-
-```java
-SidecarClientConfig config = new SidecarClientConfig();
-config.setSidecarJarPath("directml-sidecar.jar");
-config.setEmbedBackend("auto");
-
-SidecarClient client = new SidecarClient(config);
-client.start();
-HealthResult health = client.health();
-EmbeddingResult vector = client.embed("query: local search example");
-RerankResult reranked = client.rerank("local DirectML search", documents, 10);
-client.shutdown();
-```
-
-The Java 8 client exposes typed result objects, JSON-RPC errors, timeout
-handling and orderly process shutdown. Full copy-paste examples are available
-in `examples/java8-client`.
-
-## Workbench
-
-For interactive testing of the sidecar from a Java 8 host environment
-(stdin/stdout JSON-RPC, no FFM and no DirectML in the host JVM):
-
-```powershell
-./gradlew.bat :directml-sidecar:jar
-./gradlew.bat :directml-sidecar-workbench:run
-```
-
-Documentation: [`WORKBENCH.md`](WORKBENCH.md).
-
 ## Embeddings and reranking details
 
-### Embeddings (`embed`, `embedBatch`)
+### Embeddings
 
-`embed` and `embedBatch` are backed by a generic BERT-style encoder runtime.
-The current shipped/experimental WordPiece families are MiniLM and E5.
+Embeddings are backed by a generic BERT-style encoder runtime. The current
+shipped/experimental WordPiece families are MiniLM and E5.
 
 - `minilm`: `sentence-transformers/all-MiniLM-L6-v2`, 384-dimensional output.
 - `e5`: `intfloat/e5-small-v2`, `intfloat/e5-base-v2`, experimental
@@ -319,35 +212,28 @@ The current shipped/experimental WordPiece families are MiniLM and E5.
 `embedBatch` preserves input order. Planned XLM-R/SentencePiece models remain
 visible in `SUPPORTED_MODELS.md` but are not silently treated as runnable.
 
-### Reranking (`rerank`)
+### Reranking
 
-`rerank` scores `(query, document)` pairs jointly through a cross-encoder and
+Reranking scores `(query, document)` pairs jointly through a cross-encoder and
 returns the top-N documents sorted by raw classifier logit. It is intended for
 reranking a vector-search candidate set, not for indexing the entire corpus.
 
-Configuration:
-
-```text
--Drerank.modelDir=<path>
--Drerank.backend=auto|directml|cpu
-```
-
-The default model location is `model/cross-encoder-ms-marco-MiniLM-L-6-v2/`.
-If no reranker model is present, the sidecar still starts and `rerank` reports
-`-32005 Not implemented`.
+The default model location in examples is
+`model/cross-encoder-ms-marco-MiniLM-L-6-v2/`.
 
 ## Status summary
 
 | Area | Status |
 |---|---|
-| JSON-RPC protocol | Formalized in `directml-sidecar/PROTOCOL.md`. |
+| Direct Java 21 API | Primary product path, implemented in `directml-runtime`. |
 | MiniLM embeddings | CPU and DirectML paths implemented. |
 | E5 WordPiece embeddings | `small-v2`, `base-v2`, experimental `large-v2` runtime path. |
-| Reranker | Cross-encoder reranker exposed over JSON-RPC. |
+| Reranker | Cross-encoder reranker available through the direct API. |
 | CPU-only usage | Supported; not a failure mode. |
 | DirectML usage | Supported Windows acceleration path. |
-| Phi-3 summarizer | Experimental, sidecar-only, not core release focus. |
-| Decoder LLMs | Future work. |
+| Legacy JSON-RPC sidecar / Java 8 bridge | Source kept, no longer published in new releases. |
+| Phi-3 summarizer | Legacy/experimental; not part of the core release path. |
+| Decoder LLMs / ACP / MCP / A2A | Out of scope for this repository. |
 
 ## Build
 
@@ -377,48 +263,36 @@ redistributable.
 
 ## Releases / Maven Central
 
-Maven Central is the primary distribution channel for library and sidecar
-artifacts. GitHub Release zips remain convenience packages for users who want a
-ready-to-run sidecar or workbench distribution.
-
-Published artifacts under `com.aresstack:`:
+New Maven Central releases publish only the Java 21 core inference artifacts:
 
 ```gradle
 dependencies {
-    implementation 'com.aresstack:directml-runtime:0.1.0-beta.1'
-    implementation 'com.aresstack:directml-sidecar-client-java8:0.1.0-beta.1'
+    implementation 'com.aresstack:directml-runtime:<version>'
 }
 ```
 
-For Java 8 hosts, resolve `com.aresstack:directml-sidecar:<version>` through a
-separate sidecar distribution configuration or a separate Java 21 launcher
-module, not through the Java 8 host runtime classpath.
-
-Full artifact overview: [`docs/artifact-structure.md`](docs/artifact-structure.md).
+Published artifacts under `com.aresstack:`:
 
 | Coordinate | Java | Purpose |
 |---|---|---|
 | `com.aresstack:directml-config` | 8/21 shared | Configuration, limits and model registry types. |
 | `com.aresstack:directml-windows-bindings` | 21 preview | FFM bindings to D3D12 / DXGI / DirectML plus low-level kernel primitives. |
-| `com.aresstack:directml-inference` | 21 preview | Experimental Phi-3 inference/summarizer path used by the sidecar. |
 | `com.aresstack:directml-encoder` | 21 preview | MiniLM, E5 and cross-encoder reranker pipelines with CPU + DirectML parity. |
-| `com.aresstack:directml-runtime` | 21 preview | Public direct Java 21 ML facade for embeddings and reranking. |
-| `com.aresstack:directml-sidecar-protocol-java8` | 8 | Shared protocol/validation types. |
-| `com.aresstack:directml-sidecar-client-java8` | 8 | JSON-RPC client to talk to the sidecar from a Java 8 host JVM. |
-| `com.aresstack:directml-sidecar` | 21 preview | Java 21 JSON-RPC adapter over `directml-runtime`. |
+| `com.aresstack:directml-runtime` | 21 preview | Public direct Java 21 ML API for embeddings and reranking. |
 
-`directml-sidecar-workbench` is a diagnostics/demo UI and remains a GitHub
-Release zip rather than a stable Maven library artifact.
+Legacy beta artifacts such as `directml-sidecar`, `directml-sidecar-client-java8`,
+`directml-sidecar-protocol-java8`, `directml-sidecar-workbench` and
+`directml-inference` are kept in the repository but are not published in new
+releases.
+
+Full artifact overview: [`docs/artifact-structure.md`](docs/artifact-structure.md).
 
 ### Release command
 
 ```powershell
-./gradlew :directml-windows-bindings:test :directml-encoder:test `
-          :directml-runtime:test :directml-sidecar-protocol-java8:test `
-          :directml-sidecar-client-java8:test :directml-sidecar:test
-.\release.ps1 0.1.0-beta.1
+./gradlew :directml-windows-bindings:test :directml-encoder:test :directml-runtime:test
+.\release.ps1 <version>
 ```
 
-The release workflow publishes with the Central Portal configuration in the
-root Gradle build and attaches sidecar/workbench distribution zips to the
-matching GitHub release.
+The release workflow publishes the core artifacts with the Central Portal
+configuration in the root Gradle build.
