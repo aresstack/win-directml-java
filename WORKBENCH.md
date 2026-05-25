@@ -14,7 +14,9 @@ directml-sidecar-workbench        Java 8 Swing developer UI
 
 Both modules **must not** depend on `directml-windows-bindings`,
 `directml-encoder`, `directml-inference`, or `directml-sidecar`. They talk
-to the sidecar only via stdin/stdout JSON-RPC.
+to the sidecar only via stdin/stdout JSON-RPC. The Workbench may use shared
+Java-8 helper classes from the client module, such as the CPU-only model
+validator described in [`docs/model-validation.md`](docs/model-validation.md).
 
 ## Build & run
 
@@ -34,7 +36,7 @@ The window opens with seven tabs:
 
 | Tab                | Purpose                                                                                                                                                                                 |
 |--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Config & Control   | Java exe, sidecar jar, model dir, `embed.backend`, DLL override, extra JVM args, timeout. Buttons: `Start / Stop / Restart Sidecar`, `Health`, `Clear Logs`. Live command-line preview. |
+| Config & Control   | Java exe, sidecar jar, model dir, `embed.backend`, DLL override, extra JVM args, timeout. Buttons: `Start / Stop / Restart Sidecar`, `Health`, `Validate Models`, `Clear Logs`. Live command-line preview. `Validate Models` runs the CPU-only model directory check without starting the sidecar. |
 | Health             | `sidecarRunning`, `embeddingReady`, `embeddingBackend`, `modelLoaded`, `mode`, `lastError` + raw JSON.                                                                                  |
 | Embeddings         | Two text fields (A/B), `Embed A`, `Embed B`, `Cosine Similarity`, dimension/timing/backend readout.                                                                                     |
 | Summarize          | Input text, `maxTokens` spinner, summary output, raw response. Shows JSON-RPC errors clearly when no summarizer is loaded.                                                              |
@@ -77,71 +79,16 @@ The exact same client library can be embedded into any Java-8 application:
 
 ```java
 SidecarClientConfig config = new SidecarClientConfig();
-config.
+config.setJavaExecutable("C:\\Program Files\\Java\\jdk-21\\bin\\java.exe");
+config.setSidecarJarPath("directml-sidecar-all.jar");
+config.setModelDirectory("model/all-MiniLM-L6-v2");
+config.setEmbedBackend("directml");
 
-setJavaExecutable("C:\\Program Files\\Java\\jdk-21\\bin\\java.exe");
-config.
-
-setSidecarJarPath("directml-sidecar.jar");
-config.
-
-setModelDirectory("model/all-MiniLM-L6-v2");
-config.
-
-setEmbedBackend("directml");          // or "auto" / "cpu"
-
-SidecarClient client = new SidecarClient(config);
-try{
-        client.
-
-start();
-
-HealthResult h = client.health();
-EmbeddingResult e = client.embed("hello world");
-double cos = EmbeddingResult.cosine(e.getVector(),
-        client.embed("hi").getVector());
-
-    try{
-SummaryResult s = client.summarize("long input…", 256);
-    }catch(
-JsonRpcError err){
-        // summarizer not loaded → -32005 / not implemented
-        }
-        }finally{
-        client.
-
-shutdown();
+try (SidecarClient client = new SidecarClient(config)) {
+    client.start();
+    HealthResult h = client.health();
+    EmbeddingResult v = client.embed("hello world");
 }
 ```
 
-Threading rules for Swing host applications:
-
-- never call `health()` / `embed()` / `summarize()` from the EDT
-- wrap them in `SwingWorker.doInBackground()` like the workbench does
-- `shutdown()` is safe to call multiple times
-
-## Tests
-
-No GPU is required. Both modules are tested headlessly:
-
-```powershell
-.\gradlew.bat :directml-sidecar-client-java8:test
-.\gradlew.bat :directml-sidecar-workbench:test
-```
-
-- `JsonRpcRequestTest` / `JsonRpcResponseTest` – framing round-trip.
-- `SidecarProcessCommandLineTest` – verifies the spawned argv.
-- `SidecarClientFakeProcessTest` – end-to-end JSON-RPC against an
-  in-memory fake `SidecarProcess` (health, timeout, JSON-RPC error,
-  exit code).
-- `WorkbenchModelTest` – headless model logic.
-- `WorkbenchFrameSmokeTest` – Swing instantiation; auto-skipped on
-  truly headless build hosts.
-
-## Java compatibility
-
-`directml-sidecar-client-java8` and `directml-sidecar-workbench` use
-`options.release.set(8)` in their `build.gradle`, so the compiler rejects
-any accidental use of Java-9+ APIs. The library is therefore safe to
-consume from a Java-8 host application.
-
+See also [`examples/java8-client`](examples/java8-client) for a runnable sample.
