@@ -23,7 +23,7 @@ public final class InputLimits {
 
     /**
      * Maximum character length for a single text input (embed, embedBatch entry,
-     * summarize). 32 768 characters ≈ ~8 000 tokens; well above a 512-token
+     * rerank query). 32 768 characters ≈ ~8 000 tokens; well above a 512-token
      * BERT context but catches accidental megabyte blobs.
      */
     public static final int MAX_TEXT_LENGTH = 32_768;
