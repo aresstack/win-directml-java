@@ -1,0 +1,25 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+ext.java8Module = true
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+application {
+    mainClass = 'com.aresstack.windirectml.examples.java8.Java8ClientExample'
+}
+
+dependencies {
+    implementation project(':directml-sidecar-client-java8')
+}
