@@ -14,20 +14,22 @@ allprojects {
 }
 
 // ── Publishable modules ─────────────────────────────────────────────
-// Modules that get published to Maven Central as separate artifacts.
-// `directml-sidecar` is published as a Java 21 application artifact so
-// host applications can resolve a matching sidecar from Maven Central.
-// The release workflow still also attaches sidecar/workbench distribution
-// zips to GitHub Releases as convenience launch packages.
+// Maven Central now publishes only the Java 21 core Windows inference API.
+// Sidecar / Java-8 bridge / workbench modules remain in the repository as
+// frozen beta/legacy adapters, but are no longer part of new releases. A
+// future ACP sidecar / manager project should consume directml-runtime
+// directly instead of depending on this repository's legacy JSON-RPC sidecar.
 ext.publishableModules = [
         'directml-config',
         'directml-windows-bindings',
-        'directml-inference',
         'directml-encoder',
         'directml-runtime',
-        'directml-sidecar-protocol-java8',
-        'directml-sidecar-client-java8',
-        'directml-sidecar',
+        // Legacy beta modules kept in source but intentionally not published:
+        // 'directml-inference',
+        // 'directml-sidecar-protocol-java8',
+        // 'directml-sidecar-client-java8',
+        // 'directml-sidecar',
+        // 'directml-sidecar-workbench',
 ]
 
 subprojects {
