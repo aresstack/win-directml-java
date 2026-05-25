@@ -172,6 +172,61 @@ class EmbeddingModelRegistryTest {
     }
 
     @Test
+    void jinaV2EntryCarriesAnalysisFields() {
+        // Locks in the Jina v2 analysis recorded in
+        // SUPPORTED_MODELS.md §1.1.2. Keep this test in sync with
+        // that section: the registry entry IS the source-of-truth that
+        // downstream tooling (workbench, sidecar embed gate) reads.
+        EmbeddingModelRegistry.Entry jina = EmbeddingModelRegistry
+                .findByModelId("jinaai/jina-embeddings-v2-base-de");
+        assertNotNull(jina);
+
+        assertEquals(EmbeddingModelRegistry.UseCase.EMBEDDING, jina.useCase());
+        assertEquals(EmbeddingModelRegistry.Status.PLANNED, jina.status());
+        assertNull(jina.embedFamily(),
+                "planned Jina entry must NOT claim a runtime family");
+
+        String arch = jina.architecture();
+        assertNotNull(arch);
+        assertTrue(arch.contains("ALiBi"),
+                "architecture must mention ALiBi positional bias: " + arch);
+        assertTrue(arch.contains("8192"),
+                "architecture must mention the 8192 max sequence length: " + arch);
+
+        String tokenizer = jina.tokenizerType();
+        assertNotNull(tokenizer);
+        assertTrue(tokenizer.toLowerCase(java.util.Locale.ROOT).contains("wordpiece"),
+                "tokenizer must be flagged as WordPiece: " + tokenizer);
+        assertTrue(tokenizer.toLowerCase(java.util.Locale.ROOT).contains("jina"),
+                "tokenizer must be flagged as a Jina-custom vocab: " + tokenizer);
+
+        String backend = jina.backendSupport().toLowerCase(java.util.Locale.ROOT);
+        assertTrue(backend.contains("planned"),
+                "backend support must read as planned: " + jina.backendSupport());
+        assertFalse(backend.contains("cpu, directml"),
+                "planned Jina entry must not advertise shipped CPU+DirectML support: "
+                        + jina.backendSupport());
+
+        String realModel = jina.realModelTestStatus().toLowerCase(java.util.Locale.ROOT);
+        assertTrue(realModel.contains("not tested") || realModel.contains("no runtime"),
+                "real-model test status must not claim a test exists: "
+                        + jina.realModelTestStatus());
+
+        String dl = jina.downloadScriptSupport();
+        assertNotNull(dl);
+        assertTrue(dl.toLowerCase(java.util.Locale.ROOT).contains("not added")
+                        || dl.toLowerCase(java.util.Locale.ROOT).contains("no download"),
+                "downloadScriptSupport must reflect the 'not added yet' decision: "
+                        + dl);
+        assertTrue(dl.contains("SUPPORTED_MODELS.md"),
+                "downloadScriptSupport must point at SUPPORTED_MODELS.md: " + dl);
+
+        assertTrue(jina.notes().contains("§1.1.2")
+                        || jina.notes().contains("SUPPORTED_MODELS.md"),
+                "notes must point at the Jina analysis section: " + jina.notes());
+    }
+
+    @Test
     void entriesPreserveDeclarationOrder() {
         List<EmbeddingModelRegistry.Entry> all = EmbeddingModelRegistry.entries();
         assertEquals(7, all.size());
