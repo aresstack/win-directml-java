@@ -1,0 +1,5 @@
+dependencies {
+    api project(':directml-config')
+    api project(':directml-encoder')
+    api project(':directml-windows-bindings')
+}
