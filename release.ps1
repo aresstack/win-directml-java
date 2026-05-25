@@ -13,12 +13,12 @@
       GPG_PRIVATE_KEY       ASCII-armored GPG private key
       GPG_PASSPHRASE        passphrase of the GPG key
 
-    New releases publish only the core Java 21 inference artifacts listed in
+    New releases publish only the core inference artifacts listed in
     root build.gradle `publishableModules`:
-      directml-config
-      directml-windows-bindings
-      directml-encoder
-      directml-runtime
+      directml-config              shared config/registry module
+      directml-windows-bindings    Java 21 FFM runtime module
+      directml-encoder             Java 21 encoder/reranker module
+      directml-runtime             Java 21 public API module
 
     Legacy beta sidecar / Java-8 bridge / workbench artifacts remain in source
     but are not published by new releases.
@@ -81,6 +81,6 @@ git push origin HEAD --tags
 
 Write-Host ""
 Write-Host "Done! Tag $tag pushed." -ForegroundColor Green
-Write-Host "GitHub Actions workflow will now build, sign and publish core Maven artifacts."
+Write-Host "GitHub Actions workflow will now build, sign and publish core inference artifacts."
 Write-Host "Monitor: https://github.com/aresstack/win-directml-java/actions" -ForegroundColor Yellow
 
