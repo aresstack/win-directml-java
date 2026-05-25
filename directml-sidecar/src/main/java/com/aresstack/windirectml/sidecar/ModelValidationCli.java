@@ -8,8 +8,16 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
-final class ModelValidationCli {
+public final class ModelValidationCli {
     private ModelValidationCli() {
+    }
+
+    public static void main(String[] args) {
+        if (requested(args)) {
+            System.exit(run());
+            return;
+        }
+        DirectMlPhi3Sidecar.main(args);
     }
 
     static boolean requested(String[] args) {
