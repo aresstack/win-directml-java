@@ -90,6 +90,31 @@ stderr = Logs, Debug-Ausgaben, Stacktraces
 | `-32004` | Cancelled           | Auftrag wurde abgebrochen         |
 | `-32005` | Not implemented     | Methode ist Platzhalter           |
 | `-32006` | Unsupported backend | Backend wird nicht unterstützt    |
+| `-32007` | Limit exceeded      | Input überschreitet Größenlimit   |
+
+## Input-Limits
+
+Der Sidecar erzwingt maximale Eingabegrößen, um Out-of-Memory-Fehler und
+unakzeptable Latenz zu verhindern. Überschreitungen werden mit
+`-32007 Limit exceeded` abgelehnt. Der Java-8-Client validiert dieselben
+Grenzen lokal und wirft eine `SidecarException`, bevor der Request
+abgeschickt wird.
+
+| Limit | Default | System Property | Betrifft |
+|-------|---------|-----------------|----------|
+| Max Text Length | 32 768 Zeichen | `windirectml.limits.maxTextLength` | `embed`, `embedBatch` (pro Text), `rerank` (Query) |
+| Max Batch Size (embedBatch) | 256 | `windirectml.limits.maxEmbedBatchSize` | `embedBatch` |
+| Max Rerank Documents | 256 | `windirectml.limits.maxRerankDocuments` | `rerank` |
+| Max Rerank Document Length | 32 768 Zeichen | `windirectml.limits.maxRerankDocumentLength` | `rerank` (pro Dokument) |
+
+Alle Limits sind über System Properties konfigurierbar (positive Integer-Werte).
+Ungültige oder nicht-positive Werte werden ignoriert und der Default gilt.
+
+Beispiel – Custom-Limit per JVM-Argument:
+
+```text
+-Dwindirectml.limits.maxEmbedBatchSize=512
+```
 
 ## Methoden
 

@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.sidecar.client;
 
+import com.aresstack.windirectml.config.InputLimits;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -146,6 +147,11 @@ public final class SidecarClient {
         if (text == null || text.length() == 0) {
             throw new SidecarException("embed: text must not be empty");
         }
+        int maxLen = InputLimits.maxTextLength();
+        if (text.length() > maxLen) {
+            throw new SidecarException("embed: text length " + text.length()
+                    + " exceeds maximum " + maxLen);
+        }
         Map<String, Object> params = new LinkedHashMap<String, Object>();
         params.put("text", text);
         params.put("normalize", normalize);
@@ -172,10 +178,20 @@ public final class SidecarClient {
         if (texts == null || texts.isEmpty()) {
             throw new SidecarException("embedBatch: texts must not be empty");
         }
+        int maxBatch = InputLimits.maxEmbedBatchSize();
+        if (texts.size() > maxBatch) {
+            throw new SidecarException("embedBatch: batch size " + texts.size()
+                    + " exceeds maximum " + maxBatch);
+        }
+        int maxLen = InputLimits.maxTextLength();
         for (int i = 0; i < texts.size(); i++) {
             String t = texts.get(i);
             if (t == null || t.trim().length() == 0) {
                 throw new SidecarException("embedBatch: texts[" + i + "] must not be blank");
+            }
+            if (t.length() > maxLen) {
+                throw new SidecarException("embedBatch: texts[" + i + "] length " + t.length()
+                        + " exceeds maximum " + maxLen);
             }
         }
         Map<String, Object> params = new LinkedHashMap<String, Object>();
@@ -228,8 +244,26 @@ public final class SidecarClient {
         if (query == null || query.length() == 0) {
             throw new SidecarException("rerank: query must not be empty");
         }
+        int maxTextLen = InputLimits.maxTextLength();
+        if (query.length() > maxTextLen) {
+            throw new SidecarException("rerank: query length " + query.length()
+                    + " exceeds maximum " + maxTextLen);
+        }
         if (documents == null || documents.isEmpty()) {
             throw new SidecarException("rerank: documents must not be empty");
+        }
+        int maxDocs = InputLimits.maxRerankDocuments();
+        if (documents.size() > maxDocs) {
+            throw new SidecarException("rerank: documents count " + documents.size()
+                    + " exceeds maximum " + maxDocs);
+        }
+        int maxDocLen = InputLimits.maxRerankDocumentLength();
+        for (int i = 0; i < documents.size(); i++) {
+            String d = documents.get(i);
+            if (d != null && d.length() > maxDocLen) {
+                throw new SidecarException("rerank: documents[" + i + "] length " + d.length()
+                        + " exceeds maximum " + maxDocLen);
+            }
         }
         Map<String, Object> params = new LinkedHashMap<String, Object>();
         params.put("query", query);

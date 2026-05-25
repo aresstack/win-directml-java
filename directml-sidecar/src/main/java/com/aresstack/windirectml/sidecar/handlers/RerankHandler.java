@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.sidecar.handlers;
 
+import com.aresstack.windirectml.config.InputLimits;
 import com.aresstack.windirectml.encoder.reranker.RerankException;
 import com.aresstack.windirectml.encoder.reranker.RerankRequest;
 import com.aresstack.windirectml.encoder.reranker.RerankResult;
@@ -69,11 +70,22 @@ public final class RerankHandler implements JsonRpcMethodHandler {
         if (query.isBlank()) {
             throw new JsonRpcMethodException(JsonRpcErrorCode.INVALID_PARAMS, "query must not be blank");
         }
+        int maxTextLen = InputLimits.maxTextLength();
+        if (query.length() > maxTextLen) {
+            throw new JsonRpcMethodException(JsonRpcErrorCode.LIMIT_EXCEEDED,
+                    "query length " + query.length() + " exceeds maximum " + maxTextLen);
+        }
         JsonNode docsNode = params.get("documents");
         if (!docsNode.isArray() || docsNode.isEmpty()) {
             throw new JsonRpcMethodException(JsonRpcErrorCode.INVALID_PARAMS,
                     "documents must be a non-empty array of strings");
         }
+        int maxDocs = InputLimits.maxRerankDocuments();
+        if (docsNode.size() > maxDocs) {
+            throw new JsonRpcMethodException(JsonRpcErrorCode.LIMIT_EXCEEDED,
+                    "documents count " + docsNode.size() + " exceeds maximum " + maxDocs);
+        }
+        int maxDocLen = InputLimits.maxRerankDocumentLength();
         List<String> docs = new ArrayList<>(docsNode.size());
         for (int i = 0; i < docsNode.size(); i++) {
             JsonNode d = docsNode.get(i);
@@ -85,6 +97,10 @@ public final class RerankHandler implements JsonRpcMethodHandler {
             if (text.isBlank()) {
                 throw new JsonRpcMethodException(JsonRpcErrorCode.INVALID_PARAMS,
                         "documents[" + i + "] must not be blank");
+            }
+            if (text.length() > maxDocLen) {
+                throw new JsonRpcMethodException(JsonRpcErrorCode.LIMIT_EXCEEDED,
+                        "documents[" + i + "] length " + text.length() + " exceeds maximum " + maxDocLen);
             }
             docs.add(text);
         }

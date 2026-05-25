@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.sidecar.handlers;
 
+import com.aresstack.windirectml.config.InputLimits;
 import com.aresstack.windirectml.encoder.reranker.RerankRequest;
 import com.aresstack.windirectml.encoder.reranker.RerankResult;
 import com.aresstack.windirectml.encoder.reranker.Reranker;
@@ -118,6 +119,48 @@ class RerankHandlerTest {
         // The handler must have forwarded the parsed documents in order.
         assertEquals(Arrays.asList("a", "b", "c"), stub.seen.get(0).documents());
         assertEquals(2, stub.seen.get(0).topN());
+    }
+
+    @Test
+    void rejectsDocumentsExceedingLimit() {
+        StubReranker stub = new StubReranker();
+        RerankHandler h = new RerankHandler(() -> stub, new SidecarStatus());
+        var docsNode = MAPPER.createArrayNode();
+        for (int i = 0; i <= InputLimits.maxRerankDocuments(); i++) {
+            docsNode.add("doc " + i);
+        }
+        JsonRpcMethodException ex = assertThrows(JsonRpcMethodException.class,
+                () -> h.handle(MAPPER.createObjectNode()
+                        .put("query", "test")
+                        .set("documents", docsNode)));
+        assertEquals(JsonRpcErrorCode.LIMIT_EXCEEDED, ex.code());
+        assertTrue(ex.getMessage().contains("exceeds maximum"));
+    }
+
+    @Test
+    void rejectsQueryExceedingMaxLength() {
+        StubReranker stub = new StubReranker();
+        RerankHandler h = new RerankHandler(() -> stub, new SidecarStatus());
+        String longQuery = "x".repeat(InputLimits.maxTextLength() + 1);
+        JsonRpcMethodException ex = assertThrows(JsonRpcMethodException.class,
+                () -> h.handle(MAPPER.createObjectNode()
+                        .put("query", longQuery)
+                        .set("documents", MAPPER.createArrayNode().add("doc"))));
+        assertEquals(JsonRpcErrorCode.LIMIT_EXCEEDED, ex.code());
+        assertTrue(ex.getMessage().contains("query length"));
+    }
+
+    @Test
+    void rejectsDocumentExceedingMaxLength() {
+        StubReranker stub = new StubReranker();
+        RerankHandler h = new RerankHandler(() -> stub, new SidecarStatus());
+        String longDoc = "y".repeat(InputLimits.maxRerankDocumentLength() + 1);
+        JsonRpcMethodException ex = assertThrows(JsonRpcMethodException.class,
+                () -> h.handle(MAPPER.createObjectNode()
+                        .put("query", "test")
+                        .set("documents", MAPPER.createArrayNode().add(longDoc))));
+        assertEquals(JsonRpcErrorCode.LIMIT_EXCEEDED, ex.code());
+        assertTrue(ex.getMessage().contains("documents[0]"));
     }
 }
 

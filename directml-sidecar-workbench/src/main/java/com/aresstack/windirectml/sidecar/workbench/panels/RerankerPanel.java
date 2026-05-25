@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.sidecar.workbench.panels;
 
+import com.aresstack.windirectml.config.InputLimits;
 import com.aresstack.windirectml.sidecar.client.RerankResult;
 import com.aresstack.windirectml.sidecar.workbench.WorkbenchModel;
 
@@ -108,10 +109,28 @@ public final class RerankerPanel extends JPanel {
             statusLbl.setText("query must not be empty");
             return;
         }
+        int maxTextLen = InputLimits.maxTextLength();
+        if (query.length() > maxTextLen) {
+            statusLbl.setText("query too long: " + query.length() + " chars (max " + maxTextLen + ")");
+            return;
+        }
         final List<String> docs = splitDocuments(docsArea.getText());
         if (docs.isEmpty()) {
             statusLbl.setText("no candidate documents");
             return;
+        }
+        int maxDocs = InputLimits.maxRerankDocuments();
+        if (docs.size() > maxDocs) {
+            statusLbl.setText("too many documents: " + docs.size() + " (max " + maxDocs + ")");
+            return;
+        }
+        int maxDocLen = InputLimits.maxRerankDocumentLength();
+        for (int i = 0; i < docs.size(); i++) {
+            if (docs.get(i).length() > maxDocLen) {
+                statusLbl.setText("document " + (i + 1) + " too long: "
+                        + docs.get(i).length() + " chars (max " + maxDocLen + ")");
+                return;
+            }
         }
         final int topN = ((Number) topNSpinner.getValue()).intValue();
 
