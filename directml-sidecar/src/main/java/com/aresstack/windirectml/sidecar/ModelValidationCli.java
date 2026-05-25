@@ -1,8 +1,8 @@
 package com.aresstack.windirectml.sidecar;
 
-import com.aresstack.windirectml.sidecar.client.validation.ModelExpectation;
-import com.aresstack.windirectml.sidecar.client.validation.ModelValidator;
-import com.aresstack.windirectml.sidecar.client.validation.ValidationReport;
+import com.aresstack.windirectml.sidecar.protocol.validation.ModelExpectation;
+import com.aresstack.windirectml.sidecar.protocol.validation.ModelValidator;
+import com.aresstack.windirectml.sidecar.protocol.validation.ValidationReport;
 
 import java.io.File;
 import java.util.ArrayList;

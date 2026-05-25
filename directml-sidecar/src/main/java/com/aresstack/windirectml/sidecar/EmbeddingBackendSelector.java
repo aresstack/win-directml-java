@@ -1,6 +1,12 @@
 package com.aresstack.windirectml.sidecar;
 
 import com.aresstack.windirectml.encoder.EmbeddingModel;
+import com.aresstack.windirectml.encoder.e5.E5Variant;
+import com.aresstack.windirectml.runtime.facade.Backend;
+import com.aresstack.windirectml.runtime.facade.EmbeddingModelConfig;
+import com.aresstack.windirectml.runtime.facade.LocalEmbeddingModel;
+import com.aresstack.windirectml.runtime.facade.LocalMlRuntime;
+import com.aresstack.windirectml.runtime.facade.LocalMlRuntimeConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -8,38 +14,29 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * Wählt das Embedding-Backend anhand des Systemproperty
- * {@code -Dembed.backend}.
+ * Selects the embedding backend using the public {@link LocalMlRuntime} facade.
  * <p>
- * Drei Modi:
+ * Three modes:
  * <ul>
- *   <li>{@code cpu} – {@code CpuMiniLmEncoder} erzwingen. Fehler beim
- *       Laden wird als {@link IllegalStateException} hochgeworfen.</li>
- *   <li>{@code directml} – {@code DirectMlMiniLmEncoder} erzwingen. Wenn
- *       DirectML nicht verfügbar ist, schlägt die Initialisierung sichtbar
- *       fehl ({@link IllegalStateException}). Es gibt explizit keinen
- *       stillen Fallback in diesem Modus.</li>
- *   <li>{@code auto} (Default) – DirectML versuchen, bei Fehler sauber auf
- *       CPU zurückfallen und eine Warnung in den Logger schreiben.</li>
+ *   <li>{@code cpu} – force CPU; fail visibly if loading fails.</li>
+ *   <li>{@code directml} – force DirectML; fail visibly if unavailable.</li>
+ *   <li>{@code auto} (default) – try DirectML first via the runtime, fall
+ *       back to CPU on failure and record a warning.</li>
  * </ul>
- * <p>
- * Der Selector kennt die konkreten Encoder-Klassen nicht direkt: die
- * Loader werden als {@link EncoderLoader} hineingereicht. Das hält die
- * Klasse für Unit-Tests ohne GPU testbar.
  */
 public final class EmbeddingBackendSelector {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddingBackendSelector.class);
 
     /**
-     * Backend-Modus, abgeleitet aus {@code -Dembed.backend}.
+     * Backend mode derived from {@code -Dembed.backend}.
      */
     public enum Mode {
         CPU, DIRECTML, AUTO;
 
         /**
-         * Parst den Wert eines {@code -Dembed.backend}-Properties.
-         * {@code null}/leer ⇒ {@link #AUTO}. Unbekannte Werte werfen
+         * Parse a {@code -Dembed.backend} property value.
+         * {@code null}/blank → {@link #AUTO}. Unknown values throw
          * {@link IllegalArgumentException}.
          */
         public static Mode parse(String raw) {
@@ -67,7 +64,8 @@ public final class EmbeddingBackendSelector {
     }
 
     /**
-     * Lädt einen {@link EmbeddingModel} aus einem Modellverzeichnis.
+     * Functional interface for loading an embedding model from a directory.
+     * Retained for backward compatibility with tests that supply custom loaders.
      */
     @FunctionalInterface
     public interface EncoderLoader {
@@ -75,7 +73,7 @@ public final class EmbeddingBackendSelector {
     }
 
     /**
-     * Ergebnis einer Selector-Auswahl.
+     * Result of a backend selection.
      */
     public record Selection(EmbeddingModel model,
                             String backend,
@@ -92,11 +90,7 @@ public final class EmbeddingBackendSelector {
     }
 
     /**
-     * Wählt den passenden Encoder entsprechend {@code mode} und lädt ihn
-     * aus {@code modelDir}.
-     *
-     * @throws IllegalStateException wenn der erzwungene Pfad fehlschlägt
-     *                               bzw. bei {@code AUTO} sowohl DirectML als auch CPU scheitern.
+     * Select and load the embedding model using custom loaders (test path).
      */
     public Selection select(Mode mode, Path modelDir) {
         switch (mode) {
@@ -145,6 +139,91 @@ public final class EmbeddingBackendSelector {
             default:
                 throw new IllegalStateException("unreachable mode: " + mode);
         }
+    }
+
+    /**
+     * Select and load the embedding model using the public {@link LocalMlRuntime}
+     * facade. This is the production path used by the sidecar entry point.
+     *
+     * @param mode       backend mode (cpu/directml/auto)
+     * @param modelDir   model directory
+     * @param family     embedding family ("minilm" or "e5")
+     * @param e5Variant  E5 variant (required for e5 family, null otherwise)
+     * @param prefix     optional E5 prefix
+     * @return selection with loaded model, backend name, and fallback info
+     */
+    public static Selection selectViaRuntime(Mode mode, Path modelDir, String family,
+                                             E5Variant e5Variant, String prefix) {
+        switch (mode) {
+            case CPU: {
+                try {
+                    LocalMlRuntime runtime = LocalMlRuntime.create(
+                            LocalMlRuntimeConfig.builder().backend(Backend.CPU).build());
+                    EmbeddingModelConfig config = buildEmbedConfig(modelDir, family, e5Variant, prefix);
+                    LocalEmbeddingModel loaded = runtime.loadEmbeddingModel(config);
+                    EmbeddingModel m = loaded.unwrapModel();
+                    log.info("embed.backend=cpu: loaded via runtime from {}", modelDir);
+                    return new Selection(m, "cpu", null, false);
+                } catch (Exception e) {
+                    throw new IllegalStateException(
+                            "embed.backend=cpu requested but CPU encoder failed to load: "
+                                    + e.getMessage(), e);
+                }
+            }
+            case DIRECTML: {
+                try {
+                    LocalMlRuntime runtime = LocalMlRuntime.create(
+                            LocalMlRuntimeConfig.builder().backend(Backend.DIRECTML).build());
+                    EmbeddingModelConfig config = buildEmbedConfig(modelDir, family, e5Variant, prefix);
+                    LocalEmbeddingModel loaded = runtime.loadEmbeddingModel(config);
+                    EmbeddingModel m = loaded.unwrapModel();
+                    log.info("embed.backend=directml: loaded via runtime from {}", modelDir);
+                    return new Selection(m, "directml", null, false);
+                } catch (Exception e) {
+                    throw new IllegalStateException(
+                            "embed.backend=directml requested but DirectML encoder failed to load: "
+                                    + e.getMessage(), e);
+                }
+            }
+            case AUTO: {
+                try {
+                    LocalMlRuntime runtime = LocalMlRuntime.create(
+                            LocalMlRuntimeConfig.builder().backend(Backend.DIRECTML).build());
+                    EmbeddingModelConfig config = buildEmbedConfig(modelDir, family, e5Variant, prefix);
+                    LocalEmbeddingModel loaded = runtime.loadEmbeddingModel(config);
+                    EmbeddingModel m = loaded.unwrapModel();
+                    log.info("embed.backend=auto: DirectML loaded via runtime from {}", modelDir);
+                    return new Selection(m, "directml", null, false);
+                } catch (Exception primary) {
+                    String warn = "embed.backend=auto: DirectML unavailable, falling back to CPU – "
+                            + primary.getMessage();
+                    log.warn(warn);
+                    try {
+                        LocalMlRuntime runtime = LocalMlRuntime.create(
+                                LocalMlRuntimeConfig.builder().backend(Backend.CPU).build());
+                        EmbeddingModelConfig config = buildEmbedConfig(modelDir, family, e5Variant, prefix);
+                        LocalEmbeddingModel loaded = runtime.loadEmbeddingModel(config);
+                        EmbeddingModel m = loaded.unwrapModel();
+                        return new Selection(m, "cpu", warn, true);
+                    } catch (Exception secondary) {
+                        throw new IllegalStateException(
+                                "embed.backend=auto: both DirectML and CPU failed (directml="
+                                        + primary.getMessage() + "; cpu=" + secondary.getMessage() + ")",
+                                secondary);
+                    }
+                }
+            }
+            default:
+                throw new IllegalStateException("unreachable mode: " + mode);
+        }
+    }
+
+    private static EmbeddingModelConfig buildEmbedConfig(Path modelDir, String family,
+                                                         E5Variant e5Variant, String prefix) {
+        if ("e5".equals(family)) {
+            return EmbeddingModelConfig.e5(modelDir, e5Variant, prefix);
+        }
+        return EmbeddingModelConfig.miniLm(modelDir);
     }
 }
 

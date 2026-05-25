@@ -2,16 +2,16 @@ package com.aresstack.windirectml.sidecar;
 
 import com.aresstack.windirectml.config.models.EmbeddingModelRegistry;
 import com.aresstack.windirectml.encoder.EmbeddingModel;
-import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
-import com.aresstack.windirectml.encoder.e5.E5Encoders;
 import com.aresstack.windirectml.encoder.e5.E5Variant;
-import com.aresstack.windirectml.encoder.minilm.CpuMiniLmEncoder;
-import com.aresstack.windirectml.encoder.minilm.DirectMlMiniLmEncoder;
-import com.aresstack.windirectml.encoder.reranker.BertCrossEncoderRerankers;
 import com.aresstack.windirectml.encoder.reranker.Reranker;
 import com.aresstack.windirectml.inference.Phi3InferenceEngine;
 import com.aresstack.windirectml.inference.Phi3Summarizer;
 import com.aresstack.windirectml.inference.Summarizer;
+import com.aresstack.windirectml.runtime.facade.Backend;
+import com.aresstack.windirectml.runtime.facade.LocalMlRuntime;
+import com.aresstack.windirectml.runtime.facade.LocalMlRuntimeConfig;
+import com.aresstack.windirectml.runtime.facade.LocalRerankerModel;
+import com.aresstack.windirectml.runtime.facade.RerankerModelConfig;
 import com.aresstack.windirectml.sidecar.handlers.CancelHandler;
 import com.aresstack.windirectml.sidecar.handlers.EmbedHandler;
 import com.aresstack.windirectml.sidecar.handlers.EmbedBatchHandler;
@@ -180,12 +180,10 @@ public final class DirectMlPhi3Sidecar {
         }
 
         Path embedModelDir;
-        EmbeddingBackendSelector.EncoderLoader cpuLoader;
-        EmbeddingBackendSelector.EncoderLoader dmlLoader;
         String missingMsg;
+        E5Variant e5Variant = null;
         switch (embedFamily) {
             case "e5": {
-                E5Variant e5Variant;
                 try {
                     e5Variant = E5Variant.parse(System.getProperty("e5.model"));
                 } catch (IllegalArgumentException e) {
@@ -194,9 +192,6 @@ public final class DirectMlPhi3Sidecar {
                     return;
                 }
                 embedModelDir = resolveE5Dir(e5Variant);
-                final E5Variant fv = e5Variant;
-                cpuLoader = dir -> E5Encoders.loadCpu(dir, fv);
-                dmlLoader = dir -> E5Encoders.loadDirectMl(dir, fv);
                 missingMsg = "No E5 model directory found for variant=" + e5Variant.token()
                         + " (checked -De5.modelDir and " + e5Variant.directoryHints() + ")";
                 log.info("Embedding family=e5 variant={} (-De5.model)", e5Variant.token());
@@ -206,8 +201,6 @@ public final class DirectMlPhi3Sidecar {
             default: {
                 embedFamily = "minilm";
                 embedModelDir = resolveMiniLmDir();
-                cpuLoader = CpuMiniLmEncoder::load;
-                dmlLoader = DirectMlMiniLmEncoder::load;
                 missingMsg = "No MiniLM model directory found "
                         + "(checked -Dminilm.modelDir and model/all-MiniLM-L6-v2/)";
                 break;
@@ -231,16 +224,12 @@ public final class DirectMlPhi3Sidecar {
         } else {
             log.info("{} model present at {} – selecting embedding backend (mode={})",
                     embedFamily, embedModelDir, embedMode.token());
-            EmbeddingBackendSelector selector = new EmbeddingBackendSelector(cpuLoader, dmlLoader);
             try {
-                EmbeddingBackendSelector.Selection sel = selector.select(embedMode, embedModelDir);
+                EmbeddingBackendSelector.Selection sel =
+                        EmbeddingBackendSelector.selectViaRuntime(
+                                embedMode, embedModelDir, embedFamily, e5Variant, null);
                 sidecar.withEmbeddingBackend(sel.backend(), sel.model());
                 if (sel.fallback()) {
-                    // Surface the auto-fallback as a dedicated, non-error
-                    // signal in health so the workbench/client can show
-                    // *why* we ended up on CPU even though the user did
-                    // not force it. lastError stays reserved for hard
-                    // failures only.
                     sidecar.status.setEmbeddingFallback(true);
                     sidecar.status.setEmbeddingFallbackReason(sel.warning());
                 }
@@ -299,7 +288,10 @@ public final class DirectMlPhi3Sidecar {
                 if (rerankMode == RerankerBackendMode.DIRECTML
                         || rerankMode == RerankerBackendMode.AUTO) {
                     try {
-                        rr = BertCrossEncoderRerankers.loadDirectMl(rerankDir);
+                        LocalMlRuntime runtime = LocalMlRuntime.create(
+                                LocalMlRuntimeConfig.builder().backend(Backend.DIRECTML).build());
+                        LocalRerankerModel loaded = runtime.loadRerankerModel(new RerankerModelConfig(rerankDir));
+                        rr = loaded.unwrapReranker();
                         rerankBackend = "directml";
                     } catch (Exception gpuFail) {
                         if (rerankMode == RerankerBackendMode.DIRECTML) {
@@ -315,7 +307,10 @@ public final class DirectMlPhi3Sidecar {
                 if (rr == null && (rerankMode == RerankerBackendMode.CPU
                         || rerankMode == RerankerBackendMode.AUTO)) {
                     try {
-                        rr = BertCrossEncoderRerankers.loadCpu(rerankDir);
+                        LocalMlRuntime runtime = LocalMlRuntime.create(
+                                LocalMlRuntimeConfig.builder().backend(Backend.CPU).build());
+                        LocalRerankerModel loaded = runtime.loadRerankerModel(new RerankerModelConfig(rerankDir));
+                        rr = loaded.unwrapReranker();
                         rerankBackend = "cpu";
                     } catch (Exception cpuFail) {
                         if (rerankMode == RerankerBackendMode.CPU) {

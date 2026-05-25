@@ -80,6 +80,18 @@ public final class LocalEmbeddingModel implements AutoCloseable {
         return delegate.isReady();
     }
 
+    /**
+     * Return the underlying {@link EmbeddingModel} delegate.
+     * <p>
+     * This is intended for adapter layers (e.g. the JSON-RPC sidecar) that
+     * need to bridge between the high-level runtime facade and internal
+     * handler interfaces. Application code should prefer the typed methods
+     * on this class instead.
+     */
+    public EmbeddingModel unwrapModel() {
+        return delegate;
+    }
+
     @Override
     public void close() {
         if (delegate instanceof AutoCloseable ac) {

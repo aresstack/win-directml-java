@@ -2,8 +2,8 @@ package com.aresstack.windirectml.sidecar.workbench.panels;
 
 import com.aresstack.windirectml.sidecar.client.SidecarClientConfig;
 import com.aresstack.windirectml.sidecar.client.SidecarException;
-import com.aresstack.windirectml.sidecar.client.validation.ModelValidator;
-import com.aresstack.windirectml.sidecar.client.validation.ValidationReport;
+import com.aresstack.windirectml.sidecar.protocol.validation.ModelValidator;
+import com.aresstack.windirectml.sidecar.protocol.validation.ValidationReport;
 import com.aresstack.windirectml.sidecar.workbench.WorkbenchModel;
 
 import javax.swing.BorderFactory;

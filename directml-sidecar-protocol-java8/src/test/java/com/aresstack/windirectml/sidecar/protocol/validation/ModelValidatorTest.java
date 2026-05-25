@@ -1,7 +1,5 @@
-package com.aresstack.windirectml.sidecar.client.validation;
+package com.aresstack.windirectml.sidecar.protocol.validation;
 
-import com.aresstack.windirectml.sidecar.protocol.validation.ModelValidator;
-import com.aresstack.windirectml.sidecar.protocol.validation.ValidationReport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
