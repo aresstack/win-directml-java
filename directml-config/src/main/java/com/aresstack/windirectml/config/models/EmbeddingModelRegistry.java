@@ -206,18 +206,24 @@ public final class EmbeddingModelRegistry {
                 "jinaai/jina-embeddings-v2-base-de",
                 UseCase.EMBEDDING,
                 "Jina AI",
-                "Jina BERT v2 (custom; ALiBi positional bias)",
-                "WordPiece (Jina-custom)",
-                "planned",
+                "JinaBERT v2 (BERT-base, 12 layers / 768 hidden / 12 heads; "
+                        + "ALiBi positional bias, GLU-style feed-forward, "
+                        + "max sequence length 8192)",
+                "WordPiece (Jina-custom tokenizer.json; bilingual de/en vocab)",
+                "planned (no CPU or DirectML path)",
                 Status.PLANNED,
                 Arrays.asList(
                         "model/jina-embeddings-v2-base-de",
                         "model/jinaai/jina-embeddings-v2-base-de"),
-                "planned (no download-jina.ps1 yet)",
-                "not yet tested \u2013 architecture analysis pending",
-                "Jina v2 uses ALiBi instead of learned positional "
-                        + "embeddings; not a drop-in for the current BERT core. "
-                        + "Needs analysis before being marked experimental.",
+                "not added yet \u2013 no download-jina.ps1 until at least a "
+                        + "CPU real-model path exists (see SUPPORTED_MODELS.md \u00a71.1.2)",
+                "not tested \u2013 no runtime path; no real-model test claimed",
+                "Analysis (see SUPPORTED_MODELS.md \u00a71.1.2): mean pooling "
+                        + "+ L2 normalisation; ALiBi (no learned positional "
+                        + "embeddings) and GLU-style MLP make this NOT a drop-in "
+                        + "for the current BERT/MiniLM/E5 core. Requires a "
+                        + "Jina-specific attention path before it can move to "
+                        + "experimental; remains planned in this release.",
                 null));
         entries.add(new Entry(
                 "casperhansen/llama-3.3-70b-instruct-awq",
