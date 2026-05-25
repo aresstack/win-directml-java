@@ -1,6 +1,6 @@
 # Maven artifact structure
 
-This project uses Maven Central as the primary distribution channel for library and sidecar artifacts. GitHub Release zips remain convenience packages for users who want a ready-to-run sidecar or workbench distribution, but they are not the only way to obtain the Java 21 sidecar.
+This project uses Maven Central as the primary distribution channel for library and sidecar artifacts. GitHub Release zips remain convenience packages for users who want a ready-to-run sidecar or workbench distribution.
 
 ## Published Maven Central artifacts
 
@@ -15,7 +15,7 @@ All artifacts use group id `com.aresstack`.
 | `directml-runtime` | 21 preview | yes | Public Java 21 in-process ML runtime facade for embeddings and reranking. |
 | `directml-sidecar-protocol-java8` | 8 | yes | Shared Java-8-compatible protocol and validation types. |
 | `directml-sidecar-client-java8` | 8 | yes | Java 8 process/RPC client for host applications. |
-| `directml-sidecar` | 21 preview | yes | JSON-RPC sidecar adapter over `directml-runtime`, used by Java 8 hosts. |
+| `directml-sidecar` | 21 preview | yes | JSON-RPC sidecar adapter over `directml-runtime`, launched as a separate Java 21 process. |
 | `directml-sidecar-workbench` | 8 | no | Swing diagnostics UI, distributed as a GitHub Release zip only. |
 
 ## Typical dependency choices
@@ -32,13 +32,35 @@ This mode calls embeddings and reranking in-process. It does not start JSON-RPC 
 
 ### Java 8 host application
 
-Use the Java 8 client plus a matching sidecar artifact or distribution:
+The Java 8 host uses only the Java 8 client on its application classpath:
 
 ```gradle
-implementation 'com.aresstack:directml-sidecar-client-java8:<version>'
+dependencies {
+    implementation 'com.aresstack:directml-sidecar-client-java8:<version>'
+}
 ```
 
-The host process must start a Java 21 sidecar, either from the Maven artifact `com.aresstack:directml-sidecar:<version>` resolved by the application/build tooling, or from a GitHub Release zip. The Java 8 host classpath must not contain Java 21 runtime modules.
+The Java 21 sidecar should be resolved separately, for example into a distribution directory or into a separate Java 21 launcher module. Do not wire the sidecar artifact into the Java 8 host application's `implementation` or `runtimeOnly` configuration.
+
+Example Gradle pattern for separate sidecar resolution:
+
+```gradle
+configurations {
+    directMlSidecarDistribution
+}
+
+dependencies {
+    implementation 'com.aresstack:directml-sidecar-client-java8:<version>'
+    directMlSidecarDistribution 'com.aresstack:directml-sidecar:<version>'
+}
+
+tasks.register('copyDirectMlSidecarDistribution', Copy) {
+    from configurations.directMlSidecarDistribution
+    into layout.buildDirectory.dir('directml-sidecar/lib')
+}
+```
+
+The copied sidecar files are launched with Java 21 as a separate process. The Java 8 client receives the resulting sidecar executable or launch path via `SidecarClientConfig`.
 
 ### Sidecar process
 
@@ -48,13 +70,14 @@ The sidecar itself is a Java 21 application artifact:
 runtimeOnly 'com.aresstack:directml-sidecar:<version>'
 ```
 
-It depends on `directml-runtime`, `directml-encoder`, `directml-windows-bindings`, `directml-inference` and `directml-sidecar-protocol-java8`.
+Use this dependency in a Java 21 launcher/application module or in a sidecar distribution build. The sidecar depends on `directml-runtime`, `directml-encoder`, `directml-windows-bindings`, `directml-inference` and `directml-sidecar-protocol-java8`.
 
 ## Compatibility rules
 
 - Use matching versions for `directml-sidecar-client-java8`, `directml-sidecar-protocol-java8` and `directml-sidecar`.
-- The Java 8 client remains Java 8 bytecode and must not depend on Java 21 runtime modules.
-- The sidecar is the process boundary for Java 8 hosts.
+- The Java 8 client remains Java 8 bytecode and does not depend on Java 21 runtime modules.
+- Keep Java 21 sidecar/runtime modules out of the Java 8 host application classpath.
+- The sidecar is the process boundary for Java 8 hosts and is launched with Java 21.
 - Model weights are never shipped in Maven Central artifacts.
 - GitHub Release zips are convenience launch packages and should match the Maven artifact version.
 
