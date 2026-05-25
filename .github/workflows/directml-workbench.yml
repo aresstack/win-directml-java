@@ -1,0 +1,48 @@
+name: DirectML Workbench
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build workbench fat jar
+        run: ./gradlew :directml-workbench:shadowJar
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: directml-workbench-all
+          path: directml-workbench/build/libs/directml-workbench-all.jar
+
+      - name: Delete existing release (if any)
+        run: gh release delete directml-workbench-latest --yes || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete existing tag (if any)
+        run: git push --delete origin directml-workbench-latest || true
+
+      - name: Create rolling release
+        run: |
+          gh release create directml-workbench-latest \
+            directml-workbench/build/libs/directml-workbench-all.jar \
+            --title "DirectML Workbench (latest)" \
+            --notes "Rolling demo release of the DirectML Workbench fat jar. Run with: java --enable-preview --enable-native-access=ALL-UNNAMED -jar directml-workbench-all.jar" \
+            --prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
