@@ -40,8 +40,25 @@ class EmbedFamilyParseTest {
     void fullEmbeddingModelIdsResolveViaRegistry() {
         assertEquals("minilm", DirectMlPhi3Sidecar.embedFamily(
                 "sentence-transformers/all-MiniLM-L6-v2"));
-        assertEquals("e5", DirectMlPhi3Sidecar.embedFamily(
-                "danielheinz/e5-base-sts-en-de"));
+    }
+
+    @Test
+    void danielheinzE5BaseStsEnDeRejectedAsUnimplemented() {
+        // The upstream checkpoint at huggingface.co/danielheinz/e5-base-sts-en-de
+        // hosts an XLMRobertaModel (vocab=250002, type_vocab_size=1) and does
+        // not run on the current WordPiece-only E5 path. The registry classifies
+        // it as planned with embedFamily=null so the gate rejects it with the
+        // standard "planned" / SUPPORTED_MODELS.md message.
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> DirectMlPhi3Sidecar.embedFamily(
+                        "danielheinz/e5-base-sts-en-de"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                ex.getMessage().contains("danielheinz/e5-base-sts-en-de"),
+                ex.getMessage());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                ex.getMessage().contains("planned"), ex.getMessage());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                ex.getMessage().contains("SUPPORTED_MODELS.md"), ex.getMessage());
     }
 
     @Test
