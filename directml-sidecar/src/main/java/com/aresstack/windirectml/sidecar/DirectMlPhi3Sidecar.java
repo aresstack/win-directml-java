@@ -236,7 +236,13 @@ public final class DirectMlPhi3Sidecar {
                 EmbeddingBackendSelector.Selection sel = selector.select(embedMode, embedModelDir);
                 sidecar.withEmbeddingBackend(sel.backend(), sel.model());
                 if (sel.fallback()) {
-                    sidecar.status.setLastError(sel.warning());
+                    // Surface the auto-fallback as a dedicated, non-error
+                    // signal in health so the workbench/client can show
+                    // *why* we ended up on CPU even though the user did
+                    // not force it. lastError stays reserved for hard
+                    // failures only.
+                    sidecar.status.setEmbeddingFallback(true);
+                    sidecar.status.setEmbeddingFallbackReason(sel.warning());
                 }
                 log.info("Embedding backend ready: family={} backend={} (fallback={})",
                         embedFamily, sel.backend(), sel.fallback());
@@ -323,8 +329,10 @@ public final class DirectMlPhi3Sidecar {
                 if (autoFallbackMsg != null) {
                     // Surface the auto-fallback in the health endpoint so the
                     // workbench shows *why* we are on CPU even though DirectML
-                    // is available on the box.
-                    sidecar.status.setLastError(autoFallbackMsg);
+                    // is available on the box. Use the dedicated fallback
+                    // signal – lastError stays reserved for hard errors.
+                    sidecar.status.setRerankerFallback(true);
+                    sidecar.status.setRerankerFallbackReason(autoFallbackMsg);
                 }
                 log.info("Reranker backend ready: mode={} backend={} modelDir={}",
                         rerankMode.token(), rerankBackend, rerankDir);
