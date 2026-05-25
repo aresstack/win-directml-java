@@ -361,23 +361,27 @@ class SidecarLifecycleTest {
     @Test
     void autoFallbackResultIsObservableInHealth() throws Exception {
         // Simulate what main() does when EmbeddingBackendSelector returns
-        // a fallback Selection: register CPU encoder, expose warning.
+        // a fallback Selection: register CPU encoder, expose the dedicated
+        // embeddingFallback signal (lastError is reserved for hard errors).
         String input = """
                 {"jsonrpc":"2.0","id":"h","method":"health"}
                 {"jsonrpc":"2.0","id":"x","method":"shutdown"}
                 """;
         List<JsonNode> msgs = runWith(input, s -> {
             s.withEmbeddingBackend("cpu", new StubEmbeddingModel("cpu"));
-            // emulate selector having reported a fallback warning
-            // by setting lastError; the production code in main() does the same.
-            s.statusForTesting().setLastError(
+            s.statusForTesting().setEmbeddingFallback(true);
+            s.statusForTesting().setEmbeddingFallbackReason(
                     "embed.backend=auto: DirectML unavailable, falling back to CPU");
         });
         JsonNode result = msgs.get(1).path("result");
         assertEquals("cpu", result.path("embeddingBackend").asText());
         assertTrue(result.path("embeddingReady").asBoolean());
-        assertNotNull(result.get("lastError"));
-        assertTrue(result.path("lastError").asText().contains("auto"));
+        assertTrue(result.path("embeddingFallback").asBoolean(),
+                "embeddingFallback flag must be observable in health");
+        assertNotNull(result.get("embeddingFallbackReason"));
+        assertTrue(result.path("embeddingFallbackReason").asText().contains("auto"));
+        // lastError stays clean when only a (soft) fallback happened.
+        assertNull(result.get("lastError"));
     }
 
     @Test

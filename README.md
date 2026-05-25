@@ -258,7 +258,9 @@ active family or backend.
 ### Family and backend selection
 
 The sidecar picks the family via `-Dembed.model` and the backend via
-`-Dembed.backend`:
+`-Dembed.backend`. See [`docs/fallback-policy.md`](docs/fallback-policy.md)
+for the complete CPU / DirectML fallback contract (modes, health
+fields, CPU-only setup).
 
 ```powershell
 # MiniLM (default family)
