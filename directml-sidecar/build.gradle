@@ -3,7 +3,7 @@ plugins {
 }
 
 application {
-    mainClass = 'com.aresstack.windirectml.sidecar.DirectMlPhi3Sidecar'
+    mainClass = 'com.aresstack.windirectml.sidecar.ModelValidationCli'
     applicationDefaultJvmArgs = ['--enable-preview', '--enable-native-access=ALL-UNNAMED', '-Xmx4g']
 }
 
@@ -28,7 +28,7 @@ tasks.register('fatJar', Jar) {
     }
     manifest {
         attributes(
-                'Main-Class': 'com.aresstack.windirectml.sidecar.DirectMlPhi3Sidecar',
+                'Main-Class': 'com.aresstack.windirectml.sidecar.ModelValidationCli',
                 'Enable-Native-Access': 'ALL-UNNAMED'
         )
     }
