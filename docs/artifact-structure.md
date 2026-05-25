@@ -1,86 +1,59 @@
 # Maven artifact structure
 
-This project uses Maven Central as the primary distribution channel for library and sidecar artifacts. GitHub Release zips remain convenience packages for users who want a ready-to-run sidecar or workbench distribution.
+This project now publishes only the Java 21 Windows inference core as new Maven Central artifacts. The JSON-RPC sidecar, Java 8 bridge, protocol module and workbench remain in the repository for compatibility with the previous beta line, but they are no longer part of new Maven Central releases.
 
-## Published Maven Central artifacts
+The intended downstream architecture is:
+
+```text
+Java 21 application / ACP sidecar / manager project
+    -> directml-runtime
+    -> directml-encoder
+    -> directml-windows-bindings
+    -> Windows CPU / DirectML inference
+```
+
+A future ACP sidecar or manager-agent project should consume this repository as a pure Java library. It should not depend on this repository's legacy JSON-RPC sidecar as its product boundary.
+
+## Published Maven Central artifacts going forward
 
 All artifacts use group id `com.aresstack`.
 
-| Artifact | Java | Published | Purpose |
+| Artifact | Java | Published going forward | Purpose |
 |---|---:|---:|---|
-| `directml-config` | 8-compatible API surface where applicable | yes | Shared configuration, limits and model registry types. |
+| `directml-config` | 8-compatible API surface where applicable | yes | Shared configuration, limits and model registry types used by the core runtime. |
 | `directml-windows-bindings` | 21 preview | yes | Java FFM bindings for DXGI, D3D12, DirectML and low-level Windows runtime access. |
-| `directml-inference` | 21 preview | yes | Experimental Phi-3 inference/summarizer path used by the sidecar. |
 | `directml-encoder` | 21 preview | yes | MiniLM, WordPiece E5 and cross-encoder reranker implementations. |
-| `directml-runtime` | 21 preview | yes | Public Java 21 in-process ML runtime facade for embeddings and reranking. |
-| `directml-sidecar-protocol-java8` | 8 | yes | Shared Java-8-compatible protocol and validation types. |
-| `directml-sidecar-client-java8` | 8 | yes | Java 8 process/RPC client for host applications. |
-| `directml-sidecar` | 21 preview | yes | JSON-RPC sidecar adapter over `directml-runtime`, launched as a separate Java 21 process. |
-| `directml-sidecar-workbench` | 8 | no | Swing diagnostics UI, distributed as a GitHub Release zip only. |
+| `directml-runtime` | 21 preview | yes | Public Java 21 in-process ML runtime API for embeddings and reranking. |
+| `directml-inference` | 21 preview | no | Legacy/experimental Phi-3 inference path from the beta line. Kept in source, not published in new releases. |
+| `directml-sidecar-protocol-java8` | 8 | no | Legacy beta protocol/validation module. Kept in source, not published in new releases. |
+| `directml-sidecar-client-java8` | 8 | no | Legacy Java 8 JSON-RPC client. Kept in source, not published in new releases. |
+| `directml-sidecar` | 21 preview | no | Legacy JSON-RPC sidecar adapter. Kept in source, not published in new releases. |
+| `directml-sidecar-workbench` | 8 | no | Legacy diagnostics UI. Kept in source, not published in new releases. |
 
-## Typical dependency choices
+## Dependency choices
 
-### Java 21 application, no sidecar
+### Java 21 application, ACP sidecar, or manager project
 
 Use the direct runtime API:
 
 ```gradle
-implementation 'com.aresstack:directml-runtime:<version>'
-```
-
-This mode calls embeddings and reranking in-process. It does not start JSON-RPC and does not require the Java 8 sidecar client.
-
-### Java 8 host application
-
-The Java 8 host uses only the Java 8 client on its application classpath:
-
-```gradle
 dependencies {
-    implementation 'com.aresstack:directml-sidecar-client-java8:<version>'
+    implementation 'com.aresstack:directml-runtime:<version>'
 }
 ```
 
-The Java 21 sidecar should be resolved separately, for example into a distribution directory or into a separate Java 21 launcher module. Do not wire the sidecar artifact into the Java 8 host application's `implementation` or `runtimeOnly` configuration.
+This is the canonical path. It calls embeddings and reranking in-process and does not require JSON-RPC or a sidecar process.
 
-Example Gradle pattern for separate sidecar resolution:
+### Legacy Java 8 bridge
 
-```gradle
-configurations {
-    directMlSidecarDistribution
-}
+The Java 8 bridge modules remain in the source tree to preserve the previous beta implementation, but they are not part of new Maven Central releases. A project that still needs that bridge should stay on the previous beta artifacts or build the legacy modules from source.
 
-dependencies {
-    implementation 'com.aresstack:directml-sidecar-client-java8:<version>'
-    directMlSidecarDistribution 'com.aresstack:directml-sidecar:<version>'
-}
-
-tasks.register('copyDirectMlSidecarDistribution', Copy) {
-    from configurations.directMlSidecarDistribution
-    into layout.buildDirectory.dir('directml-sidecar/lib')
-}
-```
-
-The copied sidecar files are launched with Java 21 as a separate process. The Java 8 client receives the resulting sidecar executable or launch path via `SidecarClientConfig`.
-
-### Sidecar process
-
-The sidecar itself is a Java 21 application artifact:
-
-```gradle
-runtimeOnly 'com.aresstack:directml-sidecar:<version>'
-```
-
-Use this dependency in a Java 21 launcher/application module or in a sidecar distribution build. The sidecar depends on `directml-runtime`, `directml-encoder`, `directml-windows-bindings`, `directml-inference` and `directml-sidecar-protocol-java8`.
+New integration work should prefer a separate Java 21 ACP/manager project that depends on `directml-runtime` directly.
 
 ## Compatibility rules
 
-- Use matching versions for `directml-sidecar-client-java8`, `directml-sidecar-protocol-java8` and `directml-sidecar`.
-- The Java 8 client remains Java 8 bytecode and does not depend on Java 21 runtime modules.
-- Keep Java 21 sidecar/runtime modules out of the Java 8 host application classpath.
-- The sidecar is the process boundary for Java 8 hosts and is launched with Java 21.
+- New releases focus on the Java 21 core API and Windows inference engine.
+- Sidecar/protocol/workbench modules are legacy beta code unless explicitly reactivated later.
+- The Java 21 API must not require JSON-RPC, ACP, MCP, A2A or sidecar concepts.
 - Model weights are never shipped in Maven Central artifacts.
-- GitHub Release zips are convenience launch packages and should match the Maven artifact version.
-
-## Non-published application
-
-`directml-sidecar-workbench` remains GitHub-release-only for now. It is a diagnostics/demo UI, not a stable library API.
+- Existing source modules are kept to avoid deleting beta-era code, but they should not drive new product architecture.
