@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Releases a new version of win-directml-java to Maven Central via GitHub Actions.
+    Releases a new core version of win-directml-java to Maven Central via GitHub Actions.
 .PARAMETER Version
-    The version to release, e.g. "0.1.0-beta.1", "0.2.0", "1.0.0".
+    The version to release, e.g. "0.2.0", "1.0.0".
 .EXAMPLE
-    .\release.ps1 0.1.0-beta.1
+    .\release.ps1 0.2.0
 .NOTES
     Requires the following GitHub Actions secrets to be configured on the repo
     aresstack/win-directml-java:
@@ -12,10 +12,21 @@
       CENTRAL_PASSWORD      Sonatype Central Portal password-token
       GPG_PRIVATE_KEY       ASCII-armored GPG private key
       GPG_PASSPHRASE        passphrase of the GPG key
+
+    New releases publish only the core Java 21 inference artifacts listed in
+    root build.gradle `publishableModules`:
+      directml-config
+      directml-windows-bindings
+      directml-encoder
+      directml-runtime
+
+    Legacy beta sidecar / Java-8 bridge / workbench artifacts remain in source
+    but are not published by new releases.
+
     The release.yml workflow on the tag push runs:
-      ./gradlew -Pversion=$Version -x test publishAggregationToCentralPortal
-    which builds, signs and uploads all publishable modules to the Sonatype
-    Central Portal in one shot (autoPublish=true).
+      ./gradlew -Pversion=$Version -x test publishAllPublicationsToCentralPortal
+    which builds, signs and uploads all currently publishable modules to the
+    Sonatype Central Portal.
 #>
 param(
     [Parameter(Mandatory=$true, Position=0)]
@@ -70,6 +81,6 @@ git push origin HEAD --tags
 
 Write-Host ""
 Write-Host "Done! Tag $tag pushed." -ForegroundColor Green
-Write-Host "GitHub Actions workflow will now build, sign and publish to Maven Central."
+Write-Host "GitHub Actions workflow will now build, sign and publish core Maven artifacts."
 Write-Host "Monitor: https://github.com/aresstack/win-directml-java/actions" -ForegroundColor Yellow
 
