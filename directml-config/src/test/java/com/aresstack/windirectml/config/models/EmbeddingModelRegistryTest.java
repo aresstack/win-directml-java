@@ -259,4 +259,57 @@ class EmbeddingModelRegistryTest {
         assertThrows(IllegalArgumentException.class,
                 () -> EmbeddingModelRegistry.entriesByUseCase(null));
     }
+
+    @Test
+    void multilingualE5InstructAnalysisIsPinned() {
+        // Pins the documented analysis for
+        // intfloat/multilingual-e5-large-instruct so the registry
+        // entry can never silently drift away from
+        // SUPPORTED_MODELS.md section 1.1.1 (#39-C).
+        EmbeddingModelRegistry.Entry e = EmbeddingModelRegistry
+                .findByModelId("intfloat/multilingual-e5-large-instruct");
+        assertNotNull(e);
+
+        // Classification: visible as an embedding entry but explicitly
+        // planned (no real-model test, no shipped runtime).
+        assertEquals(EmbeddingModelRegistry.UseCase.EMBEDDING, e.useCase());
+        assertEquals(EmbeddingModelRegistry.Status.PLANNED, e.status());
+        assertNull(e.embedFamily(),
+                "planned multilingual-E5-instruct must not claim an embedFamily "
+                        + "until SentencePiece + XLM-R support lands");
+
+        // Tokenizer analysis: SentencePiece (XLM-R), not WordPiece.
+        String tokenizer = e.tokenizerType();
+        assertNotNull(tokenizer);
+        assertTrue(tokenizer.contains("SentencePiece"),
+                "tokenizerType must record SentencePiece: " + tokenizer);
+        assertTrue(tokenizer.contains("XLM-R"),
+                "tokenizerType must call out the XLM-R variant: " + tokenizer);
+
+        // Architecture analysis: XLM-RoBERTa-large.
+        String architecture = e.architecture();
+        assertNotNull(architecture);
+        assertTrue(architecture.contains("XLM-RoBERTa"),
+                "architecture must identify the XLM-RoBERTa core: " + architecture);
+
+        // Notes must call out the non-compatibility, the instruction
+        // prefix and forward callers to SUPPORTED_MODELS.md.
+        String notes = e.notes();
+        assertNotNull(notes);
+        assertTrue(notes.contains("NOT compatible"),
+                "notes must state non-compatibility with the BERT/E5 core: " + notes);
+        assertTrue(notes.contains("SentencePiece"), notes);
+        assertTrue(notes.contains("Instruct:"),
+                "notes must record the instruction-prefix format: " + notes);
+        assertTrue(notes.contains("SUPPORTED_MODELS.md"),
+                "notes must point callers at the analysis section: " + notes);
+
+        // Real-model test status must explicitly say no real-model
+        // test exists yet (no fake-support claim).
+        String realModel = e.realModelTestStatus();
+        assertNotNull(realModel);
+        assertTrue(realModel.toLowerCase(java.util.Locale.ROOT).contains("not yet tested"),
+                "realModelTestStatus must record the missing real-model test: "
+                        + realModel);
+    }
 }
