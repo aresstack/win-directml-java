@@ -11,4 +11,5 @@ Implementierungs-Pflicht besteht in dieser Phase nicht.
 | [concept-decoder-extensions.md](concept-decoder-extensions.md) | 25    | Weitere Decoder-LLMs nach Phi-3              |
 | [concept-sentencepiece-xlmr.md](concept-sentencepiece-xlmr.md) | 33    | SentencePiece / XLM-R-Modellfamilien         |
 | [concept-jina.md](concept-jina.md)                             | 34    | JinaBERT / Jina-Embeddings (Post-Release)    |
+| [model-validation.md](model-validation.md)                     | 12    | CPU-only Modellverzeichnis-Validierung       |
 
