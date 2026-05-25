@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.sidecar.client.validation;
+package com.aresstack.windirectml.sidecar.protocol.validation;
 
 public final class ValidationFinding {
     public enum Severity { OK, WARN, ERROR }

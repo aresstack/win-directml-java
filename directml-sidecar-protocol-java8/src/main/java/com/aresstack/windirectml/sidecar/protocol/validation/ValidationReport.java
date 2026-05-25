@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.sidecar.client.validation;
+package com.aresstack.windirectml.sidecar.protocol.validation;
 
 import java.io.File;
 import java.util.ArrayList;

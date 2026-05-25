@@ -119,14 +119,18 @@ separate process. Supported WordPiece E5 variants: `small-v2`, `base-v2`, `large
 XLM-R/SentencePiece E5 models (e.g. `danielheinz/e5-base-sts-en-de`) remain planned
 but not ready; attempting to load them throws `UnsupportedModelException`.
 
-### Sidecar architecture (Java 8 host)
+### Sidecar architecture (Java 8 bridge/adapter)
+
+The sidecar is a thin JSON-RPC adapter over the `directml-runtime` API.
+It allows Java 8 host applications to access local ML capabilities without
+requiring Java 21 in the host process.
 
 ```text
 Java 8 host application
     │ JSON-RPC 2.0, one message per line
     │ stdin / stdout (logs on stderr)
     ▼
-Java 21 DirectML sidecar
+Java 21 DirectML sidecar (bridge/adapter over directml-runtime)
     │ Java FFM preview API
     ▼
 Windows 11 DirectML / D3D12 / DXGI
@@ -148,14 +152,15 @@ layers are intentionally **not** included.
 ## Modules
 
 ```text
-directml-config                 Minimal inference configuration
-directml-windows-bindings       Java 21 FFM bindings for DXGI, D3D12, DirectML, COM/HRESULT
-directml-encoder                MiniLM, E5 and reranker encoder/runtime code
-directml-runtime                Public Java 21 facade for direct in-process use (no sidecar)
-directml-sidecar                JSON-RPC 2.0 sidecar entry point and handlers
-directml-sidecar-client-java8   Pure Java 8 client for host applications
-directml-sidecar-workbench      Java 8 Swing workbench / diagnostics UI
-directml-inference              Experimental Phi-3 summarizer path
+directml-config                     Minimal inference configuration
+directml-windows-bindings           Java 21 FFM bindings for DXGI, D3D12, DirectML, COM/HRESULT
+directml-encoder                    MiniLM, E5 and reranker encoder/runtime code
+directml-runtime                    Public Java 21 facade for direct in-process use (no sidecar)
+directml-sidecar-protocol-java8     Shared protocol/validation types (Java 8 compatible)
+directml-sidecar                    JSON-RPC 2.0 sidecar – Java 8 bridge/adapter over directml-runtime
+directml-sidecar-client-java8       Pure Java 8 client for host applications
+directml-sidecar-workbench          Java 8 Swing workbench / diagnostics UI
+directml-inference                  Experimental Phi-3 summarizer path
 ```
 
 ## Requirements

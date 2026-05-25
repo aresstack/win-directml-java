@@ -31,6 +31,7 @@ tasks.withType(Test).configureEach {
 }
 
 dependencies {
+    api project(':directml-sidecar-protocol-java8')
     api project(':directml-config')
     api 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
     // No SLF4J / logback: Java-8 host app brings its own logging.
