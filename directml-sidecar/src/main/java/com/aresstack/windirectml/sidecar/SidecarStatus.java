@@ -22,6 +22,16 @@ public final class SidecarStatus {
      */
     private volatile String embeddingBackend;
     private volatile boolean embeddingReady = false;
+    /**
+     * {@code true} when the embedding backend was selected via the
+     * {@code auto} policy after the preferred backend (DirectML) failed
+     * and we silently fell back to CPU. Exposed via {@code health} so
+     * clients/workbench can show that we are not running on the user's
+     * preferred device. Forced modes ({@code cpu}/{@code directml})
+     * never set this flag – they either succeed or fail hard.
+     */
+    private volatile boolean embeddingFallback = false;
+    private volatile String embeddingFallbackReason;
 
     /**
      * Aktiver Reranker-Backend-Name ({@code "cpu"}, {@code "directml"},
@@ -30,6 +40,9 @@ public final class SidecarStatus {
     private volatile String rerankerBackend;
     private volatile boolean rerankerReady = false;
     private volatile String rerankerModel;
+    /** See {@link #embeddingFallback}; same semantics for the reranker. */
+    private volatile boolean rerankerFallback = false;
+    private volatile String rerankerFallbackReason;
 
     /**
      * {@code true} when the Phi-3 summarizer has finished loading and is ready
@@ -115,6 +128,16 @@ public final class SidecarStatus {
     public void setRerankerReady(boolean rerankerReady) { this.rerankerReady = rerankerReady; }
     public String getRerankerModel() { return rerankerModel; }
     public void setRerankerModel(String rerankerModel) { this.rerankerModel = rerankerModel; }
+
+    public boolean isEmbeddingFallback() { return embeddingFallback; }
+    public void setEmbeddingFallback(boolean embeddingFallback) { this.embeddingFallback = embeddingFallback; }
+    public String getEmbeddingFallbackReason() { return embeddingFallbackReason; }
+    public void setEmbeddingFallbackReason(String reason) { this.embeddingFallbackReason = reason; }
+
+    public boolean isRerankerFallback() { return rerankerFallback; }
+    public void setRerankerFallback(boolean rerankerFallback) { this.rerankerFallback = rerankerFallback; }
+    public String getRerankerFallbackReason() { return rerankerFallbackReason; }
+    public void setRerankerFallbackReason(String reason) { this.rerankerFallbackReason = reason; }
 
     public boolean isSummarizerReady() { return summarizerReady; }
     public void setSummarizerReady(boolean v) { this.summarizerReady = v; }
