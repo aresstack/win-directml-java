@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      run_directml_tests:
+        description: 'Run DirectML GPU tests (requires Windows GPU runner)'
+        type: boolean
+        default: false
+      run_real_model_tests:
+        description: 'Run real-model reference tests (downloads large checkpoints)'
+        type: boolean
+        default: false
+
+# Cancel superseded runs on the same PR/branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # Java 8 modules: directml-config, directml-sidecar-client-java8,
+  # directml-sidecar-workbench
+  # ──────────────────────────────────────────────────────────────────────
+  java8-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    name: "Java 8 modules (${{ matrix.os }})"
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (toolchain host)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run Java 8 module tests
+        run: >-
+          ./gradlew
+          :directml-config:test
+          :directml-sidecar-client-java8:test
+          :directml-sidecar-workbench:test
+          --no-daemon
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-java8-${{ matrix.os }}
+          path: |
+            directml-config/build/reports/tests/
+            directml-sidecar-client-java8/build/reports/tests/
+            directml-sidecar-workbench/build/reports/tests/
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Java 21 modules – CPU-only (no DirectML runtime)
+  # Linux/macOS: DirectML tests auto-skip via assumeTrue(WindowsBindings.isSupported())
+  # Windows: CPU-only tests pass; DirectML kernel tests skip without GPU
+  # ──────────────────────────────────────────────────────────────────────
+  java21-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    name: "Java 21 modules (${{ matrix.os }})"
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run Java 21 module tests (CPU-only, no real models)
+        # DirectML tests auto-skip on non-Windows via assumeTrue(WindowsBindings.isSupported()).
+        # Real-model tests auto-skip when checkpoint dirs are absent (@EnabledIf("modelPresent")).
+        # Both produce explicit skip messages in the JUnit report.
+        run: >-
+          ./gradlew
+          :directml-windows-bindings:test
+          :directml-inference:test
+          :directml-encoder:test
+          :directml-sidecar:test
+          --no-daemon
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-java21-${{ matrix.os }}
+          path: |
+            directml-windows-bindings/build/reports/tests/
+            directml-inference/build/reports/tests/
+            directml-encoder/build/reports/tests/
+            directml-sidecar/build/reports/tests/
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Windows DirectML GPU tests – optional, manual trigger only
+  # Runs on a self-hosted Windows runner with DirectML-capable GPU.
+  # ──────────────────────────────────────────────────────────────────────
+  directml-gpu-tests:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.run_directml_tests == true
+    runs-on: [ self-hosted, Windows, DirectML ]
+    name: "DirectML GPU tests (Windows self-hosted)"
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run DirectML GPU tests
+        run: >-
+          ./gradlew
+          :directml-windows-bindings:test
+          :directml-encoder:test
+          --no-daemon
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-directml-gpu
+          path: |
+            directml-windows-bindings/build/reports/tests/
+            directml-encoder/build/reports/tests/
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Real-model reference tests – manual trigger only
+  # Downloads large model checkpoints; requires cache or secrets.
+  # ──────────────────────────────────────────────────────────────────────
+  real-model-tests:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.run_real_model_tests == true
+    runs-on: [ self-hosted, Windows, DirectML ]
+    name: "Real-model reference tests"
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache model checkpoints
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/windirectml/models
+          key: model-cache-${{ runner.os }}-${{ hashFiles('SUPPORTED_MODELS.md') }}
+          restore-keys: |
+            model-cache-${{ runner.os }}-
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run real-model reference tests
+        run: >-
+          ./gradlew
+          :directml-encoder:test
+          --no-daemon
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-real-model
+          path: |
+            directml-encoder/build/reports/tests/
+          retention-days: 14
