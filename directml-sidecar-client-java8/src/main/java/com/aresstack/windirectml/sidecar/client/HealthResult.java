@@ -16,9 +16,13 @@ public final class HealthResult {
     private final String mode;
     private final String embeddingBackend;
     private final boolean embeddingReady;
+    private final boolean embeddingFallback;
+    private final String embeddingFallbackReason;
     private final String rerankerBackend;
     private final boolean rerankerReady;
     private final String rerankerModel;
+    private final boolean rerankerFallback;
+    private final String rerankerFallbackReason;
     private final boolean summarizerReady;
     private final String summarizerBackend;
     private final String summarizerModel;
@@ -29,7 +33,9 @@ public final class HealthResult {
                          boolean modelLoaded, boolean shuttingDown,
                          String mode, String embeddingBackend,
                          boolean embeddingReady,
+                         boolean embeddingFallback, String embeddingFallbackReason,
                          String rerankerBackend, boolean rerankerReady, String rerankerModel,
+                         boolean rerankerFallback, String rerankerFallbackReason,
                          boolean summarizerReady, String summarizerBackend, String summarizerModel,
                          String lastError, String raw) {
         this.status = status;
@@ -40,9 +46,13 @@ public final class HealthResult {
         this.mode = mode;
         this.embeddingBackend = embeddingBackend;
         this.embeddingReady = embeddingReady;
+        this.embeddingFallback = embeddingFallback;
+        this.embeddingFallbackReason = embeddingFallbackReason;
         this.rerankerBackend = rerankerBackend;
         this.rerankerReady = rerankerReady;
         this.rerankerModel = rerankerModel;
+        this.rerankerFallback = rerankerFallback;
+        this.rerankerFallbackReason = rerankerFallbackReason;
         this.summarizerReady = summarizerReady;
         this.summarizerBackend = summarizerBackend;
         this.summarizerModel = summarizerModel;
@@ -52,8 +62,8 @@ public final class HealthResult {
 
     public static HealthResult from(JsonNode result, String raw) {
         if (result == null) return new HealthResult(null, false, false, false, false,
-                null, null, false, null, false, null,
-                false, null, null, null, raw);
+                null, null, false, false, null, null, false, null,
+                false, null, false, null, null, null, raw);
         return new HealthResult(
                 asText(result, "status"),
                 asBool(result, "ready"),
@@ -63,9 +73,13 @@ public final class HealthResult {
                 asText(result, "mode"),
                 asText(result, "embeddingBackend"),
                 asBool(result, "embeddingReady"),
+                asBool(result, "embeddingFallback"),
+                asText(result, "embeddingFallbackReason"),
                 asText(result, "rerankerBackend"),
                 asBool(result, "rerankerReady"),
                 asText(result, "rerankerModel"),
+                asBool(result, "rerankerFallback"),
+                asText(result, "rerankerFallbackReason"),
                 asBool(result, "summarizerReady"),
                 asText(result, "summarizerBackend"),
                 asText(result, "summarizerModel"),
@@ -122,6 +136,20 @@ public final class HealthResult {
     public String getRerankerBackend() { return rerankerBackend; }
     public boolean isRerankerReady() { return rerankerReady; }
     public String getRerankerModel() { return rerankerModel; }
+
+    /**
+     * {@code true} when the embedding backend was selected via {@code auto}
+     * and the preferred backend (DirectML) was not available, so the sidecar
+     * silently fell back to CPU. Use {@link #getEmbeddingFallbackReason()}
+     * for the human-readable reason. Always {@code false} for forced modes
+     * ({@code cpu}/{@code directml}) – those fail hard instead.
+     */
+    public boolean isEmbeddingFallback() { return embeddingFallback; }
+    public String getEmbeddingFallbackReason() { return embeddingFallbackReason; }
+
+    /** See {@link #isEmbeddingFallback()}; same semantics for the reranker. */
+    public boolean isRerankerFallback() { return rerankerFallback; }
+    public String getRerankerFallbackReason() { return rerankerFallbackReason; }
 
     public boolean isSummarizerReady() { return summarizerReady; }
     public String getSummarizerBackend() { return summarizerBackend; }

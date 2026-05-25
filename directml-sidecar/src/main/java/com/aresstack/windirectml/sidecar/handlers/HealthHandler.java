@@ -33,9 +33,17 @@ public final class HealthHandler implements JsonRpcMethodHandler {
         result.put("embeddingBackend",
                 status.getEmbeddingBackend() != null ? status.getEmbeddingBackend() : "none");
         result.put("embeddingReady", status.isEmbeddingReady());
+        result.put("embeddingFallback", status.isEmbeddingFallback());
+        if (status.getEmbeddingFallbackReason() != null) {
+            result.put("embeddingFallbackReason", status.getEmbeddingFallbackReason());
+        }
         result.put("rerankerBackend",
                 status.getRerankerBackend() != null ? status.getRerankerBackend() : "none");
         result.put("rerankerReady", status.isRerankerReady());
+        result.put("rerankerFallback", status.isRerankerFallback());
+        if (status.getRerankerFallbackReason() != null) {
+            result.put("rerankerFallbackReason", status.getRerankerFallbackReason());
+        }
         if (status.getRerankerModel() != null) result.put("rerankerModel", status.getRerankerModel());
         // Phi-3 summarizer
         result.put("summarizerReady", status.isSummarizerReady());
