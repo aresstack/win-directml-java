@@ -532,6 +532,27 @@ public final class DirectMlPhi3Sidecar {
             }
 
             log.info("Sidecar shutting down (stdin closed or shutdown requested)");
+
+            // Wait briefly for in-flight async handlers (e.g. SummarizeHandler,
+            // which offloads inference to a daemon worker thread) to finish
+            // writing their response before the writer is closed by
+            // try-with-resources. Without this wait, a `summarize` immediately
+            // followed by `shutdown` is racy: the dispatch loop may exit and
+            // close stdout before the async worker writes its response. The
+            // async handlers set `status.setBusy(true)` synchronously on the
+            // dispatch thread before starting their worker, so by the time we
+            // reach this point `isBusy()` reliably reflects pending async work.
+            // Bounded so a hung worker can't block shutdown indefinitely.
+            long deadlineNanos = System.nanoTime()
+                    + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (status.isBusy() && System.nanoTime() < deadlineNanos) {
+                try {
+                    Thread.sleep(5);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
         } catch (IOException e) {
             log.error("Sidecar IO error", e);
             return 1;
