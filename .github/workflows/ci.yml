@@ -43,14 +43,16 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Run Java 8 module tests
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          arguments: >-
-            :directml-config:test
-            :directml-sidecar-client-java8:test
-            :directml-sidecar-workbench:test
-            --no-daemon
+
+      - name: Run Java 8 module tests
+        run: >-
+          ./gradlew
+          :directml-config:test
+          :directml-sidecar-client-java8:test
+          :directml-sidecar-workbench:test
+          --no-daemon
 
       - name: Upload test reports
         if: always()
@@ -86,18 +88,20 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Run Java 21 module tests (CPU-only, no real models)
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          # DirectML tests auto-skip on non-Windows via assumeTrue(WindowsBindings.isSupported()).
-          # Real-model tests auto-skip when checkpoint dirs are absent (@EnabledIf("modelPresent")).
-          # Both produce explicit skip messages in the JUnit report.
-          arguments: >-
-            :directml-windows-bindings:test
-            :directml-inference:test
-            :directml-encoder:test
-            :directml-sidecar:test
-            --no-daemon
+
+      - name: Run Java 21 module tests (CPU-only, no real models)
+        # DirectML tests auto-skip on non-Windows via assumeTrue(WindowsBindings.isSupported()).
+        # Real-model tests auto-skip when checkpoint dirs are absent (@EnabledIf("modelPresent")).
+        # Both produce explicit skip messages in the JUnit report.
+        run: >-
+          ./gradlew
+          :directml-windows-bindings:test
+          :directml-inference:test
+          :directml-encoder:test
+          :directml-sidecar:test
+          --no-daemon
 
       - name: Upload test reports
         if: always()
@@ -132,13 +136,15 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Run DirectML GPU tests
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          arguments: >-
-            :directml-windows-bindings:test
-            :directml-encoder:test
-            --no-daemon
+
+      - name: Run DirectML GPU tests
+        run: >-
+          ./gradlew
+          :directml-windows-bindings:test
+          :directml-encoder:test
+          --no-daemon
 
       - name: Upload test reports
         if: always()
@@ -180,12 +186,14 @@ jobs:
           restore-keys: |
             model-cache-${{ runner.os }}-
 
-      - name: Run real-model reference tests
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          arguments: >-
-            :directml-encoder:test
-            --no-daemon
+
+      - name: Run real-model reference tests
+        run: >-
+          ./gradlew
+          :directml-encoder:test
+          --no-daemon
 
       - name: Upload test reports
         if: always()
