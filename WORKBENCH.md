@@ -14,7 +14,9 @@ directml-sidecar-workbench        Java 8 Swing developer UI
 
 Both modules **must not** depend on `directml-windows-bindings`,
 `directml-encoder`, `directml-inference`, or `directml-sidecar`. They talk
-to the sidecar only via stdin/stdout JSON-RPC.
+to the sidecar only via stdin/stdout JSON-RPC. The Workbench may use shared
+Java-8 helper classes from the client module, such as the CPU-only model
+validator described in [`docs/model-validation.md`](docs/model-validation.md).
 
 ## Build & run
 
@@ -34,7 +36,7 @@ The window opens with seven tabs:
 
 | Tab                | Purpose                                                                                                                                                                                 |
 |--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Config & Control   | Java exe, sidecar jar, model dir, `embed.backend`, DLL override, extra JVM args, timeout. Buttons: `Start / Stop / Restart Sidecar`, `Health`, `Clear Logs`. Live command-line preview. |
+| Config & Control   | Java exe, sidecar jar, model dir, `embed.backend`, DLL override, extra JVM args, timeout. Buttons: `Start / Stop / Restart Sidecar`, `Health`, `Validate Models`, `Clear Logs`. Live command-line preview. `Validate Models` runs the CPU-only model directory check without starting the sidecar. |
 | Health             | `sidecarRunning`, `embeddingReady`, `embeddingBackend`, `modelLoaded`, `mode`, `lastError` + raw JSON.                                                                                  |
 | Embeddings         | Two text fields (A/B), `Embed A`, `Embed B`, `Cosine Similarity`, dimension/timing/backend readout.                                                                                     |
 | Summarize          | Input text, `maxTokens` spinner, summary output, raw response. Shows JSON-RPC errors clearly when no summarizer is loaded.                                                              |

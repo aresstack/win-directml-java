@@ -2,6 +2,8 @@ package com.aresstack.windirectml.sidecar.workbench.panels;
 
 import com.aresstack.windirectml.sidecar.client.SidecarClientConfig;
 import com.aresstack.windirectml.sidecar.client.SidecarException;
+import com.aresstack.windirectml.sidecar.client.validation.ModelValidator;
+import com.aresstack.windirectml.sidecar.client.validation.ValidationReport;
 import com.aresstack.windirectml.sidecar.workbench.WorkbenchModel;
 
 import javax.swing.BorderFactory;
@@ -24,6 +26,7 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.File;
 
 /**
  * Configuration form + process control buttons.
@@ -50,13 +53,11 @@ public final class ConfigPanel extends JPanel {
     private final JTextField rerankModelDirField = new JTextField("");
     private final JComboBox<String> rerankBackendBox =
             new JComboBox<String>(new String[]{"auto", "directml", "cpu"});
-    // ── Phi-3 Summarizer ────────────────────────────────────────────────
     private final JTextField phi3ModelDirField = new JTextField(
             "model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128");
     private final JComboBox<String> phi3BackendBox =
             new JComboBox<String>(new String[]{"auto", "directml", "cpu"});
     private final JTextField phi3MaxTokensField = new JTextField("512");
-    // ────────────────────────────────────────────────────────────────────
     private final JCheckBox debugBox = new JCheckBox("windirectml.debug=true");
     private final JTextField dllOverrideField = new JTextField("");
     private final JTextField timeoutField = new JTextField("30000");
@@ -69,6 +70,7 @@ public final class ConfigPanel extends JPanel {
     private final JButton stopBtn = new JButton("Stop Sidecar");
     private final JButton restartBtn = new JButton("Restart Sidecar");
     private final JButton healthBtn = new JButton("Health");
+    private final JButton validateBtn = new JButton("Validate Models");
     private final JButton clearBtn = new JButton("Clear Logs");
 
     private final JTextArea logArea = new JTextArea(8, 60);
@@ -109,6 +111,7 @@ public final class ConfigPanel extends JPanel {
         buttons.add(restartBtn);
         buttons.add(Box.createHorizontalStrut(20));
         buttons.add(healthBtn);
+        buttons.add(validateBtn);
         buttons.add(clearBtn);
 
         commandPreview.setEditable(false);
@@ -210,11 +213,23 @@ public final class ConfigPanel extends JPanel {
                 runAsync("Health", new Callable() {
                     @Override
                     public String call() throws SidecarException {
-                        return "health → " + model.health().getStatus()
+                        return "health -> " + model.health().getStatus()
                                 + " (embed=" + model.health().getEmbeddingBackend()
                                 + ", embedReady=" + model.health().isEmbeddingReady()
                                 + ", summarizer=" + model.health().getSummarizerBackend()
                                 + ", summarizerReady=" + model.health().isSummarizerReady() + ")";
+                    }
+                });
+            }
+        });
+        validateBtn.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                applyConfigToModel();
+                runAsync("Validate Models", new Callable() {
+                    @Override
+                    public String call() {
+                        return validateConfiguredModels();
                     }
                 });
             }
@@ -225,6 +240,30 @@ public final class ConfigPanel extends JPanel {
                 logArea.setText("");
             }
         });
+    }
+
+    private String validateConfiguredModels() {
+        StringBuilder sb = new StringBuilder();
+        String embedModel = (String) embedModelBox.getSelectedItem();
+        if (embedModel != null && embedModel.toLowerCase(java.util.Locale.ROOT).contains("e5")) {
+            sb.append(ModelValidator.validate(fileOrNull(e5ModelDirField.getText()),
+                    ModelValidator.e5Expectation((String) e5VariantBox.getSelectedItem())).format());
+        } else {
+            sb.append(ModelValidator.validate(fileOrNull(modelDirField.getText()),
+                    ModelValidator.minilmExpectation()).format());
+        }
+        String rerankDir = rerankModelDirField.getText();
+        if (rerankDir != null && rerankDir.trim().length() > 0) {
+            sb.append('\n').append('\n');
+            sb.append(ModelValidator.validate(fileOrNull(rerankDir),
+                    ModelValidator.rerankerExpectation()).format());
+        }
+        return sb.toString();
+    }
+
+    private static File fileOrNull(String value) {
+        if (value == null || value.trim().length() == 0) return null;
+        return new File(value.trim());
     }
 
     private void applyConfigToModel() {
@@ -243,7 +282,7 @@ public final class ConfigPanel extends JPanel {
         try {
             int mt = Integer.parseInt(phi3MaxTokensField.getText().trim());
             cfg.setPhi3MaxTokens(mt > 0 ? mt : 0);
-        } catch (NumberFormatException ignored) { /* keep previous */ }
+        } catch (NumberFormatException ignored) { }
         cfg.setDirectmlDebug(debugBox.isSelected());
         cfg.setDirectmlDllOverride(dllOverrideField.getText().trim());
         cfg.setExtraJvmArgs(extraJvmField.getText().trim());
@@ -277,7 +316,7 @@ public final class ConfigPanel extends JPanel {
     }
 
     private void runAsync(final String action, final Callable c) {
-        appendLog("→ " + action + "…");
+        appendLog("-> " + action + "...");
         SwingWorker<String, Void> w = new SwingWorker<String, Void>() {
             @Override
             protected String doInBackground() throws Exception {
@@ -287,10 +326,10 @@ public final class ConfigPanel extends JPanel {
             @Override
             protected void done() {
                 try {
-                    appendLog("✔ " + get());
+                    appendLog(get());
                 } catch (Exception e) {
                     Throwable cause = (e.getCause() != null) ? e.getCause() : e;
-                    appendLog("✖ " + action + " failed: " + cause.getMessage());
+                    appendLog(action + " failed: " + cause.getMessage());
                 }
                 if (onChange != null) onChange.run();
             }
