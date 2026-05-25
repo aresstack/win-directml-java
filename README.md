@@ -251,15 +251,28 @@ as an error just because DirectML is unavailable.
 ## Java 8 host integration
 
 The host application uses `directml-sidecar-client-java8` and does not need FFM,
-DirectML bindings or Java 21 APIs on its own classpath. Use a matching version
-of the Java 8 client and Java 21 sidecar artifact.
+DirectML bindings or Java 21 APIs on its own classpath. The Java 21 sidecar is
+resolved, copied or packaged separately and then started as a separate process.
 
 ```gradle
+configurations {
+    directMlSidecarDistribution
+}
+
 dependencies {
     implementation 'com.aresstack:directml-sidecar-client-java8:0.1.0-beta.1'
-    runtimeOnly 'com.aresstack:directml-sidecar:0.1.0-beta.1'
+    directMlSidecarDistribution 'com.aresstack:directml-sidecar:0.1.0-beta.1'
+}
+
+tasks.register('copyDirectMlSidecarDistribution', Copy) {
+    from configurations.directMlSidecarDistribution
+    into layout.buildDirectory.dir('directml-sidecar/lib')
 }
 ```
+
+Do not put `directml-sidecar` on the Java 8 application's `implementation` or
+`runtimeOnly` classpath. It is a Java 21 sidecar artifact and belongs in a
+separate distribution/launcher path.
 
 Typical host flow:
 
@@ -374,9 +387,12 @@ Published artifacts under `com.aresstack:`:
 dependencies {
     implementation 'com.aresstack:directml-runtime:0.1.0-beta.1'
     implementation 'com.aresstack:directml-sidecar-client-java8:0.1.0-beta.1'
-    runtimeOnly 'com.aresstack:directml-sidecar:0.1.0-beta.1'
 }
 ```
+
+For Java 8 hosts, resolve `com.aresstack:directml-sidecar:<version>` through a
+separate sidecar distribution configuration or a separate Java 21 launcher
+module, not through the Java 8 host runtime classpath.
 
 Full artifact overview: [`docs/artifact-structure.md`](docs/artifact-structure.md).
 
