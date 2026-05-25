@@ -6,6 +6,9 @@ include 'directml-inference'
 include 'directml-encoder'
 include 'directml-sidecar'
 include 'directml-sidecar-client-java8'
+include 'directml-runtime'
 include 'directml-sidecar-workbench'
 include 'examples:java8-client'
 project(':examples:java8-client').projectDir = file('examples/java8-client')
+include 'examples:java21-direct-api'
+project(':examples:java21-direct-api').projectDir = file('examples/java21-direct-api')

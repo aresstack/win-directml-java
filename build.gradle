@@ -21,6 +21,7 @@ ext.publishableModules = [
         'directml-config',
         'directml-windows-bindings',
         'directml-encoder',
+        'directml-runtime',
         'directml-sidecar-client-java8',
 ]
 

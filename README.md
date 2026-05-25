@@ -77,6 +77,42 @@ by score.
 
 ## Architecture
 
+### Direct Java 21 API (no sidecar)
+
+Java 21 applications can use embeddings and reranking directly in-process,
+without starting the JSON-RPC sidecar:
+
+```java
+import com.aresstack.windirectml.runtime.facade.*;
+
+// Create runtime (defaults to auto backend: DirectML → CPU fallback)
+LocalMlRuntime runtime = LocalMlRuntime.create();
+
+// Load and use embedding model
+var embedCfg = EmbeddingModelConfig.miniLm(Path.of("model/all-MiniLM-L6-v2"));
+try (var embeddings = runtime.loadEmbeddingModel(embedCfg)) {
+    float[] vector = embeddings.embed("hello world");
+    List<float[]> batch = embeddings.embedBatch(List.of("a", "b", "c"));
+}
+
+// Load and use reranker
+var rerankCfg = new RerankerModelConfig(Path.of("model/cross-encoder-ms-marco-MiniLM-L-6-v2"));
+try (var reranker = runtime.loadRerankerModel(rerankCfg)) {
+    var results = reranker.rerank("search query", List.of("doc1", "doc2"));
+}
+```
+
+Dependency (Gradle):
+```groovy
+implementation 'com.aresstack:directml-runtime:<version>'
+```
+
+The direct API hides sidecar transport details and does not require JSON-RPC or a
+separate process. Unsupported model families (e.g. XLM-R/SentencePiece) throw
+`UnsupportedModelException` with an explicit message.
+
+### Sidecar architecture (Java 8 host)
+
 ```text
 Java 8 host application
     │ JSON-RPC 2.0, one message per line
@@ -107,6 +143,7 @@ layers are intentionally **not** included.
 directml-config                 Minimal inference configuration
 directml-windows-bindings       Java 21 FFM bindings for DXGI, D3D12, DirectML, COM/HRESULT
 directml-encoder                MiniLM, E5 and reranker encoder/runtime code
+directml-runtime                Public Java 21 facade for direct in-process use (no sidecar)
 directml-sidecar                JSON-RPC 2.0 sidecar entry point and handlers
 directml-sidecar-client-java8   Pure Java 8 client for host applications
 directml-sidecar-workbench      Java 8 Swing workbench / diagnostics UI
