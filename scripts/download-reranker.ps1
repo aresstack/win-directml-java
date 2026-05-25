@@ -1,13 +1,6 @@
-[CmdletBinding()]
-param(
-    [string]$Repo = 'cross-encoder/ms-marco-MiniLM-L-6-v2',
-    [string]$Destination = 'model/cross-encoder-ms-marco-MiniLM-L-6-v2'
-)
-
-# Downloads a HuggingFace cross-encoder reranker checkpoint into
-# `$Destination`. The sidecar discovers the model automatically when
-# the directory contains `config.json`, `tokenizer.json` and
-# `model.safetensors`.
+# Downloads a HuggingFace cross-encoder reranker checkpoint.
+# The sidecar discovers the model automatically when the directory
+# contains `config.json`, `tokenizer.json` and `model.safetensors`.
 #
 # Typical models (BERT-WordPiece, drop-in compatible):
 #   - cross-encoder/ms-marco-MiniLM-L-6-v2   (~90 MB, default)
@@ -17,35 +10,47 @@ param(
 # SentencePiece-only families (e.g. bge-reranker-v2-m3) are NOT yet
 # supported – the WordPiece tokenizer in directml-encoder rejects
 # them at load time.
-
+#
+# Usage:
+#   pwsh scripts/download-reranker.ps1
+#   pwsh scripts/download-reranker.ps1 -Variant ms-marco-MiniLM-L-12-v2
+#   pwsh scripts/download-reranker.ps1 -Force -Validate
+[CmdletBinding()]
+param(
+    [string]$ModelRoot = (Join-Path $PSScriptRoot '..\\model'),
+    [ValidateSet('ms-marco-MiniLM-L-6-v2', 'ms-marco-MiniLM-L-12-v2', 'bge-reranker-base')]
+    [string]$Variant = 'ms-marco-MiniLM-L-6-v2',
+    [switch]$Force,
+    [switch]$Validate
+)
 $ErrorActionPreference = 'Stop'
 
-if (-not (Test-Path $Destination)) {
-    New-Item -ItemType Directory -Path $Destination | Out-Null
+# Load shared helper
+. (Join-Path $PSScriptRoot '_Download-HfModel.ps1')
+
+# Map variant to repo
+$repoMap = @{
+    'ms-marco-MiniLM-L-6-v2'  = @{ Repo = 'cross-encoder/ms-marco-MiniLM-L-6-v2';  Folder = 'cross-encoder-ms-marco-MiniLM-L-6-v2' };
+    'ms-marco-MiniLM-L-12-v2' = @{ Repo = 'cross-encoder/ms-marco-MiniLM-L-12-v2'; Folder = 'cross-encoder-ms-marco-MiniLM-L-12-v2' };
+    'bge-reranker-base'        = @{ Repo = 'BAAI/bge-reranker-base';                 Folder = 'bge-reranker-base' };
 }
+$entry = $repoMap[$Variant]
+$targetDir = Join-Path $ModelRoot $entry.Folder
 
-$files = @('config.json', 'tokenizer.json', 'tokenizer_config.json',
-           'special_tokens_map.json', 'vocab.txt', 'model.safetensors')
+Write-Host "Downloading Reranker variant '$Variant' from $($entry.Repo)"
 
-foreach ($f in $files) {
-    $url = "https://huggingface.co/$Repo/resolve/main/$f"
-    $out = Join-Path $Destination $f
-    if (Test-Path $out) {
-        Write-Host "skip $f (already present)"
-        continue
-    }
-    Write-Host "fetching $f from $Repo..."
-    try {
-        Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
-    } catch {
-        # vocab.txt / tokenizer_config.json are optional on some repos.
-        if ($f -in @('vocab.txt', 'tokenizer_config.json', 'special_tokens_map.json')) {
-            Write-Warning "optional file $f not available, skipping"
-            continue
-        }
-        throw
-    }
-}
+$result = Download-HfModel `
+    -Repo $entry.Repo `
+    -TargetDir $targetDir `
+    -RequiredFiles @('model.safetensors', 'tokenizer.json', 'config.json') `
+    -OptionalFiles @('tokenizer_config.json', 'special_tokens_map.json', 'vocab.txt') `
+    -Force:$Force `
+    -Validate:$Validate
 
-Write-Host "Reranker model ready in: $Destination"
+Write-Host ""
+Write-Host "Reranker ($Variant) ready at: $result"
+
+# Run Model-Doctor
+Write-Host ""
+& (Join-Path $PSScriptRoot 'model-doctor.ps1') -ModelDir $result
 

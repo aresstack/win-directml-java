@@ -242,7 +242,8 @@ For each family both backends exist behind the same API:
   usage is fully supported.
 
 Fetch the models once. Size depends on the selected variant
-(MiniLM ≈ 90 MB; E5 small ≈ 130 MB, base ≈ 440 MB, large ≈ 1.3 GB):
+(MiniLM ≈ 90 MB; E5 small ≈ 130 MB, base ≈ 440 MB, large ≈ 1.3 GB;
+Reranker ≈ 90 MB):
 
 ```powershell
 pwsh scripts/download-minilm.ps1                          # MiniLM (default 384-dim)
@@ -250,6 +251,25 @@ pwsh scripts/download-e5.ps1 -Variant base-sts-en-de      # E5 de/en STS (768-di
 pwsh scripts/download-e5.ps1 -Variant small-v2            # E5 small (384-dim)
 pwsh scripts/download-e5.ps1 -Variant base-v2             # E5 base (768-dim)
 pwsh scripts/download-e5.ps1 -Variant large-v2            # E5 large (1024-dim)
+pwsh scripts/download-reranker.ps1                        # Reranker (default ms-marco L-6)
+pwsh scripts/download-reranker.ps1 -Variant ms-marco-MiniLM-L-12-v2
+```
+
+All download scripts share a consistent parameter interface:
+
+| Parameter    | Description                                              |
+|--------------|----------------------------------------------------------|
+| `-ModelRoot` | Parent directory for model folders (default: `model/`)   |
+| `-Variant`   | Model variant to download                                |
+| `-Force`     | Re-download even if files already exist                  |
+| `-Validate`  | Display SHA-256 checksums and file sizes after download  |
+
+Each script automatically runs `scripts/model-doctor.ps1` after download to
+verify the model is complete and immediately usable. You can also run the
+doctor standalone:
+
+```powershell
+pwsh scripts/model-doctor.ps1 -ModelDir model/all-MiniLM-L6-v2
 ```
 
 `embed("…")` then returns a real L2-normalised vector regardless of the
