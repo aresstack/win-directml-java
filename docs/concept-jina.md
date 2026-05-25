@@ -25,14 +25,21 @@ geklärt ist, und wird hier nicht separat betrachtet (siehe
 
 ## Unterschiede zu MiniLM / E5
 
-| Aspekt        | MiniLM-L6                 | E5-base               | Jina v2 base-de                                    |
-|---------------|---------------------------|-----------------------|----------------------------------------------------|
-| Architektur   | BERT, 6 Layer, 384-d      | BERT/XLM-R, 12 Layer  | **JinaBERT v2** (BERT-like, 12 Layer, 768-d)       |
-| Positional    | Learned absolute (max 512)| Learned absolute      | **ALiBi** (Attention Linear Biases, kein Pos-Emb)  |
-| Tokenizer     | WordPiece (uncased)       | SentencePiece-BPE     | WordPiece (Jina-custom Vocab, cased)               |
-| Pooling       | Mean + L2                 | Mean + L2             | Mean + L2 (identisch)                              |
-| Output-Dim    | 384                       | 768                   | 768                                                |
-| Max Seq-Len   | 512                       | 512                   | **8 192** (durch ALiBi möglich)                    |
+E5 ist tokenizer-mäßig keine einheitliche Familie: `intfloat/e5-{small,base,large}-v2`
+sind **WordPiece/BERT-base** und werden vom Runtime heute getragen (siehe
+`SUPPORTED_MODELS.md`); `intfloat/multilingual-e5-large-instruct` und der
+in PR #56 reklassifizierte `danielheinz/e5-base-sts-en-de` sind hingegen
+**XLM-R/SentencePiece** und stehen aktuell auf `planned`. In der folgenden
+Tabelle ist „E5-base“ exemplarisch für den WordPiece-Pfad gemeint.
+
+| Aspekt        | MiniLM-L6                 | E5-base (WordPiece) / E5-multilingual (XLM-R) | Jina v2 base-de                                    |
+|---------------|---------------------------|------------------------------------------------|----------------------------------------------------|
+| Architektur   | BERT, 6 Layer, 384-d      | BERT 12 Layer (intfloat-WP) / XLM-R 24 Layer   | **JinaBERT v2** (BERT-like, 12 Layer, 768-d)       |
+| Positional    | Learned absolute (max 512)| Learned absolute                               | **ALiBi** (Attention Linear Biases, kein Pos-Emb)  |
+| Tokenizer     | WordPiece (uncased)       | WordPiece (intfloat-v2) **oder** SentencePiece (multilingual / `e5-base-sts-en-de`) | WordPiece (Jina-custom Vocab, cased)               |
+| Pooling       | Mean + L2                 | Mean + L2                                       | Mean + L2 (identisch)                              |
+| Output-Dim    | 384                       | 768 (base) / 1024 (large)                       | 768                                                |
+| Max Seq-Len   | 512                       | 512                                             | **8 192** (durch ALiBi möglich)                    |
 | Input-Format  | Roh-Text                  | `"query: "`-Prefix    | Roh-Text (kein Prefix erforderlich)                |
 
 Die beiden wirklich relevanten Abweichungen sind **ALiBi** und die
@@ -115,31 +122,39 @@ beides außerhalb des aktuellen Phi-3/MiniLM-Aufwand.
 | Smoke- und Parity-Tests (CPU vs. DML, MiniLM-Stil)          | 1 PT           | gering |
 | **Summe**                                                   | **≈ 7–9 PT**   |        |
 
-Das ist deutlich mehr als der reine E5-Pfad (geschätzt 2–3 PT, weil
-dort nur der Tokenizer fehlt und die Encoder-Layer identisch zu MiniLM
-ist).
+Das ist deutlich mehr als der WordPiece-E5-Pfad
+(`intfloat/e5-*-v2`, bereits im Runtime), bei dem Tokenizer und
+Encoder-Layer identisch zu MiniLM sind. Auch der noch ausstehende
+SentencePiece-/XLM-R-E5-Pfad (`multilingual-e5-large-instruct`,
+`e5-base-sts-en-de`) bleibt damit unabhängig von dieser Jina-Bewertung.
 
 ## Entscheidung
 
-**Status: not planned für das Maven-Central-Release.**
+**Decision für dieses Release: nicht im Maven-Central-Release enthalten
+(Implementierung post-release vorgesehen).**
 
-Begründung:
+Das ist konsistent mit der Registry-Klassifikation `Status.PLANNED` für
+`jinaai/jina-embeddings-v2-base-de`: `PLANNED` bedeutet im Registry-
+Vokabular genau „vorgesehen, aber noch nicht implementiert – Sidecar
+weist den Embed-Request mit der status-aware `not implemented`-Meldung
+ab“. Das Konzept dokumentiert lediglich, dass diese Implementierung
+nicht im aktuellen Release-Scope liegt; es ändert oder widerspricht der
+Registry-Klassifikation nicht.
+
+Begründung für den Post-Release-Slot:
 
 1. Jina v2 verlangt zwei Architektur-Neuerungen (ALiBi, optional GeGLU),
    die der bestehende generische BERT-Encoder nicht abdeckt.
 2. Es existiert kein offizieller ONNX-Export; die Pipeline müsste selbst
    aufgebaut werden.
-3. MiniLM und (sobald freigeschaltet) E5 decken die deutsch- und
-   mehrsprachigen Embeddings für den Release ausreichend ab.
+3. MiniLM und die `intfloat/e5-*-v2`-WordPiece-Varianten decken die
+   englisch-/deutschsprachigen Embeddings für den Release ausreichend ab;
+   die XLM-R-basierten E5-Modelle (`multilingual-e5-large-instruct`,
+   `e5-base-sts-en-de`) bleiben analog auf `planned`.
 4. Reranking-Use-Cases sind über die generische Reranker-Runtime mit
    `cross-encoder/ms-marco-MiniLM-L-6-v2` bzw. `bge-reranker` bereits
    abgedeckt – Jina-Reranker bringt keinen funktionalen Mehrwert für
    das Release.
-
-→ `EmbeddingModelRegistry` lässt `jinaai/jina-embeddings-v2-base-de`
-weiterhin als `PLANNED` mit der bestehenden „needs custom Jina v2
-attention path“-Begründung stehen. Die Einreichung über den Sidecar
-liefert weiterhin den klar lesbaren `not implemented`-Fehler.
 
 **Re-Evaluierung** nach dem Release, wenn:
 
@@ -147,6 +162,25 @@ liefert weiterhin den klar lesbaren `not implemented`-Fehler.
   Varianten, BGE-M3) gebraucht werden, oder
 - Nutzer-Feedback explizit Jina-Embeddings für deutsche Long-Document-
   Retrieval-Cases anfordert.
+
+## Doku-Check / Test-Nachweis
+
+Dieser Konzept-PR ändert ausschließlich `docs/concept-jina.md` und den
+Index in `docs/README.md`. Es werden weder Code noch Konfiguration noch
+Registry-Einträge angepasst, und es entsteht kein Build-Impact.
+
+- Keine Java-Quellen geändert → keine `*.java`-Tests neu auszuführen.
+- Registry-Klassifikation (`EmbeddingModelRegistry`) bleibt unverändert
+  bei `Status.PLANNED` für `jinaai/jina-embeddings-v2-base-de`; die
+  bestehende Test-Suite in `directml-config`
+  (`EmbeddingModelRegistryTest`) bleibt der maßgebliche Nachweis und
+  erfordert hier kein erneutes Ausführen, weil keine ihrer geprüften
+  Inputs verändert wurden. Auf einer Windows-/CI-Umgebung lässt sich
+  das mit `./gradlew :directml-config:test` jederzeit verifizieren.
+- Doku-Verlinkung wurde manuell geprüft: Index-Eintrag in
+  `docs/README.md` verweist relativ auf `concept-jina.md` im selben
+  Ordner; Querverlinkung zu `concept-reranker.md` ist analog
+  vorhanden.
 
 ## Akzeptanzkriterien (Issue 34)
 
@@ -157,8 +191,8 @@ liefert weiterhin den klar lesbaren `not implemented`-Fehler.
 - [x] Gewichtslayout geprüft (HF-PyTorch, kein offizieller ONNX-Export,
       ALiBi-Slopes laufzeitberechnet, GeGLU-Keys abweichend).
 - [x] CPU-/DirectML-Aufwand geschätzt (≈ 7–9 PT, ALiBi + GeGLU dominant).
-- [x] Entscheidung dokumentiert: **not planned für Maven-Central-Release**
-      (Status im Registry bleibt `PLANNED`, Re-Evaluierung Post-Release).
+- [x] Entscheidung dokumentiert: Implementierung **post-release**
+      (konsistent mit Registry-Status `PLANNED`).
 - [x] Kein Blocker für das Maven-Central-Release – die Klassifikation
       ist bereits korrekt verdrahtet (`EmbeddingModelRegistry` →
       `Status.PLANNED`, Sidecar liefert `not implemented`-Antwort).

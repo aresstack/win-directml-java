@@ -1,7 +1,8 @@
 # Konzept-Dokumente
 
 Diese Ordner-Sammlung hält die "konzeptionellen Vorarbeiten" der Roadmap
-(Issues 23–25). Implementierungs-Pflicht besteht in dieser Phase nicht.
+(Issues 23–25 sowie Post-Release-Themen wie Issue 34).
+Implementierungs-Pflicht besteht in dieser Phase nicht.
 
 | Doc                                                            | Issue | Inhalt                                       |
 |----------------------------------------------------------------|-------|----------------------------------------------|
