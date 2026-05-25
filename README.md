@@ -154,13 +154,13 @@ layers are intentionally **not** included.
 ```text
 directml-config                     Minimal inference configuration
 directml-windows-bindings           Java 21 FFM bindings for DXGI, D3D12, DirectML, COM/HRESULT
+directml-inference                  Experimental Phi-3 summarizer path
 directml-encoder                    MiniLM, E5 and reranker encoder/runtime code
 directml-runtime                    Public Java 21 facade for direct in-process use (no sidecar)
 directml-sidecar-protocol-java8     Shared protocol/validation types (Java 8 compatible)
 directml-sidecar                    JSON-RPC 2.0 sidecar – Java 8 bridge/adapter over directml-runtime
 directml-sidecar-client-java8       Pure Java 8 client for host applications
 directml-sidecar-workbench          Java 8 Swing workbench / diagnostics UI
-directml-inference                  Experimental Phi-3 summarizer path
 ```
 
 ## Requirements
@@ -251,13 +251,28 @@ as an error just because DirectML is unavailable.
 ## Java 8 host integration
 
 The host application uses `directml-sidecar-client-java8` and does not need FFM,
-DirectML bindings or Java 21 APIs on its own classpath.
+DirectML bindings or Java 21 APIs on its own classpath. The Java 21 sidecar is
+resolved, copied or packaged separately and then started as a separate process.
 
 ```gradle
+configurations {
+    directMlSidecarDistribution
+}
+
 dependencies {
     implementation 'com.aresstack:directml-sidecar-client-java8:0.1.0-beta.1'
+    directMlSidecarDistribution 'com.aresstack:directml-sidecar:0.1.0-beta.1'
+}
+
+tasks.register('copyDirectMlSidecarDistribution', Copy) {
+    from configurations.directMlSidecarDistribution
+    into layout.buildDirectory.dir('directml-sidecar/lib')
 }
 ```
+
+Do not put `directml-sidecar` on the Java 8 application's `implementation` or
+`runtimeOnly` classpath. It is a Java 21 sidecar artifact and belongs in a
+separate distribution/launcher path.
 
 Typical host flow:
 
@@ -275,8 +290,8 @@ client.shutdown();
 ```
 
 The Java 8 client exposes typed result objects, JSON-RPC errors, timeout
-handling and orderly process shutdown. Full copy-paste examples are planned in
-`examples/java8-client`.
+handling and orderly process shutdown. Full copy-paste examples are available
+in `examples/java8-client`.
 
 ## Workbench
 
@@ -362,34 +377,44 @@ redistributable.
 
 ## Releases / Maven Central
 
+Maven Central is the primary distribution channel for library and sidecar
+artifacts. GitHub Release zips remain convenience packages for users who want a
+ready-to-run sidecar or workbench distribution.
+
 Published artifacts under `com.aresstack:`:
 
 ```gradle
 dependencies {
-    implementation 'com.aresstack:directml-config:0.1.0-beta.1'
-    implementation 'com.aresstack:directml-windows-bindings:0.1.0-beta.1'
-    implementation 'com.aresstack:directml-encoder:0.1.0-beta.1'
+    implementation 'com.aresstack:directml-runtime:0.1.0-beta.1'
     implementation 'com.aresstack:directml-sidecar-client-java8:0.1.0-beta.1'
 }
 ```
 
-Module overview:
+For Java 8 hosts, resolve `com.aresstack:directml-sidecar:<version>` through a
+separate sidecar distribution configuration or a separate Java 21 launcher
+module, not through the Java 8 host runtime classpath.
+
+Full artifact overview: [`docs/artifact-structure.md`](docs/artifact-structure.md).
 
 | Coordinate | Java | Purpose |
 |---|---|---|
-| `com.aresstack:directml-config` | 21 | Backend / feature-level / GPU-adapter configuration types. |
+| `com.aresstack:directml-config` | 8/21 shared | Configuration, limits and model registry types. |
 | `com.aresstack:directml-windows-bindings` | 21 preview | FFM bindings to D3D12 / DXGI / DirectML plus low-level kernel primitives. |
+| `com.aresstack:directml-inference` | 21 preview | Experimental Phi-3 inference/summarizer path used by the sidecar. |
 | `com.aresstack:directml-encoder` | 21 preview | MiniLM, E5 and cross-encoder reranker pipelines with CPU + DirectML parity. |
+| `com.aresstack:directml-runtime` | 21 preview | Public direct Java 21 ML facade for embeddings and reranking. |
+| `com.aresstack:directml-sidecar-protocol-java8` | 8 | Shared protocol/validation types. |
 | `com.aresstack:directml-sidecar-client-java8` | 8 | JSON-RPC client to talk to the sidecar from a Java 8 host JVM. |
+| `com.aresstack:directml-sidecar` | 21 preview | Java 21 JSON-RPC adapter over `directml-runtime`. |
 
-The `directml-sidecar` and `directml-sidecar-workbench` applications are not
-published as normal Maven library dependencies; they are intended to be shipped
-as self-contained distribution zips via GitHub Releases.
+`directml-sidecar-workbench` is a diagnostics/demo UI and remains a GitHub
+Release zip rather than a stable Maven library artifact.
 
 ### Release command
 
 ```powershell
 ./gradlew :directml-windows-bindings:test :directml-encoder:test `
+          :directml-runtime:test :directml-sidecar-protocol-java8:test `
           :directml-sidecar-client-java8:test :directml-sidecar:test
 .\release.ps1 0.1.0-beta.1
 ```

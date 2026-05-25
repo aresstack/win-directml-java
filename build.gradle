@@ -15,15 +15,19 @@ allprojects {
 
 // ── Publishable modules ─────────────────────────────────────────────
 // Modules that get published to Maven Central as separate artifacts.
-// Sidecar/Workbench applications are shipped as zips via GitHub Releases
-// (`./gradlew :directml-sidecar:distZip`) and are not on Central.
+// `directml-sidecar` is published as a Java 21 application artifact so
+// host applications can resolve a matching sidecar from Maven Central.
+// The release workflow still also attaches sidecar/workbench distribution
+// zips to GitHub Releases as convenience launch packages.
 ext.publishableModules = [
         'directml-config',
         'directml-windows-bindings',
+        'directml-inference',
         'directml-encoder',
         'directml-runtime',
         'directml-sidecar-protocol-java8',
         'directml-sidecar-client-java8',
+        'directml-sidecar',
 ]
 
 subprojects {
