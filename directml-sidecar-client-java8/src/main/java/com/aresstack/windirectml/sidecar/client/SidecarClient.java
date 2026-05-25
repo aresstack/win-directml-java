@@ -232,12 +232,23 @@ public final class SidecarClient {
     }
 
     /**
-     * Cross-encoder reranking. Sends {@code (query, documents, topN)}
-     * and returns the ranked list (already sorted by descending score).
+     * Cross-encoder reranking. Sends {@code (query, documents, topN)} and
+     * returns the ranked list, already sorted by descending score.
      *
-     * @param query    the search query.
+     * <p><b>Score semantics:</b> returned scores are raw classifier logits from
+     * the loaded cross-encoder model. They are model-dependent, intended only
+     * for relative ranking within the same query, and are not globally
+     * calibrated probabilities. Do not compare scores across different models
+     * or queries. See {@link RerankResult} for details.
+     *
+     * @param query     the search query.
      * @param documents candidate documents.
-     * @param topN     {@code <= 0} ⇒ return all results.
+     * @param topN      maximum number of results to return; {@code <= 0}
+     *                  returns all documents. Results are the top-N most
+     *                  relevant after sorting.
+     * @return ranked results sorted descending by score.
+     * @throws SidecarException if local input validation fails, the sidecar
+     *                          rejects the request, or the sidecar is not running.
      */
     public RerankResult rerank(String query, java.util.List<String> documents, int topN)
             throws SidecarException {

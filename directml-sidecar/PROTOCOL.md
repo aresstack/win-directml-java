@@ -428,13 +428,83 @@ Response:
 }
 ```
 
-`score` ist der rohe Classifier-Logit (höher = relevanter). Cross-Encoder-
-Logits sind nicht modellübergreifend kalibriert; Vergleiche sind nur
-innerhalb desselben Modells sinnvoll. `index` bezieht sich auf die
-ursprüngliche Reihenfolge in `documents` – der Host re-resolved den Text.
+`score` ist der rohe Classifier-Logit (höher = relevanter). `index`
+bezieht sich auf die ursprüngliche Reihenfolge in `documents` – der Host
+re-resolved den Text.
+
+#### Score-Semantik
+
+| Eigenschaft | Beschreibung |
+|---|---|
+| **Modellabhängig** | Score-Werte stammen aus dem Classification-Head des jeweiligen Cross-Encoders. Verschiedene Modelle produzieren unterschiedliche Wertebereiche – ein Score von `8.0` bei `ms-marco-MiniLM-L-6-v2` ist nicht mit `8.0` bei einem anderen Modell vergleichbar. |
+| **Nur intra-Query vergleichbar** | Scores sind ausschließlich für das Ranking **innerhalb derselben Query** gedacht. Einen Score aus Query A mit einem Score aus Query B zu vergleichen ist semantisch nicht sinnvoll. |
+| **Nicht global kalibriert** | Scores sind **keine** Wahrscheinlichkeiten und besitzen keinen fixen Schwellenwert für „relevant" vs. „nicht relevant". Es gibt kein universelles Cutoff. |
+
+#### Sortierreihenfolge
+
+Die `results`-Liste wird **absteigend nach Score** zurückgegeben
+(höchster Score = relevantestes Dokument zuerst).
+
+#### `topN`-Semantik
+
+- `topN` begrenzt die Anzahl der zurückgegebenen Ergebnisse.
+- `topN = 0` oder `topN >= documents.length` → alle Dokumente werden
+  zurückgegeben (kein Abschneiden).
+- Die Sortierung geschieht **vor** dem Abschneiden: es werden immer die
+  Top-N relevantesten Ergebnisse geliefert.
+
+#### Eingabevalidierung
+
+- `query` darf nicht leer/blank sein → `INVALID_PARAMS (-32602)`.
+- `documents` muss mindestens einen nicht-leeren/nicht-blank Eintrag
+  enthalten → `INVALID_PARAMS (-32602)`.
+- Leere/blank Einträge in `documents` werden abgelehnt (kein stilles
+  Ignorieren).
 
 Solange kein Reranker-Modell gefunden wird, antwortet `rerank` mit
 `-32005 Not implemented`.
+
+#### Beispiel: typisches RAG-Reranking
+
+```text
+# Schritt 1: Embedding-basierte Vorauswahl liefert 50 Kandidaten
+# Schritt 2: Reranker bewertet die Top-50 mit der Original-Query
+```
+
+```json
+{
+  "jsonrpc": "2.0", "id": "r1", "method": "rerank",
+  "params": {
+    "query": "Wie funktioniert DirectML auf AMD-GPUs?",
+    "documents": [
+      "DirectML nutzt Direct3D 12 und funktioniert auf allen D3D12-kompatiblen GPUs inkl. AMD.",
+      "CUDA ist NVIDIAs proprietäre GPU-Compute-Schnittstelle.",
+      "AMD ROCm bietet eine offene GPU-Programmierplattform für Linux."
+    ],
+    "topN": 2
+  }
+}
+```
+
+Antwort (nur die 2 relevantesten, absteigend sortiert):
+
+```json
+{
+  "jsonrpc": "2.0", "id": "r1",
+  "result": {
+    "model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "results": [
+      { "index": 0, "score": 7.89 },
+      { "index": 2, "score": 2.14 }
+    ]
+  }
+}
+```
+
+Interpretation: Dokument 0 ist deutlich relevanter als Dokument 2.
+Dokument 1 wurde abgeschnitten (topN=2). Die konkreten Score-Werte
+(`7.89`, `2.14`) dienen nur dem relativen Vergleich innerhalb dieser
+Query und haben keine absolute Bedeutung.
 
 ### `shutdown`
 
