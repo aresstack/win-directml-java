@@ -1,33 +1,40 @@
 # Embedding Benchmark Matrix
 
 This document is the reproducible, top-level benchmark reference for the
-**supported embedding models** in `win-directml-java`. It complements the
+**shipped embedding models** in `win-directml-java`. It complements the
 shipping list in [`SUPPORTED_MODELS.md`](SUPPORTED_MODELS.md) and the
 deeper kernel-level write-up in
 [`directml-encoder/BENCHMARK.md`](directml-encoder/BENCHMARK.md).
 
 Scope follows the model registry in `directml-config`
-(`EmbeddingModelRegistry`, `useCase=EMBEDDING`): only models that have a
-real CPU + DirectML runtime path are benchmarked. Models classified as
-🚧 *planned* (`jinaai/jina-embeddings-v2-base-de`,
-`intfloat/multilingual-e5-large-instruct`, `nomic-ai/nomic-embed-text-v1.5`)
-are **not** benchmarked — they have no runtime path on disk yet and the
-project policy is *"Keine Benchmark-Werte ohne echten Lauf"*.
+(`EmbeddingModelRegistry`, `useCase=EMBEDDING`): only models that have
+**status = shipped** and a real CPU + DirectML runtime path are
+benchmarked. Models classified as 🚧 *planned* or 🧪 *experimental*
+are **not** benchmarked here.
 
-> **Measurements vs. recommendations.** Sections [§4](#4-results) and
-> [§5](#5-results-for-danielheinze5-base-sts-en-de) contain measured
-> numbers (or an explicit "not yet measured on this host" note). The
-> derived guidance lives in a clearly separated [§6](#6-recommendations)
-> block and is never mixed with the raw tables.
+> **Excluded from benchmark scope:**
+>
+> - `danielheinz/e5-base-sts-en-de` — classified as 🚧 *planned*
+>   since PR #56: the upstream checkpoint is an XLM-R / SentencePiece
+>   multilingual-E5 derivative and is incompatible with the current
+>   WordPiece-only E5 runtime. No runtime path, no benchmark.
+> - `intfloat/e5-large-v2` — 🧪 *experimental*; not yet release-grade.
+> - `jinaai/jina-embeddings-v2-base-de`, `intfloat/multilingual-e5-large-instruct`,
+>   `nomic-ai/nomic-embed-text-v1.5` — 🚧 *planned*; no runtime path.
+
+> **Measurements vs. recommendations.** Section [§4](#4-results) contains
+> measured numbers. The derived guidance lives in a clearly separated
+> [§5](#5-recommendations) block and is never mixed with the raw tables.
 
 ---
 
 ## 1. Benchmark scope
 
-| Model                                    | Embed family | Backends benchmarked | Source / download                                |
-|------------------------------------------|--------------|----------------------|--------------------------------------------------|
-| `sentence-transformers/all-MiniLM-L6-v2` | `minilm`     | CPU + DirectML       | `scripts/download-minilm.ps1`                    |
-| `danielheinz/e5-base-sts-en-de`          | `e5`         | CPU + DirectML       | `scripts/download-e5.ps1` (`base-sts-en-de`)     |
+| Model                                    | Embed family | Backends benchmarked | Status       | Source / download             |
+|------------------------------------------|--------------|----------------------|--------------|-------------------------------|
+| `sentence-transformers/all-MiniLM-L6-v2` | `minilm`     | CPU + DirectML       | ✅ shipped    | `scripts/download-minilm.ps1` |
+| `intfloat/e5-small-v2`                   | `e5`         | CPU + DirectML       | ✅ shipped    | `scripts/download-e5.ps1`     |
+| `intfloat/e5-base-v2`                    | `e5`         | CPU + DirectML       | ✅ shipped    | `scripts/download-e5.ps1`     |
 
 For each `(backend, model)` pair the benchmark sweeps:
 
@@ -53,7 +60,7 @@ provenance contract for every measured row.
 | OS                   | Windows 11, Build 22H2+ (DirectML in-box ≥ 1.8).                                            |
 | Java (sidecar)       | Java 21 with `--enable-preview` (FFM API). Java 8 modules build with `-release 8`.          |
 | DirectML             | Windows-in-box `DirectML.dll` (FL 2.0 / 5.0 fast path where available). Side-by-side `DirectML.dll` is also supported via `-Dwindirectml.directml.dll=…`. |
-| Model directory      | `model/all-MiniLM-L6-v2/` (MiniLM), `model/e5-base-sts-en-de/` (E5 STS de/en).              |
+| Model directory      | `model/all-MiniLM-L6-v2/` (MiniLM), `model/e5-small-v2/` / `model/e5-base-v2/` (E5).       |
 | Download script      | `scripts/download-minilm.ps1`, `scripts/download-e5.ps1`.                                   |
 | Warmup               | 1 × `embedBatch(maxN)` so every pad-bucket entry is hot before the first measured `N`.      |
 | Repetitions          | 1 timed run per `N` per `(method × backend × model)`. The harness is intentionally simple — no JMH, no statistical smoothing — it has to make order-of-magnitude differences visible, not 5 %. |
@@ -72,7 +79,8 @@ root.
 ```powershell
 # 1. Download supported embedding model weights into ./model/...
 powershell -ExecutionPolicy Bypass -File scripts/download-minilm.ps1
-powershell -ExecutionPolicy Bypass -File scripts/download-e5.ps1 -Variant base-sts-en-de
+powershell -ExecutionPolicy Bypass -File scripts/download-e5.ps1 -Variant small-v2
+powershell -ExecutionPolicy Bypass -File scripts/download-e5.ps1 -Variant base-v2
 ```
 
 ```bash
@@ -90,9 +98,13 @@ powershell -ExecutionPolicy Bypass -File scripts/download-e5.ps1 -Variant base-s
 ./gradlew :directml-encoder:runEmbedBatchBenchmark \
     --args="model minilm both 1 10,50,100"
 
-# E5 base-sts-en-de, CPU + DirectML, N = 10, 50, 100:
+# E5 small-v2, CPU + DirectML, N = 10, 50, 100:
 ./gradlew :directml-encoder:runEmbedBatchBenchmark \
-    --args="model e5 both 1 10,50,100"
+    --args="model e5 both 1 10,50,100" -De5.model=small-v2
+
+# E5 base-v2, CPU + DirectML, N = 10, 50, 100:
+./gradlew :directml-encoder:runEmbedBatchBenchmark \
+    --args="model e5 both 1 10,50,100" -De5.model=base-v2
 ```
 
 The harness skips any backend or model directory that is not present on
@@ -154,65 +166,35 @@ per-encoder-layer command-list submission — see
 [`directml-encoder/BENCHMARK.md`](directml-encoder/BENCHMARK.md) for
 the kernel-level breakdown.
 
-## 5. Results — `danielheinz/e5-base-sts-en-de`
+### 4.4 Results — E5 WordPiece variants (`e5-small-v2`, `e5-base-v2`)
 
-> **Not yet measured on the reference host.** The E5 STS de/en weights
-> were not present in `model/e5-base-sts-en-de/` on the host that
-> produced §4. The runtime path is shipped (`E5Encoders.BASE_STS_EN_DE`,
-> CPU + DirectML, parity-tested in `:directml-encoder:test`), so the
-> benchmark is **reproducible** with the command below — we are
-> deliberately leaving the result table empty rather than copying
-> values from a different model, per the issue's *"Keine Benchmark-
-> Werte ohne echten Lauf"* rule.
-
-Command:
-
-```
-gradle :directml-encoder:runEmbedBatchBenchmark --args="model e5 both 1 10,50,100"
-```
-
-### 5.1 CPU backend
-
-| Method       |   N | wall (ms) | per-text (ms/text) | throughput (texts/s) |
-|--------------|----:|----------:|-------------------:|---------------------:|
-| `embed` ×N   |  10 | _pending_ |          _pending_ |            _pending_ |
-| `embedBatch` |  10 | _pending_ |          _pending_ |            _pending_ |
-| `embed` ×N   |  50 | _pending_ |          _pending_ |            _pending_ |
-| `embedBatch` |  50 | _pending_ |          _pending_ |            _pending_ |
-| `embed` ×N   | 100 | _pending_ |          _pending_ |            _pending_ |
-| `embedBatch` | 100 | _pending_ |          _pending_ |            _pending_ |
-
-### 5.2 DirectML backend
-
-| Method       |   N | wall (ms) | per-text (ms/text) | throughput (texts/s) |
-|--------------|----:|----------:|-------------------:|---------------------:|
-| `embed` ×N   |  10 | _pending_ |          _pending_ |            _pending_ |
-| `embedBatch` |  10 | _pending_ |          _pending_ |            _pending_ |
-| `embed` ×N   |  50 | _pending_ |          _pending_ |            _pending_ |
-| `embedBatch` |  50 | _pending_ |          _pending_ |            _pending_ |
-| `embed` ×N   | 100 | _pending_ |          _pending_ |            _pending_ |
-| `embedBatch` | 100 | _pending_ |          _pending_ |            _pending_ |
-
-When updating this section on a new host, also fill in `Host:` (CPU
-model, GPU model, DirectML version) at the top of §4 / §5 so the
-provenance contract from §2 is satisfied.
+> **Not yet measured on the reference host.** The shipped WordPiece E5
+> variants (`intfloat/e5-small-v2`, `intfloat/e5-base-v2`) have a
+> working CPU + DirectML runtime path but have not yet been benchmarked
+> on the reference Windows host. The commands in §3 are directly
+> executable once the model weights are downloaded. Tables will be
+> added here when measurements are available.
+>
+> We are deliberately leaving the result tables empty rather than
+> copying values from MiniLM, per the issue's *"Keine Benchmark-Werte
+> ohne echten Lauf"* rule.
 
 ---
 
-## 6. Recommendations
+## 5. Recommendations
 
-> The numbers in §4–§5 are the only inputs that back the guidance
-> below; everything in this section is an interpretation and is **not**
-> a measurement. CPU is a fully supported local backend, not a debug
+> The numbers in §4 are the only inputs that back the guidance below;
+> everything in this section is an interpretation and is **not** a
+> measurement. CPU is a fully supported local backend, not a debug
 > fallback.
 
-| Use case                                       | Recommended model                        | Recommended backend    | Rationale (from §4–§5)                                                                                       |
-|------------------------------------------------|------------------------------------------|------------------------|--------------------------------------------------------------------------------------------------------------|
+| Use case                                       | Recommended model                        | Recommended backend    | Rationale (from §4)                                                                                       |
+|------------------------------------------------|------------------------------------------|------------------------|-----------------------------------------------------------------------------------------------------------|
 | Small / fast default                           | `sentence-transformers/all-MiniLM-L6-v2` | DirectML if available, CPU otherwise | 6-layer encoder, ~9 ms/text on DirectML and ~280 ms/text on CPU (§4); ships as the workbench default. |
-| German-language / German+English text          | `danielheinz/e5-base-sts-en-de`          | DirectML if available, CPU otherwise | Shipped E5 path with `"query: "` / `"passage: "` prefix policy; STS-fine-tuned for German + English. Throughput is host-specific; capture §5 locally before committing to a backend. |
-| Multilingual coverage beyond German + English  | _none shipped_                           | _n/a_                  | `intfloat/multilingual-e5-large-instruct` is 🚧 *planned* (needs SentencePiece + XLM-R core) and intentionally **not** benchmarked. |
+| German-language / German+English text          | _no shipped model_                       | _n/a_                  | `danielheinz/e5-base-sts-en-de` is 🚧 planned (XLM-R/SentencePiece mismatch, see §5.1). No German-optimized model ships today. |
+| Multilingual coverage beyond English           | _none shipped_                           | _n/a_                  | `intfloat/multilingual-e5-large-instruct` is 🚧 *planned* (needs SentencePiece + XLM-R core) and intentionally **not** benchmarked. |
 | CPU-only host (no DirectML GPU)                | `sentence-transformers/all-MiniLM-L6-v2` | CPU                    | ~3.5 texts/s on the reference CPU host with `embedBatch`, byte-identical (within documented tolerance) to the DirectML output — suitable for local pipelines and offline indexing. |
-| DirectML host (Windows 11 + DX12 GPU)          | `sentence-transformers/all-MiniLM-L6-v2` (fast) or `danielheinz/e5-base-sts-en-de` (quality) | DirectML | DirectML is ~26–32× faster than CPU on MiniLM (§4.3). E5 numbers are pending §5; the kernel path is identical to MiniLM so a similar relative speedup is expected — but treat that as expectation, not as a measurement. |
+| DirectML host (Windows 11 + DX12 GPU)          | `sentence-transformers/all-MiniLM-L6-v2` | DirectML               | DirectML is ~26–32× faster than CPU on MiniLM (§4.3). E5 WordPiece variants share the same kernel path so a similar speedup is expected once measured. |
 
 Notes:
 
@@ -225,7 +207,26 @@ Notes:
   the Phi-3 decoder is tracked separately in
   [`directml-inference/BENCHMARK.md`](directml-inference/BENCHMARK.md).
 - *Planned* embedding models (Jina v2, multilingual-E5-instruct,
-  Nomic v1.5) are explicitly out of scope here. They have no runtime
-  path and are gated out by `EmbeddingModelRegistry`; the sidecar
-  rejects them with a status-aware error pointing at
+  Nomic v1.5, `danielheinz/e5-base-sts-en-de`) are explicitly out of
+  scope here. They have no runtime path and are gated out by
+  `EmbeddingModelRegistry`; the sidecar rejects them with a
+  status-aware error pointing at
   [`SUPPORTED_MODELS.md`](SUPPORTED_MODELS.md).
+
+### 5.1 Note on `danielheinz/e5-base-sts-en-de`
+
+This model was previously listed as a benchmark target. As of PR #56,
+it is classified as 🚧 *planned*:
+
+- The upstream checkpoint at
+  `https://huggingface.co/danielheinz/e5-base-sts-en-de` is an
+  `XLMRobertaModel` with a SentencePiece tokenizer (`vocab_size=250002`,
+  `type_vocab_size=1`, ~1.06 GB `model.safetensors`).
+- The current E5 runtime path in `directml-encoder` supports only
+  WordPiece / BERT-base models.
+- The model is rejected at runtime by the embed gate with:
+  *"… classified as an embedding model but has no runtime support in
+  this build (status=planned)."*
+
+Until SentencePiece + XLM-R encoder support lands, this model cannot
+be benchmarked and is not a valid follow-up task for this document.
