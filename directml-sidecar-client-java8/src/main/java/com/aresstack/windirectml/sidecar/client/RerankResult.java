@@ -12,6 +12,20 @@ import java.util.List;
  * Carries the model name plus the ranked list of {@link Item items},
  * already sorted by descending score on the sidecar. The host re-maps
  * {@link Item#getIndex()} to the original document text on its side.
+ *
+ * <h3>Score semantics</h3>
+ * <ul>
+ *   <li><b>Model-dependent:</b> score values are raw classifier logits from the
+ *       loaded cross-encoder model. Different models can produce different
+ *       value ranges, so scores are not comparable across models.</li>
+ *   <li><b>Intra-query only:</b> scores are intended for ranking documents
+ *       within a single query. Comparing scores across different queries is not
+ *       meaningful.</li>
+ *   <li><b>Not globally calibrated:</b> scores are not probabilities and have no
+ *       fixed threshold for "relevant" vs. "not relevant".</li>
+ * </ul>
+ *
+ * <p>The items list is sorted <b>descending by score</b> (highest = most relevant first).
  */
 public final class RerankResult {
 
@@ -51,7 +65,13 @@ public final class RerankResult {
     public long getElapsedMillis() { return elapsedMillis; }
     public String getRaw() { return raw; }
 
-    /** One reranked entry: original document index plus raw classifier logit. */
+    /**
+     * One reranked entry: original document index plus raw classifier logit.
+     * <p>
+     * The {@link #getScore() score} is model-dependent and only meaningful for
+     * relative ranking within the same query. It is not a probability and cannot
+     * be compared across different models or queries.
+     */
     public static final class Item {
         private final int index;
         private final double score;
