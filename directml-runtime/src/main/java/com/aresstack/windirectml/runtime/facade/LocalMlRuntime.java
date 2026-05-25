@@ -4,6 +4,7 @@ import com.aresstack.windirectml.config.models.EmbeddingModelRegistry;
 import com.aresstack.windirectml.encoder.EmbeddingException;
 import com.aresstack.windirectml.encoder.EmbeddingModel;
 import com.aresstack.windirectml.encoder.e5.E5Encoders;
+import com.aresstack.windirectml.encoder.e5.E5Variant;
 import com.aresstack.windirectml.encoder.minilm.CpuMiniLmEncoder;
 import com.aresstack.windirectml.encoder.minilm.DirectMlMiniLmEncoder;
 import com.aresstack.windirectml.encoder.reranker.BertCrossEncoderRerankers;
@@ -42,12 +43,16 @@ import java.util.Set;
  * <h2>Supported model families</h2>
  * <ul>
  *   <li><b>minilm</b> – WordPiece BERT-style MiniLM encoders (shipped, fully supported).</li>
- *   <li><b>e5</b> – WordPiece E5 variants (shipped, fully supported).</li>
+ *   <li><b>e5</b> – WordPiece E5 variants: {@code small-v2}, {@code base-v2},
+ *       {@code large-v2} (shipped, fully supported). An explicit
+ *       {@link com.aresstack.windirectml.encoder.e5.E5Variant E5Variant} must be
+ *       specified via {@link EmbeddingModelConfig#e5(java.nio.file.Path, E5Variant, String)}.</li>
  * </ul>
  * <p>
- * XLM-R/SentencePiece-based models (e.g. {@code danielheinz/e5-base-sts-en-de},
- * {@code intfloat/multilingual-e5-large-instruct}) are <b>not yet supported</b>
- * and will produce an explicit {@link UnsupportedModelException} when loaded.
+ * XLM-R/SentencePiece-based E5 models (e.g. {@code danielheinz/e5-base-sts-en-de},
+ * {@code intfloat/multilingual-e5-large-instruct}) are <b>planned but not yet
+ * supported</b>. Attempting to load them will produce an explicit
+ * {@link UnsupportedModelException}.
  */
 public final class LocalMlRuntime {
 
@@ -93,10 +98,18 @@ public final class LocalMlRuntime {
 
         validateEmbeddingFamily(family);
 
+        // E5 requires an explicit variant selection
+        if ("e5".equals(family) && config.e5Variant() == null) {
+            throw new IllegalArgumentException(
+                    "E5 family requires an explicit variant (e5Variant). "
+                            + "Use EmbeddingModelConfig.e5(modelDir, E5Variant.BASE_V2, prefix) "
+                            + "or another supported WordPiece variant (SMALL_V2, BASE_V2, LARGE_V2).");
+        }
+
         EmbeddingModel model = switch (backend) {
-            case CPU -> loadEmbeddingCpu(family, config.modelDir());
-            case DIRECTML -> loadEmbeddingDirectMl(family, config.modelDir());
-            case AUTO -> loadEmbeddingAuto(family, config.modelDir());
+            case CPU -> loadEmbeddingCpu(family, config);
+            case DIRECTML -> loadEmbeddingDirectMl(family, config);
+            case AUTO -> loadEmbeddingAuto(family, config);
         };
 
         return new LocalEmbeddingModel(model, config.prefix());
@@ -164,33 +177,33 @@ public final class LocalMlRuntime {
                 + "Supported families: " + SUPPORTED_FAMILIES;
     }
 
-    private EmbeddingModel loadEmbeddingCpu(String family, Path modelDir)
+    private EmbeddingModel loadEmbeddingCpu(String family, EmbeddingModelConfig config)
             throws EmbeddingException {
         return switch (family) {
-            case "minilm" -> CpuMiniLmEncoder.load(modelDir);
-            case "e5" -> E5Encoders.loadCpu(modelDir);
+            case "minilm" -> CpuMiniLmEncoder.load(config.modelDir());
+            case "e5" -> E5Encoders.loadCpu(config.modelDir(), config.e5Variant());
             default -> throw new UnsupportedModelException(family,
                     "No CPU loader for family: " + family);
         };
     }
 
-    private EmbeddingModel loadEmbeddingDirectMl(String family, Path modelDir)
+    private EmbeddingModel loadEmbeddingDirectMl(String family, EmbeddingModelConfig config)
             throws EmbeddingException {
         return switch (family) {
-            case "minilm" -> DirectMlMiniLmEncoder.load(modelDir);
-            case "e5" -> E5Encoders.loadDirectMl(modelDir);
+            case "minilm" -> DirectMlMiniLmEncoder.load(config.modelDir());
+            case "e5" -> E5Encoders.loadDirectMl(config.modelDir(), config.e5Variant());
             default -> throw new UnsupportedModelException(family,
                     "No DirectML loader for family: " + family);
         };
     }
 
-    private EmbeddingModel loadEmbeddingAuto(String family, Path modelDir)
+    private EmbeddingModel loadEmbeddingAuto(String family, EmbeddingModelConfig config)
             throws EmbeddingException {
         try {
-            return loadEmbeddingDirectMl(family, modelDir);
+            return loadEmbeddingDirectMl(family, config);
         } catch (Exception directMlEx) {
             try {
-                return loadEmbeddingCpu(family, modelDir);
+                return loadEmbeddingCpu(family, config);
             } catch (Exception cpuEx) {
                 throw new EmbeddingException(
                         "Backend=auto: both DirectML and CPU failed for family '"

@@ -23,6 +23,7 @@ implementation 'com.aresstack:directml-runtime:<version>'
 ## Quick start
 
 ```java
+import com.aresstack.windirectml.encoder.e5.E5Variant;
 import com.aresstack.windirectml.runtime.facade.*;
 import java.nio.file.Path;
 import java.util.List;
@@ -30,11 +31,18 @@ import java.util.List;
 // 1. Create a runtime
 LocalMlRuntime runtime = LocalMlRuntime.create();
 
-// 2. Load and use an embedding model
+// 2. Load and use an embedding model (MiniLM)
 var cfg = EmbeddingModelConfig.miniLm(Path.of("model/all-MiniLM-L6-v2"));
 try (LocalEmbeddingModel embeddings = runtime.loadEmbeddingModel(cfg)) {
     float[] vector = embeddings.embed("hello world");
     List<float[]> batch = embeddings.embedBatch(List.of("text one", "text two"));
+}
+
+// 2b. E5 model (requires explicit variant selection)
+var e5Cfg = EmbeddingModelConfig.e5(
+        Path.of("model/e5-base-v2"), E5Variant.BASE_V2, "query: ");
+try (LocalEmbeddingModel embeddings = runtime.loadEmbeddingModel(e5Cfg)) {
+    float[] vector = embeddings.embed("search query");
 }
 
 // 3. Load and use a reranker
@@ -70,14 +78,26 @@ LocalMlRuntime runtime = LocalMlRuntime.create(config);
 | Family | Config factory | Status |
 |--------|---------------|--------|
 | `minilm` | `EmbeddingModelConfig.miniLm(dir)` | Shipped (WordPiece, BERT-style) |
-| `e5` | `EmbeddingModelConfig.e5(dir, prefix)` | Shipped (WordPiece E5 variants) |
+| `e5` | `EmbeddingModelConfig.e5(dir, variant, prefix)` | Shipped (WordPiece E5 variants only) |
 
-### Not yet supported
+### Supported E5 variants (WordPiece)
 
-XLM-R/SentencePiece-based models (e.g. `danielheinz/e5-base-sts-en-de`,
-`intfloat/multilingual-e5-large-instruct`) are **planned but not ready**.
+| Variant | Enum constant | Dimensions |
+|---------|---------------|------------|
+| `intfloat/e5-small-v2` | `E5Variant.SMALL_V2` | 384 |
+| `intfloat/e5-base-v2` | `E5Variant.BASE_V2` | 768 |
+| `intfloat/e5-large-v2` | `E5Variant.LARGE_V2` | 1024 |
+
+### Not yet supported (planned)
+
+XLM-R/SentencePiece-based E5 models are **planned but not ready**:
+- `danielheinz/e5-base-sts-en-de` – XLM-RoBERTa encoder, requires SentencePiece tokenizer
+- `intfloat/multilingual-e5-large-instruct` – XLM-RoBERTa-large, requires SentencePiece + XLM-R encoder path
+
+These models use a fundamentally different tokenizer (SentencePiece) and model
+architecture (XLM-RoBERTa) that is not implemented in this runtime.
 Attempting to load them will throw `UnsupportedModelException` with an explicit
-message explaining why the family is not available.
+message explaining why the model is not available.
 
 ## Error handling
 

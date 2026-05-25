@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.examples;
 
+import com.aresstack.windirectml.encoder.e5.E5Variant;
 import com.aresstack.windirectml.runtime.facade.*;
 
 import java.nio.file.Path;
@@ -76,7 +77,7 @@ public class DirectApiExample {
         // 4. Demonstrate unsupported model error
         try {
             runtime.loadEmbeddingModel(new EmbeddingModelConfig(
-                    Path.of("dummy"), "sentencepiece-xlmr", null));
+                    Path.of("dummy"), "sentencepiece-xlmr", null, null));
         } catch (UnsupportedModelException e) {
             System.out.println("\nExpected error for unsupported family: " + e.getMessage());
         } catch (Exception e) {

@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.runtime.facade;
 
+import com.aresstack.windirectml.encoder.e5.E5Variant;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -29,7 +30,7 @@ class LocalMlRuntimeTest {
     @Test
     void loadEmbeddingModelRejectsUnsupportedFamily() {
         LocalMlRuntime runtime = LocalMlRuntime.create();
-        var cfg = new EmbeddingModelConfig(Path.of("dummy"), "xlm-r", null);
+        var cfg = new EmbeddingModelConfig(Path.of("dummy"), "xlm-r", null, null);
         var ex = assertThrows(UnsupportedModelException.class,
                 () -> runtime.loadEmbeddingModel(cfg));
         assertEquals("xlm-r", ex.family());
@@ -39,7 +40,7 @@ class LocalMlRuntimeTest {
     @Test
     void loadEmbeddingModelRejectsUnknownFamily() {
         LocalMlRuntime runtime = LocalMlRuntime.create();
-        var cfg = new EmbeddingModelConfig(Path.of("dummy"), "totally-unknown", null);
+        var cfg = new EmbeddingModelConfig(Path.of("dummy"), "totally-unknown", null, null);
         var ex = assertThrows(UnsupportedModelException.class,
                 () -> runtime.loadEmbeddingModel(cfg));
         assertEquals("totally-unknown", ex.family());
@@ -47,24 +48,41 @@ class LocalMlRuntimeTest {
     }
 
     @Test
+    void loadEmbeddingModelE5RequiresVariant() {
+        LocalMlRuntime runtime = LocalMlRuntime.create();
+        var cfg = new EmbeddingModelConfig(Path.of("dummy"), "e5", "query: ", null);
+        var ex = assertThrows(IllegalArgumentException.class,
+                () -> runtime.loadEmbeddingModel(cfg));
+        assertTrue(ex.getMessage().contains("variant"));
+    }
+
+    @Test
     void embeddingModelConfigMiniLmFactory() {
         var cfg = EmbeddingModelConfig.miniLm(Path.of("model/all-MiniLM-L6-v2"));
         assertEquals("minilm", cfg.modelFamily());
         assertNull(cfg.prefix());
+        assertNull(cfg.e5Variant());
         assertEquals(Path.of("model/all-MiniLM-L6-v2"), cfg.modelDir());
     }
 
     @Test
     void embeddingModelConfigE5Factory() {
-        var cfg = EmbeddingModelConfig.e5(Path.of("model/e5"), "query: ");
+        var cfg = EmbeddingModelConfig.e5(Path.of("model/e5"), E5Variant.BASE_V2, "query: ");
         assertEquals("e5", cfg.modelFamily());
         assertEquals("query: ", cfg.prefix());
+        assertEquals(E5Variant.BASE_V2, cfg.e5Variant());
+    }
+
+    @Test
+    void embeddingModelConfigE5FactoryRejectsNullVariant() {
+        assertThrows(NullPointerException.class,
+                () -> EmbeddingModelConfig.e5(Path.of("model/e5"), null, "query: "));
     }
 
     @Test
     void embeddingModelConfigRejectsBlankFamily() {
         assertThrows(IllegalArgumentException.class,
-                () -> new EmbeddingModelConfig(Path.of("x"), " ", null));
+                () -> new EmbeddingModelConfig(Path.of("x"), " ", null, null));
     }
 
     @Test

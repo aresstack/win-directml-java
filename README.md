@@ -83,16 +83,23 @@ Java 21 applications can use embeddings and reranking directly in-process,
 without starting the JSON-RPC sidecar:
 
 ```java
+import com.aresstack.windirectml.encoder.e5.E5Variant;
 import com.aresstack.windirectml.runtime.facade.*;
 
 // Create runtime (defaults to auto backend: DirectML → CPU fallback)
 LocalMlRuntime runtime = LocalMlRuntime.create();
 
-// Load and use embedding model
+// Load and use embedding model (MiniLM)
 var embedCfg = EmbeddingModelConfig.miniLm(Path.of("model/all-MiniLM-L6-v2"));
 try (var embeddings = runtime.loadEmbeddingModel(embedCfg)) {
     float[] vector = embeddings.embed("hello world");
     List<float[]> batch = embeddings.embedBatch(List.of("a", "b", "c"));
+}
+
+// E5 requires an explicit WordPiece variant (SMALL_V2, BASE_V2, LARGE_V2)
+var e5Cfg = EmbeddingModelConfig.e5(Path.of("model/e5-base-v2"), E5Variant.BASE_V2, "query: ");
+try (var embeddings = runtime.loadEmbeddingModel(e5Cfg)) {
+    float[] vector = embeddings.embed("search query");
 }
 
 // Load and use reranker
@@ -108,8 +115,9 @@ implementation 'com.aresstack:directml-runtime:<version>'
 ```
 
 The direct API hides sidecar transport details and does not require JSON-RPC or a
-separate process. Unsupported model families (e.g. XLM-R/SentencePiece) throw
-`UnsupportedModelException` with an explicit message.
+separate process. Supported WordPiece E5 variants: `small-v2`, `base-v2`, `large-v2`.
+XLM-R/SentencePiece E5 models (e.g. `danielheinz/e5-base-sts-en-de`) remain planned
+but not ready; attempting to load them throws `UnsupportedModelException`.
 
 ### Sidecar architecture (Java 8 host)
 
