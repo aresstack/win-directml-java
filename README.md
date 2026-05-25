@@ -263,7 +263,8 @@ redistributable.
 
 ## Releases / Maven Central
 
-New Maven Central releases publish only the Java 21 core inference artifacts:
+New Maven Central releases publish only the core inference artifacts: the Java 21
+runtime modules plus the shared `directml-config` module.
 
 ```gradle
 dependencies {
