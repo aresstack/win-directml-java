@@ -197,7 +197,9 @@ Protocol details: [`directml-sidecar/PROTOCOL.md`](directml-sidecar/PROTOCOL.md)
 > for `0.1.0-beta.1`. When no Phi-3 model directory is present the
 > sidecar still starts cleanly and `summarize` replies with
 > `-32005 Not implemented` instead of crashing. See
-> [`SUPPORTED_MODELS.md`](SUPPORTED_MODELS.md) for the model matrix.
+> [`SUPPORTED_MODELS.md`](SUPPORTED_MODELS.md) for the model matrix and
+> [`BENCHMARK.md`](BENCHMARK.md) for the reproducible embedding
+> throughput matrix (CPU + DirectML, `embed` and `embedBatch`).
 
 ## Java-8 Workbench
 

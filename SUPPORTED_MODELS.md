@@ -34,6 +34,11 @@ batched `embedBatch(...)` path with bucket-padded sequence lengths.
 DirectML pooling and L2 normalisation are GPU-resident; only the final
 `[N, hidden]` matrix is read back to the host.
 
+For reproducible throughput measurements (`embed` and `embedBatch`,
+CPU + DirectML, `N ∈ {10, 50, 100}`) of the shipped embedding models
+and the derived backend / model recommendations, see
+[`BENCHMARK.md`](BENCHMARK.md).
+
 ### 1.0.1 MiniLM / E5 runtime selection and validation
 
 - **MiniLM (`sentence-transformers/all-MiniLM-L6-v2`)**
