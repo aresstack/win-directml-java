@@ -10,12 +10,11 @@ jobs:
     # The DirectML runtime tests would require an Iris/Arc/Adreno/AMD GPU
     # that supports DirectML – not available on GitHub-hosted runners. The
     # publish job therefore skips tests and trusts the green CI on the
-    # release branch instead. Use the local
-    # `./gradlew :directml-encoder:test :directml-windows-bindings:test`
+    # release branch instead. Use the local core test command from README
     # before tagging.
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Check out sources
@@ -31,7 +30,7 @@ jobs:
         id: ver
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Build + sign + publish to Sonatype Central Portal
+      - name: Build + sign + publish core artifacts to Sonatype Central Portal
         env:
           ORG_GRADLE_PROJECT_centralUsername: ${{ secrets.CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_centralPassword: ${{ secrets.CENTRAL_PASSWORD }}
@@ -43,18 +42,3 @@ jobs:
             --no-daemon \
             -x test \
             publishAllPublicationsToCentralPortal
-
-      - name: Build sidecar distribution zip
-        run: ./gradlew --no-daemon -Pversion=${{ steps.ver.outputs.version }} :directml-sidecar:distZip
-
-      - name: Build workbench distribution zip
-        run: ./gradlew --no-daemon -Pversion=${{ steps.ver.outputs.version }} :directml-sidecar-workbench:distZip
-
-      - name: Attach sidecar and workbench zips to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            directml-sidecar/build/distributions/*.zip
-            directml-sidecar-workbench/build/distributions/*.zip
-          tag_name: ${{ github.ref_name }}
-          fail_on_unmatched_files: true
