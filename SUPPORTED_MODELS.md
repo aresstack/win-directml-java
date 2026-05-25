@@ -22,7 +22,7 @@ Status legend:
 | `sentence-transformers/all-MiniLM-L6-v2` | yes     | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + optional L2                                      | ✅ shipped       | `directml-encoder` (`DirectMlMiniLmEncoder`, `CpuMiniLmEncoder`) |
 | `intfloat/e5-small-v2`                   | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | ✅ shipped       | `directml-encoder` (`E5Encoders.SMALL_V2`)                       |
 | `intfloat/e5-base-v2`                    | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | ✅ shipped       | `directml-encoder` (`E5Encoders.BASE_V2`)                        |
-| `danielheinz/e5-base-sts-en-de`          | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | ✅ shipped       | `directml-encoder` (`E5Encoders.BASE_STS_EN_DE`)                 |
+| `danielheinz/e5-base-sts-en-de`          | no      | ❌        | ❌             | SentencePiece (XLM-R)   | mean + L2 (E5 prefixes when supported)                  | 🚧 planned      | – (XLM-R/SentencePiece pending; see §1.0.1)                       |
 | `intfloat/e5-large-v2`                   | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | 🧪 experimental | `directml-encoder` (`E5Encoders.LARGE_V2`)                       |
 | `intfloat/multilingual-e5-large-instruct`| no      | ❌        | ❌             | SentencePiece (XLM-R)   | mean + L2 + `Instruct: …\nQuery: …` prefix              | 🚧 planned      | – (needs SentencePiece + XLM-RoBERTa core)                       |
 | `jinaai/jina-embeddings-v2-base-de`      | no      | ❌        | ❌             | WordPiece (Jina-custom) | mean + L2; ALiBi positional bias                        | 🚧 planned      | – (needs custom Jina v2 attention path)                          |
@@ -42,15 +42,23 @@ DirectML pooling and L2 normalisation are GPU-resident; only the final
     `sentence-transformers/all-MiniLM-L6-v2`.
   - Works through both `embed` and `embedBatch`.
 - **E5 (`danielheinz/e5-base-sts-en-de`)**
-  - Registry status: `shipped` (`embedFamily=e5`, CPU + DirectML).
-  - `-Dembed.model` accepts both alias `e5` and full model ID
-    `danielheinz/e5-base-sts-en-de`.
-  - `-De5.model=base-sts-en-de` selects the expected variant
-    (default for the E5 path).
-  - Query/document input should use E5 prefixes: `"query: "` /
-    `"passage: "` (for both `embed` and `embedBatch`).
-  - Real-model CPU-vs-DirectML parity target: cosine `> 0.999`
-    when real-model tests are runnable locally.
+  - Registry status: `planned` (no `embedFamily` while the runtime is
+    WordPiece-only).
+  - The upstream checkpoint at
+    https://huggingface.co/danielheinz/e5-base-sts-en-de hosts an
+    `XLMRobertaModel` (`vocab_size=250002`, `type_vocab_size=1`,
+    SentencePiece tokenizer, ~1.06 GB `model.safetensors`), i.e. a
+    multilingual-E5 derivative – not the WordPiece BERT-base profile
+    the current E5 runtime supports.
+  - `-Dembed.model=danielheinz/e5-base-sts-en-de` is rejected by the
+    `embed` gate with the standard
+    `… classified as an embedding model but has no runtime support in
+    this build (status=planned).` message until SentencePiece + XLM-R
+    support lands (tracked with multilingual-E5).
+  - The variant constant `E5Encoders.BASE_STS_EN_DE` and the
+    `download-e5.ps1 -Variant base-sts-en-de` helper are kept in the
+    tree but are not exercised end-to-end against the current upstream
+    checkpoint.
 - **Workbench**
   - The `embed.model` dropdown always includes aliases `minilm`, `e5`
     first and then all registry entries with `useCase=embedding`.
@@ -80,7 +88,7 @@ status / embedFamily` classification without duplicating metadata.
 | `modelId`                                   | `useCase`  | `status`        | Backend support   | Notes                                                                                                                |
 |---------------------------------------------|------------|-----------------|-------------------|----------------------------------------------------------------------------------------------------------------------|
 | `sentence-transformers/all-MiniLM-L6-v2`    | embedding  | ✅ shipped       | CPU + DirectML    | Default fast embedding model (WordPiece, BERT-style).                                                                |
-| `danielheinz/e5-base-sts-en-de`             | embedding  | ✅ shipped       | CPU + DirectML    | German/English STS fine-tune; uses `"query: "` / `"passage: "` E5 prefixes.                                          |
+| `danielheinz/e5-base-sts-en-de`             | embedding  | 🚧 planned      | – (planned)       | Upstream checkpoint is an XLMRobertaModel (vocab=250002, type_vocab=1); needs SentencePiece + XLM-R, tracked with multilingual-E5.       |
 | `intfloat/multilingual-e5-large-instruct`   | embedding  | 🚧 planned      | – (planned)       | NOT compatible with the current WordPiece-only E5 path. Requires SentencePiece + XLM-RoBERTa core.                   |
 | `jinaai/jina-embeddings-v2-base-de`         | embedding  | 🚧 planned      | – (planned)       | Jina BERT v2 uses ALiBi positional bias; not a drop-in for the standard BERT core. Requires analysis before shipping.|
 | `openai/gpt-oss-120b`                       | decoder    | ⛔ unsupported  | – (not for embed) | Decoder-only LLM. Rejected by the `embed` endpoint.                                                                  |
