@@ -101,6 +101,7 @@ jobs:
           :directml-windows-bindings:test
           :directml-inference:test
           :directml-encoder:test
+          :directml-runtime:test
           :directml-sidecar:test
           --no-daemon
 
@@ -113,6 +114,7 @@ jobs:
             directml-windows-bindings/build/reports/tests/
             directml-inference/build/reports/tests/
             directml-encoder/build/reports/tests/
+            directml-runtime/build/reports/tests/
             directml-sidecar/build/reports/tests/
           retention-days: 14
 
