@@ -79,16 +79,71 @@ The exact same client library can be embedded into any Java-8 application:
 
 ```java
 SidecarClientConfig config = new SidecarClientConfig();
-config.setJavaExecutable("C:\\Program Files\\Java\\jdk-21\\bin\\java.exe");
-config.setSidecarJarPath("directml-sidecar-all.jar");
-config.setModelDirectory("model/all-MiniLM-L6-v2");
-config.setEmbedBackend("directml");
+config.
 
-try (SidecarClient client = new SidecarClient(config)) {
-    client.start();
-    HealthResult h = client.health();
-    EmbeddingResult v = client.embed("hello world");
+setJavaExecutable("C:\\Program Files\\Java\\jdk-21\\bin\\java.exe");
+config.
+
+setSidecarJarPath("directml-sidecar.jar");
+config.
+
+setModelDirectory("model/all-MiniLM-L6-v2");
+config.
+
+setEmbedBackend("directml");          // or "auto" / "cpu"
+
+SidecarClient client = new SidecarClient(config);
+try{
+        client.
+
+start();
+
+HealthResult h = client.health();
+EmbeddingResult e = client.embed("hello world");
+double cos = EmbeddingResult.cosine(e.getVector(),
+        client.embed("hi").getVector());
+
+    try{
+SummaryResult s = client.summarize("long input…", 256);
+    }catch(
+JsonRpcError err){
+        // summarizer not loaded → -32005 / not implemented
+        }
+        }finally{
+        client.
+
+shutdown();
 }
 ```
 
-See also [`examples/java8-client`](examples/java8-client) for a runnable sample.
+Threading rules for Swing host applications:
+
+- never call `health()` / `embed()` / `summarize()` from the EDT
+- wrap them in `SwingWorker.doInBackground()` like the workbench does
+- `shutdown()` is safe to call multiple times
+
+## Tests
+
+No GPU is required. Both modules are tested headlessly:
+
+```powershell
+.\gradlew.bat :directml-sidecar-client-java8:test
+.\gradlew.bat :directml-sidecar-workbench:test
+```
+
+- `JsonRpcRequestTest` / `JsonRpcResponseTest` – framing round-trip.
+- `SidecarProcessCommandLineTest` – verifies the spawned argv.
+- `SidecarClientFakeProcessTest` – end-to-end JSON-RPC against an
+  in-memory fake `SidecarProcess` (health, timeout, JSON-RPC error,
+  exit code).
+- `WorkbenchModelTest` – headless model logic.
+- `WorkbenchFrameSmokeTest` – Swing instantiation; auto-skipped on
+  truly headless build hosts.
+
+## Java compatibility
+
+`directml-sidecar-client-java8` and `directml-sidecar-workbench` use
+`options.release.set(8)` in their `build.gradle`, so the compiler rejects
+any accidental use of Java-9+ APIs. The library is therefore safe to
+consume from a Java-8 host application.
+
