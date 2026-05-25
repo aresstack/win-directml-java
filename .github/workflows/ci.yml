@@ -23,7 +23,7 @@ concurrency:
 jobs:
   # ──────────────────────────────────────────────────────────────────────
   # Java 8 modules: directml-config, directml-sidecar-client-java8,
-  # directml-sidecar-workbench
+  # directml-sidecar-workbench, examples/java8-client compile smoke test
   # ──────────────────────────────────────────────────────────────────────
   java8-tests:
     strategy:
@@ -52,6 +52,7 @@ jobs:
           :directml-config:test
           :directml-sidecar-client-java8:test
           :directml-sidecar-workbench:test
+          :examples:java8-client:compileJava
           --no-daemon
 
       - name: Upload test reports
