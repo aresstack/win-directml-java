@@ -25,14 +25,12 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-# Load shared helper
 . (Join-Path $PSScriptRoot '_Download-HfModel.ps1')
 
-# Map variant to repo
 $repoMap = @{
     'ms-marco-MiniLM-L-6-v2'  = @{ Repo = 'cross-encoder/ms-marco-MiniLM-L-6-v2';  Folder = 'cross-encoder-ms-marco-MiniLM-L-6-v2' };
     'ms-marco-MiniLM-L-12-v2' = @{ Repo = 'cross-encoder/ms-marco-MiniLM-L-12-v2'; Folder = 'cross-encoder-ms-marco-MiniLM-L-12-v2' };
-    'bge-reranker-base'        = @{ Repo = 'BAAI/bge-reranker-base';                 Folder = 'bge-reranker-base' };
+    'bge-reranker-base'       = @{ Repo = 'BAAI/bge-reranker-base';                Folder = 'bge-reranker-base' };
 }
 $entry = $repoMap[$Variant]
 $targetDir = Join-Path $ModelRoot $entry.Folder
@@ -50,7 +48,6 @@ $result = Download-HfModel `
 Write-Host ""
 Write-Host "Reranker ($Variant) ready at: $result"
 
-# Run Model-Doctor
 Write-Host ""
-& (Join-Path $PSScriptRoot 'model-doctor.ps1') -ModelDir $result
+& (Join-Path $PSScriptRoot 'model-doctor.ps1') -ModelDir $result -Family reranker
 
