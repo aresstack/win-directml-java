@@ -99,11 +99,12 @@ public final class RerankerPanel extends JPanel {
 
                         appendResult("Reranking completed in " + rerankMs + " ms (" + results.size() + " results)");
                         appendResult("---");
-                        for (var r : results) {
+                        for (int rank = 0; rank < results.size(); rank++) {
+                            RerankResult r = results.get(rank);
                             String docPreview = documents.get(r.originalIndex());
                             if (docPreview.length() > 80) docPreview = docPreview.substring(0, 77) + "...";
                             appendResult(String.format("  #%d [idx=%d] score=%.6f  %s",
-                                    results.indexOf(r) + 1, r.originalIndex(), r.score(), docPreview));
+                                    rank + 1, r.originalIndex(), r.score(), docPreview));
                         }
                     }
                 } catch (Exception ex) {
