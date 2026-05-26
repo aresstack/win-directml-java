@@ -41,14 +41,35 @@ class PublicRuntimeApiTest {
     }
 
     @Test
+    void rerankerConfigDerivesModelDirFromModelId() {
+        var config = RerankerConfig.builder()
+                .model(RerankerModelId.MS_MARCO_MINILM_L6)
+                .build();
+
+        // modelDir derived from model.directoryName() under "model/"
+        assertEquals(
+                Path.of("model", RerankerModelId.MS_MARCO_MINILM_L6.directoryName()),
+                config.modelDir());
+    }
+
+    @Test
+    void rerankerConfigRejectsInconsistentModelDir() {
+        assertThrows(IllegalArgumentException.class, () ->
+                RerankerConfig.builder()
+                        .model(RerankerModelId.MS_MARCO_MINILM_L6)
+                        .modelDir(Path.of("model/bge-reranker-base"))   // wrong name for chosen model
+                        .build());
+    }
+
+    @Test
     void runtimeBuilderDefaultsToAuto() {
-        var runtime = LocalMlRuntime.create();
+        var runtime = MlRuntime.create();
         assertEquals(Backend.AUTO, runtime.backend());
     }
 
     @Test
     void runtimeBuilderAcceptsExplicitBackend() {
-        var runtime = LocalMlRuntime.builder()
+        var runtime = MlRuntime.builder()
                 .backend(Backend.CPU)
                 .build();
         assertEquals(Backend.CPU, runtime.backend());

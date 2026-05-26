@@ -7,19 +7,42 @@ import java.util.Objects;
 /**
  * Public Java 21 entry point for local embeddings and reranking.
  *
- * @deprecated Use {@link MlRuntime} instead. {@code LocalMlRuntime} in this
- *             package duplicates the simple name of
- *             {@link com.aresstack.windirectml.runtime.facade.LocalMlRuntime}
- *             and will be removed in a future release. Migrate to
- *             {@link MlRuntime} which is the single, unambiguous entry point
- *             for the {@code runtime.api} package.
+ * <p>This is the primary entry point for the {@code runtime.api} package.
+ * Use this class to load embedding and reranker models without starting
+ * the JSON-RPC sidecar process.
+ *
+ * <h2>Quick start</h2>
+ * <pre>{@code
+ * MlRuntime runtime = MlRuntime.create();
+ *
+ * // Embeddings
+ * var embedCfg = EmbeddingConfig.builder()
+ *         .model(EmbeddingModelId.E5_BASE_V2)
+ *         .modelDir(Path.of("model/e5-base-v2"))
+ *         .build();
+ * try (EmbeddingModelHandle embeddings = runtime.loadEmbeddings(embedCfg)) {
+ *     float[] vector = embeddings.embed("hello world");
+ * }
+ *
+ * // Reranking
+ * var rerankCfg = RerankerConfig.builder()
+ *         .model(RerankerModelId.MS_MARCO_MINILM_L6)
+ *         .build();
+ * try (RerankerModelHandle reranker = runtime.loadReranker(rerankCfg)) {
+ *     var results = reranker.rerank("search query", List.of("doc1", "doc2"));
+ * }
+ * }</pre>
+ *
+ * <p>Consumers of the lower-level {@code runtime.facade} package may migrate
+ * to this class at their convenience. The facade's
+ * {@link com.aresstack.windirectml.runtime.facade.LocalMlRuntime} is still
+ * fully functional but has been deprecated in favour of this type.
  */
-@Deprecated(forRemoval = true)
-public final class LocalMlRuntime {
+public final class MlRuntime {
     private final Backend backend;
     private final com.aresstack.windirectml.runtime.facade.LocalMlRuntime delegate;
 
-    private LocalMlRuntime(Builder builder) {
+    private MlRuntime(Builder builder) {
         this.backend = Objects.requireNonNull(builder.backend, "backend");
         var config = com.aresstack.windirectml.runtime.facade.LocalMlRuntimeConfig.builder()
                 .backend(backend.toFacade())
@@ -31,7 +54,7 @@ public final class LocalMlRuntime {
         return new Builder();
     }
 
-    public static LocalMlRuntime create() {
+    public static MlRuntime create() {
         return builder().build();
     }
 
@@ -59,8 +82,8 @@ public final class LocalMlRuntime {
             return this;
         }
 
-        public LocalMlRuntime build() {
-            return new LocalMlRuntime(this);
+        public MlRuntime build() {
+            return new MlRuntime(this);
         }
     }
 }
