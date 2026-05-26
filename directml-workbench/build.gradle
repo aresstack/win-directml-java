@@ -2,6 +2,7 @@
 // Does NOT talk JSON-RPC – uses LocalMlRuntime, EmbeddingModelConfig, etc. directly.
 plugins {
     id 'application'
+    id 'com.gradleup.shadow' version '9.3.0'
 }
 
 application {
@@ -21,32 +22,18 @@ tasks.withType(Test).configureEach {
     systemProperty 'java.awt.headless', 'true'
 }
 
-// Fat/shadow jar task – produces a single executable jar with all dependencies.
-// Gradle's runtimeClasspath contains project dependency jar paths, but resolving
-// the configuration alone does not guarantee those jars are assembled before we
-// expand them. Depend on the concrete core jar tasks explicitly.
-tasks.register('shadowJar', Jar) {
-    dependsOn classes
-    dependsOn ':directml-config:jar'
-    dependsOn ':directml-windows-bindings:jar'
-    dependsOn ':directml-encoder:jar'
-    dependsOn ':directml-runtime:jar'
-
+// Fat/shadow jar – uses the official Shadow plugin to produce a single
+// executable jar with all runtime dependencies correctly resolved.
+shadowJar {
     archiveBaseName = 'directml-workbench'
     archiveClassifier = 'all'
     archiveVersion = ''
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     manifest {
         attributes(
                 'Main-Class': application.mainClass.get()
         )
     }
-
-    from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    }
-    with jar
 
     // Exclude signature files from dependencies
     exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
