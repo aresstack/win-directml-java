@@ -23,6 +23,7 @@ public final class WorkbenchFrame extends JFrame {
         tabs.addTab("Download", new DownloadPanel(model));
         tabs.addTab("Embeddings", new EmbeddingsPanel(model));
         tabs.addTab("Batch Embeddings", new BatchEmbeddingsPanel(model));
+        tabs.addTab("Summarizer", new SummarizerPanel(model));
         tabs.addTab("Reranker", new RerankerPanel(model));
         tabs.addTab("About", new AboutPanel());
 
