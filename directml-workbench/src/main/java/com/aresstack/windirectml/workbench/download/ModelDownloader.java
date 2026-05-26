@@ -36,7 +36,7 @@ public final class ModelDownloader {
     );
 
     /** Subdirectory within the HuggingFace repo for Phi-3 DirectML INT4 quantised variant. */
-    public static final String PHI3_SUBDIR = "directml-int4-awq-block-128";
+    public static final String PHI3_SUBDIR = "directml/directml-int4-awq-block-128";
 
     private static final String HF_BASE_URL = "https://huggingface.co";
 
@@ -62,7 +62,7 @@ public final class ModelDownloader {
      * and may store them in a subdirectory within the HuggingFace repository.
      *
      * @param repo          HuggingFace repository (e.g. "microsoft/Phi-3-mini-4k-instruct-onnx")
-     * @param repoSubdir    subdirectory within the HuggingFace repo (e.g. "directml-int4-awq-block-128"),
+     * @param repoSubdir    subdirectory within the HuggingFace repo (e.g. "directml/directml-int4-awq-block-128"),
      *                      or {@code null} for root-level files
      * @param requiredFiles list of file names that must be downloaded successfully
      * @param optionalFiles list of file names to attempt downloading (may be absent)
@@ -97,7 +97,7 @@ public final class ModelDownloader {
     /**
      * Download Phi-3 model from HuggingFace (ONNX/GenAI layout).
      * <p>
-     * Downloads from the {@code directml-int4-awq-block-128} subdirectory of the
+     * Downloads from the {@code directml/directml-int4-awq-block-128} subdirectory of the
      * {@code microsoft/Phi-3-mini-4k-instruct-onnx} repository.
      *
      * @param targetDir local directory to save model files into
