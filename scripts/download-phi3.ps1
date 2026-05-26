@@ -2,7 +2,7 @@
 # into model/phi-3-mini-4k-instruct-onnx for use with the Workbench Summarizer tab.
 #
 # The model is served from HuggingFace:
-#   microsoft/Phi-3-mini-4k-instruct-onnx (directml-int4-awq-block-128 subdirectory)
+#   microsoft/Phi-3-mini-4k-instruct-onnx/directml/directml-int4-awq-block-128
 #
 # Required files (~2.3 GB total):
 #   config.json, tokenizer.json, model.onnx, model.onnx.data
@@ -22,7 +22,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '_Download-HfModel.ps1')
 
 $Repo = 'microsoft/Phi-3-mini-4k-instruct-onnx'
-$Subdir = 'directml-int4-awq-block-128'
+$Subdir = 'directml/directml-int4-awq-block-128'
 $targetDir = Join-Path $ModelRoot 'phi-3-mini-4k-instruct-onnx'
 
 Write-Host "Downloading Phi-3 Mini 4K Instruct (ONNX/GenAI, DirectML INT4)"
