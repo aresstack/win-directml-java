@@ -5,6 +5,8 @@ import com.aresstack.windirectml.workbench.WorkbenchModel;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.nio.file.Path;
 
 /**
@@ -48,7 +50,13 @@ public final class ConfigPanel extends JPanel {
         gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0;
         form.add(new JLabel("Model Root:"), gbc);
         modelRootField = new JTextField(model.getModelRoot().toString(), 30);
-        modelRootField.addActionListener(e -> model.setModelRoot(Path.of(modelRootField.getText().trim())));
+        modelRootField.addActionListener(e -> applyModelRoot());
+        modelRootField.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusLost(FocusEvent e) {
+                applyModelRoot();
+            }
+        });
         gbc.gridx = 1; gbc.weightx = 1;
         form.add(modelRootField, gbc);
 
@@ -76,6 +84,15 @@ public final class ConfigPanel extends JPanel {
         form.add(new JLabel("Reranker Model:"), gbc);
         rerankerField = new JTextField(model.getRerankerModel(), 30);
         rerankerField.addActionListener(e -> model.setRerankerModel(rerankerField.getText().trim()));
+        rerankerField.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusLost(FocusEvent e) {
+                String value = rerankerField.getText().trim();
+                if (!value.isEmpty()) {
+                    model.setRerankerModel(value);
+                }
+            }
+        });
         gbc.gridx = 1; gbc.weightx = 1;
         form.add(rerankerField, gbc);
 
@@ -90,6 +107,13 @@ public final class ConfigPanel extends JPanel {
         appendLog("DirectML Workbench initialized.");
         appendLog("Backend: " + model.getBackend());
         appendLog("Model root: " + model.getModelRoot());
+    }
+
+    private void applyModelRoot() {
+        String value = modelRootField.getText().trim();
+        if (!value.isEmpty()) {
+            model.setModelRoot(Path.of(value));
+        }
     }
 
     public void appendLog(String message) {
