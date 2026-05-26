@@ -68,6 +68,16 @@ class WorkbenchSmokeTest {
     }
 
     @Test
+    void summarizerPanelCanBeConstructed() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            var model = new WorkbenchModel();
+            var panel = new SummarizerPanel(model);
+            assertNotNull(panel);
+            assertTrue(panel.getComponentCount() > 0);
+        });
+    }
+
+    @Test
     void rerankerPanelCanBeConstructed() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             var model = new WorkbenchModel();
