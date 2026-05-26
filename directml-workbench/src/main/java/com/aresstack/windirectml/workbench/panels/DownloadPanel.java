@@ -61,15 +61,16 @@ public final class DownloadPanel extends JPanel {
         var targetDir = model.getModelRoot().resolve(folder);
         appendLog("Starting download: " + repo + " -> " + targetDir);
 
-        new SwingWorker<Void, String>() {
+        new SwingWorker<Boolean, String>() {
             @Override
-            protected Void doInBackground() {
+            protected Boolean doInBackground() {
                 try {
                     ModelDownloader.download(repo, targetDir, force, this::publish);
+                    return true;
                 } catch (Exception ex) {
                     publish("ERROR: " + ex.getMessage());
+                    return false;
                 }
-                return null;
             }
 
             @Override
@@ -79,7 +80,12 @@ public final class DownloadPanel extends JPanel {
 
             @Override
             protected void done() {
-                appendLog("Download complete: " + folder);
+                try {
+                    boolean ok = get();
+                    appendLog((ok ? "Download finished: " : "Download ended with errors: ") + folder);
+                } catch (Exception ex) {
+                    appendLog("Download ended with errors: " + folder + " (" + ex.getMessage() + ")");
+                }
             }
         }.execute();
     }
