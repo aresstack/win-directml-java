@@ -1,0 +1,48 @@
+// Java 21 Swing workbench for directly exercising the directml-runtime API.
+// Does NOT talk JSON-RPC – uses LocalMlRuntime, EmbeddingModelConfig, etc. directly.
+plugins {
+    id 'application'
+}
+
+application {
+    mainClass = 'com.aresstack.windirectml.workbench.DirectMlWorkbenchApp'
+}
+
+dependencies {
+    implementation project(':directml-runtime')
+    implementation project(':directml-config')
+    runtimeOnly 'ch.qos.logback:logback-classic:1.5.6'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(Test).configureEach {
+    systemProperty 'java.awt.headless', 'true'
+}
+
+// Fat/shadow jar task – produces a single executable jar with all dependencies.
+tasks.register('shadowJar', Jar) {
+    archiveBaseName = 'directml-workbench'
+    archiveClassifier = 'all'
+    archiveVersion = ''
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    manifest {
+        attributes(
+                'Main-Class': application.mainClass.get()
+        )
+    }
+
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    with jar
+
+    // Exclude signature files from dependencies
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+}
+
+tasks.named('shadowJar').configure {
+    dependsOn classes
+}

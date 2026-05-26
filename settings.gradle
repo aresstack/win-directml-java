@@ -9,6 +9,7 @@ include 'directml-sidecar-protocol-java8'
 include 'directml-sidecar-client-java8'
 include 'directml-runtime'
 include 'directml-sidecar-workbench'
+include 'directml-workbench'
 include 'examples:java8-client'
 project(':examples:java8-client').projectDir = file('examples/java8-client')
 include 'examples:java21-direct-api'
