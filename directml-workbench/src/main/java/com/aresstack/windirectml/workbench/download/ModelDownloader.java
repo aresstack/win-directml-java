@@ -45,18 +45,17 @@ public final class ModelDownloader {
             throws IOException, InterruptedException {
         Files.createDirectories(targetDir);
 
-        try (var client = HttpClient.newBuilder()
+        var client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .followRedirects(HttpClient.Redirect.NORMAL)
-                .build()) {
+                .build();
 
-            for (String file : REQUIRED_FILES) {
-                downloadFile(client, repo, file, targetDir, force, logger, true);
-            }
+        for (String file : REQUIRED_FILES) {
+            downloadFile(client, repo, file, targetDir, force, logger, true);
+        }
 
-            for (String file : OPTIONAL_FILES) {
-                downloadFile(client, repo, file, targetDir, force, logger, false);
-            }
+        for (String file : OPTIONAL_FILES) {
+            downloadFile(client, repo, file, targetDir, force, logger, false);
         }
     }
 
