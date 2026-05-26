@@ -37,8 +37,9 @@ public final class DownloadPanel extends JPanel {
                 "cross-encoder/ms-marco-MiniLM-L-12-v2", "cross-encoder-ms-marco-MiniLM-L-12-v2"));
 
         // Summarizer / decoder models
-        buttons.add(createDownloadButton("Download Phi-3 Mini 4K Instruct (Summarizer)",
-                "microsoft/Phi-3-mini-4k-instruct-onnx", "phi-3-mini-4k-instruct-onnx"));
+        var phi3Btn = new JButton("Download Phi-3 Mini 4K Instruct (Summarizer)");
+        phi3Btn.addActionListener(e -> startPhi3Download());
+        buttons.add(phi3Btn);
 
         forceCheckbox = new JCheckBox("Force re-download (overwrite existing)");
 
@@ -89,6 +90,43 @@ public final class DownloadPanel extends JPanel {
                     appendLog((ok ? "Download finished: " : "Download ended with errors: ") + folder);
                 } catch (Exception ex) {
                     appendLog("Download ended with errors: " + folder + " (" + ex.getMessage() + ")");
+                }
+            }
+        }.execute();
+    }
+
+    private void startPhi3Download() {
+        boolean force = forceCheckbox.isSelected();
+        var targetDir = model.getModelRoot().resolve("phi-3-mini-4k-instruct-onnx");
+        appendLog("Starting Phi-3 download (ONNX/GenAI layout from "
+                + ModelDownloader.PHI3_SUBDIR + ") -> " + targetDir);
+        appendLog("  Required files: " + ModelDownloader.PHI3_REQUIRED_FILES);
+
+        new SwingWorker<Boolean, String>() {
+            @Override
+            protected Boolean doInBackground() {
+                try {
+                    ModelDownloader.downloadPhi3(targetDir, force, this::publish);
+                    return true;
+                } catch (Exception ex) {
+                    publish("ERROR: " + ex.getMessage());
+                    return false;
+                }
+            }
+
+            @Override
+            protected void process(java.util.List<String> chunks) {
+                for (var msg : chunks) appendLog(msg);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    boolean ok = get();
+                    appendLog((ok ? "Phi-3 download finished: "
+                            : "Phi-3 download ended with errors: ") + targetDir);
+                } catch (Exception ex) {
+                    appendLog("Phi-3 download ended with errors: " + ex.getMessage());
                 }
             }
         }.execute();

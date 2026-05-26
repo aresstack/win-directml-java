@@ -4,6 +4,7 @@ import com.aresstack.windirectml.config.models.EmbeddingModelRegistry;
 import com.aresstack.windirectml.config.models.EmbeddingModelRegistry.Entry;
 import com.aresstack.windirectml.config.models.EmbeddingModelRegistry.UseCase;
 import com.aresstack.windirectml.inference.InferenceException;
+import com.aresstack.windirectml.inference.Phi3InferenceEngine;
 import com.aresstack.windirectml.inference.Phi3Summarizer;
 import com.aresstack.windirectml.inference.Summary;
 import com.aresstack.windirectml.inference.SummaryRequest;
@@ -213,42 +214,10 @@ public final class SummarizerPanel extends JPanel {
     }
 
     private void validateModelFiles(Path modelDir) {
-        if (!Files.isDirectory(modelDir)) {
-            throw new IllegalStateException(
-                    "Model directory not found: " + modelDir.toAbsolutePath()
-                            + ". Download the model first from the Download tab.");
-        }
-
-        // Check for essential ONNX GenAI / Phi-3 files
-        boolean hasOnnx = Files.exists(modelDir.resolve("model.onnx"))
-                || Files.exists(modelDir.resolve("model.onnx.data"))
-                || containsOnnxFile(modelDir);
-        if (!hasOnnx) {
-            throw new IllegalStateException(
-                    "No ONNX model graph found in: " + modelDir.toAbsolutePath()
-                            + ". Expected model.onnx or Phi-3 quantised graph file.");
-        }
-
-        if (!Files.exists(modelDir.resolve("tokenizer.json"))
-                && !Files.exists(modelDir.resolve("tokenizer.model"))) {
-            throw new IllegalStateException(
-                    "Missing tokenizer file in: " + modelDir.toAbsolutePath()
-                            + ". Expected tokenizer.json or tokenizer.model.");
-        }
-
-        if (!Files.exists(modelDir.resolve("genai_config.json"))
-                && !Files.exists(modelDir.resolve("config.json"))) {
-            throw new IllegalStateException(
-                    "Missing config file in: " + modelDir.toAbsolutePath()
-                            + ". Expected genai_config.json or config.json.");
-        }
-    }
-
-    private static boolean containsOnnxFile(Path dir) {
-        try (var stream = Files.list(dir)) {
-            return stream.anyMatch(p -> p.getFileName().toString().endsWith(".onnx"));
-        } catch (Exception e) {
-            return false;
+        String missing = Phi3InferenceEngine.describeMissingModelFile(modelDir);
+        if (missing != null) {
+            throw new IllegalStateException(missing
+                    + ". Download the model first from the Download tab.");
         }
     }
 
