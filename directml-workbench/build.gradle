@@ -22,12 +22,15 @@ tasks.withType(Test).configureEach {
 }
 
 // Fat/shadow jar task – produces a single executable jar with all dependencies.
-// The runtime classpath contains project dependencies such as directml-runtime;
-// make the task depend on those artifacts explicitly so Gradle builds their jars
-// before this task tries to expand them.
+// Gradle's runtimeClasspath contains project dependency jar paths, but resolving
+// the configuration alone does not guarantee those jars are assembled before we
+// expand them. Depend on the concrete core jar tasks explicitly.
 tasks.register('shadowJar', Jar) {
-    dependsOn configurations.runtimeClasspath
     dependsOn classes
+    dependsOn ':directml-config:jar'
+    dependsOn ':directml-windows-bindings:jar'
+    dependsOn ':directml-encoder:jar'
+    dependsOn ':directml-runtime:jar'
 
     archiveBaseName = 'directml-workbench'
     archiveClassifier = 'all'
