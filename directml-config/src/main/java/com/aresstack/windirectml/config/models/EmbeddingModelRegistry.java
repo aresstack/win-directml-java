@@ -282,6 +282,43 @@ public final class EmbeddingModelRegistry {
                 "Summarizer/decoder model \u2013 belongs to the summarize endpoint "
                         + "future work, not the embed endpoint.",
                 null));
+        entries.add(new Entry(
+                "microsoft/Phi-3-mini-4k-instruct-onnx",
+                UseCase.SUMMARIZER,
+                "Microsoft",
+                "Phi-3 Mini 4K Instruct (decoder-only, ONNX Runtime GenAI)",
+                "SentencePiece (Phi-3 tokenizer.json)",
+                "cpu, directml",
+                Status.EXPERIMENTAL,
+                Arrays.asList(
+                        "model/phi-3-mini-4k-instruct-onnx",
+                        "model/microsoft/Phi-3-mini-4k-instruct-onnx"),
+                "Workbench download tab / scripts/download-phi3.ps1",
+                "manual smoke test (see WINDOWS-SMOKE-RUN.md)",
+                "First supported decoder/summarizer backend. Uses ONNX Runtime "
+                        + "GenAI for text generation. Requires ~2.3 GB disk for the "
+                        + "int4-quantised ONNX graph. CPU fallback supported; DirectML "
+                        + "acceleration available on compatible GPUs.",
+                null));
+        entries.add(new Entry(
+                "microsoft/Phi-3.5-mini-instruct-onnx",
+                UseCase.SUMMARIZER,
+                "Microsoft",
+                "Phi-3.5 Mini Instruct (decoder-only, ONNX Runtime GenAI)",
+                "SentencePiece (Phi-3.5 tokenizer.json)",
+                "cpu, directml",
+                Status.PLANNED,
+                Arrays.asList(
+                        "model/phi-3.5-mini-instruct-onnx",
+                        "model/microsoft/Phi-3.5-mini-instruct-onnx"),
+                "planned (download support not yet added)",
+                "not yet tested \u2013 blocked on ONNX GenAI graph availability",
+                "Successor to Phi-3 Mini with improved instruction following. "
+                        + "Same architecture class as Phi-3 Mini 4K; expected to work "
+                        + "with the same ONNX Runtime GenAI path once the official "
+                        + "ONNX graph is published. Tracked as a follow-up to the "
+                        + "Phi-3 summarizer implementation.",
+                null));
         ENTRIES = Collections.unmodifiableList(entries);
 
         Map<String, Entry> byKey = new LinkedHashMap<String, Entry>();

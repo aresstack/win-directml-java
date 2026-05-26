@@ -229,9 +229,9 @@ class EmbeddingModelRegistryTest {
     @Test
     void entriesPreserveDeclarationOrder() {
         List<EmbeddingModelRegistry.Entry> all = EmbeddingModelRegistry.entries();
-        assertEquals(7, all.size());
+        assertEquals(9, all.size());
         assertEquals("sentence-transformers/all-MiniLM-L6-v2", all.get(0).modelId());
-        assertEquals("ellamind/summarizer-v6-llama-v2", all.get(all.size() - 1).modelId());
+        assertEquals("microsoft/Phi-3.5-mini-instruct-onnx", all.get(all.size() - 1).modelId());
     }
 
     @Test
@@ -307,6 +307,29 @@ class EmbeddingModelRegistryTest {
         List<EmbeddingModelRegistry.Entry> decoders =
                 EmbeddingModelRegistry.entriesByUseCase(EmbeddingModelRegistry.UseCase.DECODER);
         assertEquals(2, decoders.size());
+    }
+
+    @Test
+    void entriesByUseCaseSummarizerReturnsAllSummarizerIds() {
+        List<EmbeddingModelRegistry.Entry> summarizers =
+                EmbeddingModelRegistry.entriesByUseCase(EmbeddingModelRegistry.UseCase.SUMMARIZER);
+        assertEquals(3, summarizers.size());
+        // Phi-3 must be experimental
+        EmbeddingModelRegistry.Entry phi3 = EmbeddingModelRegistry
+                .findByModelId("microsoft/Phi-3-mini-4k-instruct-onnx");
+        assertNotNull(phi3);
+        assertEquals(EmbeddingModelRegistry.UseCase.SUMMARIZER, phi3.useCase());
+        assertEquals(EmbeddingModelRegistry.Status.EXPERIMENTAL, phi3.status());
+        assertFalse(phi3.isEmbedding());
+        assertFalse(phi3.modelDirHints().isEmpty(),
+                "Phi-3 must declare model directory hints");
+        // Phi-3.5 must be planned
+        EmbeddingModelRegistry.Entry phi35 = EmbeddingModelRegistry
+                .findByModelId("microsoft/Phi-3.5-mini-instruct-onnx");
+        assertNotNull(phi35);
+        assertEquals(EmbeddingModelRegistry.UseCase.SUMMARIZER, phi35.useCase());
+        assertEquals(EmbeddingModelRegistry.Status.PLANNED, phi35.status());
+        assertFalse(phi35.isEmbedding());
     }
 
     @Test
