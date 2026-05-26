@@ -16,7 +16,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Public Java 21 facade for direct in-process use of the local ML runtime.
+ * Java 21 facade for direct in-process use of the local ML runtime.
  * <p>
  * Java 21 applications use this class to obtain embeddings, batch
  * embeddings, and reranking <b>without</b> starting the JSON-RPC sidecar
@@ -53,7 +53,14 @@ import java.util.Set;
  * {@code intfloat/multilingual-e5-large-instruct}) are <b>planned but not yet
  * supported</b>. Attempting to load them will produce an explicit
  * {@link UnsupportedModelException}.
+ *
+ * @deprecated Prefer the higher-level
+ *             {@link com.aresstack.windirectml.runtime.api.MlRuntime} entry
+ *             point, which provides strongly-typed model identifiers and a
+ *             simpler configuration surface. This class remains fully
+ *             functional and will not be removed without a major version bump.
  */
+@Deprecated
 public final class LocalMlRuntime {
 
     private static final Set<String> SUPPORTED_FAMILIES = Set.of("minilm", "e5");

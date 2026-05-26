@@ -1,7 +1,6 @@
 package com.aresstack.windirectml.examples;
 
-import com.aresstack.windirectml.encoder.e5.E5Variant;
-import com.aresstack.windirectml.runtime.facade.*;
+import com.aresstack.windirectml.runtime.api.*;
 
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -12,7 +11,7 @@ import java.util.List;
  * <p>
  * This demonstrates:
  * <ol>
- *   <li>Creating a {@link LocalMlRuntime} with a backend configuration.</li>
+ *   <li>Creating a {@link MlRuntime} with a backend configuration.</li>
  *   <li>Loading an embedding model and producing vectors.</li>
  *   <li>Batch-embedding multiple texts.</li>
  *   <li>Loading a reranker model and scoring documents.</li>
@@ -25,14 +24,16 @@ public class DirectApiExample {
 
     public static void main(String[] args) {
         // 1. Create runtime (defaults to Backend.AUTO: try DirectML, fall back to CPU)
-        LocalMlRuntime runtime = LocalMlRuntime.create();
+        MlRuntime runtime = MlRuntime.create();
         System.out.println("Runtime created with backend: " + runtime.backend());
 
-        // 2. Load embedding model
-        Path embeddingModelDir = Path.of("model/all-MiniLM-L6-v2");
-        var embeddingConfig = EmbeddingModelConfig.miniLm(embeddingModelDir);
+        // 2. Load embedding model (modelDir derived automatically from EmbeddingModelId)
+        var embeddingConfig = EmbeddingConfig.builder()
+                .model(EmbeddingModelId.MINILM_L6_V2)
+                .modelDir(Path.of("model/all-MiniLM-L6-v2"))
+                .build();
 
-        try (LocalEmbeddingModel embeddings = runtime.loadEmbeddingModel(embeddingConfig)) {
+        try (EmbeddingModelHandle embeddings = runtime.loadEmbeddings(embeddingConfig)) {
             System.out.println("Embedding model loaded, dimension=" + embeddings.dimension());
 
             // Single embedding
@@ -54,11 +55,12 @@ public class DirectApiExample {
             System.err.println("Embedding failed (model files present?): " + e.getMessage());
         }
 
-        // 3. Load reranker model
-        Path rerankerModelDir = Path.of("model/cross-encoder-ms-marco-MiniLM-L-6-v2");
-        var rerankerConfig = new RerankerModelConfig(rerankerModelDir);
+        // 3. Load reranker model (modelDir derived automatically from RerankerModelId)
+        var rerankerConfig = RerankerConfig.builder()
+                .model(RerankerModelId.MS_MARCO_MINILM_L6)
+                .build();
 
-        try (LocalRerankerModel reranker = runtime.loadRerankerModel(rerankerConfig)) {
+        try (RerankerModelHandle reranker = runtime.loadReranker(rerankerConfig)) {
             System.out.println("\nReranker loaded: " + reranker.modelName());
 
             var results = reranker.rerank("What is machine learning?", List.of(
@@ -72,17 +74,6 @@ public class DirectApiExample {
             }
         } catch (Exception e) {
             System.err.println("Reranking failed (model files present?): " + e.getMessage());
-        }
-
-        // 4. Demonstrate unsupported model error
-        try {
-            runtime.loadEmbeddingModel(new EmbeddingModelConfig(
-                    Path.of("dummy"), "sentencepiece-xlmr", null, null));
-        } catch (UnsupportedModelException e) {
-            System.out.println("\nExpected error for unsupported family: " + e.getMessage());
-        } catch (Exception e) {
-            // Won't reach here for unsupported families (they throw before loading)
-            System.err.println("Unexpected: " + e.getMessage());
         }
     }
 }
