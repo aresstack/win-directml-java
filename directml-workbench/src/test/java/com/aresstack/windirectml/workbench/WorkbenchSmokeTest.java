@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import javax.swing.*;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
  * Headless Swing smoke test – verifies that all panels can be constructed
@@ -14,12 +15,9 @@ import static org.junit.jupiter.api.Assertions.*;
 class WorkbenchSmokeTest {
 
     @Test
-    void frameCanBeConstructedHeadlessly() throws Exception {
-        if (java.awt.GraphicsEnvironment.isHeadless()) {
-            // In headless CI, verify that WorkbenchFrame class is loadable
-            assertNotNull(WorkbenchFrame.class);
-            return;
-        }
+    void frameCanBeConstructedWhenGraphicsAreAvailable() throws Exception {
+        assumeFalse(java.awt.GraphicsEnvironment.isHeadless(),
+                "JFrame construction is skipped in headless CI");
         SwingUtilities.invokeAndWait(() -> {
             var frame = new WorkbenchFrame();
             assertNotNull(frame);
