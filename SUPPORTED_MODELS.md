@@ -99,6 +99,8 @@ status / embedFamily` classification without duplicating metadata.
 | `openai/gpt-oss-120b`                       | decoder    | ⛔ unsupported  | – (not for embed) | Decoder-only LLM. Rejected by the `embed` endpoint.                                                                  |
 | `casperhansen/llama-3.3-70b-instruct-awq`   | decoder    | ⛔ unsupported  | – (not for embed) | Llama 3.3 70B AWQ-quantised decoder-only LLM. Rejected by the `embed` endpoint.                                      |
 | `ellamind/summarizer-v6-llama-v2`           | summarizer | ⛔ unsupported  | – (not for embed) | Llama-v2 summarizer fine-tune. Belongs to a future text-generation/summarize ticket, not the embed endpoint.         |
+| `microsoft/Phi-3-mini-4k-instruct-onnx`    | summarizer | 🧪 experimental | CPU + DirectML    | First supported decoder/summarizer backend. Workbench-selectable and downloadable.                                   |
+| `microsoft/Phi-3.5-mini-instruct-onnx`     | summarizer | 🚧 planned      | – (planned)       | Phi-3 successor; runtime support pending ONNX graph availability.                                                    |
 
 Passing a decoder / summarizer ID to `-Dembed.model` fails with the
 following exact message (matched by both the registry test suite and any
@@ -326,6 +328,7 @@ including the per-layer command-list coalescing (see
 | Variant                                                       | Quantization    | DirectML | Greedy decode | KV cache | Status          | Module               |
 |---------------------------------------------------------------|-----------------|----------|---------------|----------|-----------------|----------------------|
 | `microsoft/Phi-3-mini-4k-instruct-onnx` (DirectML INT4 build) | INT4 GroupQuant | ✅        | ✅             | paged    | 🧪 experimental | `directml-inference` |
+| `microsoft/Phi-3.5-mini-instruct-onnx`                        | TBD             | –        | –             | –        | 🚧 planned      | –                    |
 
 The Phi-3 pipeline runs prefill and decode in a single DirectML graph
 per layer; speculative decoding, batched generation and beam search are
@@ -333,6 +336,19 @@ out of scope for the current release. The Phi-3 model weights are not
 permissively licensed — read
 https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-onnx
 before redistributing anything you build on top of them.
+
+### 3.1 Summarization via Decoder Models
+
+The **Workbench Summarizer tab** uses decoder models (not embeddings)
+for text generation. The summarizer model selector is populated from
+`EmbeddingModelRegistry.entriesByUseCase(SUMMARIZER)` and is
+**independent** of the embedding model selector.
+
+| `modelId`                                    | `useCase`  | `status`          | Workbench support | Notes                                                                        |
+|----------------------------------------------|------------|-------------------|-------------------|------------------------------------------------------------------------------|
+| `microsoft/Phi-3-mini-4k-instruct-onnx`     | summarizer | 🧪 experimental   | ✅ downloadable    | First supported summarizer backend. CPU + DirectML. ~2.3 GB INT4 ONNX graph. |
+| `microsoft/Phi-3.5-mini-instruct-onnx`      | summarizer | 🚧 planned        | ❌ not yet         | Successor; expected same ONNX GenAI path once graph is published.            |
+| `ellamind/summarizer-v6-llama-v2`           | summarizer | ⛔ unsupported    | ❌                 | Llama-v2 fine-tune; no local runtime path in this project.                   |
 
 > **Summarization is experimental.** The `summarize` JSON-RPC method is
 > backed exclusively by the Phi-3 runtime above and is **not part of the
@@ -348,6 +364,17 @@ before redistributing anything you build on top of them.
 > intended acceleration path is DirectML – pass `-Dphi3.backend=auto`
 > (default) or `-Dphi3.backend=directml`; `-Dphi3.backend=cpu` works as a
 > local fallback.
+
+### 3.2 Workbench Summarizer smoke test (manual)
+
+1. Download Phi-3 from the Workbench **Download** tab (button:
+   "Download Phi-3 Mini 4K Instruct (Summarizer)").
+2. Switch to the **Summarizer** tab.
+3. Select `microsoft/Phi-3-mini-4k-instruct-onnx` from the model dropdown.
+4. Paste a longer text (≥3 sentences).
+5. Click **Summarize**.
+6. Verify that the output area shows generated summary text (not
+   extractive sentences).
 
 ## 4. Sidecar / JSON-RPC
 
@@ -385,3 +412,4 @@ for a future minor:
 - Nomic-text-v1.5 with its custom positional embedding scheme.
 - Quantized weights for the BERT encoder family (INT8 GEMM via DML).
 - Speculative / batched decoding for Phi-3.
+- Phi-3.5 Mini Instruct ONNX summarizer support (pending official ONNX graph).

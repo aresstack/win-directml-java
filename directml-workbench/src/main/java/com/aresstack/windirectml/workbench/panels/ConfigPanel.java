@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.workbench.panels;
 
+import com.aresstack.windirectml.config.models.EmbeddingModelRegistry;
 import com.aresstack.windirectml.runtime.facade.Backend;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 
@@ -18,6 +19,7 @@ public final class ConfigPanel extends JPanel {
     private final JComboBox<Backend> backendCombo;
     private final JTextField modelRootField;
     private final JComboBox<String> embeddingModelCombo;
+    private final JComboBox<String> summarizerModelCombo;
     private final JTextField rerankerField;
     private final JTextArea logArea;
 
@@ -95,6 +97,21 @@ public final class ConfigPanel extends JPanel {
         });
         gbc.gridx = 1; gbc.weightx = 1;
         form.add(rerankerField, gbc);
+
+        row++;
+
+        // Summarizer model
+        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0;
+        form.add(new JLabel("Summarizer Model:"), gbc);
+        var summarizerOptions = EmbeddingModelRegistry
+                .entriesByUseCase(EmbeddingModelRegistry.UseCase.SUMMARIZER)
+                .stream().map(EmbeddingModelRegistry.Entry::modelId).toArray(String[]::new);
+        summarizerModelCombo = new JComboBox<>(summarizerOptions);
+        summarizerModelCombo.setSelectedItem(model.getSummarizerModel());
+        summarizerModelCombo.addActionListener(e ->
+                model.setSummarizerModel((String) summarizerModelCombo.getSelectedItem()));
+        gbc.gridx = 1; gbc.weightx = 1;
+        form.add(summarizerModelCombo, gbc);
 
         add(form, BorderLayout.NORTH);
 

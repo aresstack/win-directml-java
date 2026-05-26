@@ -13,6 +13,7 @@ public final class WorkbenchModel {
     private volatile Path modelRoot = Path.of("model");
     private volatile String embeddingModel = "all-MiniLM-L6-v2";
     private volatile String rerankerModel = "cross-encoder-ms-marco-MiniLM-L-6-v2";
+    private volatile String summarizerModel = "microsoft/Phi-3-mini-4k-instruct-onnx";
 
     public Backend getBackend() { return backend; }
     public void setBackend(Backend backend) { this.backend = backend; }
@@ -25,4 +26,7 @@ public final class WorkbenchModel {
 
     public String getRerankerModel() { return rerankerModel; }
     public void setRerankerModel(String rerankerModel) { this.rerankerModel = rerankerModel; }
+
+    public String getSummarizerModel() { return summarizerModel; }
+    public void setSummarizerModel(String summarizerModel) { this.summarizerModel = summarizerModel; }
 }

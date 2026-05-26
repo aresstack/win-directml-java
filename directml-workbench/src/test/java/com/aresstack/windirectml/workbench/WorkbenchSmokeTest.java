@@ -103,5 +103,6 @@ class WorkbenchSmokeTest {
         assertEquals("model", model.getModelRoot().toString());
         assertEquals("all-MiniLM-L6-v2", model.getEmbeddingModel());
         assertEquals("cross-encoder-ms-marco-MiniLM-L-6-v2", model.getRerankerModel());
+        assertEquals("microsoft/Phi-3-mini-4k-instruct-onnx", model.getSummarizerModel());
     }
 }

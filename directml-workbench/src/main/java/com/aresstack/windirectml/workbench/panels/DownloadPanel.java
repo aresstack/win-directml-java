@@ -36,6 +36,10 @@ public final class DownloadPanel extends JPanel {
         buttons.add(createDownloadButton("Download Reranker (ms-marco-MiniLM-L-12-v2)",
                 "cross-encoder/ms-marco-MiniLM-L-12-v2", "cross-encoder-ms-marco-MiniLM-L-12-v2"));
 
+        // Summarizer / decoder models
+        buttons.add(createDownloadButton("Download Phi-3 Mini 4K Instruct (Summarizer)",
+                "microsoft/Phi-3-mini-4k-instruct-onnx", "phi-3-mini-4k-instruct-onnx"));
+
         forceCheckbox = new JCheckBox("Force re-download (overwrite existing)");
 
         var topPanel = new JPanel(new BorderLayout(8, 8));

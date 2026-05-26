@@ -1,61 +1,119 @@
 package com.aresstack.windirectml.workbench.panels;
 
-import com.aresstack.windirectml.encoder.e5.E5Variant;
-import com.aresstack.windirectml.runtime.facade.EmbeddingModelConfig;
-import com.aresstack.windirectml.runtime.facade.LocalMlRuntime;
-import com.aresstack.windirectml.runtime.facade.LocalMlRuntimeConfig;
+import com.aresstack.windirectml.config.models.EmbeddingModelRegistry;
+import com.aresstack.windirectml.config.models.EmbeddingModelRegistry.Entry;
+import com.aresstack.windirectml.config.models.EmbeddingModelRegistry.UseCase;
+import com.aresstack.windirectml.inference.InferenceException;
+import com.aresstack.windirectml.inference.Phi3Summarizer;
+import com.aresstack.windirectml.inference.Summary;
+import com.aresstack.windirectml.inference.SummaryRequest;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 
 import javax.swing.*;
 import java.awt.*;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 /**
- * Extractive summarizer demo built on the public embedding API.
+ * Decoder-backed summarizer panel for the DirectML Workbench.
  * <p>
- * This is intentionally not a decoder/LLM summarizer. It embeds the whole text
- * and individual sentences, then returns the sentences closest to the document
- * vector in original order.
+ * Uses the Phi-3 (or compatible) decoder model to generate real text summaries
+ * via the {@link Phi3Summarizer} engine. This replaces the old embedding-based
+ * extractive sentence selection approach.
  */
 public final class SummarizerPanel extends JPanel {
 
     private final WorkbenchModel model;
     private final JTextArea inputArea;
     private final JTextArea resultArea;
-    private final JSpinner sentenceCountSpinner;
+    private final JComboBox<String> modelSelector;
+    private final JSpinner maxTokensSpinner;
 
     public SummarizerPanel(WorkbenchModel model) {
         this.model = model;
         setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
+        // --- Top: model selector and controls ---
+        var controlsPanel = new JPanel(new BorderLayout(4, 4));
+
+        var modelPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        modelPanel.add(new JLabel("Summarizer Model:"));
+        modelSelector = new JComboBox<>(buildSummarizerModelOptions());
+        modelSelector.setSelectedItem(model.getSummarizerModel());
+        modelSelector.addActionListener(e -> {
+            String selected = (String) modelSelector.getSelectedItem();
+            if (selected != null) {
+                model.setSummarizerModel(selected);
+            }
+        });
+        modelPanel.add(modelSelector);
+
+        // Status label
+        var statusLabel = new JLabel();
+        updateStatusLabel(statusLabel);
+        modelSelector.addActionListener(e -> updateStatusLabel(statusLabel));
+        modelPanel.add(statusLabel);
+        controlsPanel.add(modelPanel, BorderLayout.NORTH);
+
+        // Input area
         var inputPanel = new JPanel(new BorderLayout(4, 4));
         inputPanel.add(new JLabel("Text to summarize:"), BorderLayout.NORTH);
-        inputArea = new JTextArea(10, 70);
+        inputArea = new JTextArea(8, 70);
         inputArea.setLineWrap(true);
         inputArea.setWrapStyleWord(true);
-        inputArea.setText("Paste a longer text here. The workbench will create an extractive summary by selecting the most representative sentences using the selected embedding model.");
+        inputArea.setText("Paste a longer text here. The workbench will generate a summary using the selected decoder model (e.g. Phi-3).");
         inputPanel.add(new JScrollPane(inputArea), BorderLayout.CENTER);
 
-        var controls = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        controls.add(new JLabel("Sentences:"));
-        sentenceCountSpinner = new JSpinner(new SpinnerNumberModel(3, 1, 20, 1));
-        controls.add(sentenceCountSpinner);
+        var runControls = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        runControls.add(new JLabel("Max tokens:"));
+        maxTokensSpinner = new JSpinner(new SpinnerNumberModel(256, 32, 2048, 32));
+        runControls.add(maxTokensSpinner);
         var runBtn = new JButton("Summarize");
         runBtn.addActionListener(e -> runSummarizer());
-        controls.add(runBtn);
-        inputPanel.add(controls, BorderLayout.SOUTH);
-        add(inputPanel, BorderLayout.NORTH);
+        runControls.add(runBtn);
+        inputPanel.add(runControls, BorderLayout.SOUTH);
 
+        controlsPanel.add(inputPanel, BorderLayout.CENTER);
+        add(controlsPanel, BorderLayout.NORTH);
+
+        // --- Bottom: result area ---
         resultArea = new JTextArea(14, 70);
         resultArea.setEditable(false);
         resultArea.setLineWrap(true);
         resultArea.setWrapStyleWord(true);
         resultArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         add(new JScrollPane(resultArea), BorderLayout.CENTER);
+    }
+
+    private String[] buildSummarizerModelOptions() {
+        List<Entry> summarizers = EmbeddingModelRegistry.entriesByUseCase(UseCase.SUMMARIZER);
+        String[] options = new String[summarizers.size()];
+        for (int i = 0; i < summarizers.size(); i++) {
+            options[i] = summarizers.get(i).modelId();
+        }
+        return options;
+    }
+
+    private void updateStatusLabel(JLabel label) {
+        String selected = (String) modelSelector.getSelectedItem();
+        if (selected == null) {
+            label.setText("");
+            return;
+        }
+        Entry entry = EmbeddingModelRegistry.findByModelId(selected);
+        if (entry == null) {
+            label.setText(" [unknown]");
+            return;
+        }
+        String statusText = switch (entry.status()) {
+            case SHIPPED -> " \u2705 shipped";
+            case EXPERIMENTAL -> " \uD83E\uDDEA experimental";
+            case PLANNED -> " \uD83D\uDEA7 planned";
+            case UNSUPPORTED -> " \u274C unsupported";
+        };
+        label.setText(statusText);
     }
 
     private void runSummarizer() {
@@ -65,58 +123,61 @@ public final class SummarizerPanel extends JPanel {
             return;
         }
 
-        List<String> sentences = splitSentences(text);
-        if (sentences.isEmpty()) {
-            appendResult("ERROR: No sentences found.");
+        String selectedModel = (String) modelSelector.getSelectedItem();
+        if (selectedModel == null) {
+            appendResult("ERROR: No summarizer model selected.");
             return;
         }
 
-        int requested = (Integer) sentenceCountSpinner.getValue();
-        int count = Math.min(requested, sentences.size());
-        appendResult("Loading model: " + model.getEmbeddingModel() + " (backend: " + model.getBackend() + ")...");
+        // Check model status
+        Entry entry = EmbeddingModelRegistry.findByModelId(selectedModel);
+        if (entry != null) {
+            if (entry.status() == EmbeddingModelRegistry.Status.UNSUPPORTED) {
+                appendResult("ERROR: Model '" + selectedModel + "' is unsupported in this runtime.");
+                appendResult("  Status: unsupported. This model cannot run locally.");
+                return;
+            }
+            if (entry.status() == EmbeddingModelRegistry.Status.PLANNED) {
+                appendResult("ERROR: Model '" + selectedModel + "' is not yet implemented.");
+                appendResult("  Status: planned. Runtime support is in progress.");
+                return;
+            }
+        }
+
+        int maxTokens = (Integer) maxTokensSpinner.getValue();
+        appendResult("Loading summarizer model: " + selectedModel
+                + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
 
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
                 try {
-                    var config = LocalMlRuntimeConfig.builder()
-                            .backend(model.getBackend())
-                            .build();
-                    var runtime = LocalMlRuntime.create(config);
-                    Path modelDir = model.getModelRoot().resolve(model.getEmbeddingModel());
+                    Path modelDir = resolveSummarizerModelDir(selectedModel);
 
-                    var embedConfig = buildEmbeddingConfig(modelDir);
+                    // Validate required files
+                    validateModelFiles(modelDir);
+
+                    String backend = model.getBackend().name().toLowerCase();
                     long start = System.nanoTime();
-                    try (var embeddings = runtime.loadEmbeddingModel(embedConfig)) {
-                        appendResult("Model loaded in " + elapsedMs(start) + " ms (dimension: " + embeddings.dimension() + ")");
 
-                        long summarizeStart = System.nanoTime();
-                        float[] documentVector = embeddings.embed(text);
-                        List<float[]> sentenceVectors = embeddings.embedBatch(sentences);
+                    try (var summarizer = new Phi3Summarizer(modelDir, maxTokens, backend)) {
+                        appendResult("Initializing model...");
+                        summarizer.initialize();
+                        appendResult("Model loaded in " + elapsedMs(start) + " ms");
 
-                        List<ScoredSentence> ranked = new ArrayList<>();
-                        for (int i = 0; i < sentences.size(); i++) {
-                            ranked.add(new ScoredSentence(i, sentences.get(i), cosine(documentVector, sentenceVectors.get(i))));
-                        }
-
-                        ranked.sort(Comparator.comparingDouble(ScoredSentence::score).reversed());
-                        List<ScoredSentence> selected = ranked.subList(0, count).stream()
-                                .sorted(Comparator.comparingInt(ScoredSentence::index))
-                                .toList();
-
-                        appendResult("Summary completed in " + elapsedMs(summarizeStart) + " ms");
-                        appendResult("Selected " + selected.size() + " of " + sentences.size() + " sentences.");
+                        long genStart = System.nanoTime();
+                        SummaryRequest request = SummaryRequest.of(text, maxTokens);
+                        Summary summary = summarizer.summarize(request);
+                        appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
+                        appendResult("  Prompt tokens: " + summary.promptTokens());
+                        appendResult("  Output tokens: " + summary.outputTokens());
+                        appendResult("  Finish reason: " + summary.finishReason());
                         appendResult("");
                         appendResult("SUMMARY:");
-                        for (ScoredSentence sentence : selected) {
-                            appendResult("- " + sentence.text());
-                        }
-                        appendResult("");
-                        appendResult("Scores:");
-                        for (ScoredSentence sentence : selected) {
-                            appendResult("  #" + (sentence.index() + 1) + " score=" + sentence.score());
-                        }
+                        appendResult(summary.text());
                     }
+                } catch (InferenceException ex) {
+                    appendResult("INFERENCE ERROR: " + ex.getMessage());
                 } catch (Exception ex) {
                     appendResult("ERROR: " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
                 }
@@ -125,43 +186,70 @@ public final class SummarizerPanel extends JPanel {
         }.execute();
     }
 
-    private EmbeddingModelConfig buildEmbeddingConfig(Path modelDir) {
-        String selected = model.getEmbeddingModel();
-        return switch (selected) {
-            case "e5-small-v2" -> EmbeddingModelConfig.e5(modelDir, E5Variant.SMALL_V2, "query: ");
-            case "e5-base-v2" -> EmbeddingModelConfig.e5(modelDir, E5Variant.BASE_V2, "query: ");
-            case "e5-large-v2" -> EmbeddingModelConfig.e5(modelDir, E5Variant.LARGE_V2, "query: ");
-            default -> EmbeddingModelConfig.miniLm(modelDir);
-        };
-    }
-
-    private static List<String> splitSentences(String text) {
-        String normalized = text.replace('\n', ' ').replace('\r', ' ').trim();
-        String[] parts = normalized.split("(?<=[.!?])\\s+");
-        List<String> sentences = new ArrayList<>();
-        for (String part : parts) {
-            String sentence = part.trim();
-            if (!sentence.isEmpty()) {
-                sentences.add(sentence);
+    private Path resolveSummarizerModelDir(String modelId) {
+        // Try known directory layouts
+        Entry entry = EmbeddingModelRegistry.findByModelId(modelId);
+        if (entry != null && !entry.modelDirHints().isEmpty()) {
+            for (String hint : entry.modelDirHints()) {
+                Path candidate = model.getModelRoot().resolve("..").resolve(hint).normalize();
+                if (Files.isDirectory(candidate)) {
+                    return candidate;
+                }
+            }
+            // Also try relative to model root directly
+            for (String hint : entry.modelDirHints()) {
+                Path hintPath = Path.of(hint);
+                String dirName = hintPath.getFileName().toString();
+                Path candidate = model.getModelRoot().resolve(dirName);
+                if (Files.isDirectory(candidate)) {
+                    return candidate;
+                }
             }
         }
-        return sentences;
+
+        // Fallback: use the model ID last segment as directory name
+        String dirName = modelId.contains("/") ? modelId.substring(modelId.lastIndexOf('/') + 1) : modelId;
+        return model.getModelRoot().resolve(dirName);
     }
 
-    private static double cosine(float[] a, float[] b) {
-        double dot = 0.0;
-        double normA = 0.0;
-        double normB = 0.0;
-        int n = Math.min(a.length, b.length);
-        for (int i = 0; i < n; i++) {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
+    private void validateModelFiles(Path modelDir) {
+        if (!Files.isDirectory(modelDir)) {
+            throw new IllegalStateException(
+                    "Model directory not found: " + modelDir.toAbsolutePath()
+                            + ". Download the model first from the Download tab.");
         }
-        if (normA == 0.0 || normB == 0.0) {
-            return 0.0;
+
+        // Check for essential ONNX GenAI / Phi-3 files
+        boolean hasOnnx = Files.exists(modelDir.resolve("model.onnx"))
+                || Files.exists(modelDir.resolve("model.onnx.data"))
+                || containsOnnxFile(modelDir);
+        if (!hasOnnx) {
+            throw new IllegalStateException(
+                    "No ONNX model graph found in: " + modelDir.toAbsolutePath()
+                            + ". Expected model.onnx or Phi-3 quantised graph file.");
         }
-        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+
+        if (!Files.exists(modelDir.resolve("tokenizer.json"))
+                && !Files.exists(modelDir.resolve("tokenizer.model"))) {
+            throw new IllegalStateException(
+                    "Missing tokenizer file in: " + modelDir.toAbsolutePath()
+                            + ". Expected tokenizer.json or tokenizer.model.");
+        }
+
+        if (!Files.exists(modelDir.resolve("genai_config.json"))
+                && !Files.exists(modelDir.resolve("config.json"))) {
+            throw new IllegalStateException(
+                    "Missing config file in: " + modelDir.toAbsolutePath()
+                            + ". Expected genai_config.json or config.json.");
+        }
+    }
+
+    private static boolean containsOnnxFile(Path dir) {
+        try (var stream = Files.list(dir)) {
+            return stream.anyMatch(p -> p.getFileName().toString().endsWith(".onnx"));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static long elapsedMs(long startNanos) {
@@ -174,6 +262,4 @@ public final class SummarizerPanel extends JPanel {
             resultArea.setCaretPosition(resultArea.getDocument().getLength());
         });
     }
-
-    private record ScoredSentence(int index, String text, double score) { }
 }
