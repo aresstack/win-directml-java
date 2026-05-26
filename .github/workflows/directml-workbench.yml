@@ -23,6 +23,13 @@ jobs:
       - name: Build workbench fat jar
         run: ./gradlew :directml-workbench:shadowJar
 
+      - name: Verify release inputs
+        run: |
+          test -f directml-workbench/build/libs/directml-workbench-all.jar
+          test -f directml-workbench/packaging/launcher.ps1
+          ls -l directml-workbench/build/libs/directml-workbench-all.jar
+          ls -l directml-workbench/packaging/launcher.ps1
+
       - name: Upload jar artifact
         uses: actions/upload-artifact@v4
         with:
@@ -43,13 +50,22 @@ jobs:
       - name: Delete existing tag (if any)
         run: git push --delete origin directml-workbench-latest || true
 
-      - name: Create rolling release
+      - name: Create rolling release with jar
         run: |
           gh release create directml-workbench-latest \
             directml-workbench/build/libs/directml-workbench-all.jar \
-            directml-workbench/packaging/launcher.ps1 \
             --title "DirectML Workbench (latest)" \
             --notes "Rolling demo release of the DirectML Workbench standalone fat jar. Requires Java 21 or newer. Download directml-workbench-all.jar and launcher.ps1 into the same directory, then run: powershell -ExecutionPolicy Bypass -File .\\launcher.ps1" \
             --prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload launcher release asset
+        run: gh release upload directml-workbench-latest directml-workbench/packaging/launcher.ps1 --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List release assets
+        run: gh release view directml-workbench-latest --json assets --jq '.assets[].name'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
