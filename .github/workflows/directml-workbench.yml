@@ -23,11 +23,17 @@ jobs:
       - name: Build workbench fat jar
         run: ./gradlew :directml-workbench:shadowJar
 
-      - name: Upload artifact
+      - name: Upload jar artifact
         uses: actions/upload-artifact@v4
         with:
           name: directml-workbench-all
           path: directml-workbench/build/libs/directml-workbench-all.jar
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-ps1
+          path: directml-workbench/packaging/launcher.ps1
 
       - name: Delete existing release (if any)
         run: gh release delete directml-workbench-latest --yes || true
@@ -41,8 +47,9 @@ jobs:
         run: |
           gh release create directml-workbench-latest \
             directml-workbench/build/libs/directml-workbench-all.jar \
+            directml-workbench/packaging/launcher.ps1 \
             --title "DirectML Workbench (latest)" \
-            --notes "Rolling demo release of the DirectML Workbench standalone fat jar. Requires Java 21 or newer. Run with: java --enable-preview --enable-native-access=ALL-UNNAMED -jar directml-workbench-all.jar" \
+            --notes "Rolling demo release of the DirectML Workbench standalone fat jar. Requires Java 21 or newer. Download directml-workbench-all.jar and launcher.ps1 into the same directory, then run: powershell -ExecutionPolicy Bypass -File .\\launcher.ps1" \
             --prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
