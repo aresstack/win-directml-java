@@ -8,17 +8,28 @@ if (-not (Test-Path $Jar)) {
     exit 1
 }
 
-function Get-JavaMajorVersion($JavaPath) {
+function Get-JavaMajorFromVersionObject($Version) {
+    if ($null -eq $Version) { return $null }
+    try {
+        if ($Version.Major -eq 1 -and $Version.Minor -gt 0) {
+            return [int]$Version.Minor
+        }
+        return [int]$Version.Major
+    } catch {
+        return $null
+    }
+}
+
+function Get-JavaMajorFromVersionText($JavaPath) {
     try {
         $VersionOutput = & $JavaPath -version 2>&1
         $VersionLine = $VersionOutput | Select-String 'version' | Select-Object -First 1
         if (-not $VersionLine) { return $null }
 
-        $VersionText = $VersionLine.ToString()
-        if ($VersionText -notmatch '"([^"]+)"') { return $null }
+        $Text = $VersionLine.ToString()
+        if ($Text -notmatch '"([^"]+)"') { return $null }
 
-        $Version = $Matches[1]
-        $Parts = $Version.Split('.')
+        $Parts = $Matches[1].Split('.')
         if ($Parts[0] -eq '1' -and $Parts.Length -gt 1) {
             return [int]$Parts[1]
         }
@@ -28,20 +39,31 @@ function Get-JavaMajorVersion($JavaPath) {
     }
 }
 
-$Candidates = New-Object System.Collections.Generic.List[string]
+$Candidates = @()
 
 if ($env:JAVA_HOME_21_X64) {
-    $Candidates.Add((Join-Path $env:JAVA_HOME_21_X64 'bin/java.exe'))
-}
-if ($env:JAVA_HOME) {
-    $Candidates.Add((Join-Path $env:JAVA_HOME 'bin/java.exe'))
+    $Path = Join-Path $env:JAVA_HOME_21_X64 'bin/java.exe'
+    if (Test-Path $Path) {
+        $Candidates += [pscustomobject]@{ Source = $Path; Major = (Get-JavaMajorFromVersionText $Path) }
+    }
 }
 
-# PowerShell can see every java.exe on PATH. This is important when Java 8 is
-# first on PATH but Java 21 is also installed later, for example under Zulu.
+if ($env:JAVA_HOME) {
+    $Path = Join-Path $env:JAVA_HOME 'bin/java.exe'
+    if (Test-Path $Path) {
+        $Candidates += [pscustomobject]@{ Source = $Path; Major = (Get-JavaMajorFromVersionText $Path) }
+    }
+}
+
+# PowerShell exposes all java.exe entries on PATH here, including entries after
+# an older Java 8 installation. Prefer this metadata because it is exactly what
+# users see with: Get-Command java -All
 Get-Command java -All -ErrorAction SilentlyContinue | ForEach-Object {
     if ($_.Source) {
-        $Candidates.Add($_.Source)
+        $Candidates += [pscustomobject]@{
+            Source = $_.Source
+            Major = (Get-JavaMajorFromVersionObject $_.Version)
+        }
     }
 }
 
@@ -49,14 +71,17 @@ $SelectedJava = $null
 $SelectedMajor = $null
 $Seen = @{}
 
-foreach ($Java in $Candidates) {
+foreach ($Candidate in $Candidates) {
+    $Java = $Candidate.Source
     if ([string]::IsNullOrWhiteSpace($Java)) { continue }
     if ($Seen.ContainsKey($Java)) { continue }
     $Seen[$Java] = $true
+    if (-not (Test-Path $Java)) { continue }
 
-    if ($Java -ne 'java' -and -not (Test-Path $Java)) { continue }
-
-    $Major = Get-JavaMajorVersion $Java
+    $Major = $Candidate.Major
+    if ($null -eq $Major) {
+        $Major = Get-JavaMajorFromVersionText $Java
+    }
     if ($null -eq $Major) { continue }
 
     Write-Host "Found Java $Major at: $Java"
