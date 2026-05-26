@@ -23,26 +23,11 @@ jobs:
       - name: Build workbench fat jar
         run: ./gradlew :directml-workbench:shadowJar
 
-      - name: Prepare Windows package
-        run: |
-          mkdir -p build/workbench-release
-          cp directml-workbench/build/libs/directml-workbench-all.jar build/workbench-release/
-          cp directml-workbench/packaging/directml-workbench.ps1 build/workbench-release/
-          cp directml-workbench/packaging/README-WINDOWS.txt build/workbench-release/
-          cd build/workbench-release
-          zip -9 ../directml-workbench-windows.zip directml-workbench-all.jar directml-workbench.ps1 README-WINDOWS.txt
-
-      - name: Upload jar artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: directml-workbench-all
           path: directml-workbench/build/libs/directml-workbench-all.jar
-
-      - name: Upload Windows package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: directml-workbench-windows
-          path: build/directml-workbench-windows.zip
 
       - name: Delete existing release (if any)
         run: gh release delete directml-workbench-latest --yes || true
@@ -56,9 +41,8 @@ jobs:
         run: |
           gh release create directml-workbench-latest \
             directml-workbench/build/libs/directml-workbench-all.jar \
-            build/directml-workbench-windows.zip \
             --title "DirectML Workbench (latest)" \
-            --notes "Rolling demo release of the DirectML Workbench. Windows users should download directml-workbench-windows.zip and start with directml-workbench.ps1 so Java 21 is selected explicitly." \
+            --notes "Rolling demo release of the DirectML Workbench standalone fat jar. Requires Java 21 or newer. Run with: java --enable-preview --enable-native-access=ALL-UNNAMED -jar directml-workbench-all.jar" \
             --prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
