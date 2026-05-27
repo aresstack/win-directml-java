@@ -60,6 +60,7 @@ class GenerationApiTest {
         StopTokenPolicy policy = StopTokenPolicy.withStopStrings("<|end|>", "<|eot_id|>");
         assertEquals(2, policy.stopStrings().size());
         assertEquals("<|end|>", policy.stopStrings().get(0));
+        assertEquals("<|eot_id|>", policy.stopStrings().get(1));
     }
 
     @Test
