@@ -168,6 +168,7 @@ public final class GenerationModelRegistry {
                 ChatTemplate.CHATML,
                 Status.PLANNED,
                 Arrays.asList(
+                        "model/qwen2.5-coder-0.5b-directml-int4",
                         "model/qwen2.5-coder-0.5b-instruct",
                         "model/Qwen/Qwen2.5-Coder-0.5B-Instruct"),
                 "Smallest Qwen2.5-Coder variant. Target for initial Qwen "
