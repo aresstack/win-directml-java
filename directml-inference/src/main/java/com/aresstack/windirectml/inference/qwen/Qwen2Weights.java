@@ -508,8 +508,8 @@ public final class Qwen2Weights implements AutoCloseable {
         return result;
     }
 
-    private static float[] readFp32Floats(MappedByteBuffer buf, long offset, int length) {
-        int count = length / 4;
+    private static float[] readFp32Floats(MappedByteBuffer buf, long offset, int lengthInBytes) {
+        int count = lengthInBytes / 4;
         float[] result = new float[count];
         int pos = (int) offset;
         for (int i = 0; i < count; i++) {
