@@ -32,13 +32,12 @@ import java.nio.file.Path;
  *   model.onnx.data          — External weight data (memory-mapped)
  * </pre>
  *
- * <h2>Experimental status</h2>
- * <p>This engine is <b>CPU-only</b> and <b>experimental</b>. It is not wired into
- * the Workbench UI or SUPPORTED_MODELS as a runnable backend. The smoke tests
- * require both real model weights and the system property
- * {@code -Dqwen.enable.experimental.runtime=true} to run. Status remains
- * planned/not-runnable until the ONNX source and layout are verified
- * end-to-end (issue #100).</p>
+ * <h2>Status</h2>
+ * <p>This engine is <b>CPU-only</b> and part of the Qwen runtime bring-up.
+ * The DirectML Workbench wires it as a manual test path so local release-jar
+ * builds can exercise Qwen generation. The model remains planned/not-shipped
+ * in the global registry until the ONNX source/layout and end-to-end generation
+ * are verified with real weights.</p>
  *
  * <h2>Differences from Phi-3 engine</h2>
  * <ul>
@@ -137,11 +136,12 @@ public class QwenInferenceEngine implements InferenceEngine {
             String generatedText = runtime.generate(formattedPrompt, maxTokens);
             long elapsed = System.currentTimeMillis() - t0;
 
-            // Count tokens for usage
+            // Count tokens for usage. This is approximate because generated text
+            // can re-tokenize differently from the emitted token IDs.
             int promptTokens = tokenizer.encode(formattedPrompt).length;
             int completionTokens = tokenizer.encode(generatedText).length;
 
-            log.info("Generated {} chars ({} tokens) in {} ms ({} ms/token)",
+            log.info("Generated {} chars ({} tokens approx) in {} ms ({} ms/token approx)",
                     generatedText.length(), completionTokens, elapsed,
                     completionTokens > 0 ? elapsed / completionTokens : 0);
 
