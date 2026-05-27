@@ -2,11 +2,11 @@
 
 This document covers the repeatable smoke-test procedures and benchmark
 protocol for **Qwen2.5-Coder-0.5B-Instruct** running on CPU via the
-`directml-inference` module.
+`directml-inference` module and the DirectML Workbench test path.
 
-> **Status:** 🚧 Planned.  The Qwen CPU runtime (issue #99) and download
-> layout (issue #100) are in progress.  Tests in this repository are
-> structured to validate those implementations once they land.
+> **Status:** 🚧 Planned / runtime bring-up.  The Workbench exposes Qwen for
+> local manual testing, but the model is not promoted to shipped/experimental
+> until the ONNX source/layout and end-to-end generation run are verified.
 
 ---
 
@@ -16,7 +16,8 @@ protocol for **Qwen2.5-Coder-0.5B-Instruct** running on CPU via the
 |------------------------|------------------------|-------------|-----------------------------------------------------|
 | Missing-file diagnostics (unit) | ❌ No         | ✅ Yes       | `QwenModelDirValidatorTest`                         |
 | CPU smoke test (manual)          | ✅ Yes        | ❌ No        | `QwenCpuSmokeTest` (`@EnabledIf("modelPresent")`)  |
-| Tokenizer/template unit tests    | ❌ No         | ✅ Yes       | See issue #98 (`QwenTokenizerTest`, `ChatMlTemplateTest`) |
+| Workbench local test             | ✅ Yes        | ❌ Manual    | Download tab + Generation/Summarizer tab            |
+| Tokenizer/template unit tests    | ❌ No         | ✅ Yes       | `QwenTokenizerTest`, `QwenChatTemplateTest`         |
 | Performance notes                | ✅ Yes        | ❌ Manual    | This document, §4                                   |
 
 ---
@@ -25,7 +26,6 @@ protocol for **Qwen2.5-Coder-0.5B-Instruct** running on CPU via the
 
 ```bash
 # 1. Download Qwen2.5-Coder-0.5B-Instruct ONNX into model/ directory.
-#    (Exact download script tracked in issue #100.)
 #    Expected layout:
 #      model/qwen2.5-coder-0.5b-directml-int4/
 #        config.json
@@ -36,7 +36,7 @@ protocol for **Qwen2.5-Coder-0.5B-Instruct** running on CPU via the
 #        model.onnx.data
 
 # 2. Run the real-model smoke test (CPU, max 32 tokens).
-#    NOTE: requires -Dqwen.enable.experimental.runtime=true opt-in.
+#    NOTE: requires -Dqwen.enable.experimental.runtime=true opt-in for the JUnit smoke test.
 ./gradlew :directml-inference:test \
     --tests "*.qwen.QwenCpuSmokeTest" \
     -Dqwen.model.dir=model/qwen2.5-coder-0.5b-directml-int4 \
@@ -49,16 +49,15 @@ protocol for **Qwen2.5-Coder-0.5B-Instruct** running on CPU via the
     -Dqwen.enable.experimental.runtime=true
 ```
 
-The smoke test is gated by **two conditions**:
+The JUnit smoke test is gated by **two conditions**:
 1. `@EnabledIf("modelPresent")` — skipped when the model directory is absent or
    incomplete.
 2. `-Dqwen.enable.experimental.runtime=true` — explicit opt-in required because
-   the runtime is experimental and the ONNX source/layout have not been verified
-   end-to-end (issue #100).
+   the JUnit test can be expensive and should never run accidentally in CI.
 
-> **⚠️ Experimental:** This CPU-only runtime is not wired into the Workbench UI
-> or registered in SUPPORTED_MODELS as a runnable backend. It remains
-> planned/not-runnable until source verification is complete.
+The DirectML Workbench is different: it is the manual test surface. It shows the
+Qwen download button and Qwen generation option directly so developers can test
+the release jar locally once the model files are present.
 
 ---
 
@@ -141,8 +140,9 @@ fabricate numbers — leave rows empty until measured.
 
 - [x] Documented manual command for real-model Qwen 0.5B smoke testing (§2).
 - [x] Missing-file diagnostics covered by unit tests (`QwenModelDirValidatorTest`).
-- [x] Tokenizer/template tests from issue #98 referenced (§1 table).
+- [x] Tokenizer/template tests referenced (§1 table).
 - [x] CPU runtime smoke test verifies non-empty generated output (`QwenCpuSmokeTest`).
+- [x] Workbench exposes Qwen as a local manual test path.
 - [x] Benchmark notes include: machine/CPU, model size, prompt length,
       generated token count, tokens/sec, elapsed time, memory (§4).
 - [x] German and English summary prompts included (§3.1, §3.2).
@@ -152,9 +152,10 @@ fabricate numbers — leave rows empty until measured.
 
 ## 6. Non-Goals
 
-- This document does **not** implement the Qwen runtime math (see issue #99).
 - CI must **not** download Qwen weights by default.
 - Results from 0.5B do **not** qualify 1.5B or 3B variants as supported.
+- Workbench visibility does **not** mean the model is shipped; it is the manual
+  test surface for runtime bring-up.
 
 ---
 
