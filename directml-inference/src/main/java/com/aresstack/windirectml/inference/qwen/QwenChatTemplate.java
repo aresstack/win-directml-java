@@ -31,6 +31,11 @@ import java.util.List;
  */
 public final class QwenChatTemplate {
 
+    /**
+     * Qwen official default system prompt used when no system message is provided.
+     */
+    public static final String DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
+
     private QwenChatTemplate() {} // utility class
 
     /**
@@ -56,7 +61,21 @@ public final class QwenChatTemplate {
      * @return formatted prompt string ready for encoding
      */
     public static String formatChat(String systemPrompt, String userMessage) {
-        return formatMultiTurnChat(systemPrompt, List.of(ChatMessage.user(userMessage)));
+        return formatChat(systemPrompt, userMessage, true);
+    }
+
+    /**
+     * Format a single-turn chat prompt (system + user) using ChatML.
+     *
+     * @param systemPrompt system instruction (may be {@code null} or empty)
+     * @param userMessage user message
+     * @param useDefaultSystemPrompt if true, null/empty system prompts are replaced
+     *                               with {@link #DEFAULT_SYSTEM_PROMPT}; if false,
+     *                               the system turn is omitted
+     * @return formatted prompt string ready for encoding
+     */
+    public static String formatChat(String systemPrompt, String userMessage, boolean useDefaultSystemPrompt) {
+        return formatMultiTurnChat(systemPrompt, List.of(ChatMessage.user(userMessage)), useDefaultSystemPrompt);
     }
 
     /**
@@ -80,11 +99,31 @@ public final class QwenChatTemplate {
      * @return formatted prompt string ready for encoding
      */
     public static String formatMultiTurnChat(String systemPrompt, List<ChatMessage> messages) {
-        StringBuilder sb = new StringBuilder();
+        return formatMultiTurnChat(systemPrompt, messages, true);
+    }
 
-        if (systemPrompt != null && !systemPrompt.isEmpty()) {
+    /**
+     * Format a multi-turn chat prompt using ChatML conventions.
+     *
+     * @param systemPrompt optional system prompt (may be {@code null} or empty)
+     * @param messages ordered list of user/assistant messages; the last
+     *                 message should typically be a user message
+     * @param useDefaultSystemPrompt if true, null/empty system prompts are replaced
+     *                               with {@link #DEFAULT_SYSTEM_PROMPT}; if false,
+     *                               the system turn is omitted
+     * @return formatted prompt string ready for encoding
+     */
+    public static String formatMultiTurnChat(String systemPrompt, List<ChatMessage> messages,
+                                             boolean useDefaultSystemPrompt) {
+        StringBuilder sb = new StringBuilder();
+        String effectiveSystemPrompt = systemPrompt;
+        if (effectiveSystemPrompt == null || effectiveSystemPrompt.isEmpty()) {
+            effectiveSystemPrompt = useDefaultSystemPrompt ? DEFAULT_SYSTEM_PROMPT : null;
+        }
+
+        if (effectiveSystemPrompt != null && !effectiveSystemPrompt.isEmpty()) {
             sb.append("<|im_start|>system\n")
-              .append(systemPrompt)
+              .append(effectiveSystemPrompt)
               .append("<|im_end|>\n");
         }
 

@@ -41,6 +41,8 @@ class QwenChatTemplateTest {
         String result = QwenChatTemplate.formatChat(null, "Hello");
 
         assertEquals("""
+                <|im_start|>system
+                You are a helpful assistant.<|im_end|>
                 <|im_start|>user
                 Hello<|im_end|>
                 <|im_start|>assistant
@@ -50,6 +52,19 @@ class QwenChatTemplateTest {
     @Test
     void singleTurnFormatWithEmptySystemPrompt() {
         String result = QwenChatTemplate.formatChat("", "Hello");
+
+        assertEquals("""
+                <|im_start|>system
+                You are a helpful assistant.<|im_end|>
+                <|im_start|>user
+                Hello<|im_end|>
+                <|im_start|>assistant
+                """, result);
+    }
+
+    @Test
+    void singleTurnFormatWithoutSystemPromptExplicitOptOut() {
+        String result = QwenChatTemplate.formatChat(null, "Hello", false);
 
         assertEquals("""
                 <|im_start|>user

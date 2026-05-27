@@ -138,6 +138,23 @@ class QwenTokenizerTest {
     }
 
     @Test
+    void decodePreservesSpecialTokensByDefault() {
+        String input = "<|im_start|>user\nHello<|im_end|>\n";
+        int[] ids = tokenizer.encode(input);
+        String decoded = tokenizer.decode(ids);
+        assertEquals(input, decoded);
+    }
+
+    @Test
+    void decodeCanSkipSpecialTokensWhenRequested() {
+        String input = "<|im_start|>user\nHello<|im_end|>\n";
+        int[] ids = tokenizer.encode(input);
+        String decoded = tokenizer.decode(ids, true);
+        assertFalse(decoded.contains("<|im_start|>"));
+        assertFalse(decoded.contains("<|im_end|>"));
+    }
+
+    @Test
     void isEosRecognizesStopTokens() {
         assertTrue(tokenizer.isEos(QwenTokenizer.ENDOFTEXT_ID));
         assertTrue(tokenizer.isEos(QwenTokenizer.IM_END_ID));

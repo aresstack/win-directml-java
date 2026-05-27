@@ -322,13 +322,24 @@ public final class QwenTokenizer {
      * @return decoded text string
      */
     public String decode(int[] ids) {
+        return decode(ids, false);
+    }
+
+    /**
+     * Decode token IDs back to text.
+     *
+     * @param ids array of token IDs
+     * @param skipSpecialTokens if true, special tokens such as
+     *                          {@code <|im_start|>/<|im_end|>} are omitted
+     * @return decoded text string
+     */
+    public String decode(int[] ids, boolean skipSpecialTokens) {
         StringBuilder tokenChars = new StringBuilder();
 
         for (int id : ids) {
             if (id < 0 || id >= idToToken.length) continue;
             String token = idToToken[id];
-            // Skip special tokens in decode output
-            if (specialTokens.containsKey(token)) continue;
+            if (skipSpecialTokens && specialTokens.containsKey(token)) continue;
             tokenChars.append(token);
         }
 
