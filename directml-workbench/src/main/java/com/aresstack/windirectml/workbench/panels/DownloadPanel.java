@@ -139,17 +139,16 @@ public final class DownloadPanel extends JPanel {
 
     private void startQwenDownload() {
         boolean force = forceCheckbox.isSelected();
-        var targetDir = model.getModelRoot().resolve("qwen2.5-coder-0.5b-directml-int4");
+        var config = com.aresstack.windirectml.workbench.download.QwenModelDownloadConfig.DEFAULT;
+        var targetDir = model.getModelRoot().resolve(config.localDirName());
         appendLog("Starting Qwen2.5-Coder 0.5B download -> " + targetDir);
-        appendLog("  Required files: " + ModelDownloader.QWEN_REQUIRED_FILES);
+        appendLog("  Required files: " + config.requiredLocalFiles());
 
         new SwingWorker<Boolean, String>() {
             @Override
             protected Boolean doInBackground() {
                 try {
-                    ModelDownloader.downloadQwen(
-                            "onnx-community/Qwen2.5-Coder-0.5B-Instruct",
-                            targetDir, force, this::publish);
+                    ModelDownloader.downloadQwen(config, targetDir, force, this::publish);
                     return true;
                 } catch (Exception ex) {
                     publish("ERROR: " + ex.getMessage());

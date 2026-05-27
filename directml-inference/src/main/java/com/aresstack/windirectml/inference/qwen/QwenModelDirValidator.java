@@ -24,6 +24,12 @@ import java.nio.file.Path;
  */
 public final class QwenModelDirValidator {
 
+    /** Primary external data filename (matches onnx-community export). */
+    public static final String DATA_FILE_PRIMARY = "model.onnx_data";
+
+    /** Alternative external data filename (dot-separated convention). */
+    public static final String DATA_FILE_ALT = "model.onnx.data";
+
     /** Required files in download/setup order (aligned with #100 contract). */
     private static final String[] REQUIRED_FILES = {
             "config.json",
@@ -31,7 +37,6 @@ public final class QwenModelDirValidator {
             "tokenizer_config.json",
             "special_tokens_map.json",
             "model.onnx",
-            "model.onnx.data",
     };
 
     private QwenModelDirValidator() {}
@@ -66,6 +71,32 @@ public final class QwenModelDirValidator {
                 return "Qwen model directory is missing " + name + " (looked in " + dir + ")";
             }
         }
+        // Accept either naming convention for external data
+        if (!Files.exists(dir.resolve(DATA_FILE_PRIMARY))
+                && !Files.exists(dir.resolve(DATA_FILE_ALT))) {
+            return "Qwen model directory is missing " + DATA_FILE_PRIMARY
+                    + " (or " + DATA_FILE_ALT + ") (looked in " + dir + ")";
+        }
+        String unsupportedFormat = Qwen2Weights.describeUnsupportedFormat(dir);
+        if (unsupportedFormat != null) {
+            return unsupportedFormat;
+        }
         return null;
+    }
+
+    /**
+     * Resolve the external data file path, checking both naming conventions.
+     *
+     * @param modelDir model directory
+     * @return path to the external data file
+     * @throws java.io.IOException if neither file exists
+     */
+    public static Path resolveExternalDataPath(Path modelDir) throws java.io.IOException {
+        Path primary = modelDir.resolve(DATA_FILE_PRIMARY);
+        if (Files.exists(primary)) return primary;
+        Path alt = modelDir.resolve(DATA_FILE_ALT);
+        if (Files.exists(alt)) return alt;
+        throw new java.io.IOException("Required file missing: " + DATA_FILE_PRIMARY
+                + " (or " + DATA_FILE_ALT + ") (looked in " + modelDir + ")");
     }
 }
