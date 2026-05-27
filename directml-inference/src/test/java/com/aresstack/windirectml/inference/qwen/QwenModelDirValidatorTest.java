@@ -9,7 +9,6 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -101,27 +100,31 @@ class QwenModelDirValidatorTest {
     }
 
     @Test
-    void completeDirectoryReturnsNull(@TempDir Path tmp) throws Exception {
+    void completeDirectoryWithUnparseableOnnxReportsUnsupportedFormat(@TempDir Path tmp) throws Exception {
         Files.writeString(tmp.resolve("config.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
         Files.writeString(tmp.resolve("special_tokens_map.json"), "{}");
         Files.writeString(tmp.resolve("model.onnx"), "");
         Files.writeString(tmp.resolve("model.onnx_data"), "");
-        assertNull(QwenModelDirValidator.describeMissingModelFile(tmp));
-        assertTrue(QwenModelDirValidator.isValidModelDir(tmp));
+        String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
+        assertNotNull(msg);
+        assertTrue(msg.contains("Unsupported Qwen ONNX format"), msg);
+        assertFalse(QwenModelDirValidator.isValidModelDir(tmp));
     }
 
     @Test
-    void completeDirectoryWithAltNameReturnsNull(@TempDir Path tmp) throws Exception {
+    void completeDirectoryWithAltNameAndUnparseableOnnxReportsUnsupportedFormat(@TempDir Path tmp) throws Exception {
         Files.writeString(tmp.resolve("config.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
         Files.writeString(tmp.resolve("special_tokens_map.json"), "{}");
         Files.writeString(tmp.resolve("model.onnx"), "");
         Files.writeString(tmp.resolve("model.onnx.data"), "");
-        assertNull(QwenModelDirValidator.describeMissingModelFile(tmp));
-        assertTrue(QwenModelDirValidator.isValidModelDir(tmp));
+        String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
+        assertNotNull(msg);
+        assertTrue(msg.contains("Unsupported Qwen ONNX format"), msg);
+        assertFalse(QwenModelDirValidator.isValidModelDir(tmp));
     }
 
     @Test

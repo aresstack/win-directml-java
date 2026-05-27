@@ -77,6 +77,10 @@ public final class QwenModelDirValidator {
             return "Qwen model directory is missing " + DATA_FILE_PRIMARY
                     + " (or " + DATA_FILE_ALT + ") (looked in " + dir + ")";
         }
+        String unsupportedFormat = Qwen2Weights.describeUnsupportedFormat(dir);
+        if (unsupportedFormat != null) {
+            return unsupportedFormat;
+        }
         return null;
     }
 

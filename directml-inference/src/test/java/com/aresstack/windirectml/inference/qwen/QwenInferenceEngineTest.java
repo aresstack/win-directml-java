@@ -4,6 +4,7 @@ import com.aresstack.windirectml.inference.InferenceException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -67,5 +68,20 @@ class QwenInferenceEngineTest {
         engine.shutdown();
         engine.shutdown();
         assertFalse(engine.isReady());
+    }
+
+    @Test
+    void initializeFailsEarlyWithUnsupportedFormatMessage(@TempDir Path tmp) throws Exception {
+        Files.writeString(tmp.resolve("config.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer.json"), "{\"model\":{\"type\":\"BPE\"}}");
+        Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
+        Files.writeString(tmp.resolve("special_tokens_map.json"), "{}");
+        Files.writeString(tmp.resolve("model.onnx"), "");
+        Files.writeString(tmp.resolve("model.onnx_data"), "");
+
+        QwenInferenceEngine engine = new QwenInferenceEngine(tmp, 32);
+        InferenceException ex = assertThrows(InferenceException.class, engine::initialize);
+        assertTrue(ex.getMessage().contains("Cannot initialize Qwen engine"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("Unsupported Qwen ONNX format"), ex.getMessage());
     }
 }

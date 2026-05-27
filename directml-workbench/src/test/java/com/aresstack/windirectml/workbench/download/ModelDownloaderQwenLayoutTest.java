@@ -57,4 +57,11 @@ class ModelDownloaderQwenLayoutTest {
         // added_tokens.json is optional, should not be in required
         assertFalse(required.contains("added_tokens.json"));
     }
+
+    @Test
+    void defaultDownloadUsesPrimaryExternalDataName() {
+        var config = QwenModelDownloadConfig.DEFAULT;
+        assertEquals("model.onnx_data", config.localDataFile());
+        assertTrue(config.requiredLocalFiles().contains(config.localDataFile()));
+    }
 }
