@@ -1,6 +1,6 @@
 # Decision: Qwen2.5-Coder Artifact Format
 
-Issue: #95 (parallel research task for Qwen CausalLM epic #94)
+Issue: #96 (parallel research task for Qwen CausalLM epic #94)
 
 ## Decision
 
@@ -30,9 +30,8 @@ The ONNX INT4 AWQ block-128 export is chosen because:
 3. **DirectML compatibility** – the INT4 AWQ layout is the same layout already
    dispatched to DirectML kernels in the Phi-3 GPU pipeline; future GPU work
    requires zero format conversion.
-4. **Tokenizer availability** – the ONNX export ships `tokenizer.json`
-   (HuggingFace fast-tokenizer format) and `config.json`; no additional
-   tokenizer artifact is needed.
+4. **Tokenizer availability** – the ONNX export ships `tokenizer.json`,
+   `tokenizer_config.json`, `special_tokens_map.json`, and `config.json`.
 
 ## Evaluation of candidate paths
 
@@ -88,22 +87,26 @@ The ONNX INT4 AWQ block-128 export is chosen because:
 | Phi-3 code compatibility | None – different paradigm |
 | Pure Java/DirectML | **No** – introduces external native runtime dependency |
 
-## Model directory layout
+## Local model directory layout
+
+The local Workbench/runtime directory is flat. The remote Hugging Face candidate
+may still store these files under a subdirectory such as
+`directml/directml-int4-awq-block-128/`, but the downloader copies the files into
+the top-level local model directory:
 
 ```
 model/qwen2.5-coder-0.5b-directml-int4/
-└── directml/
-    └── directml-int4-awq-block-128/
-        ├── config.json
-        ├── model.onnx
-        ├── model.onnx.data          (downloaded separately, ~350 MB)
-        ├── tokenizer.json
-        ├── tokenizer_config.json
-        ├── special_tokens_map.json
-        └── added_tokens.json        (optional)
+├── config.json
+├── model.onnx
+├── model.onnx.data          (downloaded separately, ~350 MB)
+├── tokenizer.json
+├── tokenizer_config.json
+├── special_tokens_map.json
+└── added_tokens.json        (optional)
 ```
 
-This mirrors the existing Phi-3 layout under `model/phi3-mini-directml-int4/`.
+This is the layout expected by `QwenModelDirValidator`, the Workbench download
+button, `scripts/download-qwen.ps1`, and the manual smoke-test docs.
 
 ## Scale-up candidates
 
@@ -121,22 +124,15 @@ can be added once the 0.5B loading/generation smoke test passes.
 1. **Source verification** – confirm a resolvable Hugging Face source with a
    layout compatible with this decision (candidate to evaluate:
    `onnx-community/Qwen2.5-Coder-0.5B-Instruct`).
-2. **Download script** – after source verification, add PowerShell/Bash script
-   for the selected source/layout.
-3. **Qwen2Config** – Java record mirroring `Phi3Config` for Qwen2.5
-   architecture parameters.
-4. **Qwen2Weights** – Weight loader (extends pattern from `Phi3Weights`) that
-   parses the ONNX graph for Qwen2-specific tensor naming.
-5. **Qwen2Tokenizer** – BPE tokenizer using `tokenizer.json` (HF fast format);
-   ChatML template handling.
-6. **Qwen2Runtime** – Decoder loop reusing shared decoder-core abstractions
-   from the decoder-extensions concept.
-7. **Smoke test** – End-to-end generation test with the real 0.5B checkpoint.
+2. **Download script / Workbench download** – keep the local flat layout above
+   while evaluating the remote source candidate layout.
+3. **Smoke test** – End-to-end generation test with the real 0.5B checkpoint.
+4. **Promotion decision** – only move Qwen from planned to experimental after
+   a real loading/generation smoke test passes.
 
 ## Constraints
 
-- No model is marked runnable before a real loading/generation smoke test
-  exists.
+- No model is marked shipped before a real loading/generation smoke test exists.
 - The ONNX graph is used only as a **weight container** (same as Phi-3); the
   runtime does not execute the ONNX graph.
 - The selected path keeps the project pure Java/DirectML with no external
