@@ -329,6 +329,7 @@ including the per-layer command-list coalescing (see
 |---------------------------------------------------------------|-----------------|----------|---------------|----------|-----------------|----------------------|
 | `microsoft/Phi-3-mini-4k-instruct-onnx` (DirectML INT4 build) | INT4 GroupQuant | ✅        | ✅             | paged    | 🧪 experimental | `directml-inference` |
 | `microsoft/Phi-3.5-mini-instruct-onnx`                        | TBD             | –        | –             | –        | 🚧 planned      | –                    |
+| `microsoft/Qwen2.5-Coder-0.5B-Instruct-ONNX` (DirectML INT4) | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | `directml-inference` |
 
 The Phi-3 pipeline runs prefill and decode in a single DirectML graph
 per layer; speculative decoding, batched generation and beam search are
@@ -413,3 +414,4 @@ for a future minor:
 - Quantized weights for the BERT encoder family (INT8 GEMM via DML).
 - Speculative / batched decoding for Phi-3.
 - Phi-3.5 Mini Instruct ONNX summarizer support (pending official ONNX graph).
+- Qwen2.5-Coder 1.5B / 3B scale-up (same ONNX INT4 format; blocked on 0.5B smoke test).
