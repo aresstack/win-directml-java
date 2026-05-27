@@ -123,15 +123,15 @@ public final class ModelDownloader {
     }
 
     /**
-     * Download Qwen2.5-Coder 0.5B model from HuggingFace (ONNX INT4 AWQ block-128 layout).
+     * Download Qwen2.5-Coder 0.5B model files from a HuggingFace ONNX candidate repo.
      * <p>
-     * Downloads from the {@code directml/directml-int4-awq-block-128} subdirectory.
-     * <p>
-     * <strong>Note:</strong> The concrete HuggingFace source repository is TBD/research.
-     * This method will throw until the source is verified. See
-     * {@code docs/decision-qwen-artifact-format.md} for background.
+     * The Workbench uses this helper to download the files into the local top-level
+     * {@code model/qwen2.5-coder-0.5b-directml-int4/} directory. The remote candidate
+     * repo is still source-verification work: this helper attempts the configured
+     * repo/subdir and reports normal HTTP/file errors if the candidate does not match
+     * the expected DirectML INT4 layout.
      *
-     * @param repo      HuggingFace repository for the Qwen ONNX model (source TBD)
+     * @param repo      HuggingFace repository for the Qwen ONNX model candidate
      * @param targetDir local directory to save model files into
      * @param force     if true, overwrite existing files
      * @param logger    callback for progress messages
