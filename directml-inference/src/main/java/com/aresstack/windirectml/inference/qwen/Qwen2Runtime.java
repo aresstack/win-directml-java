@@ -22,7 +22,7 @@ import java.util.List;
  * <ul>
  *   <li><b>GQA</b>: Qwen 0.5B has 14 Q heads and 2 KV heads (7:1 ratio).
  *       Phi-3 has equal Q/KV heads (no grouping). The attention loop maps each
- *       Q head to its corresponding KV head via {@code h % numKvHeads}.</li>
+ *       Q head to its corresponding KV head via contiguous groups.</li>
  *   <li><b>Separate gate/up projections</b>: Qwen uses separate gate_proj and
  *       up_proj weight matrices. Phi-3 uses a fused gate_up_proj matrix.</li>
  *   <li><b>No activation scales</b>: Qwen does not use the per-projection
@@ -47,6 +47,7 @@ public final class Qwen2Runtime {
     private final Qwen2Config config;
     private final Qwen2Weights weights;
     private final QwenTokenizer tokenizer;
+    private final int qHeadsPerKvHead;
 
     // ── KV Cache (per-head layout for cache locality) ────────────────────
     // Layout: [layer][head][pos * headDim]
@@ -101,7 +102,13 @@ public final class Qwen2Runtime {
         this.tokenizer = tokenizer;
 
         int numLayers = config.numHiddenLayers();
+        int numHeads = config.numAttentionHeads();
         int kvHeads = config.numKeyValueHeads();
+        if (numHeads % kvHeads != 0) {
+            throw new IllegalArgumentException(
+                    "numAttentionHeads must be divisible by numKeyValueHeads for GQA mapping");
+        }
+        this.qHeadsPerKvHead = numHeads / kvHeads;
         this.kvCacheK = new float[numLayers][kvHeads][];
         this.kvCacheV = new float[numLayers][kvHeads][];
         this.cachedSeqLen = 0;
@@ -132,7 +139,7 @@ public final class Qwen2Runtime {
         // Pre-compute RoPE tables
         int halfDim = config.headDim() / 2;
         // Limit pre-computed RoPE table to 4096 positions to cap startup memory
-        // (~2 MB for headDim=64). Positions beyond this are extended on-demand if needed.
+        // (~2 MB for headDim=64). Positions beyond this are computed on-the-fly.
         int ropeMaxPos = Math.min(maxPos, 4096);
         ropeCosBuf = new float[ropeMaxPos * halfDim];
         ropeSinBuf = new float[ropeMaxPos * halfDim];
@@ -144,11 +151,11 @@ public final class Qwen2Runtime {
                 ropeCosBuf[pos * halfDim + i] = (float) Math.cos(angle);
                 ropeSinBuf[pos * halfDim + i] = (float) Math.sin(angle);
             }
+
         }
 
         log.info("Qwen2Runtime: CPU-only mode, {} layers, {} heads ({}KV), headDim={}, GQA ratio={}:1",
-                numLayers, config.numAttentionHeads(), kvHeads, config.headDim(),
-                config.numAttentionHeads() / kvHeads);
+                numLayers, numHeads, kvHeads, config.headDim(), qHeadsPerKvHead);
     }
 
     // ── Streaming callback ────────────────────────────────────────────────
@@ -363,7 +370,7 @@ public final class Qwen2Runtime {
         float scale = (float) (1.0 / Math.sqrt(headDim));
 
         for (int h = 0; h < numHeads; h++) {
-            int kvH = h % kvHeads;  // GQA: map Q head to KV head
+            int kvH = kvHeadForQueryHead(h);
             int qOff = h * headDim;
             float[] kHead = kvCacheK[layerIdx][kvH];
             float[] vHead = kvCacheV[layerIdx][kvH];
@@ -498,7 +505,7 @@ public final class Qwen2Runtime {
         for (int s = 0; s < seqLen; s++) {
             int queryPos = startPos + s;
             for (int h = 0; h < numHeads; h++) {
-                int kvH = h % kvHeads;
+                int kvH = kvHeadForQueryHead(h);
                 int qOff = s * qSize + h * headDim;
                 float[] kHead = kvCacheK[layerIdx][kvH];
                 float[] vHead = kvCacheV[layerIdx][kvH];
@@ -598,6 +605,15 @@ public final class Qwen2Runtime {
                 kvCacheV[layer][h] = newV;
             }
         }
+    }
+
+    static int kvHeadForQueryHead(int queryHead, int qHeadsPerKvHead, int numKvHeads) {
+        int kvHead = queryHead / qHeadsPerKvHead;
+        return Math.min(kvHead, numKvHeads - 1);
+    }
+
+    private int kvHeadForQueryHead(int queryHead) {
+        return kvHeadForQueryHead(queryHead, qHeadsPerKvHead, config.numKeyValueHeads());
     }
 
     // ── Math utilities ───────────────────────────────────────────────────

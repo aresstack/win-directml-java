@@ -109,6 +109,7 @@ public class QwenInferenceEngine implements InferenceEngine {
             ready = true;
 
         } catch (Exception e) {
+            cleanupFailedInitialization();
             throw new InferenceException("Failed to initialize Qwen engine: " + e.getMessage(), e);
         }
     }
@@ -167,6 +168,21 @@ public class QwenInferenceEngine implements InferenceEngine {
                 weights.close();
             } catch (Exception e) {
                 log.warn("Error closing weights: {}", e.getMessage());
+            }
+        }
+        runtime = null;
+        weights = null;
+        tokenizer = null;
+        config = null;
+    }
+
+    private void cleanupFailedInitialization() {
+        ready = false;
+        if (weights != null) {
+            try {
+                weights.close();
+            } catch (Exception closeError) {
+                log.warn("Error closing weights after failed initialization: {}", closeError.getMessage());
             }
         }
         runtime = null;

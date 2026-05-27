@@ -24,6 +24,8 @@ class QwenInferenceEngineTest {
         InferenceException ex = assertThrows(InferenceException.class, engine::initialize);
         assertTrue(ex.getMessage().contains("Cannot initialize Qwen engine"),
                 "Error should name the missing file: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains(nonexistent.toString()),
+                "Error should include missing directory path: " + ex.getMessage());
     }
 
     @Test
@@ -34,6 +36,10 @@ class QwenInferenceEngineTest {
         InferenceException ex = assertThrows(InferenceException.class, engine::initialize);
         assertTrue(ex.getMessage().contains("Cannot initialize Qwen engine"),
                 "Error should indicate missing files: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("config.json"),
+                "Error should include first missing required file name: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains(tmp.toString()),
+                "Error should include model directory path: " + ex.getMessage());
     }
 
     @Test

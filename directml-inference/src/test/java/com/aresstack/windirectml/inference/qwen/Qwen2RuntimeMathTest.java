@@ -119,4 +119,15 @@ class Qwen2RuntimeMathTest {
         float[] logits = {1.0f, 5.0f, 5.0f, 3.0f};
         assertEquals(1, Qwen2Runtime.argmax(logits));
     }
+
+    @Test
+    void kvHeadMappingUsesContiguousGroups() {
+        // Qwen2.5-Coder 0.5B uses 14 query heads and 2 KV heads (7 query heads per KV head)
+        int qHeadsPerKvHead = 7;
+        int numKvHeads = 2;
+        for (int h = 0; h < 14; h++) {
+            int expectedKv = h < 7 ? 0 : 1;
+            assertEquals(expectedKv, Qwen2Runtime.kvHeadForQueryHead(h, qHeadsPerKvHead, numKvHeads));
+        }
+    }
 }

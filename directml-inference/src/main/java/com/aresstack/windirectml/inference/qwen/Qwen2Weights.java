@@ -3,7 +3,6 @@ package com.aresstack.windirectml.inference.qwen;
 import com.aresstack.windirectml.windows.OnnxModelReader;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
-import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -236,55 +235,70 @@ public final class Qwen2Weights implements AutoCloseable {
 
         log.info("Memory-mapping external data: {} ({} bytes)", dataPath, dataPath.toFile().length());
         RandomAccessFile raf = new RandomAccessFile(dataPath.toFile(), "r");
-        FileChannel channel = raf.getChannel();
-        long fileSize = channel.size();
-        MappedByteBuffer extData = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
-        extData.order(ByteOrder.LITTLE_ENDIAN);
+        FileChannel channel = null;
+        try {
+            channel = raf.getChannel();
+            long fileSize = channel.size();
+            MappedByteBuffer extData = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
+            extData.order(ByteOrder.LITTLE_ENDIAN);
 
-        Map<String, OnnxTensor> inlineTensors = graph.initializers();
-        Map<String, ExternalTensorRef> externalRefs = parseExternalRefs(onnxPath);
+            Map<String, ExternalTensorRef> externalRefs = parseExternalRefs(onnxPath);
 
-        // Map MatMulNBits outputs to weight tensor names
-        Map<String, String[]> matmulWeightNames = new LinkedHashMap<>();
-        for (OnnxNode node : graph.nodes()) {
-            if ("MatMulNBits".equals(node.opType())) {
-                String output = node.outputs().get(0);
-                matmulWeightNames.put(output, new String[]{
-                        node.inputs().get(1),  // Q data
-                        node.inputs().get(2),  // scale
-                        node.inputs().size() > 3 ? node.inputs().get(3) : null  // zero point (optional)
-                });
+            // Map MatMulNBits outputs to weight tensor names
+            Map<String, String[]> matmulWeightNames = new LinkedHashMap<>();
+            for (OnnxNode node : graph.nodes()) {
+                if ("MatMulNBits".equals(node.opType())) {
+                    String output = node.outputs().get(0);
+                    matmulWeightNames.put(output, new String[]{
+                            node.inputs().get(1),  // Q data
+                            node.inputs().get(2),  // scale
+                            node.inputs().size() > 3 ? node.inputs().get(3) : null  // zero point (optional)
+                    });
+                }
             }
-        }
 
-        boolean isQuantized = !matmulWeightNames.isEmpty();
-        log.info("Model format: {}", isQuantized ? "INT4 quantized (MatMulNBits)" : "FP16 dense");
+            boolean isQuantized = !matmulWeightNames.isEmpty();
+            log.info("Model format: {}", isQuantized ? "INT4 quantized (MatMulNBits)" : "FP16 dense");
 
-        // ── Embedding ────────────────────────────────────────────────
-        float[] embedTokens = loadEmbedding(config, externalRefs, extData);
-        log.info("Loaded embedding: [{}, {}]", config.vocabSize(), config.hiddenSize());
+            // ── Embedding ────────────────────────────────────────────────
+            float[] embedTokens = loadEmbedding(config, externalRefs, extData);
+            log.info("Loaded embedding: [{}, {}]", config.vocabSize(), config.hiddenSize());
 
-        // ── Layers ───────────────────────────────────────────────────
-        LayerWeights[] layerWeights = new LayerWeights[config.numHiddenLayers()];
-        for (int l = 0; l < config.numHiddenLayers(); l++) {
-            layerWeights[l] = loadLayer(l, config, graph, inlineTensors, externalRefs,
-                    matmulWeightNames, extData, isQuantized);
-            if ((l + 1) % 8 == 0 || l == config.numHiddenLayers() - 1) {
-                log.info("Loaded {}/{} layers", l + 1, config.numHiddenLayers());
+            // ── Layers ───────────────────────────────────────────────────
+            LayerWeights[] layerWeights = new LayerWeights[config.numHiddenLayers()];
+            for (int l = 0; l < config.numHiddenLayers(); l++) {
+                layerWeights[l] = loadLayer(l, config, graph, externalRefs, matmulWeightNames, extData, isQuantized);
+                if ((l + 1) % 8 == 0 || l == config.numHiddenLayers() - 1) {
+                    log.info("Loaded {}/{} layers", l + 1, config.numHiddenLayers());
+                }
             }
+
+            // ── Final norm ───────────────────────────────────────────────
+            float[] finalNormWeight = loadNormWeight("model.norm.weight", externalRefs, extData);
+            log.info("Loaded final norm weight");
+
+            // ── LM head ─────────────────────────────────────────────────
+            WeightMatrix lmHead = loadLmHead(config, graph, matmulWeightNames, externalRefs, extData, isQuantized);
+            log.info("Loaded lm_head: [{}, {}]", config.vocabSize(), config.hiddenSize());
+
+            log.info("All Qwen2 weights loaded successfully");
+            return new Qwen2Weights(config, raf, channel, extData,
+                    embedTokens, layerWeights, finalNormWeight, lmHead);
+        } catch (IOException | RuntimeException e) {
+            if (channel != null) {
+                try {
+                    channel.close();
+                } catch (IOException closeError) {
+                    e.addSuppressed(closeError);
+                }
+            }
+            try {
+                raf.close();
+            } catch (IOException closeError) {
+                e.addSuppressed(closeError);
+            }
+            throw e;
         }
-
-        // ── Final norm ───────────────────────────────────────────────
-        float[] finalNormWeight = loadNormWeight("model.norm.weight", externalRefs, extData);
-        log.info("Loaded final norm weight");
-
-        // ── LM head ─────────────────────────────────────────────────
-        WeightMatrix lmHead = loadLmHead(config, graph, matmulWeightNames, externalRefs, extData, isQuantized);
-        log.info("Loaded lm_head: [{}, {}]", config.vocabSize(), config.hiddenSize());
-
-        log.info("All Qwen2 weights loaded successfully");
-        return new Qwen2Weights(config, raf, channel, extData,
-                embedTokens, layerWeights, finalNormWeight, lmHead);
     }
 
     // ── Embedding loading ────────────────────────────────────────────────
@@ -307,7 +321,6 @@ public final class Qwen2Weights implements AutoCloseable {
 
     private static LayerWeights loadLayer(int layerIdx, Qwen2Config config,
                                           OnnxGraph graph,
-                                          Map<String, OnnxTensor> inlineTensors,
                                           Map<String, ExternalTensorRef> externalRefs,
                                           Map<String, String[]> matmulWeightNames,
                                           MappedByteBuffer extData,
