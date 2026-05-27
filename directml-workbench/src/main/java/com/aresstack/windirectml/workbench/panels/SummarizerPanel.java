@@ -23,14 +23,13 @@ import java.util.List;
 /**
  * Decoder-backed text generation panel for the DirectML Workbench.
  * <p>
- * The default path uses the Phi-3 summarizer adapter. Experimental decoder
- * runtimes, such as Qwen2.5-Coder CPU generation, can be exposed for manual
- * testing behind explicit system-property gates without marking them shipped.
+ * The Workbench is the manual test surface for decoder runtimes. Phi-3 uses
+ * the summarizer adapter, while Qwen can be selected to exercise the local
+ * CPU generation path directly.
  */
 public final class SummarizerPanel extends JPanel {
 
     private static final String QWEN05_MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct";
-    private static final String EXPERIMENTAL_QWEN_PROPERTY = "qwen.enable.experimental.runtime";
 
     private final WorkbenchModel model;
     private final JTextArea inputArea;
@@ -95,11 +94,9 @@ public final class SummarizerPanel extends JPanel {
         for (GenerationModelRegistry.Entry entry : GenerationModelRegistry.runnableEntries()) {
             options.add(entry.modelId());
         }
-        if (isExperimentalQwenEnabled()) {
-            Entry qwen = GenerationModelRegistry.findByModelId(QWEN05_MODEL_ID);
-            if (qwen != null && !options.contains(qwen.modelId())) {
-                options.add(qwen.modelId());
-            }
+        Entry qwen = GenerationModelRegistry.findByModelId(QWEN05_MODEL_ID);
+        if (qwen != null && !options.contains(qwen.modelId())) {
+            options.add(qwen.modelId());
         }
         return options.toArray(new String[0]);
     }
@@ -115,8 +112,8 @@ public final class SummarizerPanel extends JPanel {
             label.setText(" [unknown]");
             return;
         }
-        if (isExperimentalQwen(selected)) {
-            label.setText(" 🧪 experimental CPU-only (planned)");
+        if (isQwenTestModel(selected)) {
+            label.setText(" 🧪 CPU test (planned)");
             return;
         }
         String statusText = switch (entry.status()) {
@@ -141,14 +138,14 @@ public final class SummarizerPanel extends JPanel {
             return;
         }
 
-        boolean experimentalQwen = isExperimentalQwen(selectedModel);
+        boolean qwenTestModel = isQwenTestModel(selectedModel);
         Entry entry = GenerationModelRegistry.findByModelId(selectedModel);
         if (entry != null) {
             if (entry.status() == GenerationModelRegistry.Status.UNSUPPORTED) {
                 appendResult("ERROR: Model '" + selectedModel + "' is unsupported in this runtime.");
                 return;
             }
-            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !experimentalQwen) {
+            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !qwenTestModel) {
                 appendResult("ERROR: Model '" + selectedModel + "' is not yet implemented.");
                 appendResult("  Status: planned. Runtime support is in progress.");
                 return;
@@ -158,9 +155,8 @@ public final class SummarizerPanel extends JPanel {
         int maxTokens = (Integer) maxTokensSpinner.getValue();
         appendResult("Loading generation model: " + selectedModel
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
-        if (experimentalQwen) {
-            appendResult("  NOTE: Qwen CPU runtime is experimental and enabled by -D"
-                    + EXPERIMENTAL_QWEN_PROPERTY + "=true.");
+        if (qwenTestModel) {
+            appendResult("  NOTE: Qwen is running through the Workbench CPU test path.");
         }
 
         new SwingWorker<Void, Void>() {
@@ -168,7 +164,7 @@ public final class SummarizerPanel extends JPanel {
             protected Void doInBackground() {
                 try {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
-                    if (experimentalQwen) {
+                    if (qwenTestModel) {
                         runQwenGeneration(modelDir, text, maxTokens, selectedModel);
                     } else {
                         runPhi3Summarizer(modelDir, text, maxTokens);
@@ -210,7 +206,7 @@ public final class SummarizerPanel extends JPanel {
         long start = System.nanoTime();
         QwenInferenceEngine engine = new QwenInferenceEngine(modelDir, maxTokens);
         try {
-            appendResult("Initializing experimental Qwen CPU runtime...");
+            appendResult("Initializing Qwen CPU runtime...");
             engine.initialize();
             appendResult("Model loaded in " + elapsedMs(start) + " ms");
             long genStart = System.nanoTime();
@@ -272,12 +268,8 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private static boolean isExperimentalQwenEnabled() {
-        return Boolean.getBoolean(EXPERIMENTAL_QWEN_PROPERTY);
-    }
-
-    private static boolean isExperimentalQwen(String modelId) {
-        return isExperimentalQwenEnabled() && QWEN05_MODEL_ID.equals(modelId);
+    private static boolean isQwenTestModel(String modelId) {
+        return QWEN05_MODEL_ID.equals(modelId);
     }
 
     private static long elapsedMs(long startNanos) {
