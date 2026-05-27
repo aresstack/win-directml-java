@@ -57,8 +57,8 @@ class QwenStopTokenPolicyTest {
     @Test
     void policyMatchesTokenizerIsEos() {
         // QwenStopTokenPolicy and QwenTokenizer.isEos should agree
-        assertEquals(QwenStopTokenPolicy.shouldStop(QwenTokenizer.ENDOFTEXT_ID), true);
-        assertEquals(QwenStopTokenPolicy.shouldStop(QwenTokenizer.IM_END_ID), true);
-        assertEquals(QwenStopTokenPolicy.shouldStop(QwenTokenizer.IM_START_ID), false);
+        assertTrue(QwenStopTokenPolicy.shouldStop(QwenTokenizer.ENDOFTEXT_ID));
+        assertTrue(QwenStopTokenPolicy.shouldStop(QwenTokenizer.IM_END_ID));
+        assertFalse(QwenStopTokenPolicy.shouldStop(QwenTokenizer.IM_START_ID));
     }
 }
