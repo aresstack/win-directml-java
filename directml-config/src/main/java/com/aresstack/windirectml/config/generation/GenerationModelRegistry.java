@@ -143,7 +143,7 @@ public final class GenerationModelRegistry {
                         "model/phi-3-mini-4k-instruct-onnx",
                         "model/microsoft/Phi-3-mini-4k-instruct-onnx"),
                 "First supported decoder/summarizer backend. Uses ONNX Runtime "
-                        + "GenAI for text generation. INT4 quantised, ~2.3 GB disk."));
+                        + "GenAI for text generation. INT4 quantized, ~2.3 GB disk."));
 
         entries.add(new Entry(
                 "microsoft/Phi-3.5-mini-instruct-onnx",
