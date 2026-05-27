@@ -1,0 +1,95 @@
+package com.aresstack.windirectml.inference.qwen;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Unit tests for {@link QwenModelDirValidator}.
+ *
+ * <p>These tests verify the missing-file diagnostics for Qwen2.5-Coder
+ * model directories. No real model weights are needed — the tests use
+ * empty placeholder files to check that the validator correctly identifies
+ * which file is missing.</p>
+ *
+ * <p>Modelled after the Phi-3 diagnostics in
+ * {@code Phi3InferenceEngineModelDirTest}.</p>
+ */
+class QwenModelDirValidatorTest {
+
+    @Test
+    void nullDirectoryYieldsClearMessage() {
+        String msg = QwenModelDirValidator.describeMissingModelFile(null);
+        assertNotNull(msg);
+        assertTrue(msg.toLowerCase().contains("qwen"), msg);
+        assertTrue(msg.contains("null"), msg);
+    }
+
+    @Test
+    void missingDirectoryYieldsClearMessage(@TempDir Path tmp) {
+        Path doesNotExist = tmp.resolve("qwen-not-here");
+        String msg = QwenModelDirValidator.describeMissingModelFile(doesNotExist);
+        assertNotNull(msg);
+        assertTrue(msg.contains("does not exist"), msg);
+        assertTrue(msg.contains("qwen-not-here"), msg);
+        assertFalse(QwenModelDirValidator.isValidModelDir(doesNotExist));
+    }
+
+    @Test
+    void emptyDirectoryReportsConfigJsonMissing(@TempDir Path tmp) {
+        String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
+        assertNotNull(msg);
+        assertTrue(msg.contains("config.json"), msg);
+    }
+
+    @Test
+    void missingTokenizerJsonIsNamed(@TempDir Path tmp) throws Exception {
+        Files.writeString(tmp.resolve("config.json"), "{}");
+        String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
+        assertNotNull(msg);
+        assertTrue(msg.contains("tokenizer.json"), msg);
+    }
+
+    @Test
+    void missingModelOnnxIsNamed(@TempDir Path tmp) throws Exception {
+        Files.writeString(tmp.resolve("config.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer.json"), "{}");
+        String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
+        assertNotNull(msg);
+        assertTrue(msg.contains("model.onnx"), msg);
+    }
+
+    @Test
+    void missingModelOnnxDataIsNamed(@TempDir Path tmp) throws Exception {
+        Files.writeString(tmp.resolve("config.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer.json"), "{}");
+        Files.writeString(tmp.resolve("model.onnx"), "");
+        String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
+        assertNotNull(msg);
+        assertTrue(msg.contains("model.onnx.data"), msg);
+    }
+
+    @Test
+    void completeDirectoryReturnsNull(@TempDir Path tmp) throws Exception {
+        Files.writeString(tmp.resolve("config.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer.json"), "{}");
+        Files.writeString(tmp.resolve("model.onnx"), "");
+        Files.writeString(tmp.resolve("model.onnx.data"), "");
+        assertNull(QwenModelDirValidator.describeMissingModelFile(tmp));
+        assertTrue(QwenModelDirValidator.isValidModelDir(tmp));
+    }
+
+    @Test
+    void diagnosticIncludesDirectoryPath(@TempDir Path tmp) {
+        String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
+        assertNotNull(msg);
+        assertTrue(msg.contains(tmp.toString()), msg);
+    }
+}

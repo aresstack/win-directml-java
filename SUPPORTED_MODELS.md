@@ -353,6 +353,7 @@ for text generation. The summarizer model selector is populated from
 |----------------------------------------------|------------|-------------------|-------------------|------------------------------------------------------------------------------|
 | `microsoft/Phi-3-mini-4k-instruct-onnx`     | summarizer | 🧪 experimental   | ✅ downloadable    | First supported summarizer backend. CPU + DirectML. ~2.3 GB INT4 ONNX graph. |
 | `microsoft/Phi-3.5-mini-instruct-onnx`      | summarizer | 🚧 planned        | ❌ not yet         | Successor; expected same ONNX GenAI path once graph is published.            |
+| `Qwen/Qwen2.5-Coder-0.5B-Instruct`         | causal-lm  | 🚧 planned        | ❌ not yet         | Qwen2.5-Coder 0.5B, CPU-first. ChatML template. See [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md). |
 | `ellamind/summarizer-v6-llama-v2`           | summarizer | ⛔ unsupported    | ❌                 | Llama-v2 fine-tune; no local runtime path in this project.                   |
 
 > **Summarization is experimental.** The `summarize` JSON-RPC method is
@@ -380,6 +381,30 @@ for text generation. The summarizer model selector is populated from
 5. Click **Summarize**.
 6. Verify that the output area shows generated summary text (not
    extractive sentences).
+
+### 3.3 Qwen2.5-Coder 0.5B CPU smoke test (manual)
+
+> Tracked in issue #101. Full smoke-test protocol in
+> [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md).
+
+1. Download Qwen2.5-Coder-0.5B-Instruct ONNX model into
+   `model/qwen2.5-coder-0.5b-instruct/` (download script tracked in
+   issue #100).
+2. Run the automated smoke test:
+   ```bash
+   ./gradlew :directml-inference:test \
+       --tests "*.qwen.QwenCpuSmokeTest" \
+       -Dqwen.model.dir=model/qwen2.5-coder-0.5b-instruct
+   ```
+3. Verify all four prompt scenarios produce non-empty output:
+   - English summarization
+   - German summarization
+   - Natural/ADABAS code explanation
+   - Short max-token generation (≤32 tokens)
+4. Missing-file diagnostics are covered by CI-safe unit tests:
+   ```bash
+   ./gradlew :directml-inference:test --tests "*.qwen.QwenModelDirValidatorTest"
+   ```
 
 ## 4. Sidecar / JSON-RPC
 
