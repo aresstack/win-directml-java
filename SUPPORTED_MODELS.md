@@ -392,14 +392,21 @@ for text generation. The summarizer model selector is populated from
 > Tracked in issue #101. Full smoke-test protocol in
 > [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md).
 
+> **⚠️ Experimental / CPU-only:** The Qwen CPU runtime is not wired into
+> the Workbench UI or registered as a runnable backend. Status remains
+> planned/not-runnable until the ONNX source and layout are verified
+> end-to-end (issue #100). The smoke test requires explicit opt-in via
+> `-Dqwen.enable.experimental.runtime=true`.
+
 1. Download Qwen2.5-Coder-0.5B-Instruct ONNX model into
-   `model/qwen2.5-coder-0.5b-instruct/` (download script tracked in
+   `model/qwen2.5-coder-0.5b-directml-int4/` (download script tracked in
    issue #100).
 2. Run the automated smoke test:
    ```bash
    ./gradlew :directml-inference:test \
        --tests "*.qwen.QwenCpuSmokeTest" \
-       -Dqwen.model.dir=model/qwen2.5-coder-0.5b-instruct
+       -Dqwen.model.dir=model/qwen2.5-coder-0.5b-directml-int4 \
+       -Dqwen.enable.experimental.runtime=true
    ```
 3. Verify all four prompt scenarios produce non-empty output:
    - English summarization

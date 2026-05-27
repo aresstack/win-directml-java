@@ -1,28 +1,33 @@
 package com.aresstack.windirectml.inference.qwen;
 
-import org.junit.jupiter.api.Disabled;
+import com.aresstack.windirectml.inference.InferenceRequest;
+import com.aresstack.windirectml.inference.InferenceResult;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Optional real-model smoke test for Qwen2.5-Coder 0.5B CPU generation.
  *
- * <p><b>These tests require real model weights and are skipped by default in CI.</b>
+ * <p><b>These tests require real model weights AND the experimental runtime
+ * property, and are skipped by default in CI.</b>
  * To run locally, download the Qwen2.5-Coder-0.5B-Instruct ONNX model into
- * {@code model/qwen2.5-coder-0.5b-instruct/} (or set system property
- * {@code qwen.model.dir} to point at the model directory).</p>
+ * {@code model/qwen2.5-coder-0.5b-directml-int4/} (or set system property
+ * {@code qwen.model.dir} to point at the model directory), and enable the
+ * experimental runtime gate:</p>
  *
  * <h3>Manual run command:</h3>
  * <pre>{@code
  * ./gradlew :directml-inference:test \
  *     --tests "*.qwen.QwenCpuSmokeTest" \
- *     -Dqwen.model.dir=model/qwen2.5-coder-0.5b-instruct
+ *     -Dqwen.model.dir=model/qwen2.5-coder-0.5b-directml-int4 \
+ *     -Dqwen.enable.experimental.runtime=true
  * }</pre>
  *
  * <h3>Prompts tested:</h3>
@@ -37,6 +42,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>This test validates the CPU runtime path from issue #99 and the model
  * download layout from issue #100. Tokenizer/template tests from issue #98
  * cover the ChatML formatting separately.</p>
+ *
+ * <p><b>Experimental:</b> This CPU-only runtime is not wired into Workbench or
+ * SUPPORTED_MODELS as runnable. Status remains planned/not-runnable until ONNX
+ * source and layout are verified end-to-end (issue #100).</p>
  *
  * @see QwenModelDirValidator
  */
@@ -85,7 +94,13 @@ class QwenCpuSmokeTest {
 
     // ── Condition ────────────────────────────────────────────────────────
 
+    private static QwenInferenceEngine engine;
+
     static boolean modelPresent() {
+        // Gate: require explicit opt-in via system property
+        if (!"true".equalsIgnoreCase(System.getProperty("qwen.enable.experimental.runtime"))) {
+            return false;
+        }
         Path dir = resolveModelDir();
         return dir != null && QwenModelDirValidator.isValidModelDir(dir);
     }
@@ -95,83 +110,88 @@ class QwenCpuSmokeTest {
         if (explicit != null && !explicit.isBlank()) {
             return Path.of(explicit);
         }
-        // Default location relative to repository root
-        Path defaultDir = Path.of("model", "qwen2.5-coder-0.5b-instruct");
+        // Default location relative to repository root (aligned with #100 layout)
+        Path defaultDir = Path.of("model", "qwen2.5-coder-0.5b-directml-int4");
         if (Files.isDirectory(defaultDir)) {
             return defaultDir;
         }
         return null;
     }
 
+    @BeforeAll
+    static void setUp() throws Exception {
+        Path dir = resolveModelDir();
+        assertNotNull(dir, "Model directory must be resolved when modelPresent() is true");
+        engine = new QwenInferenceEngine(dir, SHORT_MAX_TOKENS);
+        engine.initialize();
+        assertTrue(engine.isReady(), "Engine must be ready after initialization");
+    }
+
+    @AfterAll
+    static void tearDown() {
+        if (engine != null) {
+            engine.shutdown();
+        }
+    }
+
     // ── Smoke tests ──────────────────────────────────────────────────────
 
     @Test
-    @Disabled("Awaiting Qwen CPU runtime (#99)")
-    void englishSummarizationProducesOutput() {
-        // This test verifies that the CPU runtime generates non-empty output
-        // for an English summarization prompt.
-        //
-        // Implementation note: once the Qwen runtime (issue #99) lands, this
-        // test should instantiate the runtime, format the prompt using ChatML
-        // (issue #98), generate with SHORT_MAX_TOKENS, and assert non-empty.
-        //
-        // Placeholder assertion that validates model directory:
-        Path dir = resolveModelDir();
-        assertNotNull(dir, "Model directory must be resolved when modelPresent() is true");
-        assertTrue(QwenModelDirValidator.isValidModelDir(dir));
+    void englishSummarizationProducesOutput() throws Exception {
+        InferenceRequest request = InferenceRequest.builder()
+                .systemPrompt(SYSTEM_PROMPT)
+                .userPrompt(ENGLISH_SUMMARY_PROMPT)
+                .maxTokens(SHORT_MAX_TOKENS)
+                .build();
 
-        // TODO(#99): Replace with actual Qwen runtime generation call:
-        // var engine = new QwenInferenceEngine(dir, SHORT_MAX_TOKENS, "cpu");
-        // engine.initialize();
-        // var result = engine.generate(new InferenceRequest(SYSTEM_PROMPT, ENGLISH_SUMMARY_PROMPT, SHORT_MAX_TOKENS));
-        // assertFalse(result.getText().isBlank(), "Generated text must not be empty");
-        // engine.shutdown();
+        InferenceResult result = engine.generate(request);
+        assertNotNull(result);
+        assertNotNull(result.getText());
+        assertFalse(result.getText().isBlank(), "English summary must not be empty");
     }
 
     @Test
-    @Disabled("Awaiting Qwen CPU runtime (#99)")
-    void germanSummarizationProducesOutput() {
-        Path dir = resolveModelDir();
-        assertNotNull(dir);
-        assertTrue(QwenModelDirValidator.isValidModelDir(dir));
+    void germanSummarizationProducesOutput() throws Exception {
+        InferenceRequest request = InferenceRequest.builder()
+                .systemPrompt(SYSTEM_PROMPT)
+                .userPrompt(GERMAN_SUMMARY_PROMPT)
+                .maxTokens(SHORT_MAX_TOKENS)
+                .build();
 
-        // TODO(#99): Replace with actual Qwen runtime generation call:
-        // var engine = new QwenInferenceEngine(dir, SHORT_MAX_TOKENS, "cpu");
-        // engine.initialize();
-        // var result = engine.generate(new InferenceRequest(SYSTEM_PROMPT, GERMAN_SUMMARY_PROMPT, SHORT_MAX_TOKENS));
-        // assertFalse(result.getText().isBlank(), "German summary must not be empty");
-        // engine.shutdown();
+        InferenceResult result = engine.generate(request);
+        assertNotNull(result);
+        assertNotNull(result.getText());
+        assertFalse(result.getText().isBlank(), "German summary must not be empty");
     }
 
     @Test
-    @Disabled("Awaiting Qwen CPU runtime (#99)")
-    void naturalAdabasCodeExplanationProducesOutput() {
-        Path dir = resolveModelDir();
-        assertNotNull(dir);
-        assertTrue(QwenModelDirValidator.isValidModelDir(dir));
+    void naturalAdabasCodeExplanationProducesOutput() throws Exception {
+        InferenceRequest request = InferenceRequest.builder()
+                .systemPrompt(SYSTEM_PROMPT)
+                .userPrompt(NATURAL_ADABAS_CODE_EXPLANATION_PROMPT)
+                .maxTokens(64)
+                .build();
 
-        // TODO(#99): Replace with actual Qwen runtime generation call:
-        // var engine = new QwenInferenceEngine(dir, 64, "cpu");
-        // engine.initialize();
-        // var result = engine.generate(new InferenceRequest(SYSTEM_PROMPT, NATURAL_ADABAS_CODE_EXPLANATION_PROMPT, 64));
-        // assertFalse(result.getText().isBlank(), "Code explanation must not be empty");
-        // engine.shutdown();
+        InferenceResult result = engine.generate(request);
+        assertNotNull(result);
+        assertNotNull(result.getText());
+        assertFalse(result.getText().isBlank(), "Code explanation must not be empty");
     }
 
     @Test
-    @Disabled("Awaiting Qwen CPU runtime (#99)")
-    void shortMaxTokenGenerationProducesOutput() {
-        Path dir = resolveModelDir();
-        assertNotNull(dir);
-        assertTrue(QwenModelDirValidator.isValidModelDir(dir));
+    void shortMaxTokenGenerationProducesOutput() throws Exception {
+        InferenceRequest request = InferenceRequest.builder()
+                .systemPrompt(SYSTEM_PROMPT)
+                .userPrompt("Hello!")
+                .maxTokens(SHORT_MAX_TOKENS)
+                .build();
 
-        // TODO(#99): Replace with actual Qwen runtime generation call:
-        // var engine = new QwenInferenceEngine(dir, SHORT_MAX_TOKENS, "cpu");
-        // engine.initialize();
-        // var result = engine.generate(new InferenceRequest(SYSTEM_PROMPT, "Hello!", SHORT_MAX_TOKENS));
-        // assertFalse(result.getText().isBlank(), "Short generation must produce output");
-        // assertTrue(result.getUsage().completionTokens() <= SHORT_MAX_TOKENS,
-        //         "Must not exceed max token limit");
-        // engine.shutdown();
+        InferenceResult result = engine.generate(request);
+        assertNotNull(result);
+        assertNotNull(result.getText());
+        assertFalse(result.getText().isBlank(), "Short generation must produce output");
+        assertNotNull(result.getUsage());
+        assertTrue(result.getUsage().completionTokens() <= SHORT_MAX_TOKENS,
+                "Must not exceed max token limit");
     }
 }
