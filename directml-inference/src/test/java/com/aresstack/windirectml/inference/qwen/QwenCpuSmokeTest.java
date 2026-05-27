@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.qwen;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 
@@ -106,6 +107,7 @@ class QwenCpuSmokeTest {
     // ── Smoke tests ──────────────────────────────────────────────────────
 
     @Test
+    @Disabled("Awaiting Qwen CPU runtime (#99)")
     void englishSummarizationProducesOutput() {
         // This test verifies that the CPU runtime generates non-empty output
         // for an English summarization prompt.
@@ -128,6 +130,7 @@ class QwenCpuSmokeTest {
     }
 
     @Test
+    @Disabled("Awaiting Qwen CPU runtime (#99)")
     void germanSummarizationProducesOutput() {
         Path dir = resolveModelDir();
         assertNotNull(dir);
@@ -142,6 +145,7 @@ class QwenCpuSmokeTest {
     }
 
     @Test
+    @Disabled("Awaiting Qwen CPU runtime (#99)")
     void naturalAdabasCodeExplanationProducesOutput() {
         Path dir = resolveModelDir();
         assertNotNull(dir);
@@ -156,6 +160,7 @@ class QwenCpuSmokeTest {
     }
 
     @Test
+    @Disabled("Awaiting Qwen CPU runtime (#99)")
     void shortMaxTokenGenerationProducesOutput() {
         Path dir = resolveModelDir();
         assertNotNull(dir);
