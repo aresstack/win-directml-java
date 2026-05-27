@@ -229,9 +229,9 @@ class EmbeddingModelRegistryTest {
     @Test
     void entriesPreserveDeclarationOrder() {
         List<EmbeddingModelRegistry.Entry> all = EmbeddingModelRegistry.entries();
-        assertEquals(9, all.size());
+        assertEquals(12, all.size());
         assertEquals("sentence-transformers/all-MiniLM-L6-v2", all.get(0).modelId());
-        assertEquals("microsoft/Phi-3.5-mini-instruct-onnx", all.get(all.size() - 1).modelId());
+        assertEquals("Qwen/Qwen2.5-Coder-3B-Instruct", all.get(all.size() - 1).modelId());
     }
 
     @Test
@@ -306,7 +306,7 @@ class EmbeddingModelRegistryTest {
     void entriesByUseCaseDecoderReturnsBothDecoderIds() {
         List<EmbeddingModelRegistry.Entry> decoders =
                 EmbeddingModelRegistry.entriesByUseCase(EmbeddingModelRegistry.UseCase.DECODER);
-        assertEquals(2, decoders.size());
+        assertEquals(5, decoders.size());
     }
 
     @Test
@@ -330,6 +330,32 @@ class EmbeddingModelRegistryTest {
         assertEquals(EmbeddingModelRegistry.UseCase.SUMMARIZER, phi35.useCase());
         assertEquals(EmbeddingModelRegistry.Status.PLANNED, phi35.status());
         assertFalse(phi35.isEmbedding());
+    }
+
+    @Test
+    void qwenCoderEntriesArePlannedDecoders() {
+        EmbeddingModelRegistry.Entry qwen05 = EmbeddingModelRegistry
+                .findByModelId("Qwen/Qwen2.5-Coder-0.5B-Instruct");
+        assertNotNull(qwen05, "registry must contain Qwen 0.5B");
+        assertEquals(EmbeddingModelRegistry.UseCase.DECODER, qwen05.useCase());
+        assertEquals(EmbeddingModelRegistry.Status.PLANNED, qwen05.status());
+        assertFalse(qwen05.isEmbedding());
+        assertFalse(qwen05.modelDirHints().isEmpty(),
+                "Qwen 0.5B must declare model directory hints");
+
+        EmbeddingModelRegistry.Entry qwen15 = EmbeddingModelRegistry
+                .findByModelId("Qwen/Qwen2.5-Coder-1.5B-Instruct");
+        assertNotNull(qwen15, "registry must contain Qwen 1.5B");
+        assertEquals(EmbeddingModelRegistry.UseCase.DECODER, qwen15.useCase());
+        assertEquals(EmbeddingModelRegistry.Status.PLANNED, qwen15.status());
+        assertFalse(qwen15.isEmbedding());
+
+        EmbeddingModelRegistry.Entry qwen3 = EmbeddingModelRegistry
+                .findByModelId("Qwen/Qwen2.5-Coder-3B-Instruct");
+        assertNotNull(qwen3, "registry must contain Qwen 3B");
+        assertEquals(EmbeddingModelRegistry.UseCase.DECODER, qwen3.useCase());
+        assertEquals(EmbeddingModelRegistry.Status.PLANNED, qwen3.status());
+        assertFalse(qwen3.isEmbedding());
     }
 
     @Test

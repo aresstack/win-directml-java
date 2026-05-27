@@ -41,6 +41,11 @@ public final class DownloadPanel extends JPanel {
         phi3Btn.addActionListener(e -> startPhi3Download());
         buttons.add(phi3Btn);
 
+        var qwenBtn = new JButton("Download Qwen2.5-Coder 0.5B");
+        qwenBtn.setToolTipText("Download Qwen2.5-Coder 0.5B for local Workbench testing.");
+        qwenBtn.addActionListener(e -> startQwenDownload());
+        buttons.add(qwenBtn);
+
         forceCheckbox = new JCheckBox("Force re-download (overwrite existing)");
 
         var topPanel = new JPanel(new BorderLayout(8, 8));
@@ -127,6 +132,44 @@ public final class DownloadPanel extends JPanel {
                             : "Phi-3 download ended with errors: ") + targetDir);
                 } catch (Exception ex) {
                     appendLog("Phi-3 download ended with errors: " + ex.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    private void startQwenDownload() {
+        boolean force = forceCheckbox.isSelected();
+        var targetDir = model.getModelRoot().resolve("qwen2.5-coder-0.5b-directml-int4");
+        appendLog("Starting Qwen2.5-Coder 0.5B download -> " + targetDir);
+        appendLog("  Required files: " + ModelDownloader.QWEN_REQUIRED_FILES);
+
+        new SwingWorker<Boolean, String>() {
+            @Override
+            protected Boolean doInBackground() {
+                try {
+                    ModelDownloader.downloadQwen(
+                            "onnx-community/Qwen2.5-Coder-0.5B-Instruct",
+                            targetDir, force, this::publish);
+                    return true;
+                } catch (Exception ex) {
+                    publish("ERROR: " + ex.getMessage());
+                    return false;
+                }
+            }
+
+            @Override
+            protected void process(java.util.List<String> chunks) {
+                for (var msg : chunks) appendLog(msg);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    boolean ok = get();
+                    appendLog((ok ? "Qwen download finished: "
+                            : "Qwen download ended with errors: ") + targetDir);
+                } catch (Exception ex) {
+                    appendLog("Qwen download ended with errors: " + ex.getMessage());
                 }
             }
         }.execute();

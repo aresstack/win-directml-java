@@ -1,29 +1,35 @@
 package com.aresstack.windirectml.workbench.panels;
 
-import com.aresstack.windirectml.config.models.EmbeddingModelRegistry;
-import com.aresstack.windirectml.config.models.EmbeddingModelRegistry.Entry;
-import com.aresstack.windirectml.config.models.EmbeddingModelRegistry.UseCase;
+import com.aresstack.windirectml.config.generation.GenerationModelRegistry;
+import com.aresstack.windirectml.config.generation.GenerationModelRegistry.Entry;
 import com.aresstack.windirectml.inference.InferenceException;
+import com.aresstack.windirectml.inference.InferenceRequest;
+import com.aresstack.windirectml.inference.InferenceResult;
 import com.aresstack.windirectml.inference.Phi3InferenceEngine;
 import com.aresstack.windirectml.inference.Phi3Summarizer;
 import com.aresstack.windirectml.inference.Summary;
 import com.aresstack.windirectml.inference.SummaryRequest;
+import com.aresstack.windirectml.inference.qwen.QwenInferenceEngine;
+import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 
 import javax.swing.*;
 import java.awt.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Decoder-backed summarizer panel for the DirectML Workbench.
+ * Decoder-backed text generation panel for the DirectML Workbench.
  * <p>
- * Uses the Phi-3 (or compatible) decoder model to generate real text summaries
- * via the {@link Phi3Summarizer} engine. This replaces the old embedding-based
- * extractive sentence selection approach.
+ * The Workbench is the manual test surface for decoder runtimes. Phi-3 uses
+ * the summarizer adapter, while Qwen can be selected to exercise the local
+ * CPU generation path directly.
  */
 public final class SummarizerPanel extends JPanel {
+
+    private static final String QWEN05_MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct";
 
     private final WorkbenchModel model;
     private final JTextArea inputArea;
@@ -36,11 +42,9 @@ public final class SummarizerPanel extends JPanel {
         setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        // --- Top: model selector and controls ---
         var controlsPanel = new JPanel(new BorderLayout(4, 4));
-
         var modelPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        modelPanel.add(new JLabel("Summarizer Model:"));
+        modelPanel.add(new JLabel("Generation Model:"));
         modelSelector = new JComboBox<>(buildSummarizerModelOptions());
         modelSelector.setSelectedItem(model.getSummarizerModel());
         modelSelector.addActionListener(e -> {
@@ -51,27 +55,25 @@ public final class SummarizerPanel extends JPanel {
         });
         modelPanel.add(modelSelector);
 
-        // Status label
         var statusLabel = new JLabel();
         updateStatusLabel(statusLabel);
         modelSelector.addActionListener(e -> updateStatusLabel(statusLabel));
         modelPanel.add(statusLabel);
         controlsPanel.add(modelPanel, BorderLayout.NORTH);
 
-        // Input area
         var inputPanel = new JPanel(new BorderLayout(4, 4));
-        inputPanel.add(new JLabel("Text to summarize:"), BorderLayout.NORTH);
+        inputPanel.add(new JLabel("Text / prompt:"), BorderLayout.NORTH);
         inputArea = new JTextArea(8, 70);
         inputArea.setLineWrap(true);
         inputArea.setWrapStyleWord(true);
-        inputArea.setText("Paste a longer text here. The workbench will generate a summary using the selected decoder model (e.g. Phi-3).");
+        inputArea.setText("Paste a longer text or prompt here. The workbench will generate output using the selected decoder model.");
         inputPanel.add(new JScrollPane(inputArea), BorderLayout.CENTER);
 
         var runControls = new JPanel(new FlowLayout(FlowLayout.LEFT));
         runControls.add(new JLabel("Max tokens:"));
         maxTokensSpinner = new JSpinner(new SpinnerNumberModel(256, 32, 2048, 32));
         runControls.add(maxTokensSpinner);
-        var runBtn = new JButton("Summarize");
+        var runBtn = new JButton("Generate / Summarize");
         runBtn.addActionListener(e -> runSummarizer());
         runControls.add(runBtn);
         inputPanel.add(runControls, BorderLayout.SOUTH);
@@ -79,7 +81,6 @@ public final class SummarizerPanel extends JPanel {
         controlsPanel.add(inputPanel, BorderLayout.CENTER);
         add(controlsPanel, BorderLayout.NORTH);
 
-        // --- Bottom: result area ---
         resultArea = new JTextArea(14, 70);
         resultArea.setEditable(false);
         resultArea.setLineWrap(true);
@@ -89,12 +90,15 @@ public final class SummarizerPanel extends JPanel {
     }
 
     private String[] buildSummarizerModelOptions() {
-        List<Entry> summarizers = EmbeddingModelRegistry.entriesByUseCase(UseCase.SUMMARIZER);
-        String[] options = new String[summarizers.size()];
-        for (int i = 0; i < summarizers.size(); i++) {
-            options[i] = summarizers.get(i).modelId();
+        List<String> options = new ArrayList<>();
+        for (GenerationModelRegistry.Entry entry : GenerationModelRegistry.runnableEntries()) {
+            options.add(entry.modelId());
         }
-        return options;
+        Entry qwen = GenerationModelRegistry.findByModelId(QWEN05_MODEL_ID);
+        if (qwen != null && !options.contains(qwen.modelId())) {
+            options.add(qwen.modelId());
+        }
+        return options.toArray(new String[0]);
     }
 
     private void updateStatusLabel(JLabel label) {
@@ -103,16 +107,20 @@ public final class SummarizerPanel extends JPanel {
             label.setText("");
             return;
         }
-        Entry entry = EmbeddingModelRegistry.findByModelId(selected);
+        Entry entry = GenerationModelRegistry.findByModelId(selected);
         if (entry == null) {
             label.setText(" [unknown]");
             return;
         }
+        if (isQwenTestModel(selected)) {
+            label.setText(" 🧪 CPU test (planned)");
+            return;
+        }
         String statusText = switch (entry.status()) {
-            case SHIPPED -> " \u2705 shipped";
-            case EXPERIMENTAL -> " \uD83E\uDDEA experimental";
-            case PLANNED -> " \uD83D\uDEA7 planned";
-            case UNSUPPORTED -> " \u274C unsupported";
+            case SHIPPED -> " ✅ shipped";
+            case EXPERIMENTAL -> " 🧪 experimental";
+            case PLANNED -> " 🚧 planned";
+            case UNSUPPORTED -> " ❌ unsupported";
         };
         label.setText(statusText);
     }
@@ -126,19 +134,18 @@ public final class SummarizerPanel extends JPanel {
 
         String selectedModel = (String) modelSelector.getSelectedItem();
         if (selectedModel == null) {
-            appendResult("ERROR: No summarizer model selected.");
+            appendResult("ERROR: No generation model selected.");
             return;
         }
 
-        // Check model status
-        Entry entry = EmbeddingModelRegistry.findByModelId(selectedModel);
+        boolean qwenTestModel = isQwenTestModel(selectedModel);
+        Entry entry = GenerationModelRegistry.findByModelId(selectedModel);
         if (entry != null) {
-            if (entry.status() == EmbeddingModelRegistry.Status.UNSUPPORTED) {
+            if (entry.status() == GenerationModelRegistry.Status.UNSUPPORTED) {
                 appendResult("ERROR: Model '" + selectedModel + "' is unsupported in this runtime.");
-                appendResult("  Status: unsupported. This model cannot run locally.");
                 return;
             }
-            if (entry.status() == EmbeddingModelRegistry.Status.PLANNED) {
+            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !qwenTestModel) {
                 appendResult("ERROR: Model '" + selectedModel + "' is not yet implemented.");
                 appendResult("  Status: planned. Runtime support is in progress.");
                 return;
@@ -146,36 +153,21 @@ public final class SummarizerPanel extends JPanel {
         }
 
         int maxTokens = (Integer) maxTokensSpinner.getValue();
-        appendResult("Loading summarizer model: " + selectedModel
+        appendResult("Loading generation model: " + selectedModel
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
+        if (qwenTestModel) {
+            appendResult("  NOTE: Qwen is running through the Workbench CPU test path.");
+        }
 
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
                 try {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
-
-                    // Validate required files
-                    validateModelFiles(modelDir);
-
-                    String backend = model.getBackend().name().toLowerCase();
-                    long start = System.nanoTime();
-
-                    try (var summarizer = new Phi3Summarizer(modelDir, maxTokens, backend)) {
-                        appendResult("Initializing model...");
-                        summarizer.initialize();
-                        appendResult("Model loaded in " + elapsedMs(start) + " ms");
-
-                        long genStart = System.nanoTime();
-                        SummaryRequest request = SummaryRequest.of(text, maxTokens);
-                        Summary summary = summarizer.summarize(request);
-                        appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
-                        appendResult("  Prompt tokens: " + summary.promptTokens());
-                        appendResult("  Output tokens: " + summary.outputTokens());
-                        appendResult("  Finish reason: " + summary.finishReason());
-                        appendResult("");
-                        appendResult("SUMMARY:");
-                        appendResult(summary.text());
+                    if (qwenTestModel) {
+                        runQwenGeneration(modelDir, text, maxTokens, selectedModel);
+                    } else {
+                        runPhi3Summarizer(modelDir, text, maxTokens);
                     }
                 } catch (InferenceException ex) {
                     appendResult("INFERENCE ERROR: " + ex.getMessage());
@@ -187,9 +179,61 @@ public final class SummarizerPanel extends JPanel {
         }.execute();
     }
 
+    private void runPhi3Summarizer(Path modelDir, String text, int maxTokens) throws Exception {
+        validatePhi3ModelFiles(modelDir);
+        String backend = model.getBackend().name().toLowerCase();
+        long start = System.nanoTime();
+        try (var summarizer = new Phi3Summarizer(modelDir, maxTokens, backend)) {
+            appendResult("Initializing model...");
+            summarizer.initialize();
+            appendResult("Model loaded in " + elapsedMs(start) + " ms");
+            long genStart = System.nanoTime();
+            SummaryRequest request = SummaryRequest.of(text, maxTokens);
+            Summary summary = summarizer.summarize(request);
+            appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
+            appendResult("  Prompt tokens: " + summary.promptTokens());
+            appendResult("  Output tokens: " + summary.outputTokens());
+            appendResult("  Finish reason: " + summary.finishReason());
+            appendResult("");
+            appendResult("SUMMARY:");
+            appendResult(summary.text());
+        }
+    }
+
+    private void runQwenGeneration(Path modelDir, String text, int maxTokens, String selectedModel)
+            throws InferenceException {
+        validateQwenModelFiles(modelDir);
+        long start = System.nanoTime();
+        QwenInferenceEngine engine = new QwenInferenceEngine(modelDir, maxTokens);
+        try {
+            appendResult("Initializing Qwen CPU runtime...");
+            engine.initialize();
+            appendResult("Model loaded in " + elapsedMs(start) + " ms");
+            long genStart = System.nanoTime();
+            InferenceRequest request = InferenceRequest.builder()
+                    .modelId(selectedModel)
+                    .systemPrompt("You are Qwen, created by Alibaba Cloud. You are a helpful assistant.")
+                    .userPrompt(text)
+                    .maxTokens(maxTokens)
+                    .build();
+            InferenceResult result = engine.generate(request);
+            appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
+            if (result.getUsage() != null) {
+                appendResult("  Prompt tokens: " + result.getUsage().promptTokens());
+                appendResult("  Output tokens: " + result.getUsage().completionTokens());
+                appendResult("  Total tokens: " + result.getUsage().totalTokens());
+            }
+            appendResult("  Finish reason: " + result.getFinishReason());
+            appendResult("");
+            appendResult("OUTPUT:");
+            appendResult(result.getText());
+        } finally {
+            engine.shutdown();
+        }
+    }
+
     private Path resolveSummarizerModelDir(String modelId) {
-        // Try known directory layouts
-        Entry entry = EmbeddingModelRegistry.findByModelId(modelId);
+        Entry entry = GenerationModelRegistry.findByModelId(modelId);
         if (entry != null && !entry.modelDirHints().isEmpty()) {
             for (String hint : entry.modelDirHints()) {
                 Path candidate = model.getModelRoot().resolve("..").resolve(hint).normalize();
@@ -197,7 +241,6 @@ public final class SummarizerPanel extends JPanel {
                     return candidate;
                 }
             }
-            // Also try relative to model root directly
             for (String hint : entry.modelDirHints()) {
                 Path hintPath = Path.of(hint);
                 String dirName = hintPath.getFileName().toString();
@@ -207,18 +250,26 @@ public final class SummarizerPanel extends JPanel {
                 }
             }
         }
-
-        // Fallback: use the model ID last segment as directory name
         String dirName = modelId.contains("/") ? modelId.substring(modelId.lastIndexOf('/') + 1) : modelId;
         return model.getModelRoot().resolve(dirName);
     }
 
-    private void validateModelFiles(Path modelDir) {
+    private void validatePhi3ModelFiles(Path modelDir) {
         String missing = Phi3InferenceEngine.describeMissingModelFile(modelDir);
         if (missing != null) {
-            throw new IllegalStateException(missing
-                    + ". Download the model first from the Download tab.");
+            throw new IllegalStateException(missing + ". Download the model first from the Download tab.");
         }
+    }
+
+    private void validateQwenModelFiles(Path modelDir) {
+        String missing = QwenModelDirValidator.describeMissingModelFile(modelDir);
+        if (missing != null) {
+            throw new IllegalStateException(missing + ". Download the Qwen model first from the Download tab.");
+        }
+    }
+
+    private static boolean isQwenTestModel(String modelId) {
+        return QWEN05_MODEL_ID.equals(modelId);
     }
 
     private static long elapsedMs(long startNanos) {

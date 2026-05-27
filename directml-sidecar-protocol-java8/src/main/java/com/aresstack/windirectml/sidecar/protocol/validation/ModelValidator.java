@@ -61,6 +61,32 @@ public final class ModelValidator {
                 .build();
     }
 
+    /**
+     * Expectation for Qwen2.5-Coder models (ONNX INT4 AWQ block-128 layout).
+     * <p>
+     * Marked as not ready because the ONNX source and runtime are still TBD/research.
+     *
+     * @param variant model size variant: "0.5b", "1.5b", or "3b"
+     */
+    public static ModelExpectation qwenExpectation(String variant) {
+        String v = variant == null ? "0.5b" : variant.trim().toLowerCase(Locale.ROOT);
+        String label = "Qwen2.5-Coder-" + v.toUpperCase(Locale.ROOT) + "-Instruct";
+        ModelExpectation.Builder builder = ModelExpectation.builder(label)
+                .require("config.json", "tokenizer.json", "tokenizer_config.json",
+                        "special_tokens_map.json", "model.onnx", "model.onnx.data")
+                .tokenizerType("BPE")
+                .notReady("planned: ONNX source TBD/research; runtime not yet implemented");
+        // Shape values for known variants (hidden_size, num_hidden_layers, num_attention_heads)
+        if ("0.5b".equals(v)) {
+            builder.shape(896, 24, 14);
+        } else if ("1.5b".equals(v)) {
+            builder.shape(1536, 28, 12);
+        } else if ("3b".equals(v)) {
+            builder.shape(2048, 36, 16);
+        }
+        return builder.build();
+    }
+
     public static ValidationReport validate(File dir, ModelExpectation expectation) {
         if (expectation == null) throw new IllegalArgumentException("expectation must not be null");
         List<ValidationFinding> findings = new ArrayList<ValidationFinding>();

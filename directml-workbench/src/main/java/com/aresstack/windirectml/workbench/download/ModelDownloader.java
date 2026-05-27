@@ -38,6 +38,18 @@ public final class ModelDownloader {
     /** Subdirectory within the HuggingFace repo for Phi-3 DirectML INT4 quantised variant. */
     public static final String PHI3_SUBDIR = "directml/directml-int4-awq-block-128";
 
+    /** Required files for Qwen2.5-Coder ONNX decoder model (INT4 AWQ block-128). */
+    public static final List<String> QWEN_REQUIRED_FILES = List.of(
+            "model.onnx", "model.onnx.data", "tokenizer.json", "config.json",
+            "tokenizer_config.json", "special_tokens_map.json"
+    );
+
+    /**
+     * Subdirectory within the HuggingFace repo for Qwen2.5-Coder DirectML INT4 quantised variant.
+     * Mirrors the Phi-3 layout convention.
+     */
+    public static final String QWEN_SUBDIR = "directml/directml-int4-awq-block-128";
+
     private static final String HF_BASE_URL = "https://huggingface.co";
 
     private ModelDownloader() {}
@@ -108,6 +120,26 @@ public final class ModelDownloader {
             throws IOException, InterruptedException {
         download("microsoft/Phi-3-mini-4k-instruct-onnx", PHI3_SUBDIR,
                 PHI3_REQUIRED_FILES, List.of(), targetDir, force, logger);
+    }
+
+    /**
+     * Download Qwen2.5-Coder 0.5B model files from a HuggingFace ONNX candidate repo.
+     * <p>
+     * The Workbench uses this helper to download the files into the local top-level
+     * {@code model/qwen2.5-coder-0.5b-directml-int4/} directory. The remote candidate
+     * repo is still source-verification work: this helper attempts the configured
+     * repo/subdir and reports normal HTTP/file errors if the candidate does not match
+     * the expected DirectML INT4 layout.
+     *
+     * @param repo      HuggingFace repository for the Qwen ONNX model candidate
+     * @param targetDir local directory to save model files into
+     * @param force     if true, overwrite existing files
+     * @param logger    callback for progress messages
+     */
+    public static void downloadQwen(String repo, Path targetDir, boolean force, Consumer<String> logger)
+            throws IOException, InterruptedException {
+        download(repo, QWEN_SUBDIR,
+                QWEN_REQUIRED_FILES, List.of("added_tokens.json"), targetDir, force, logger);
     }
 
     private static void downloadFile(HttpClient client, String repo,

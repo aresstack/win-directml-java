@@ -329,6 +329,9 @@ including the per-layer command-list coalescing (see
 |---------------------------------------------------------------|-----------------|----------|---------------|----------|-----------------|----------------------|
 | `microsoft/Phi-3-mini-4k-instruct-onnx` (DirectML INT4 build) | INT4 GroupQuant | ✅        | ✅             | paged    | 🧪 experimental | `directml-inference` |
 | `microsoft/Phi-3.5-mini-instruct-onnx`                        | TBD             | –        | –             | –        | 🚧 planned      | –                    |
+| `Qwen2.5-Coder-0.5B-Instruct` (ONNX source TBD/research)     | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
+| `Qwen2.5-Coder-1.5B-Instruct` (ONNX source TBD/research)     | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
+| `Qwen2.5-Coder-3B-Instruct` (ONNX source TBD/research)       | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
 
 The Phi-3 pipeline runs prefill and decode in a single DirectML graph
 per layer; speculative decoding, batched generation and beam search are
@@ -336,6 +339,11 @@ out of scope for the current release. The Phi-3 model weights are not
 permissively licensed — read
 https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-onnx
 before redistributing anything you build on top of them.
+
+Qwen2.5-Coder is still planned/not runnable in this project; the ONNX source is
+explicitly TBD/research until a resolvable and layout-compatible repository is
+verified. Scale-up candidates (1.5B, 3B) use the same artifact format and will
+not be enabled until the 0.5B runtime smoke test passes (see #99).
 
 ### 3.1 Summarization via Decoder Models
 
@@ -348,6 +356,9 @@ for text generation. The summarizer model selector is populated from
 |----------------------------------------------|------------|-------------------|-------------------|------------------------------------------------------------------------------|
 | `microsoft/Phi-3-mini-4k-instruct-onnx`     | summarizer | 🧪 experimental   | ✅ downloadable    | First supported summarizer backend. CPU + DirectML. ~2.3 GB INT4 ONNX graph. |
 | `microsoft/Phi-3.5-mini-instruct-onnx`      | summarizer | 🚧 planned        | ❌ not yet         | Successor; expected same ONNX GenAI path once graph is published.            |
+| `Qwen/Qwen2.5-Coder-0.5B-Instruct`         | causal-lm  | 🚧 planned        | ❌ not yet         | Qwen2.5-Coder 0.5B, CPU-first. ChatML template. See [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md). |
+| `Qwen/Qwen2.5-Coder-1.5B-Instruct`         | causal-lm  | 🚧 planned        | ❌ not yet         | Scale-up candidate (~1 GB INT4). Blocked on 0.5B runtime verification.       |
+| `Qwen/Qwen2.5-Coder-3B-Instruct`           | causal-lm  | 🚧 planned        | ❌ not yet         | Scale-up candidate (~2 GB INT4). Blocked on 0.5B runtime verification.       |
 | `ellamind/summarizer-v6-llama-v2`           | summarizer | ⛔ unsupported    | ❌                 | Llama-v2 fine-tune; no local runtime path in this project.                   |
 
 > **Summarization is experimental.** The `summarize` JSON-RPC method is
@@ -375,6 +386,37 @@ for text generation. The summarizer model selector is populated from
 5. Click **Summarize**.
 6. Verify that the output area shows generated summary text (not
    extractive sentences).
+
+### 3.3 Qwen2.5-Coder 0.5B CPU smoke test (manual)
+
+> Tracked in issue #101. Full smoke-test protocol in
+> [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md).
+
+> **⚠️ Experimental / CPU-only:** The Qwen CPU runtime is not wired into
+> the Workbench UI or registered as a runnable backend. Status remains
+> planned/not-runnable until the ONNX source and layout are verified
+> end-to-end (issue #100). The smoke test requires explicit opt-in via
+> `-Dqwen.enable.experimental.runtime=true`.
+
+1. Download Qwen2.5-Coder-0.5B-Instruct ONNX model into
+   `model/qwen2.5-coder-0.5b-directml-int4/` (download script tracked in
+   issue #100).
+2. Run the automated smoke test:
+   ```bash
+   ./gradlew :directml-inference:test \
+       --tests "*.qwen.QwenCpuSmokeTest" \
+       -Dqwen.model.dir=model/qwen2.5-coder-0.5b-directml-int4 \
+       -Dqwen.enable.experimental.runtime=true
+   ```
+3. Verify all four prompt scenarios produce non-empty output:
+   - English summarization
+   - German summarization
+   - Natural/ADABAS code explanation
+   - Short max-token generation (≤32 tokens)
+4. Missing-file diagnostics are covered by CI-safe unit tests:
+   ```bash
+   ./gradlew :directml-inference:test --tests "*.qwen.QwenModelDirValidatorTest"
+   ```
 
 ## 4. Sidecar / JSON-RPC
 
@@ -413,3 +455,4 @@ for a future minor:
 - Quantized weights for the BERT encoder family (INT8 GEMM via DML).
 - Speculative / batched decoding for Phi-3.
 - Phi-3.5 Mini Instruct ONNX summarizer support (pending official ONNX graph).
+- Qwen2.5-Coder 1.5B / 3B scale-up (same ONNX INT4 format; blocked on 0.5B smoke test).

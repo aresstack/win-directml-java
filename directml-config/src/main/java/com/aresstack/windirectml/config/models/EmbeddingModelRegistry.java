@@ -319,6 +319,56 @@ public final class EmbeddingModelRegistry {
                         + "ONNX graph is published. Tracked as a follow-up to the "
                         + "Phi-3 summarizer implementation.",
                 null));
+        entries.add(new Entry(
+                "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+                UseCase.DECODER,
+                "Alibaba / Qwen",
+                "Qwen2.5-Coder 0.5B decoder-only (24 layers, hidden=896, heads=14); "
+                        + "ONNX INT4 AWQ block-128",
+                "BPE (HuggingFace fast-tokenizer format; ChatML template)",
+                "planned (CPU-first, DirectML later)",
+                Status.PLANNED,
+                Arrays.asList(
+                        "model/qwen2.5-coder-0.5b-directml-int4"),
+                "Workbench download tab (disabled) / scripts/download-qwen.ps1",
+                "not yet tested \u2013 ONNX source TBD/research",
+                "Qwen2.5-Coder 0.5B Instruct. ONNX source is TBD/research; "
+                        + "the download button is disabled until source verification "
+                        + "completes. Runtime depends on #99. See "
+                        + "docs/decision-qwen-artifact-format.md.",
+                null));
+        entries.add(new Entry(
+                "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+                UseCase.DECODER,
+                "Alibaba / Qwen",
+                "Qwen2.5-Coder 1.5B decoder-only (28 layers, hidden=1536, heads=12); "
+                        + "ONNX INT4 AWQ block-128",
+                "BPE (HuggingFace fast-tokenizer format; ChatML template)",
+                "planned (CPU-first, DirectML later)",
+                Status.PLANNED,
+                Collections.<String>emptyList(),
+                "none (planned)",
+                "not yet tested \u2013 blocked on 0.5B runtime verification",
+                "Qwen2.5-Coder 1.5B Instruct scale-up candidate. Same format "
+                        + "as 0.5B, larger weights (~1 GB INT4). Not enabled until "
+                        + "0.5B runtime smoke test passes.",
+                null));
+        entries.add(new Entry(
+                "Qwen/Qwen2.5-Coder-3B-Instruct",
+                UseCase.DECODER,
+                "Alibaba / Qwen",
+                "Qwen2.5-Coder 3B decoder-only (36 layers, hidden=2048, heads=16); "
+                        + "ONNX INT4 AWQ block-128",
+                "BPE (HuggingFace fast-tokenizer format; ChatML template)",
+                "planned (CPU-first, DirectML later)",
+                Status.PLANNED,
+                Collections.<String>emptyList(),
+                "none (planned)",
+                "not yet tested \u2013 blocked on 0.5B runtime verification",
+                "Qwen2.5-Coder 3B Instruct scale-up candidate. Same format "
+                        + "as 0.5B, larger weights (~2 GB INT4). May require chunked "
+                        + "mmap. Not enabled until 0.5B runtime smoke test passes.",
+                null));
         ENTRIES = Collections.unmodifiableList(entries);
 
         Map<String, Entry> byKey = new LinkedHashMap<String, Entry>();

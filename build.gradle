@@ -68,10 +68,12 @@ subprojects { sub ->
             // e5-base-v2 weights) and run CPU + DirectML side by side –
             // 512 MB (Gradle default) is not enough headroom.
             maxHeapSize = '2g'
-            // Forward -Dwindirectml.* system properties from the Gradle invocation
-            // into the test JVM (e.g. -Dwindirectml.debug=true).
+            // Forward selected system properties from the Gradle invocation
+            // into the test JVM (e.g. -Dwindirectml.debug=true,
+            // -Dqwen.model.dir=..., -Dqwen.enable.experimental.runtime=true).
             System.getProperties().each { k, v ->
-                if (k.toString().startsWith('windirectml.')) {
+                String key = k.toString()
+                if (key.startsWith('windirectml.') || key.startsWith('qwen.')) {
                     systemProperty(k.toString(), v.toString())
                 }
             }
