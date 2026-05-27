@@ -11,6 +11,8 @@ import java.awt.*;
  */
 public final class DownloadPanel extends JPanel {
 
+    private static final String EXPERIMENTAL_QWEN_PROPERTY = "qwen.enable.experimental.runtime";
+
     private final WorkbenchModel model;
     private final JTextArea logArea;
     private final JCheckBox forceCheckbox;
@@ -41,12 +43,11 @@ public final class DownloadPanel extends JPanel {
         phi3Btn.addActionListener(e -> startPhi3Download());
         buttons.add(phi3Btn);
 
-        // Qwen2.5-Coder – download is available but runtime is not yet supported
-        var qwenBtn = new JButton("Download Qwen2.5-Coder 0.5B (planned)");
-        qwenBtn.setToolTipText("Qwen2.5-Coder 0.5B Instruct – ONNX source TBD/research. "
-                + "Runtime not yet available; download only.");
+        var qwenBtn = new JButton("Download Qwen2.5-Coder 0.5B (experimental)");
+        qwenBtn.setToolTipText("Start Workbench with -D" + EXPERIMENTAL_QWEN_PROPERTY
+                + "=true to enable this experimental Qwen test model.");
         qwenBtn.addActionListener(e -> startQwenDownload());
-        qwenBtn.setEnabled(false); // disabled until ONNX source is verified (#96/#99)
+        qwenBtn.setEnabled(isExperimentalQwenEnabled());
         buttons.add(qwenBtn);
 
         forceCheckbox = new JCheckBox("Force re-download (overwrite existing)");
@@ -141,19 +142,20 @@ public final class DownloadPanel extends JPanel {
     }
 
     private void startQwenDownload() {
+        if (!isExperimentalQwenEnabled()) {
+            appendLog("ERROR: Qwen test model is disabled. Start Workbench with -D"
+                    + EXPERIMENTAL_QWEN_PROPERTY + "=true.");
+            return;
+        }
         boolean force = forceCheckbox.isSelected();
         var targetDir = model.getModelRoot().resolve("qwen2.5-coder-0.5b-directml-int4");
-        appendLog("Starting Qwen2.5-Coder 0.5B download (ONNX INT4 AWQ block-128 layout from "
-                + ModelDownloader.QWEN_SUBDIR + ") -> " + targetDir);
+        appendLog("Starting Qwen2.5-Coder 0.5B experimental download -> " + targetDir);
         appendLog("  Required files: " + ModelDownloader.QWEN_REQUIRED_FILES);
-        appendLog("  NOTE: ONNX source is TBD/research. Download may fail if source is not yet available.");
 
         new SwingWorker<Boolean, String>() {
             @Override
             protected Boolean doInBackground() {
                 try {
-                    // Source repo is TBD – candidate: onnx-community/Qwen2.5-Coder-0.5B-Instruct
-                    // This will be updated once source verification completes (#96).
                     ModelDownloader.downloadQwen(
                             "onnx-community/Qwen2.5-Coder-0.5B-Instruct",
                             targetDir, force, this::publish);
@@ -180,6 +182,10 @@ public final class DownloadPanel extends JPanel {
                 }
             }
         }.execute();
+    }
+
+    private static boolean isExperimentalQwenEnabled() {
+        return Boolean.getBoolean(EXPERIMENTAL_QWEN_PROPERTY);
     }
 
     private void appendLog(String message) {
