@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.workbench.panels;
 
+import com.aresstack.windirectml.config.generation.GenerationModelRegistry;
 import com.aresstack.windirectml.config.models.EmbeddingModelRegistry;
 import com.aresstack.windirectml.runtime.facade.Backend;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
@@ -100,12 +101,11 @@ public final class ConfigPanel extends JPanel {
 
         row++;
 
-        // Summarizer model
+        // Summarizer model (uses GenerationModelRegistry for generation-capable models)
         gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0;
         form.add(new JLabel("Summarizer Model:"), gbc);
-        var summarizerOptions = EmbeddingModelRegistry
-                .entriesByUseCase(EmbeddingModelRegistry.UseCase.SUMMARIZER)
-                .stream().map(EmbeddingModelRegistry.Entry::modelId).toArray(String[]::new);
+        var summarizerOptions = GenerationModelRegistry.runnableEntries()
+                .stream().map(GenerationModelRegistry.Entry::modelId).toArray(String[]::new);
         summarizerModelCombo = new JComboBox<>(summarizerOptions);
         summarizerModelCombo.setSelectedItem(model.getSummarizerModel());
         summarizerModelCombo.addActionListener(e ->
