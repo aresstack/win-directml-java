@@ -1,8 +1,7 @@
 package com.aresstack.windirectml.workbench.panels;
 
-import com.aresstack.windirectml.config.models.EmbeddingModelRegistry;
-import com.aresstack.windirectml.config.models.EmbeddingModelRegistry.Entry;
-import com.aresstack.windirectml.config.models.EmbeddingModelRegistry.UseCase;
+import com.aresstack.windirectml.config.generation.GenerationModelRegistry;
+import com.aresstack.windirectml.config.generation.GenerationModelRegistry.Entry;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.Phi3InferenceEngine;
 import com.aresstack.windirectml.inference.Phi3Summarizer;
@@ -89,10 +88,12 @@ public final class SummarizerPanel extends JPanel {
     }
 
     private String[] buildSummarizerModelOptions() {
-        List<Entry> summarizers = EmbeddingModelRegistry.entriesByUseCase(UseCase.SUMMARIZER);
-        String[] options = new String[summarizers.size()];
-        for (int i = 0; i < summarizers.size(); i++) {
-            options[i] = summarizers.get(i).modelId();
+        // Use GenerationModelRegistry for generation-capable models
+        java.util.List<GenerationModelRegistry.Entry> generationModels =
+                GenerationModelRegistry.runnableEntries();
+        String[] options = new String[generationModels.size()];
+        for (int i = 0; i < generationModels.size(); i++) {
+            options[i] = generationModels.get(i).modelId();
         }
         return options;
     }
@@ -103,7 +104,7 @@ public final class SummarizerPanel extends JPanel {
             label.setText("");
             return;
         }
-        Entry entry = EmbeddingModelRegistry.findByModelId(selected);
+        Entry entry = GenerationModelRegistry.findByModelId(selected);
         if (entry == null) {
             label.setText(" [unknown]");
             return;
@@ -131,14 +132,14 @@ public final class SummarizerPanel extends JPanel {
         }
 
         // Check model status
-        Entry entry = EmbeddingModelRegistry.findByModelId(selectedModel);
+        Entry entry = GenerationModelRegistry.findByModelId(selectedModel);
         if (entry != null) {
-            if (entry.status() == EmbeddingModelRegistry.Status.UNSUPPORTED) {
+            if (entry.status() == GenerationModelRegistry.Status.UNSUPPORTED) {
                 appendResult("ERROR: Model '" + selectedModel + "' is unsupported in this runtime.");
                 appendResult("  Status: unsupported. This model cannot run locally.");
                 return;
             }
-            if (entry.status() == EmbeddingModelRegistry.Status.PLANNED) {
+            if (entry.status() == GenerationModelRegistry.Status.PLANNED) {
                 appendResult("ERROR: Model '" + selectedModel + "' is not yet implemented.");
                 appendResult("  Status: planned. Runtime support is in progress.");
                 return;
@@ -189,7 +190,7 @@ public final class SummarizerPanel extends JPanel {
 
     private Path resolveSummarizerModelDir(String modelId) {
         // Try known directory layouts
-        Entry entry = EmbeddingModelRegistry.findByModelId(modelId);
+        Entry entry = GenerationModelRegistry.findByModelId(modelId);
         if (entry != null && !entry.modelDirHints().isEmpty()) {
             for (String hint : entry.modelDirHints()) {
                 Path candidate = model.getModelRoot().resolve("..").resolve(hint).normalize();
