@@ -151,7 +151,6 @@ public final class Qwen2Runtime {
                 ropeCosBuf[pos * halfDim + i] = (float) Math.cos(angle);
                 ropeSinBuf[pos * halfDim + i] = (float) Math.sin(angle);
             }
-
         }
 
         log.info("Qwen2Runtime: CPU-only mode, {} layers, {} heads ({}KV), headDim={}, GQA ratio={}:1",
@@ -609,7 +608,10 @@ public final class Qwen2Runtime {
 
     static int kvHeadForQueryHead(int queryHead, int qHeadsPerKvHead, int numKvHeads) {
         int kvHead = queryHead / qHeadsPerKvHead;
-        return Math.min(kvHead, numKvHeads - 1);
+        if (kvHead >= numKvHeads) {
+            throw new IllegalArgumentException("queryHead out of range for configured GQA mapping: " + queryHead);
+        }
+        return kvHead;
     }
 
     private int kvHeadForQueryHead(int queryHead) {

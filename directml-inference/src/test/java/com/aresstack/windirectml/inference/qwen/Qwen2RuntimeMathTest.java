@@ -130,4 +130,10 @@ class Qwen2RuntimeMathTest {
             assertEquals(expectedKv, Qwen2Runtime.kvHeadForQueryHead(h, qHeadsPerKvHead, numKvHeads));
         }
     }
+
+    @Test
+    void kvHeadMappingRejectsOutOfRangeQueryHead() {
+        assertThrows(IllegalArgumentException.class,
+                () -> Qwen2Runtime.kvHeadForQueryHead(14, 7, 2));
+    }
 }
