@@ -38,7 +38,7 @@ public final class ModelDownloader {
     /** Subdirectory within the HuggingFace repo for Phi-3 DirectML INT4 quantised variant. */
     public static final String PHI3_SUBDIR = "directml/directml-int4-awq-block-128";
 
-    /** Required local files for Qwen2.5-Coder ONNX decoder model. */
+    /** Required local files for Qwen2.5-Coder ONNX decoder model (derived from DEFAULT config). */
     public static final List<String> QWEN_REQUIRED_FILES =
             QwenModelDownloadConfig.DEFAULT.requiredLocalFiles();
 
