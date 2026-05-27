@@ -7,9 +7,9 @@ import com.aresstack.windirectml.inference.InferenceRequest;
 import com.aresstack.windirectml.inference.InferenceResult;
 import com.aresstack.windirectml.inference.Phi3InferenceEngine;
 import com.aresstack.windirectml.inference.Phi3Summarizer;
-import com.aresstack.windirectml.inference.QwenInferenceEngine;
 import com.aresstack.windirectml.inference.Summary;
 import com.aresstack.windirectml.inference.SummaryRequest;
+import com.aresstack.windirectml.inference.qwen.QwenInferenceEngine;
 import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 
@@ -43,9 +43,7 @@ public final class SummarizerPanel extends JPanel {
         setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        // --- Top: model selector and controls ---
         var controlsPanel = new JPanel(new BorderLayout(4, 4));
-
         var modelPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         modelPanel.add(new JLabel("Generation Model:"));
         modelSelector = new JComboBox<>(buildSummarizerModelOptions());
@@ -58,20 +56,18 @@ public final class SummarizerPanel extends JPanel {
         });
         modelPanel.add(modelSelector);
 
-        // Status label
         var statusLabel = new JLabel();
         updateStatusLabel(statusLabel);
         modelSelector.addActionListener(e -> updateStatusLabel(statusLabel));
         modelPanel.add(statusLabel);
         controlsPanel.add(modelPanel, BorderLayout.NORTH);
 
-        // Input area
         var inputPanel = new JPanel(new BorderLayout(4, 4));
         inputPanel.add(new JLabel("Text / prompt:"), BorderLayout.NORTH);
         inputArea = new JTextArea(8, 70);
         inputArea.setLineWrap(true);
         inputArea.setWrapStyleWord(true);
-        inputArea.setText("Paste a longer text or prompt here. The workbench will generate output using the selected decoder model (e.g. Phi-3 or experimental Qwen).");
+        inputArea.setText("Paste a longer text or prompt here. The workbench will generate output using the selected decoder model.");
         inputPanel.add(new JScrollPane(inputArea), BorderLayout.CENTER);
 
         var runControls = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -86,7 +82,6 @@ public final class SummarizerPanel extends JPanel {
         controlsPanel.add(inputPanel, BorderLayout.CENTER);
         add(controlsPanel, BorderLayout.NORTH);
 
-        // --- Bottom: result area ---
         resultArea = new JTextArea(14, 70);
         resultArea.setEditable(false);
         resultArea.setLineWrap(true);
@@ -96,22 +91,16 @@ public final class SummarizerPanel extends JPanel {
     }
 
     private String[] buildSummarizerModelOptions() {
-        // Use GenerationModelRegistry for generation-capable runnable models.
         List<String> options = new ArrayList<>();
-        List<GenerationModelRegistry.Entry> generationModels = GenerationModelRegistry.runnableEntries();
-        for (GenerationModelRegistry.Entry entry : generationModels) {
+        for (GenerationModelRegistry.Entry entry : GenerationModelRegistry.runnableEntries()) {
             options.add(entry.modelId());
         }
-
-        // Manual Workbench testing hook for the #99 Qwen CPU runtime.
-        // The model remains PLANNED globally and only appears with explicit opt-in.
         if (isExperimentalQwenEnabled()) {
             Entry qwen = GenerationModelRegistry.findByModelId(QWEN05_MODEL_ID);
             if (qwen != null && !options.contains(qwen.modelId())) {
                 options.add(qwen.modelId());
             }
         }
-
         return options.toArray(new String[0]);
     }
 
@@ -153,13 +142,10 @@ public final class SummarizerPanel extends JPanel {
         }
 
         boolean experimentalQwen = isExperimentalQwen(selectedModel);
-
-        // Check model status
         Entry entry = GenerationModelRegistry.findByModelId(selectedModel);
         if (entry != null) {
             if (entry.status() == GenerationModelRegistry.Status.UNSUPPORTED) {
                 appendResult("ERROR: Model '" + selectedModel + "' is unsupported in this runtime.");
-                appendResult("  Status: unsupported. This model cannot run locally.");
                 return;
             }
             if (entry.status() == GenerationModelRegistry.Status.PLANNED && !experimentalQwen) {
@@ -172,10 +158,9 @@ public final class SummarizerPanel extends JPanel {
         int maxTokens = (Integer) maxTokensSpinner.getValue();
         appendResult("Loading generation model: " + selectedModel
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
-
         if (experimentalQwen) {
-            appendResult("  NOTE: Qwen CPU runtime is experimental and hidden unless -D"
-                    + EXPERIMENTAL_QWEN_PROPERTY + "=true is set.");
+            appendResult("  NOTE: Qwen CPU runtime is experimental and enabled by -D"
+                    + EXPERIMENTAL_QWEN_PROPERTY + "=true.");
         }
 
         new SwingWorker<Void, Void>() {
@@ -199,17 +184,13 @@ public final class SummarizerPanel extends JPanel {
     }
 
     private void runPhi3Summarizer(Path modelDir, String text, int maxTokens) throws Exception {
-        // Validate required files
         validatePhi3ModelFiles(modelDir);
-
         String backend = model.getBackend().name().toLowerCase();
         long start = System.nanoTime();
-
         try (var summarizer = new Phi3Summarizer(modelDir, maxTokens, backend)) {
             appendResult("Initializing model...");
             summarizer.initialize();
             appendResult("Model loaded in " + elapsedMs(start) + " ms");
-
             long genStart = System.nanoTime();
             SummaryRequest request = SummaryRequest.of(text, maxTokens);
             Summary summary = summarizer.summarize(request);
@@ -226,14 +207,12 @@ public final class SummarizerPanel extends JPanel {
     private void runQwenGeneration(Path modelDir, String text, int maxTokens, String selectedModel)
             throws InferenceException {
         validateQwenModelFiles(modelDir);
-
         long start = System.nanoTime();
         QwenInferenceEngine engine = new QwenInferenceEngine(modelDir, maxTokens);
         try {
             appendResult("Initializing experimental Qwen CPU runtime...");
             engine.initialize();
             appendResult("Model loaded in " + elapsedMs(start) + " ms");
-
             long genStart = System.nanoTime();
             InferenceRequest request = InferenceRequest.builder()
                     .modelId(selectedModel)
@@ -258,7 +237,6 @@ public final class SummarizerPanel extends JPanel {
     }
 
     private Path resolveSummarizerModelDir(String modelId) {
-        // Try known directory layouts
         Entry entry = GenerationModelRegistry.findByModelId(modelId);
         if (entry != null && !entry.modelDirHints().isEmpty()) {
             for (String hint : entry.modelDirHints()) {
@@ -267,7 +245,6 @@ public final class SummarizerPanel extends JPanel {
                     return candidate;
                 }
             }
-            // Also try relative to model root directly
             for (String hint : entry.modelDirHints()) {
                 Path hintPath = Path.of(hint);
                 String dirName = hintPath.getFileName().toString();
@@ -277,8 +254,6 @@ public final class SummarizerPanel extends JPanel {
                 }
             }
         }
-
-        // Fallback: use the model ID last segment as directory name
         String dirName = modelId.contains("/") ? modelId.substring(modelId.lastIndexOf('/') + 1) : modelId;
         return model.getModelRoot().resolve(dirName);
     }
@@ -286,17 +261,14 @@ public final class SummarizerPanel extends JPanel {
     private void validatePhi3ModelFiles(Path modelDir) {
         String missing = Phi3InferenceEngine.describeMissingModelFile(modelDir);
         if (missing != null) {
-            throw new IllegalStateException(missing
-                    + ". Download the model first from the Download tab.");
+            throw new IllegalStateException(missing + ". Download the model first from the Download tab.");
         }
     }
 
     private void validateQwenModelFiles(Path modelDir) {
         String missing = QwenModelDirValidator.describeMissingModelFile(modelDir);
         if (missing != null) {
-            throw new IllegalStateException(missing
-                    + ". Download the Qwen model first from the Download tab with -D"
-                    + EXPERIMENTAL_QWEN_PROPERTY + "=true.");
+            throw new IllegalStateException(missing + ". Download the Qwen model first from the Download tab.");
         }
     }
 
