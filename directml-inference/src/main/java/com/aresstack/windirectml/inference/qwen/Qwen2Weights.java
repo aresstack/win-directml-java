@@ -221,13 +221,10 @@ public final class Qwen2Weights implements AutoCloseable {
      */
     public static Qwen2Weights load(Path modelDir, Qwen2Config config) throws IOException {
         Path onnxPath = modelDir.resolve("model.onnx");
-        Path dataPath = modelDir.resolve("model.onnx.data");
+        Path dataPath = QwenModelDirValidator.resolveExternalDataPath(modelDir);
 
         if (!Files.exists(onnxPath)) {
             throw new IOException("Required file missing: model.onnx (looked in " + modelDir + ")");
-        }
-        if (!Files.exists(dataPath)) {
-            throw new IOException("Required file missing: model.onnx.data (looked in " + modelDir + ")");
         }
 
         log.info("Loading ONNX graph from {}", onnxPath);
