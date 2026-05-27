@@ -77,21 +77,28 @@ GenerationModelRegistry      – static registry of known generation checkpoints
 |------------------------------------------|--------------|--------------|------------------------------------|
 | microsoft/Phi-3-mini-4k-instruct-onnx    | CAUSAL_LM    | experimental | Active summarizer/generation backend |
 | microsoft/Phi-3.5-mini-instruct-onnx     | CAUSAL_LM    | planned      | Successor to Phi-3 Mini             |
-| Qwen/Qwen2.5-Coder-0.5B-Instruct        | CAUSAL_LM    | planned      | Initial Qwen runtime target         |
+| Qwen/Qwen2.5-Coder-0.5B-Instruct        | CAUSAL_LM    | planned      | Workbench-visible CPU test path; not shipped |
 | Qwen/Qwen2.5-Coder-1.5B-Instruct        | CAUSAL_LM    | planned      | Scale-up candidate                  |
 | Qwen/Qwen2.5-Coder-3B-Instruct          | CAUSAL_LM    | planned      | Largest planned local deployment    |
 
 ## Workbench Integration
 
-The workbench queries generation-capable models via:
+Most workbench generation selectors query active generation models via:
 
 ```java
 GenerationModelRegistry.runnableEntries()
 ```
 
-This returns only models with `status = SHIPPED` or `status = EXPERIMENTAL`,
-ensuring planned models (including all Qwen entries) are never presented as
-available for generation.
+This returns only models with `status = SHIPPED` or `status = EXPERIMENTAL` and
+is the default filter for normal runtime-backed generation models.
+
+The DirectML Workbench is also the manual test surface for runtime bring-up. For
+that reason, the Workbench Generation/Summarizer panel may explicitly add a
+planned model when there is a local test path for it. Qwen2.5-Coder 0.5B is the
+current exception: it remains `status = PLANNED` in the registry, but is visible
+in the Workbench so developers can download the candidate layout and exercise
+`QwenInferenceEngine` locally before the model is promoted to experimental or
+shipped.
 
 ## Relationship to Existing Code
 
@@ -99,7 +106,8 @@ available for generation.
   It can be adapted to additionally implement `CausalLanguageModel` in a
   follow-up ticket.
 - `InferenceEngine` / `InferenceRequest` / `InferenceResult` remain as the
-  internal Phi-3-specific types. The shared `GenerationRequest` / `GenerationResult`
-  provide the public API that future Qwen and Seq2Seq implementations will target.
+  internal text-generation bridge used by Phi-3 and the Qwen Workbench test path.
+  The shared `GenerationRequest` / `GenerationResult` provide the public API that
+  future Qwen and Seq2Seq implementations will target.
 - The `EmbeddingModelRegistry` continues to hold Phi-3 and Phi-3.5 under
   `UseCase.SUMMARIZER` for backward compatibility with existing gating logic.
