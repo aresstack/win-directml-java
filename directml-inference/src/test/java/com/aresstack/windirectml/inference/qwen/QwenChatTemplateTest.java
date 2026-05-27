@@ -42,7 +42,7 @@ class QwenChatTemplateTest {
 
         assertEquals("""
                 <|im_start|>system
-                You are a helpful assistant.<|im_end|>
+                You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>
                 <|im_start|>user
                 Hello<|im_end|>
                 <|im_start|>assistant
@@ -55,11 +55,18 @@ class QwenChatTemplateTest {
 
         assertEquals("""
                 <|im_start|>system
-                You are a helpful assistant.<|im_end|>
+                You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>
                 <|im_start|>user
                 Hello<|im_end|>
                 <|im_start|>assistant
                 """, result);
+    }
+
+    @Test
+    void defaultSystemPromptMatchesQwenInstructTemplate() {
+        assertEquals(
+                "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+                QwenChatTemplate.DEFAULT_SYSTEM_PROMPT);
     }
 
     @Test

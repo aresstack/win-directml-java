@@ -34,7 +34,8 @@ public final class QwenChatTemplate {
     /**
      * Qwen official default system prompt used when no system message is provided.
      */
-    public static final String DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
+    public static final String DEFAULT_SYSTEM_PROMPT =
+            "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.";
 
     private QwenChatTemplate() {} // utility class
 
