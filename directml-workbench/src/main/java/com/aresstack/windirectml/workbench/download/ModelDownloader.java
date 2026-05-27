@@ -45,10 +45,9 @@ public final class ModelDownloader {
     );
 
     /**
-     * Subdirectory within the HuggingFace repo for Qwen2.5-Coder DirectML INT4 quantised variant.
-     * Mirrors the Phi-3 layout convention.
+     * Subdirectory within the HuggingFace repo for onnx-community Qwen2.5-Coder ONNX files.
      */
-    public static final String QWEN_SUBDIR = "directml/directml-int4-awq-block-128";
+    public static final String QWEN_ONNX_SUBDIR = "onnx";
 
     private static final String HF_BASE_URL = "https://huggingface.co";
 
@@ -125,11 +124,11 @@ public final class ModelDownloader {
     /**
      * Download Qwen2.5-Coder 0.5B model files from a HuggingFace ONNX candidate repo.
      * <p>
-     * The Workbench uses this helper to download the files into the local top-level
-     * {@code model/qwen2.5-coder-0.5b-directml-int4/} directory. The remote candidate
-     * repo is still source-verification work: this helper attempts the configured
-     * repo/subdir and reports normal HTTP/file errors if the candidate does not match
-     * the expected DirectML INT4 layout.
+     * The onnx-community layout stores model weights under {@code onnx/} while
+     * tokenizer and config files live at the repository root. The remote file
+     * {@code onnx/model.onnx_data} is saved locally as {@code model.onnx.data} to
+     * match the contract expected by {@code QwenModelDirValidator} and
+     * {@code Qwen2Weights}.
      *
      * @param repo      HuggingFace repository for the Qwen ONNX model candidate
      * @param targetDir local directory to save model files into
@@ -138,8 +137,28 @@ public final class ModelDownloader {
      */
     public static void downloadQwen(String repo, Path targetDir, boolean force, Consumer<String> logger)
             throws IOException, InterruptedException {
-        download(repo, QWEN_SUBDIR,
-                QWEN_REQUIRED_FILES, List.of("added_tokens.json"), targetDir, force, logger);
+        Files.createDirectories(targetDir);
+
+        var client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(30))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+
+        // Model files live under onnx/ in the remote repo
+        downloadFile(client, repo, QWEN_ONNX_SUBDIR + "/model.onnx", "model.onnx",
+                targetDir, force, logger, true);
+        downloadFile(client, repo, QWEN_ONNX_SUBDIR + "/model.onnx_data", "model.onnx.data",
+                targetDir, force, logger, true);
+
+        // Config/tokenizer files live at the repo root
+        for (String file : List.of("tokenizer.json", "config.json",
+                "tokenizer_config.json", "special_tokens_map.json")) {
+            downloadFile(client, repo, file, file, targetDir, force, logger, true);
+        }
+
+        // Optional file
+        downloadFile(client, repo, "added_tokens.json", "added_tokens.json",
+                targetDir, force, logger, false);
     }
 
     private static void downloadFile(HttpClient client, String repo,
