@@ -131,7 +131,8 @@ public final class Qwen2Runtime {
 
         // Pre-compute RoPE tables
         int halfDim = config.headDim() / 2;
-        // Limit RoPE table to a reasonable size (e.g., 4096 positions for initial use)
+        // Limit pre-computed RoPE table to 4096 positions to cap startup memory
+        // (~2 MB for headDim=64). Positions beyond this are extended on-demand if needed.
         int ropeMaxPos = Math.min(maxPos, 4096);
         ropeCosBuf = new float[ropeMaxPos * halfDim];
         ropeSinBuf = new float[ropeMaxPos * halfDim];
@@ -418,7 +419,7 @@ public final class Qwen2Runtime {
         lw.upProj().matvec(decPostNorm, decUp);
         profProjNs += System.nanoTime() - t0;
 
-        // SwiGLU activation: gate * silu(gate) → but actually Qwen uses silu(gate) * up
+        // SwiGLU activation: silu(gate) * up, where silu(x) = x * sigmoid(x)
         t0 = System.nanoTime();
         int intermediate = config.intermediateSize();
         for (int i = 0; i < intermediate; i++) {

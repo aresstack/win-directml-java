@@ -386,11 +386,14 @@ public final class Qwen2Weights implements AutoCloseable {
             } else {
                 int numBlocks = scales.length;
                 zeroPoints = new byte[(numBlocks + 1) / 2];
+                // Default zero point: 0x88 = packed (8,8) meaning zero_point=8 for both
+                // nibbles in a uint4 pair — the standard symmetric quantization midpoint.
                 Arrays.fill(zeroPoints, (byte) 0x88);
             }
         } else {
             int numBlocks = scales.length;
             zeroPoints = new byte[(numBlocks + 1) / 2];
+            // Default zero point: 0x88 = packed (8,8), symmetric uint4 midpoint
             Arrays.fill(zeroPoints, (byte) 0x88);
         }
 
