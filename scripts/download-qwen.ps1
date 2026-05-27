@@ -26,9 +26,6 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-# Load shared helper
-. (Join-Path $PSScriptRoot '_Download-HfModel.ps1')
-
 # --- Source configuration (TBD/research) ---
 # Update this once source verification completes (see #96).
 $Repo = 'onnx-community/Qwen2.5-Coder-0.5B-Instruct'
@@ -108,5 +105,5 @@ if ($Validate) {
 Write-Host ""
 Write-Host "Qwen2.5-Coder 0.5B model ready at: $targetDir"
 Write-Host ""
-Write-Host "NOTE: Runtime support is not yet available. The model cannot be"
-Write-Host "used for text generation until runtime implementation (#99) is complete."
+Write-Host "NOTE: Workbench exposes Qwen as a local CPU test path."
+Write-Host "The model remains planned until source/layout verification and real generation pass."
