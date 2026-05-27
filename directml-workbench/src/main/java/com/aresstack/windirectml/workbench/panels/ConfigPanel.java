@@ -1,7 +1,6 @@
 package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.config.generation.GenerationModelRegistry;
-import com.aresstack.windirectml.config.models.EmbeddingModelRegistry;
 import com.aresstack.windirectml.runtime.facade.Backend;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 

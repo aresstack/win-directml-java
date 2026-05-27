@@ -1,7 +1,5 @@
 package com.aresstack.windirectml.config.generation;
 
-import java.util.Objects;
-
 /**
  * Type-safe identifier for a text-generation model checkpoint.
  *

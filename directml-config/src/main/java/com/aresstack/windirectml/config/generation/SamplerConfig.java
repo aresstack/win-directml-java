@@ -34,6 +34,9 @@ public final class SamplerConfig {
      * @throws IllegalArgumentException if temperature is negative or topK &lt; 1.
      */
     public static SamplerConfig of(float temperature, int topK) {
+        if (Float.isNaN(temperature) || Float.isInfinite(temperature)) {
+            throw new IllegalArgumentException("temperature must be finite");
+        }
         if (temperature < 0) {
             throw new IllegalArgumentException("temperature must be >= 0");
         }

@@ -44,6 +44,8 @@ class GenerationApiTest {
     @Test
     void samplerConfigRejectsInvalid() {
         assertThrows(IllegalArgumentException.class, () -> SamplerConfig.of(-1.0f, 1));
+        assertThrows(IllegalArgumentException.class, () -> SamplerConfig.of(Float.NaN, 1));
+        assertThrows(IllegalArgumentException.class, () -> SamplerConfig.of(Float.POSITIVE_INFINITY, 1));
         assertThrows(IllegalArgumentException.class, () -> SamplerConfig.of(0.5f, 0));
     }
 
@@ -55,9 +57,17 @@ class GenerationApiTest {
 
     @Test
     void stopTokenPolicyWithStrings() {
-        StopTokenPolicy policy = StopTokenPolicy.withStopStrings("<|end|>", "\n\n");
+        StopTokenPolicy policy = StopTokenPolicy.withStopStrings("<|end|>", "<|eot_id|>");
         assertEquals(2, policy.stopStrings().size());
         assertEquals("<|end|>", policy.stopStrings().get(0));
+    }
+
+    @Test
+    void stopTokenPolicyRejectsNullOrBlankStrings() {
+        assertSame(StopTokenPolicy.eosOnly(), StopTokenPolicy.withStopStrings((String[]) null));
+        assertThrows(IllegalArgumentException.class, () -> StopTokenPolicy.withStopStrings("ok", null));
+        assertThrows(IllegalArgumentException.class, () -> StopTokenPolicy.withStopStrings("ok", ""));
+        assertThrows(IllegalArgumentException.class, () -> StopTokenPolicy.withStopStrings("ok", "   "));
     }
 
     @Test

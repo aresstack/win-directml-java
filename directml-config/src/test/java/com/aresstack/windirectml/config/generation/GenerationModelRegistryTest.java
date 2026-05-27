@@ -3,6 +3,7 @@ package com.aresstack.windirectml.config.generation;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -46,7 +47,7 @@ class GenerationModelRegistryTest {
     void noQwenModelIsRunnable() {
         List<GenerationModelRegistry.Entry> runnable = GenerationModelRegistry.runnableEntries();
         for (GenerationModelRegistry.Entry e : runnable) {
-            assertFalse(e.modelId().toLowerCase().contains("qwen"),
+            assertFalse(e.modelId().toLowerCase(Locale.ROOT).contains("qwen"),
                     "No Qwen model should be runnable yet: " + e.modelId());
         }
     }
@@ -118,5 +119,20 @@ class GenerationModelRegistryTest {
             assertFalse(e.modelDirHints().isEmpty(),
                     e.modelId() + " should have at least one model dir hint");
         }
+    }
+
+    @Test
+    void entryTrimsModelIdForConsistentLookupKeys() {
+        GenerationModelRegistry.Entry entry = new GenerationModelRegistry.Entry(
+                "  acme/model  ",
+                GenerationModelRegistry.Architecture.CAUSAL_LM,
+                "Acme",
+                "1B",
+                ChatTemplate.RAW,
+                GenerationModelRegistry.Status.PLANNED,
+                java.util.Collections.singletonList("model/acme/model"),
+                null
+        );
+        assertEquals("acme/model", entry.modelId());
     }
 }

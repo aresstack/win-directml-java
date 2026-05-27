@@ -82,7 +82,8 @@ public final class GenerationModelRegistry {
                      Status status,
                      List<String> modelDirHints,
                      String notes) {
-            if (modelId == null || modelId.trim().isEmpty()) {
+            String normalizedModelId = modelId == null ? null : modelId.trim();
+            if (normalizedModelId == null || normalizedModelId.isEmpty()) {
                 throw new IllegalArgumentException("modelId must not be blank");
             }
             if (architecture == null) {
@@ -91,7 +92,7 @@ public final class GenerationModelRegistry {
             if (status == null) {
                 throw new IllegalArgumentException("status must not be null");
             }
-            this.modelId = modelId;
+            this.modelId = normalizedModelId;
             this.architecture = architecture;
             this.provider = provider;
             this.parameterSize = parameterSize;
