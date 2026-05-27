@@ -21,14 +21,24 @@ import java.nio.file.Path;
  *   <li>Stops on {@link QwenStopTokenPolicy} tokens</li>
  * </ul>
  *
- * <h2>Model directory layout</h2>
+ * <h2>Model directory layout (per issue #100 contract)</h2>
  * <pre>
- * model-dir/
- *   config.json          — HuggingFace model config
- *   tokenizer.json       — HuggingFace BPE tokenizer
- *   model.onnx           — ONNX model graph (weight metadata)
- *   model.onnx.data      — External weight data (memory-mapped)
+ * model/qwen2.5-coder-0.5b-directml-int4/
+ *   config.json              — HuggingFace model config
+ *   tokenizer.json           — HuggingFace BPE tokenizer
+ *   tokenizer_config.json    — Tokenizer config with ChatML template
+ *   special_tokens_map.json  — Special token definitions
+ *   model.onnx               — ONNX model graph (weight metadata)
+ *   model.onnx.data          — External weight data (memory-mapped)
  * </pre>
+ *
+ * <h2>Experimental status</h2>
+ * <p>This engine is <b>CPU-only</b> and <b>experimental</b>. It is not wired into
+ * the Workbench UI or SUPPORTED_MODELS as a runnable backend. The smoke tests
+ * require both real model weights and the system property
+ * {@code -Dqwen.enable.experimental.runtime=true} to run. Status remains
+ * planned/not-runnable until the ONNX source and layout are verified
+ * end-to-end (issue #100).</p>
  *
  * <h2>Differences from Phi-3 engine</h2>
  * <ul>

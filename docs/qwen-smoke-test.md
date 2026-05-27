@@ -27,26 +27,38 @@ protocol for **Qwen2.5-Coder-0.5B-Instruct** running on CPU via the
 # 1. Download Qwen2.5-Coder-0.5B-Instruct ONNX into model/ directory.
 #    (Exact download script tracked in issue #100.)
 #    Expected layout:
-#      model/qwen2.5-coder-0.5b-instruct/
+#      model/qwen2.5-coder-0.5b-directml-int4/
 #        config.json
 #        tokenizer.json
+#        tokenizer_config.json
+#        special_tokens_map.json
 #        model.onnx
 #        model.onnx.data
 
-# 2. Run the real-model smoke test (CPU, max 32 tokens):
+# 2. Run the real-model smoke test (CPU, max 32 tokens).
+#    NOTE: requires -Dqwen.enable.experimental.runtime=true opt-in.
 ./gradlew :directml-inference:test \
     --tests "*.qwen.QwenCpuSmokeTest" \
-    -Dqwen.model.dir=model/qwen2.5-coder-0.5b-instruct
+    -Dqwen.model.dir=model/qwen2.5-coder-0.5b-directml-int4 \
+    -Dqwen.enable.experimental.runtime=true
 
 # 3. Or specify an absolute path:
 ./gradlew :directml-inference:test \
     --tests "*.qwen.QwenCpuSmokeTest" \
-    -Dqwen.model.dir=/path/to/qwen2.5-coder-0.5b-instruct
+    -Dqwen.model.dir=/path/to/qwen2.5-coder-0.5b-directml-int4 \
+    -Dqwen.enable.experimental.runtime=true
 ```
 
-The smoke test is gated by `@EnabledIf("modelPresent")` and will be
-**skipped** when the model directory is absent or incomplete (no CI
-download required).
+The smoke test is gated by **two conditions**:
+1. `@EnabledIf("modelPresent")` — skipped when the model directory is absent or
+   incomplete.
+2. `-Dqwen.enable.experimental.runtime=true` — explicit opt-in required because
+   the runtime is experimental and the ONNX source/layout have not been verified
+   end-to-end (issue #100).
+
+> **⚠️ Experimental:** This CPU-only runtime is not wired into the Workbench UI
+> or registered in SUPPORTED_MODELS as a runnable backend. It remains
+> planned/not-runnable until source verification is complete.
 
 ---
 

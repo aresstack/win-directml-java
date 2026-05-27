@@ -58,9 +58,30 @@ class QwenModelDirValidatorTest {
     }
 
     @Test
+    void missingTokenizerConfigJsonIsNamed(@TempDir Path tmp) throws Exception {
+        Files.writeString(tmp.resolve("config.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer.json"), "{}");
+        String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
+        assertNotNull(msg);
+        assertTrue(msg.contains("tokenizer_config.json"), msg);
+    }
+
+    @Test
+    void missingSpecialTokensMapIsNamed(@TempDir Path tmp) throws Exception {
+        Files.writeString(tmp.resolve("config.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
+        String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
+        assertNotNull(msg);
+        assertTrue(msg.contains("special_tokens_map.json"), msg);
+    }
+
+    @Test
     void missingModelOnnxIsNamed(@TempDir Path tmp) throws Exception {
         Files.writeString(tmp.resolve("config.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
+        Files.writeString(tmp.resolve("special_tokens_map.json"), "{}");
         String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
         assertNotNull(msg);
         assertTrue(msg.contains("model.onnx"), msg);
@@ -70,6 +91,8 @@ class QwenModelDirValidatorTest {
     void missingModelOnnxDataIsNamed(@TempDir Path tmp) throws Exception {
         Files.writeString(tmp.resolve("config.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
+        Files.writeString(tmp.resolve("special_tokens_map.json"), "{}");
         Files.writeString(tmp.resolve("model.onnx"), "");
         String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
         assertNotNull(msg);
@@ -80,6 +103,8 @@ class QwenModelDirValidatorTest {
     void completeDirectoryReturnsNull(@TempDir Path tmp) throws Exception {
         Files.writeString(tmp.resolve("config.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
+        Files.writeString(tmp.resolve("special_tokens_map.json"), "{}");
         Files.writeString(tmp.resolve("model.onnx"), "");
         Files.writeString(tmp.resolve("model.onnx.data"), "");
         assertNull(QwenModelDirValidator.describeMissingModelFile(tmp));

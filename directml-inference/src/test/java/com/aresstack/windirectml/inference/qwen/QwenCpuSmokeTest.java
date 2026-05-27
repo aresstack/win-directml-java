@@ -15,16 +15,19 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Optional real-model smoke test for Qwen2.5-Coder 0.5B CPU generation.
  *
- * <p><b>These tests require real model weights and are skipped by default in CI.</b>
+ * <p><b>These tests require real model weights AND the experimental runtime
+ * property, and are skipped by default in CI.</b>
  * To run locally, download the Qwen2.5-Coder-0.5B-Instruct ONNX model into
- * {@code model/qwen2.5-coder-0.5b-instruct/} (or set system property
- * {@code qwen.model.dir} to point at the model directory).</p>
+ * {@code model/qwen2.5-coder-0.5b-directml-int4/} (or set system property
+ * {@code qwen.model.dir} to point at the model directory), and enable the
+ * experimental runtime gate:</p>
  *
  * <h3>Manual run command:</h3>
  * <pre>{@code
  * ./gradlew :directml-inference:test \
  *     --tests "*.qwen.QwenCpuSmokeTest" \
- *     -Dqwen.model.dir=model/qwen2.5-coder-0.5b-instruct
+ *     -Dqwen.model.dir=model/qwen2.5-coder-0.5b-directml-int4 \
+ *     -Dqwen.enable.experimental.runtime=true
  * }</pre>
  *
  * <h3>Prompts tested:</h3>
@@ -39,6 +42,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>This test validates the CPU runtime path from issue #99 and the model
  * download layout from issue #100. Tokenizer/template tests from issue #98
  * cover the ChatML formatting separately.</p>
+ *
+ * <p><b>Experimental:</b> This CPU-only runtime is not wired into Workbench or
+ * SUPPORTED_MODELS as runnable. Status remains planned/not-runnable until ONNX
+ * source and layout are verified end-to-end (issue #100).</p>
  *
  * @see QwenModelDirValidator
  */
@@ -90,6 +97,10 @@ class QwenCpuSmokeTest {
     private static QwenInferenceEngine engine;
 
     static boolean modelPresent() {
+        // Gate: require explicit opt-in via system property
+        if (!"true".equalsIgnoreCase(System.getProperty("qwen.enable.experimental.runtime"))) {
+            return false;
+        }
         Path dir = resolveModelDir();
         return dir != null && QwenModelDirValidator.isValidModelDir(dir);
     }
@@ -99,8 +110,8 @@ class QwenCpuSmokeTest {
         if (explicit != null && !explicit.isBlank()) {
             return Path.of(explicit);
         }
-        // Default location relative to repository root
-        Path defaultDir = Path.of("model", "qwen2.5-coder-0.5b-instruct");
+        // Default location relative to repository root (aligned with #100 layout)
+        Path defaultDir = Path.of("model", "qwen2.5-coder-0.5b-directml-int4");
         if (Files.isDirectory(defaultDir)) {
             return defaultDir;
         }

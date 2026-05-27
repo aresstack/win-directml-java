@@ -7,11 +7,13 @@ import java.nio.file.Path;
  * Validates that a directory contains the files required by the Qwen2.5-Coder
  * CPU runtime.
  *
- * <p>The Qwen2.5-Coder model requires the same file layout as other
- * HuggingFace ONNX decoder models:</p>
+ * <p>The Qwen2.5-Coder model requires the following file layout (as defined
+ * by issue #100):</p>
  * <ul>
  *   <li>{@code config.json} — model architecture config</li>
  *   <li>{@code tokenizer.json} — HuggingFace BPE tokenizer</li>
+ *   <li>{@code tokenizer_config.json} — tokenizer configuration with ChatML template</li>
+ *   <li>{@code special_tokens_map.json} — special token definitions</li>
  *   <li>{@code model.onnx} — ONNX model graph</li>
  *   <li>{@code model.onnx.data} — external weight data</li>
  * </ul>
@@ -22,10 +24,12 @@ import java.nio.file.Path;
  */
 public final class QwenModelDirValidator {
 
-    /** Required files in download/setup order. */
+    /** Required files in download/setup order (aligned with #100 contract). */
     private static final String[] REQUIRED_FILES = {
             "config.json",
             "tokenizer.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
             "model.onnx",
             "model.onnx.data",
     };
