@@ -64,7 +64,7 @@ class QwenCpuSmokeTest {
             + "ressourcenschonende Code-Generierung auf der CPU.";
 
     /** Natural/ADABAS code explanation prompt. */
-    static final String ADABAS_CODE_EXPLANATION_PROMPT =
+    static final String NATURAL_ADABAS_CODE_EXPLANATION_PROMPT =
             "Explain what the following Natural/ADABAS code does:\n\n"
             + "DEFINE DATA LOCAL\n"
             + "1 #EMPLOYEES VIEW OF EMPLOYEES\n"
@@ -142,7 +142,7 @@ class QwenCpuSmokeTest {
     }
 
     @Test
-    void adabasCodeExplanationProducesOutput() {
+    void naturalAdabasCodeExplanationProducesOutput() {
         Path dir = resolveModelDir();
         assertNotNull(dir);
         assertTrue(QwenModelDirValidator.isValidModelDir(dir));
@@ -150,7 +150,7 @@ class QwenCpuSmokeTest {
         // TODO(#99): Replace with actual Qwen runtime generation call:
         // var engine = new QwenInferenceEngine(dir, 64, "cpu");
         // engine.initialize();
-        // var result = engine.generate(new InferenceRequest(SYSTEM_PROMPT, ADABAS_CODE_EXPLANATION_PROMPT, 64));
+        // var result = engine.generate(new InferenceRequest(SYSTEM_PROMPT, NATURAL_ADABAS_CODE_EXPLANATION_PROMPT, 64));
         // assertFalse(result.getText().isBlank(), "Code explanation must not be empty");
         // engine.shutdown();
     }
