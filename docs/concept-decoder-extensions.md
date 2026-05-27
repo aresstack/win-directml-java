@@ -101,8 +101,9 @@ funktioniert.
 
 ## Qwen2.5 artifact decision
 
-Artifact format for the first Qwen experiment (0.5B-Instruct) has been
-decided: **ONNX INT4 AWQ block-128** from the Microsoft DirectML-optimized
-export. See [`docs/decision-qwen-artifact-format.md`](decision-qwen-artifact-format.md)
-for the full evaluation and model directory layout.
-
+Artifact format for the first Qwen experiment (0.5B-Instruct) is
+**ONNX INT4 AWQ block-128**. The exact Hugging Face source is currently
+**TBD/research** and the model remains planned/not runnable until source/layout
+verification is complete. See
+[`docs/decision-qwen-artifact-format.md`](decision-qwen-artifact-format.md)
+for the full evaluation and canonical planned layout.

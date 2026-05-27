@@ -4,13 +4,18 @@ Issue: #95 (parallel research task for Qwen CausalLM epic #94)
 
 ## Decision
 
-**Selected artifact path: ONNX export layout (INT4 AWQ block-128)**
+**Selected artifact format: ONNX export layout (INT4 AWQ block-128)**
 
 Target model: `Qwen/Qwen2.5-Coder-0.5B-Instruct`
 
-Source: Microsoft DirectML-optimized ONNX export from
-[`microsoft/Qwen2.5-Coder-0.5B-Instruct-ONNX`](https://huggingface.co/microsoft/Qwen2.5-Coder-0.5B-Instruct-ONNX)
-(directml/directml-int4-awq-block-128 variant).
+Source status: **TBD / research**.
+
+The previously referenced Microsoft repo
+`microsoft/Qwen2.5-Coder-0.5B-Instruct-ONNX` is not used as a selected source in
+this decision. The currently known public ONNX candidate is
+[`onnx-community/Qwen2.5-Coder-0.5B-Instruct`](https://huggingface.co/onnx-community/Qwen2.5-Coder-0.5B-Instruct),
+but its Transformers.js-style layout must be evaluated before claiming
+DirectML INT4 AWQ block-128 compatibility.
 
 ## Rationale
 
@@ -18,10 +23,10 @@ The ONNX INT4 AWQ block-128 export is chosen because:
 
 1. **Existing infrastructure** – the Phi-3 path already loads ONNX graphs via
    `OnnxModelReader`, memory-maps `model.onnx.data`, and reads INT4 quantized
-   weights through MatMulNBits nodes.  Qwen2.5 uses the same operator pattern
-   in Microsoft's DirectML export.
+   weights through MatMulNBits nodes. Qwen2.5 candidates use the same operator
+   pattern in DirectML-compatible INT4 exports.
 2. **Pure Java/DirectML** – no external runtime (llama.cpp, ONNX Runtime,
-   Python) is required.  Weight loading stays in `directml-inference`.
+   Python) is required.  Final module assignment is still TBD for the Qwen path.
 3. **DirectML compatibility** – the INT4 AWQ layout is the same layout already
    dispatched to DirectML kernels in the Phi-3 GPU pipeline; future GPU work
    requires zero format conversion.
@@ -35,7 +40,7 @@ The ONNX INT4 AWQ block-128 export is chosen because:
 
 | Criterion | Assessment |
 |-----------|-----------|
-| Required files | `model.onnx`, `model.onnx.data`, `config.json`, `tokenizer.json`, `tokenizer_config.json`, `special_tokens_map.json` |
+| Required files | `model.onnx`, `model.onnx.data`, `config.json`, `tokenizer.json`, `tokenizer_config.json`, `special_tokens_map.json` (`added_tokens.json` optional) |
 | Tokenizer/template | `tokenizer.json` (BPE, HF fast-tokenizer); ChatML template in `tokenizer_config.json` |
 | Loading complexity | Low – reuse `OnnxModelReader`; new `Qwen2Config` record + `Qwen2Weights` loader mirroring `Phi3Weights` |
 | CPU memory footprint | ~0.35 GB for 0.5B INT4 (block-128) external data |
@@ -92,11 +97,10 @@ model/qwen2.5-coder-0.5b-directml-int4/
         ├── config.json
         ├── model.onnx
         ├── model.onnx.data          (downloaded separately, ~350 MB)
-        ├── model.onnx.data.url      (pointer for download script)
         ├── tokenizer.json
         ├── tokenizer_config.json
         ├── special_tokens_map.json
-        └── added_tokens.json
+        └── added_tokens.json        (optional)
 ```
 
 This mirrors the existing Phi-3 layout under `model/phi3-mini-directml-int4/`.
@@ -114,18 +118,20 @@ can be added once the 0.5B loading/generation smoke test passes.
 
 ## Follow-up tasks
 
-1. **Download script** – PowerShell/Bash script to fetch
-   `microsoft/Qwen2.5-Coder-0.5B-Instruct-ONNX` directml-int4-awq-block-128
-   variant from HuggingFace.
-2. **Qwen2Config** – Java record mirroring `Phi3Config` for Qwen2.5
+1. **Source verification** – confirm a resolvable Hugging Face source with a
+   layout compatible with this decision (candidate to evaluate:
+   `onnx-community/Qwen2.5-Coder-0.5B-Instruct`).
+2. **Download script** – after source verification, add PowerShell/Bash script
+   for the selected source/layout.
+3. **Qwen2Config** – Java record mirroring `Phi3Config` for Qwen2.5
    architecture parameters.
-3. **Qwen2Weights** – Weight loader (extends pattern from `Phi3Weights`) that
+4. **Qwen2Weights** – Weight loader (extends pattern from `Phi3Weights`) that
    parses the ONNX graph for Qwen2-specific tensor naming.
-4. **Qwen2Tokenizer** – BPE tokenizer using `tokenizer.json` (HF fast format);
+5. **Qwen2Tokenizer** – BPE tokenizer using `tokenizer.json` (HF fast format);
    ChatML template handling.
-5. **Qwen2Runtime** – Decoder loop reusing shared decoder-core abstractions
+6. **Qwen2Runtime** – Decoder loop reusing shared decoder-core abstractions
    from the decoder-extensions concept.
-6. **Smoke test** – End-to-end generation test with the real 0.5B checkpoint.
+7. **Smoke test** – End-to-end generation test with the real 0.5B checkpoint.
 
 ## Constraints
 
