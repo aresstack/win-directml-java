@@ -1,0 +1,50 @@
+// Java 8 bootstrapper that discovers Java 21+ and launches the Workbench.
+// Compiled with --release 8 so it can run on any installed Java version.
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.gradleup.shadow' version '9.3.0'
+}
+
+ext.java8Module = true
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+compileTestJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+application {
+    mainClass = 'com.aresstack.windirectml.workbench.launcher.WorkbenchLauncher'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+shadowJar {
+    archiveBaseName = 'directml-workbench-launcher'
+    archiveClassifier = 'all'
+    archiveVersion = ''
+
+    manifest {
+        attributes(
+                'Main-Class': application.mainClass.get()
+        )
+    }
+}
