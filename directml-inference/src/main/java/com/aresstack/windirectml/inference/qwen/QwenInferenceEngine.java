@@ -9,7 +9,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
-
 /**
  * Inference engine for Qwen2.5-Coder-Instruct models (CPU-only).
  *
@@ -79,6 +78,7 @@ public class QwenInferenceEngine implements InferenceEngine {
     // GPU resources (initialised during initialize() when backend != "cpu")
     private WindowsBindings wb;
     private QwenGpuKernels gpuKernels;
+    private QwenGpuPipeline gpuPipeline;  // V2.0 shared pipeline (batched MLP)
 
     /**
      * Create a new Qwen inference engine (CPU-only).
@@ -144,9 +144,21 @@ public class QwenInferenceEngine implements InferenceEngine {
                                 System.getProperty("qwen.gpu.lmhead", "false"));
                         gpuKernels = QwenGpuKernels.create(
                                 wb, weights, config, gpuLayerCount, gpuLmHead);
-                        log.info("GPU acceleration: {}/{} layers on GPU, lmHead={}",
-                                gpuKernels.getGpuLayers(), config.numHiddenLayers(),
-                                gpuKernels.hasLmHead());
+                        // V2.0: Create shared GPU pipeline (batched MLP, 48 fence-waits/token)
+                        try {
+                            gpuPipeline = new QwenGpuPipeline(wb, gpuKernels, config);
+                            gpuPipeline.uploadLayerWeights(wb, weights, config);
+                            log.info("GPU acceleration: {}/{} layers on GPU, lmHead={}, pipeline=V2.0 (mlpBatch={})",
+                                    gpuKernels.getGpuLayers(), config.numHiddenLayers(),
+                                    gpuKernels.hasLmHead(), gpuPipeline.isMlpBatchEnabled());
+                        } catch (Exception pe) {
+                            log.warn("GPU pipeline V2.0 failed, using V1 per-kernel dispatch: {}",
+                                    pe.getMessage());
+                            gpuPipeline = null;
+                            log.info("GPU acceleration: {}/{} layers on GPU (V1), lmHead={}",
+                                    gpuKernels.getGpuLayers(), config.numHiddenLayers(),
+                                    gpuKernels.hasLmHead());
+                        }
                     } else {
                         log.warn("DirectML device not available, falling back to CPU");
                         cleanupGpu();
@@ -163,12 +175,14 @@ public class QwenInferenceEngine implements InferenceEngine {
                 }
             }
 
-            // Create runtime (gpuKernels may be null → CPU-only)
-            runtime = new Qwen2Runtime(config, weights, tokenizer, gpuKernels);
+            // Create runtime (gpuPipeline + gpuKernels may be null → CPU-only)
+            runtime = new Qwen2Runtime(config, weights, tokenizer, gpuKernels, gpuPipeline);
 
             long elapsed = System.currentTimeMillis() - t0;
             log.info("QwenInferenceEngine initialized in {} ms (backend={})",
-                    elapsed, gpuKernels != null ? "GPU(" + gpuKernels.getGpuLayers() + " layers)" : "CPU");
+                    elapsed, gpuPipeline != null
+                            ? "GPU-V2(" + gpuKernels.getGpuLayers() + " layers, mlpBatch=" + gpuPipeline.isMlpBatchEnabled() + ")"
+                            : gpuKernels != null ? "GPU-V1(" + gpuKernels.getGpuLayers() + " layers)" : "CPU");
             ready = true;
 
         } catch (Exception e) {
@@ -245,6 +259,14 @@ public class QwenInferenceEngine implements InferenceEngine {
      * Clean up GPU resources (idempotent).
      */
     private void cleanupGpu() {
+        if (gpuPipeline != null) {
+            try {
+                gpuPipeline.close();
+            } catch (Exception e) {
+                log.warn("Error closing GPU pipeline: {}", e.getMessage());
+            }
+            gpuPipeline = null;
+        }
         if (gpuKernels != null) {
             try {
                 gpuKernels.close();

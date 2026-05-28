@@ -50,7 +50,8 @@ public final class Qwen2Runtime {
     private final Qwen2Weights weights;
     private final QwenTokenizer tokenizer;
     private final int qHeadsPerKvHead;
-    private final QwenGpuKernels gpuKernels;  // null if CPU-only
+    private final QwenGpuKernels gpuKernels;   // null if CPU-only
+    private final QwenGpuPipeline gpuPipeline; // null if V1 or CPU-only
 
     // ── KV Cache (per-head layout for cache locality) ────────────────────
     // Layout: [layer][head][pos * headDim]
@@ -106,7 +107,7 @@ public final class Qwen2Runtime {
     }
 
     /**
-     * Construct a Qwen2 runtime with optional GPU acceleration.
+     * Construct a Qwen2 runtime with optional GPU acceleration (V1 — per-kernel dispatches).
      *
      * @param config     model configuration
      * @param weights    loaded model weights
@@ -115,10 +116,25 @@ public final class Qwen2Runtime {
      */
     public Qwen2Runtime(Qwen2Config config, Qwen2Weights weights, QwenTokenizer tokenizer,
                         QwenGpuKernels gpuKernels) {
+        this(config, weights, tokenizer, gpuKernels, null);
+    }
+
+    /**
+     * Construct a Qwen2 runtime with V2.0 GPU pipeline (batched MLP, 48 fence-waits/token).
+     *
+     * @param config      model configuration
+     * @param weights     loaded model weights
+     * @param tokenizer   Qwen BPE tokenizer
+     * @param gpuKernels  optional DirectML GPU kernels; {@code null} = CPU-only
+     * @param gpuPipeline optional V2.0 GPU pipeline; {@code null} = fall back to V1 or CPU
+     */
+    public Qwen2Runtime(Qwen2Config config, Qwen2Weights weights, QwenTokenizer tokenizer,
+                        QwenGpuKernels gpuKernels, QwenGpuPipeline gpuPipeline) {
         this.config = config;
         this.weights = weights;
         this.tokenizer = tokenizer;
         this.gpuKernels = gpuKernels;
+        this.gpuPipeline = gpuPipeline;
 
         int numLayers = config.numHiddenLayers();
         int numHeads = config.numAttentionHeads();
@@ -175,8 +191,11 @@ public final class Qwen2Runtime {
         }
 
         log.info("Qwen2Runtime: {} mode, {} layers, {} heads ({}KV), headDim={}, GQA ratio={}:1",
-                gpuKernels != null
-                        ? "GPU(" + gpuKernels.getGpuLayers() + " layers)"
+                gpuPipeline != null
+                        ? "GPU-V2(pipeline, " + gpuPipeline.hasLayer(config.numHiddenLayers() - 1)
+                        + " layers, mlpBatch=" + gpuPipeline.isMlpBatchEnabled() + ")"
+                        : gpuKernels != null
+                        ? "GPU-V1(" + gpuKernels.getGpuLayers() + " layers)"
                         : "CPU-only",
                 numLayers, numHeads, kvHeads, config.headDim(), qHeadsPerKvHead);
     }
@@ -309,7 +328,9 @@ public final class Qwen2Runtime {
         rmsNorm(lastHidden, weights.finalNormWeight, config.rmsNormEps());
 
         float[] logits = new float[config.vocabSize()];
-        if (gpuKernels != null && gpuKernels.hasLmHead()) {
+        if (gpuPipeline != null && gpuPipeline.hasLmHead()) {
+            gpuPipeline.lmHead(lastHidden, logits);
+        } else if (gpuKernels != null && gpuKernels.hasLmHead()) {
             gpuKernels.lmHead().matvec(lastHidden, logits);
         } else {
             Arrays.fill(logits, 0);
@@ -345,7 +366,9 @@ public final class Qwen2Runtime {
 
         // LM head → decLogits
         t0 = System.nanoTime();
-        if (gpuKernels != null && gpuKernels.hasLmHead()) {
+        if (gpuPipeline != null && gpuPipeline.hasLmHead()) {
+            gpuPipeline.lmHead(decBuf, decLogits);
+        } else if (gpuKernels != null && gpuKernels.hasLmHead()) {
             gpuKernels.lmHead().matvec(decBuf, decLogits);
         } else {
             Arrays.fill(decLogits, 0);
@@ -369,6 +392,10 @@ public final class Qwen2Runtime {
         Qwen2Weights.LayerWeights lw = weights.layers[layerIdx];
         long t0;
 
+        // Determine execution path for this layer
+        final boolean usePipeline = gpuPipeline != null && gpuPipeline.hasLayer(layerIdx);
+        final boolean useKernels = !usePipeline && gpuKernels != null && gpuKernels.hasLayer(layerIdx);
+
         // ── Pre-attention RMSNorm → decNormed ────────────────────────
         t0 = System.nanoTime();
         System.arraycopy(hiddenIo, 0, decNormed, 0, hidden);
@@ -377,8 +404,14 @@ public final class Qwen2Runtime {
 
         // ── Q/K/V Projections ────────────────────────────────────────
         t0 = System.nanoTime();
-        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
-            // Fused QKV on GPU → output layout: [Q | K | V]
+        if (usePipeline) {
+            // V2.0: shared pipeline - 1 fence wait for QKV
+            gpuPipeline.qkvFused(layerIdx, decNormed, decQKV);
+            System.arraycopy(decQKV, 0, decQ, 0, qSize);
+            System.arraycopy(decQKV, qSize, decK, 0, kvSize);
+            System.arraycopy(decQKV, qSize + kvSize, decV, 0, kvSize);
+        } else if (useKernels) {
+            // V1: per-kernel matvec
             gpuKernels.qkvFused(layerIdx).matvec(decNormed, decQKV);
             System.arraycopy(decQKV, 0, decQ, 0, qSize);
             System.arraycopy(decQKV, qSize, decK, 0, kvSize);
@@ -442,9 +475,22 @@ public final class Qwen2Runtime {
         });
         profAttnNs += System.nanoTime() - t0;
 
-        // ── O projection → decOProj ──────────────────────────────────
+        // ── O Proj + MLP block ────────────────────────────────────────────
         t0 = System.nanoTime();
-        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+
+        if (usePipeline && gpuPipeline.isMlpBatchEnabled()) {
+            // ── V2.0 MLP batch: o_proj + residual1 + rmsNorm2 + gateUp + swiglu + down + residual2
+            //    All 6 ops in ONE GPU submission → 1 fence wait instead of 3
+            gpuPipeline.batchMlp(decAttnOut, hiddenIo, hiddenIo, layerIdx);
+            profProjNs += System.nanoTime() - t0;
+            return;  // Layer complete — hiddenIo holds the updated hidden state
+        }
+
+        // ── Fallback: individual dispatches (V1 or pipeline-without-batch) ─
+        if (usePipeline) {
+            gpuPipeline.oProj(layerIdx, decAttnOut, decOProj);
+        } else if (useKernels) {
+            Arrays.fill(decOProj, 0);
             gpuKernels.oProj(layerIdx).matvec(decAttnOut, decOProj);
         } else {
             Arrays.fill(decOProj, 0);
@@ -465,8 +511,9 @@ public final class Qwen2Runtime {
 
         // ── MLP: gate_proj + up_proj → SwiGLU → down_proj ────────────
         t0 = System.nanoTime();
-        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
-            // Fused gate+up on GPU → output layout: [gate | up]
+        if (usePipeline) {
+            gpuPipeline.gateUpFused(layerIdx, decPostNorm, decGateUp);
+        } else if (useKernels) {
             gpuKernels.gateUpFused(layerIdx).matvec(decPostNorm, decGateUp);
         } else {
             Arrays.fill(decGate, 0);
@@ -476,13 +523,13 @@ public final class Qwen2Runtime {
         }
         profProjNs += System.nanoTime() - t0;
 
-        // SwiGLU activation: silu(gate) * up, where silu(x) = x * sigmoid(x)
+        // SwiGLU activation: silu(gate) * up
         t0 = System.nanoTime();
         int intermediate = config.intermediateSize();
-        boolean gpuLayer = gpuKernels != null && gpuKernels.hasLayer(layerIdx);
+        boolean gpuFused = usePipeline || useKernels;
         for (int i = 0; i < intermediate; i++) {
-            float gate = gpuLayer ? decGateUp[i] : decGate[i];
-            float up = gpuLayer ? decGateUp[intermediate + i] : decUp[i];
+            float gate = gpuFused ? decGateUp[i] : decGate[i];
+            float up = gpuFused ? decGateUp[intermediate + i] : decUp[i];
             float sigmoid = 1.0f / (1.0f + (float) Math.exp(-gate));
             decMlpAct[i] = (gate * sigmoid) * up;
         }
@@ -490,7 +537,10 @@ public final class Qwen2Runtime {
 
         // down_proj
         t0 = System.nanoTime();
-        if (gpuLayer) {
+        if (usePipeline) {
+            gpuPipeline.downProj(layerIdx, decMlpAct, decDown);
+        } else if (useKernels) {
+            Arrays.fill(decDown, 0);
             gpuKernels.downProj(layerIdx).matvec(decMlpAct, decDown);
         } else {
             Arrays.fill(decDown, 0);
@@ -534,7 +584,11 @@ public final class Qwen2Runtime {
             float[] qkvRow = new float[gpuKernels.qkvFusedN];
             for (int s = 0; s < seqLen; s++) {
                 System.arraycopy(normed, s * hidden, row, 0, hidden);
-                gpuKernels.qkvFused(layerIdx).matvec(row, qkvRow);
+                if (gpuPipeline != null) {
+                    gpuPipeline.qkvFused(layerIdx, row, qkvRow);
+                } else {
+                    gpuKernels.qkvFused(layerIdx).matvec(row, qkvRow);
+                }
                 System.arraycopy(qkvRow, 0, q, s * qSize, qSize);
                 System.arraycopy(qkvRow, qSize, k, s * kvSize, kvSize);
                 System.arraycopy(qkvRow, qSize + kvSize, v, s * kvSize, kvSize);
@@ -611,7 +665,11 @@ public final class Qwen2Runtime {
             float[] tmpOut = new float[hidden];
             for (int s = 0; s < seqLen; s++) {
                 System.arraycopy(attnOut, s * qSize, row, 0, qSize);
-                gpuKernels.oProj(layerIdx).matvec(row, tmpOut);
+                if (gpuPipeline != null) {
+                    gpuPipeline.oProj(layerIdx, row, tmpOut);
+                } else {
+                    gpuKernels.oProj(layerIdx).matvec(row, tmpOut);
+                }
                 System.arraycopy(tmpOut, 0, oProjOut, s * hidden, hidden);
             }
         } else {
@@ -641,7 +699,11 @@ public final class Qwen2Runtime {
             float[] guRow = new float[gpuKernels.gateUpFusedN]; // [2 * intermediate]
             for (int s = 0; s < seqLen; s++) {
                 System.arraycopy(postNormed, s * hidden, row, 0, hidden);
-                gpuKernels.gateUpFused(layerIdx).matvec(row, guRow);
+                if (gpuPipeline != null) {
+                    gpuPipeline.gateUpFused(layerIdx, row, guRow);
+                } else {
+                    gpuKernels.gateUpFused(layerIdx).matvec(row, guRow);
+                }
                 System.arraycopy(guRow, 0, gate, s * intermediate, intermediate);
                 System.arraycopy(guRow, intermediate, up, s * intermediate, intermediate);
             }
@@ -668,7 +730,11 @@ public final class Qwen2Runtime {
             float[] tmpOut = new float[hidden];
             for (int s = 0; s < seqLen; s++) {
                 System.arraycopy(mlpActivation, s * intermediate, row, 0, intermediate);
-                gpuKernels.downProj(layerIdx).matvec(row, tmpOut);
+                if (gpuPipeline != null) {
+                    gpuPipeline.downProj(layerIdx, row, tmpOut);
+                } else {
+                    gpuKernels.downProj(layerIdx).matvec(row, tmpOut);
+                }
                 System.arraycopy(tmpOut, 0, downOut, s * hidden, hidden);
             }
         } else {
@@ -833,7 +899,10 @@ public final class Qwen2Runtime {
         double totalMs = totalDecode / 1e6;
         double perToken = totalMs / profSteps;
         double pctDivisor = totalDecode > 0 ? totalDecode : 1;
-        int gpuL = gpuKernels != null ? gpuKernels.getGpuLayers() : 0;
+        int gpuL = gpuPipeline != null ? (gpuPipeline.hasLayer(config.numHiddenLayers() - 1)
+                ? config.numHiddenLayers() : gpuKernels != null ? gpuKernels.getGpuLayers() : 0)
+                : gpuKernels != null ? gpuKernels.getGpuLayers() : 0;
+        boolean pipelineV2 = gpuPipeline != null && gpuPipeline.isMlpBatchEnabled();
 
         return String.format(
                 "[Qwen2 Decode Profile] %d tokens, %.1f ms total, %.1f ms/token%n"
@@ -845,7 +914,11 @@ public final class Qwen2Runtime {
                 + "  SwiGLU:        %.1f ms avg (%.0f%%)%n"
                 + "  LM head:       %.1f ms avg (%.0f%%)",
                 profSteps, totalMs, perToken,
-                gpuL > 0 ? "GPU (" + gpuL + " layers, lmHead=" + gpuKernels.hasLmHead() + ")" : "CPU-only",
+                gpuL > 0
+                        ? (pipelineV2
+                        ? "GPU-V2 (pipeline, " + gpuL + " layers, mlpBatch=true, 48 submits/token)"
+                        : "GPU-V1 (" + gpuL + " layers, lmHead=" + (gpuKernels != null && gpuKernels.hasLmHead()) + ")")
+                        : "CPU-only",
                 profPrefillNs / 1e6,
                 profProjNs / 1e6 / profSteps, 100.0 * profProjNs / pctDivisor,
                 profAttnNs / 1e6 / profSteps, 100.0 * profAttnNs / pctDivisor,
