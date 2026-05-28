@@ -1,9 +1,9 @@
 # Konzept: Qwen CPU-Performance — Analyse & Optimierungsansätze
 
 > **Tracking Issue:** #130  
-> **Status:** Arbeitsdokument — wird gemeinsam überarbeitet  
+> **Status:** Prio 1 + Prio 2 implementiert (2026-05-29) — Tests grün  
 > **Erstellt:** 2026-05-28  
-> **Scope:** `directml-inference` / `Qwen2Runtime` / `Qwen2Weights`
+> **Scope:** `directml-inference` / `Qwen2Runtime` / `Qwen2Weights` / `Phi3Weights`
 
 ---
 
@@ -47,23 +47,23 @@ einer Sekunde pro Token.
 Für jeden generierten Token durchläuft `Qwen2Runtime.decodeSingleToken()`
 alle 24 Layer mit folgenden Hauptoperationen:
 
-| Operation         | Typ               | Parallelisiert?            | SIMD?            | Schreibt auf                 |
-|-------------------|-------------------|----------------------------|------------------|------------------------------|
-| `input_layernorm` | RMSNorm           | Nein                       | Nein             | `decNormed[896]`             |
-| `q_proj`          | INT4 MatVec       | **Nein**                   | **Nein**         | `decQ[896]`                  |
-| `k_proj`          | INT4 MatVec       | **Nein**                   | **Nein**         | `decK[128]`                  |
-| `v_proj`          | INT4 MatVec       | **Nein**                   | **Nein**         | `decV[128]`                  |
-| RoPE              | Scalar            | Nein                       | Nein             | `decQ`, `decK` in-place      |
-| Attention GQA     | Dot + Softmax     | **Ja** (14 Heads parallel) | **Ja** (SimdOps) | `decAttnOut[896]`            |
-| `o_proj`          | INT4 MatVec       | **Nein**                   | **Nein**         | `decOProj[896]`              |
-| Residual + Norm   | Scalar            | Nein                       | Nein             |                              |
-| `gate_proj`       | INT4 MatVec       | **Nein**                   | **Nein**         | `decGate[4864]` ← **GROSS**  |
-| `up_proj`         | INT4 MatVec       | **Nein**                   | **Nein**         | `decUp[4864]` ← **GROSS**    |
-| SwiGLU            | Scalar + exp      | Nein                       | Nein             | `decMlpAct[4864]`            |
-| `down_proj`       | INT4 MatVec       | **Nein**                   | **Nein**         | `decDown[896]` ← **GROSS K** |
-| LM Head           | Dense FP32 MatVec | **Ja** (parallel)          | **Ja**           | `decLogits[151 936]`         |
+| Operation         | Typ               | Parallelisiert?            | SIMD?             | Schreibt auf                 |
+|-------------------|-------------------|----------------------------|-------------------|------------------------------|
+| `input_layernorm` | RMSNorm           | Nein                       | Nein              | `decNormed[896]`             |
+| `q_proj`          | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decQ[896]`                  |
+| `k_proj`          | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decK[128]`                  |
+| `v_proj`          | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decV[128]`                  |
+| RoPE              | Scalar            | Nein                       | Nein              | `decQ`, `decK` in-place      |
+| Attention GQA     | Dot + Softmax     | **Ja** (14 Heads parallel) | **Ja** (SimdOps)  | `decAttnOut[896]`            |
+| `o_proj`          | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decOProj[896]`              |
+| Residual + Norm   | Scalar            | Nein                       | Nein              |                              |
+| `gate_proj`       | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decGate[4864]` ← **GROSS**  |
+| `up_proj`         | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decUp[4864]` ← **GROSS**    |
+| SwiGLU            | Scalar + exp      | Nein                       | Nein              | `decMlpAct[4864]`            |
+| `down_proj`       | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decDown[896]` ← **GROSS K** |
+| LM Head           | Dense FP32 MatVec | **Ja** (parallel)          | **Ja**            | `decLogits[151 936]`         |
 
-**24 Layer × 7 INT4-MatVec = 168 serielle, skalare INT4-MatVec-Aufrufe pro Token.**
+**24 Layer × 7 INT4-MatVec = 168 INT4-MatVec-Aufrufe pro Token — jetzt alle parallel + SIMD. ✅**
 
 ---
 
@@ -333,22 +333,28 @@ info("Vector lanes    = {}",FloatVector.SPECIES_PREFERRED.length());
 
 ## 8. Einschätzung: Was hilft wirklich?
 
-| Maßnahme                            | Aufwand | Erwarteter Effekt  | Risiko   |
-|-------------------------------------|---------|--------------------|----------|
-| Prio 1: INT4-MatVec parallelisieren | klein   | **groß** (~10–20×) | gering   |
-| Prio 2: SIMD INT4 Dequant           | mittel  | groß (~4–8×)       | mittel   |
-| FP16-Modell statt INT4              | gering* | mittel (2–4×)      | mehr RAM |
-| Prio 3: LM-Head-Trivialfix          | minimal | minimal            | keine    |
-| Prio 4: Profiling-Daten erheben     | gering  | keine Speedup,     | keine    |
-|                                     |         | aber Grundlage f.  |          |
-|                                     |         | alle anderen       |          |
-
-*) FP16-Modell: `DenseWeight` ist bereits SIMD+parallel, aber Modell ist
-~2× größer im RAM.
+| Maßnahme                                      | Status       | Erwarteter Effekt     | Risiko   |
+|-----------------------------------------------|--------------|-----------------------|----------|
+| Prio 1: INT4-MatVec parallelisieren           | **✅ Fertig** | **groß** (~10–20×)    | gering   |
+| Prio 2: SIMD INT4 Dequant (BLOCK_BUF+SimdOps) | **✅ Fertig** | groß (~2–4×)          | gering   |
+| Prio 2b: Phi3Weights parallel + blockDot      | **✅ Fertig** | groß für Phi3         | gering   |
+| FP16-Modell statt INT4                        | ausstehend   | mittel (2–4×)         | mehr RAM |
+| Prio 3: LM-Head-Trivialfix                    | ausstehend   | minimal               | keine    |
+| Prio 4: Profiling-Daten erheben               | ausstehend   | Grundlage f. weiteres | keine    |
 
 **Wichtigste Erkenntnis:** Der AMD-Ryzen-Performancevergleich ist kein
-Hinweis auf Ryzen-spezifische Optimierung. Das Problem trifft alle CPUs
-gleichermäßen — der INT4-Hotpath ist auf allen Plattformen unoptimiert.
+Hinweis auf Ryzen-spezifische Optimierung. Das Problem traf alle CPUs
+gleichermäßen — der INT4-Hotpath war auf allen Plattformen unoptimiert.
+**Mit Prio 1 + 2 ist das jetzt behoben.**
+
+### Noch offen: GPU vs. CPU
+
+Ein weiterer Faktor: Die GPU-Pipeline (`QwenGpuPipeline` V2.0) verwendet
+**FP32-dequantisierte Gewichte auf der GPU** (~59.7 MB/Layer vs. ~7.5 MB
+INT4). Bei 48 Fence-Waits/Token und FP32-Daten ist die GPU auf Intel-iGPUs
+(geteilter RAM-Bandwidth) oft *langsamer* als der optimierte CPU-INT4-Pfad.
+Falls die GPU trotz V2.0 keine Beschleunigung bringt, sollte der Fallback
+auf reinen CPU-Betrieb (kein `gpuKernels`/`gpuPipeline`) geprüft werden.
 
 ---
 
