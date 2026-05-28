@@ -31,11 +31,18 @@ public final class SummarizerPanel extends JPanel {
 
     private static final String QWEN05_MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct";
 
+    /** Reduced max tokens for Qwen CPU test path to avoid very long waits. */
+    private static final int QWEN_CPU_DEFAULT_MAX_TOKENS = 64;
+
     private final WorkbenchModel model;
     private final JTextArea inputArea;
     private final JTextArea resultArea;
     private final JComboBox<String> modelSelector;
     private final JSpinner maxTokensSpinner;
+    private final JButton cancelBtn;
+
+    /** Reference to current Qwen runtime for cancellation, or null if not running. */
+    private volatile com.aresstack.windirectml.inference.qwen.Qwen2Runtime activeQwenRuntime;
 
     public SummarizerPanel(WorkbenchModel model) {
         this.model = model;
@@ -76,6 +83,10 @@ public final class SummarizerPanel extends JPanel {
         var runBtn = new JButton("Generate / Summarize");
         runBtn.addActionListener(e -> runSummarizer());
         runControls.add(runBtn);
+        cancelBtn = new JButton("Cancel");
+        cancelBtn.setEnabled(false);
+        cancelBtn.addActionListener(e -> cancelGeneration());
+        runControls.add(cancelBtn);
         inputPanel.add(runControls, BorderLayout.SOUTH);
 
         controlsPanel.add(inputPanel, BorderLayout.CENTER);
@@ -113,7 +124,7 @@ public final class SummarizerPanel extends JPanel {
             return;
         }
         if (isQwenTestModel(selected)) {
-            label.setText(" 🧪 CPU test (planned)");
+            label.setText(" 🧪 CPU diagnostic only (planned)");
             return;
         }
         String statusText = switch (entry.status()) {
@@ -153,26 +164,36 @@ public final class SummarizerPanel extends JPanel {
         }
 
         int maxTokens = (Integer) maxTokensSpinner.getValue();
+        // Cap Qwen CPU path to a reduced default to avoid very long waits
+        if (qwenTestModel && maxTokens > QWEN_CPU_DEFAULT_MAX_TOKENS) {
+            maxTokens = QWEN_CPU_DEFAULT_MAX_TOKENS;
+            appendResult("  ⚠️  Max tokens capped to " + QWEN_CPU_DEFAULT_MAX_TOKENS
+                    + " for CPU diagnostic path.");
+        }
         appendResult("Loading generation model: " + selectedModel
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
         if (qwenTestModel) {
-            appendResult("  NOTE: Qwen is running through the Workbench CPU test path.");
+            appendResult("  NOTE: Qwen is running through the Workbench CPU test path (diagnostic only).");
         }
 
+        final int effectiveMaxTokens = maxTokens;
+        cancelBtn.setEnabled(qwenTestModel);
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
                 try {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
                     if (qwenTestModel) {
-                        runQwenGeneration(modelDir, text, maxTokens, selectedModel);
+                        runQwenGeneration(modelDir, text, effectiveMaxTokens, selectedModel);
                     } else {
-                        runPhi3Summarizer(modelDir, text, maxTokens);
+                        runPhi3Summarizer(modelDir, text, effectiveMaxTokens);
                     }
                 } catch (InferenceException ex) {
                     appendResult("INFERENCE ERROR: " + ex.getMessage());
                 } catch (Exception ex) {
                     appendResult("ERROR: " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+                } finally {
+                    SwingUtilities.invokeLater(() -> cancelBtn.setEnabled(false));
                 }
                 return null;
             }
@@ -207,9 +228,12 @@ public final class SummarizerPanel extends JPanel {
         QwenInferenceEngine engine = new QwenInferenceEngine(modelDir, maxTokens);
         try {
             appendResult("Initializing Qwen CPU runtime...");
+            appendResult("⚠️  DIAGNOSTIC ONLY: This CPU-only path is extremely slow and intended for");
+            appendResult("    validation/testing only. Use the DirectML-accelerated path for interactive use.");
+            appendResult("    Max tokens capped at " + maxTokens + " for this path. You can cancel at any time.");
             engine.initialize();
             appendResult("Model loaded in " + elapsedMs(start) + " ms");
-            appendResult("Prefill running (CPU)... first token may take a while for long prompts.");
+            appendResult("Prefill running (CPU)... progress will be reported per-layer.");
             appendResult("");
             appendResult("OUTPUT:");
             long genStart = System.nanoTime();
@@ -218,6 +242,18 @@ public final class SummarizerPanel extends JPanel {
             String formattedPrompt = com.aresstack.windirectml.inference.qwen.QwenChatTemplate.formatChat(
                     systemPrompt, text);
             com.aresstack.windirectml.inference.qwen.Qwen2Runtime runtime = engine.getRuntime();
+            activeQwenRuntime = runtime;
+
+            // Set prefill progress listener to report to UI
+            runtime.setPrefillProgressListener((layer, totalLayers, elapsedMs, seqLen) -> {
+                appendResult("  [Prefill] Layer " + layer + "/" + totalLayers
+                        + " — " + elapsedMs + " ms elapsed (seqLen=" + seqLen + ")");
+                if (layer == 1 && elapsedMs > 30_000) {
+                    appendResult("  ⚠️  Layer 1 took " + elapsedMs + " ms — full prefill will take ~"
+                            + (elapsedMs * totalLayers / 1000) + "s. Consider cancelling.");
+                }
+            });
+
             final int[] tokenCount = {0};
             String generated = runtime.generateStreaming(formattedPrompt, maxTokens,
                     (tokenId, full, delta) -> {
@@ -225,11 +261,25 @@ public final class SummarizerPanel extends JPanel {
                         appendInline(delta);
                     });
             appendResult("");
-            appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
+            if (runtime.isCancelled()) {
+                appendResult("Generation CANCELLED by user after " + elapsedMs(genStart) + " ms");
+            } else {
+                appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
+            }
             appendResult("  Output tokens (approx): " + tokenCount[0]);
-            appendResult("  Finish reason: " + (tokenCount[0] >= maxTokens ? "max_tokens" : "end_turn"));
+            appendResult("  Finish reason: " + (runtime.isCancelled() ? "cancelled"
+                    : tokenCount[0] >= maxTokens ? "max_tokens" : "end_turn"));
         } finally {
+            activeQwenRuntime = null;
             engine.shutdown();
+        }
+    }
+
+    private void cancelGeneration() {
+        var runtime = activeQwenRuntime;
+        if (runtime != null) {
+            runtime.cancel();
+            appendResult("\n  [Cancellation requested — stopping at next layer/step...]");
         }
     }
 
