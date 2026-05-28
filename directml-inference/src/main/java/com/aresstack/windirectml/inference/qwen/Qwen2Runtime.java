@@ -80,6 +80,15 @@ public final class Qwen2Runtime {
     // ── Generation quality parameters ────────────────────────────────────
     private float repetitionPenalty = 1.2f;
 
+    // ── Cancellation ─────────────────────────────────────────────────────
+    private volatile boolean cancelled;
+
+    // ── Prefill progress callback ────────────────────────────────────────
+    private PrefillProgressListener prefillProgressListener;
+
+    /** Per-layer prefill warning threshold in milliseconds. */
+    private static final long PREFILL_LAYER_WARN_THRESHOLD_MS = 30_000;
+
     // ── Profiling ────────────────────────────────────────────────────────
     private long profProjNs;
     private long profAttnNs;
@@ -165,6 +174,48 @@ public final class Qwen2Runtime {
         void onToken(int tokenId, String textSoFar, String delta);
     }
 
+    // ── Prefill progress listener ─────────────────────────────────────────
+
+    /**
+     * Callback invoked after each prefill layer completes.
+     */
+    @FunctionalInterface
+    public interface PrefillProgressListener {
+        /**
+         * Called after each layer of the prefill phase completes.
+         *
+         * @param layer        completed layer (1-based)
+         * @param totalLayers  total number of layers
+         * @param elapsedMs    milliseconds elapsed since prefill started
+         * @param seqLen       sequence length being processed
+         */
+        void onLayerComplete(int layer, int totalLayers, long elapsedMs, int seqLen);
+    }
+
+    // ── Cancellation / progress API ──────────────────────────────────────
+
+    /**
+     * Request cancellation of the current generation.
+     * The runtime will stop at the next layer boundary or decode step.
+     */
+    public void cancel() {
+        this.cancelled = true;
+    }
+
+    /**
+     * Returns true if cancellation has been requested.
+     */
+    public boolean isCancelled() {
+        return cancelled;
+    }
+
+    /**
+     * Set a listener to receive per-layer prefill progress updates.
+     */
+    public void setPrefillProgressListener(PrefillProgressListener listener) {
+        this.prefillProgressListener = listener;
+    }
+
     // ── Public API ───────────────────────────────────────────────────────
 
     /**
@@ -187,6 +238,7 @@ public final class Qwen2Runtime {
      * @return generated text (excluding the prompt)
      */
     public String generateStreaming(String prompt, int maxTokens, TokenConsumer consumer) {
+        this.cancelled = false;
         int[] inputIds = tokenizer.encode(prompt);
 
         resetProfile();
@@ -195,6 +247,10 @@ public final class Qwen2Runtime {
         // ── Prefill ──────────────────────────────────────────────────
         long t0 = System.nanoTime();
         float[] logits = prefill(inputIds);
+        if (cancelled) {
+            log.info("Generation cancelled during prefill");
+            return "";
+        }
         profPrefillNs = System.nanoTime() - t0;
 
         log.info("Prefill: {} tokens in {} ms", inputIds.length, String.format("%.1f", profPrefillNs / 1e6));
@@ -204,6 +260,10 @@ public final class Qwen2Runtime {
         String previousText = "";
 
         for (int step = 0; step < maxTokens; step++) {
+            if (cancelled) {
+                log.info("Generation cancelled at decode step {}", step);
+                break;
+            }
 
             // Repetition penalty
             if (repetitionPenalty > 1.0f && !generatedIds.isEmpty()) {
@@ -272,11 +332,22 @@ public final class Qwen2Runtime {
         int totalLayers = config.numHiddenLayers();
         long layerStart = System.nanoTime();
         for (int l = 0; l < totalLayers; l++) {
+            if (cancelled) {
+                log.info("Prefill cancelled at layer {}/{}", l + 1, totalLayers);
+                return new float[config.vocabSize()];
+            }
             hiddenStates = processLayerPrefill(l, hiddenStates, seqLen, 0);
+            long elapsed = (System.nanoTime() - layerStart) / 1_000_000L;
             if (l == 0 || (l + 1) % 4 == 0 || l == totalLayers - 1) {
-                long elapsed = (System.nanoTime() - layerStart) / 1_000_000L;
                 log.info("Prefill layer {}/{} done ({} ms elapsed, seqLen={})",
                         l + 1, totalLayers, elapsed, seqLen);
+            }
+            if (elapsed > PREFILL_LAYER_WARN_THRESHOLD_MS && l == 0) {
+                log.warn("Prefill layer 1 took {} ms — CPU fallback is very slow for this model. "
+                        + "Consider using DirectML acceleration or cancelling.", elapsed);
+            }
+            if (prefillProgressListener != null) {
+                prefillProgressListener.onLayerComplete(l + 1, totalLayers, elapsed, seqLen);
             }
         }
 
