@@ -221,10 +221,15 @@ public final class ModelDownloader {
             return;
         }
 
+        String sanitizedUrl = sanitizeUrl(url, localFilename, required, logger);
+        if (sanitizedUrl == null) {
+            return;
+        }
+
         logger.accept("  Downloading: " + localFilename + " ...");
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+                .uri(parseUriOrThrow(sanitizedUrl, localFilename, required))
                 .timeout(Duration.ofMinutes(30))
                 .GET()
                 .build();
@@ -242,12 +247,36 @@ public final class ModelDownloader {
             logger.accept("  Optional file not found (skipped): " + localFilename);
         } else {
             String msg = "HTTP " + response.statusCode() + " for " + localFilename
-                    + " (url: " + url + ")";
+                    + " (url: " + sanitizedUrl + ")";
             if (required) {
                 throw new IOException(msg);
             } else {
                 logger.accept("  Warning: " + msg);
             }
+        }
+    }
+
+    private static String sanitizeUrl(String url, String localFilename, boolean required,
+                                      Consumer<String> logger) throws IOException {
+        String sanitized = url == null ? "" : url.trim();
+        if (!sanitized.isBlank()) {
+            return sanitized;
+        }
+        if (required) {
+            throw new IOException("Invalid required download URL for " + localFilename
+                    + ": value is blank");
+        }
+        logger.accept("  Optional file URL is blank (skipped): " + localFilename);
+        return null;
+    }
+
+    private static URI parseUriOrThrow(String url, String localFilename, boolean required)
+            throws IOException {
+        try {
+            return URI.create(url);
+        } catch (IllegalArgumentException ex) {
+            throw new IOException("Invalid " + (required ? "required" : "optional")
+                    + " download URL for " + localFilename + ": " + url, ex);
         }
     }
 }

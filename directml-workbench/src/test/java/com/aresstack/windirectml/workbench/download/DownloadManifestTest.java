@@ -142,6 +142,19 @@ class DownloadManifestTest {
     }
 
     @Test
+    void overrideStoreTreatsBlankOverrideAsNoOverride(@TempDir Path tempDir) throws IOException {
+        Path storeFile = tempDir.resolve("overrides.json");
+        var store = new DownloadOverrideStore(storeFile);
+
+        var manifest = ModelDownloadUrls.manifestForPhi3().withFileUrl(0, "   ");
+        store.storeOverrides(manifest);
+
+        String content = Files.readString(storeFile);
+        assertFalse(content.contains("model.onnx"),
+                "Blank override should not be persisted");
+    }
+
+    @Test
     void overrideStoreParsesJsonEscapesInUrls(@TempDir Path tempDir) throws IOException {
         Path storeFile = tempDir.resolve("overrides.json");
         String json = "{\n"

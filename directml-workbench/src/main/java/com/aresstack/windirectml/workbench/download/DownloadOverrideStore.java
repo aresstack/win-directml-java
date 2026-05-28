@@ -124,8 +124,9 @@ public final class DownloadOverrideStore {
         ensureLoaded();
         var modelOverrides = new LinkedHashMap<String, String>();
         for (var desc : manifest.files()) {
-            if (!desc.currentUrl().equals(desc.defaultUrl())) {
-                modelOverrides.put(desc.localFilename(), desc.currentUrl());
+            String currentUrl = desc.currentUrl().trim();
+            if (!currentUrl.isBlank() && !currentUrl.equals(desc.defaultUrl())) {
+                modelOverrides.put(desc.localFilename(), currentUrl);
             }
         }
         if (modelOverrides.isEmpty()) {

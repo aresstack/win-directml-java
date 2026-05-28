@@ -4,7 +4,7 @@ package com.aresstack.windirectml.workbench.download;
  * Describes a single downloadable file for a model.
  *
  * <p>Used by both the configuration dialog (UI) and the downloader (I/O).
- * The {@code currentUrl} field is mutable and may be overridden by the user
+ * The {@code currentUrl} field is editable/overridable by the user
  * through the download configuration dialog.
  *
  * @param displayName  human-readable label for this file

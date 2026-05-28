@@ -77,6 +77,10 @@ public final class DownloadUrlConfigDialog extends JDialog {
             copyBtn.setPreferredSize(sq);
             copyBtn.setMinimumSize(sq);
             copyBtn.setMaximumSize(sq);
+            copyBtn.getAccessibleContext().setAccessibleName(
+                    "Copy URL for " + desc.localFilename());
+            copyBtn.getAccessibleContext().setAccessibleDescription(
+                    "Copy download URL for " + desc.localFilename());
             final int fieldIndex = row;
             copyBtn.addActionListener(e -> {
                 String url = urlFields.get(fieldIndex).getText();
@@ -131,7 +135,7 @@ public final class DownloadUrlConfigDialog extends JDialog {
     public List<String> getEditedUrls() {
         var urls = new ArrayList<String>();
         for (var field : urlFields) {
-            urls.add(field.getText());
+            urls.add(field.getText().trim());
         }
         return List.copyOf(urls);
     }
