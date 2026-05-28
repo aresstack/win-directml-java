@@ -209,27 +209,36 @@ public final class SummarizerPanel extends JPanel {
             appendResult("Initializing Qwen CPU runtime...");
             engine.initialize();
             appendResult("Model loaded in " + elapsedMs(start) + " ms");
-            long genStart = System.nanoTime();
-            InferenceRequest request = InferenceRequest.builder()
-                    .modelId(selectedModel)
-                    .systemPrompt("You are Qwen, created by Alibaba Cloud. You are a helpful assistant.")
-                    .userPrompt(text)
-                    .maxTokens(maxTokens)
-                    .build();
-            InferenceResult result = engine.generate(request);
-            appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
-            if (result.getUsage() != null) {
-                appendResult("  Prompt tokens: " + result.getUsage().promptTokens());
-                appendResult("  Output tokens: " + result.getUsage().completionTokens());
-                appendResult("  Total tokens: " + result.getUsage().totalTokens());
-            }
-            appendResult("  Finish reason: " + result.getFinishReason());
+            appendResult("Prefill running (CPU)... first token may take a while for long prompts.");
             appendResult("");
             appendResult("OUTPUT:");
-            appendResult(result.getText());
+            long genStart = System.nanoTime();
+            // Format prompt using ChatML template and stream tokens to UI as they appear.
+            String systemPrompt = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.";
+            String formattedPrompt = com.aresstack.windirectml.inference.qwen.QwenChatTemplate.formatChat(
+                    systemPrompt, text);
+            com.aresstack.windirectml.inference.qwen.Qwen2Runtime runtime = engine.getRuntime();
+            final int[] tokenCount = {0};
+            String generated = runtime.generateStreaming(formattedPrompt, maxTokens,
+                    (tokenId, full, delta) -> {
+                        tokenCount[0]++;
+                        appendInline(delta);
+                    });
+            appendResult("");
+            appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
+            appendResult("  Output tokens (approx): " + tokenCount[0]);
+            appendResult("  Finish reason: " + (tokenCount[0] >= maxTokens ? "max_tokens" : "end_turn"));
         } finally {
             engine.shutdown();
         }
+    }
+
+    private void appendInline(String s) {
+        if (s == null || s.isEmpty()) return;
+        SwingUtilities.invokeLater(() -> {
+            resultArea.append(s);
+            resultArea.setCaretPosition(resultArea.getDocument().getLength());
+        });
     }
 
     private Path resolveSummarizerModelDir(String modelId) {

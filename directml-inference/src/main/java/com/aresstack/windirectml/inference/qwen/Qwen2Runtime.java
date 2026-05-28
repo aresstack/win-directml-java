@@ -268,8 +268,15 @@ public final class Qwen2Runtime {
         }
 
         // Process each layer
-        for (int l = 0; l < config.numHiddenLayers(); l++) {
+        int totalLayers = config.numHiddenLayers();
+        long layerStart = System.nanoTime();
+        for (int l = 0; l < totalLayers; l++) {
             hiddenStates = processLayerPrefill(l, hiddenStates, seqLen, 0);
+            if (l == 0 || (l + 1) % 4 == 0 || l == totalLayers - 1) {
+                long elapsed = (System.nanoTime() - layerStart) / 1_000_000L;
+                log.info("Prefill layer {}/{} done ({} ms elapsed, seqLen={})",
+                        l + 1, totalLayers, elapsed, seqLen);
+            }
         }
 
         // Final norm + logits (only for last position)

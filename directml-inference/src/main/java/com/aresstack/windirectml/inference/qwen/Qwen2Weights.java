@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.stream.IntStream;
 
 /**
  * Reads Qwen2.5-Coder weights from ONNX model graph + external data file.
@@ -104,32 +105,40 @@ public final class Qwen2Weights implements AutoCloseable {
      * FP16 dense weight for non-quantized matmul.
      */
     public record DenseWeight(float[] data, int N, int K) {
-        /** Compute y += x @ W^T where W is [N, K]. */
+        /**
+         * Compute y += x @ W^T where W is [N, K] — row-parallel over output rows.
+         */
         public void matvec(float[] x, float[] y) {
-            for (int n = 0; n < N; n++) {
+            final int nLocal = N;
+            final int kLocal = K;
+            final float[] dLocal = data;
+            IntStream.range(0, nLocal).parallel().forEach(n -> {
                 float sum = 0f;
-                int offset = n * K;
-                for (int k = 0; k < K; k++) {
-                    sum += data[offset + k] * x[k];
+                int offset = n * kLocal;
+                for (int k = 0; k < kLocal; k++) {
+                    sum += dLocal[offset + k] * x[k];
                 }
                 y[n] += sum;
-            }
+            });
         }
 
-        /** Batch matvec. */
+        /** Batch matvec — parallelized over (seq, outRow) flattened index. */
         public void matmul(float[] x, float[] y, int seqLen) {
-            for (int s = 0; s < seqLen; s++) {
-                int xOff = s * K;
-                int yOff = s * N;
-                for (int n = 0; n < N; n++) {
-                    float sum = 0f;
-                    int wOff = n * K;
-                    for (int k = 0; k < K; k++) {
-                        sum += data[wOff + k] * x[xOff + k];
-                    }
-                    y[yOff + n] += sum;
+            final int nLocal = N;
+            final int kLocal = K;
+            final float[] dLocal = data;
+            final int total = seqLen * nLocal;
+            IntStream.range(0, total).parallel().forEach(idx -> {
+                int s = idx / nLocal;
+                int n = idx - s * nLocal;
+                int xOff = s * kLocal;
+                int wOff = n * kLocal;
+                float sum = 0f;
+                for (int k = 0; k < kLocal; k++) {
+                    sum += dLocal[wOff + k] * x[xOff + k];
                 }
-            }
+                y[s * nLocal + n] += sum;
+            });
         }
     }
 
