@@ -86,8 +86,7 @@ class ModelDownloadUrlsTest {
     }
 
     /**
-     * Regression: the external data file URL must use the remote underscore filename
-     * while local storage still uses dot-separated naming.
+     * Regression: the external data file URL must use the expected underscore filename.
      */
     @Test
     void qwenExternalDataUrlUsesRemoteUnderscoreName() {
@@ -113,7 +112,7 @@ class ModelDownloadUrlsTest {
                 "model.onnx",
                 "model.onnx_data",
                 "model.onnx",
-                "model.onnx.data",
+                "model.onnx_data",
                 java.util.List.of("tokenizer.json", "config.json", "tokenizer_config.json", "special_tokens_map.json"),
                 java.util.List.of(),  // no optional files
                 "qwen2.5-coder-0.5b-directml-int4"

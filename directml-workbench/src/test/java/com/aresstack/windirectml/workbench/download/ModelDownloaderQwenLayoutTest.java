@@ -20,7 +20,7 @@ class ModelDownloaderQwenLayoutTest {
     void qwenRequiredFilesIncludesExpectedEntries() {
         var files = ModelDownloader.QWEN_REQUIRED_FILES;
         assertTrue(files.contains("model.onnx"));
-        assertTrue(files.contains("model.onnx.data"));
+        assertTrue(files.contains("model.onnx_data"));
         assertTrue(files.contains("tokenizer.json"));
         assertTrue(files.contains("config.json"));
         assertTrue(files.contains("tokenizer_config.json"));
@@ -34,7 +34,7 @@ class ModelDownloaderQwenLayoutTest {
         assertEquals("onnx", config.onnxSubdir());
         assertEquals("model.onnx", config.modelFile());
         assertEquals("model.onnx_data", config.externalDataFile());
-        assertEquals("model.onnx.data", config.localDataFile());
+        assertEquals("model.onnx_data", config.localDataFile());
     }
 
     @Test
@@ -49,7 +49,7 @@ class ModelDownloaderQwenLayoutTest {
         var config = QwenModelDownloadConfig.DEFAULT;
         var required = config.requiredLocalFiles();
         assertTrue(required.contains("model.onnx"));
-        assertTrue(required.contains("model.onnx.data"));
+        assertTrue(required.contains("model.onnx_data"));
         assertTrue(required.contains("tokenizer.json"));
         assertTrue(required.contains("config.json"));
         assertTrue(required.contains("tokenizer_config.json"));
@@ -61,7 +61,7 @@ class ModelDownloaderQwenLayoutTest {
     @Test
     void defaultDownloadUsesPrimaryExternalDataName() {
         var config = QwenModelDownloadConfig.DEFAULT;
-        assertEquals("model.onnx.data", config.localDataFile());
+        assertEquals("model.onnx_data", config.localDataFile());
         assertTrue(config.requiredLocalFiles().contains(config.localDataFile()));
     }
 }
