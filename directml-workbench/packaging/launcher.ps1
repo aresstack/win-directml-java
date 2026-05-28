@@ -99,5 +99,5 @@ if (-not $SelectedJava) {
 }
 
 Write-Host "Starting DirectML Workbench with Java $SelectedMajor from: $SelectedJava"
-& $SelectedJava --enable-preview --enable-native-access=ALL-UNNAMED -jar $Jar @args
+& $SelectedJava --enable-preview --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -jar $Jar @args
 exit $LASTEXITCODE

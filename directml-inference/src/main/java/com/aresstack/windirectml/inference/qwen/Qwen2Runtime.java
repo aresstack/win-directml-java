@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /**
  * CPU-only decoder runtime for Qwen2.5-Coder-Instruct.
@@ -374,41 +375,32 @@ public final class Qwen2Runtime {
             System.arraycopy(decV, h * headDim, kvCacheV[layerIdx][h], pos * headDim, headDim);
         }
 
-        // ── Grouped-Query Attention ──────────────────────────────────
+        // ── Grouped-Query Attention (per-head parallel + SIMD) ────────────
         t0 = System.nanoTime();
         Arrays.fill(decAttnOut, 0, qSize, 0.0f);
-        float scale = (float) (1.0 / Math.sqrt(headDim));
+        final float scale = (float) (1.0 / Math.sqrt(headDim));
+        final int posLocal = pos;
+        final int headDimLocal = headDim;
+        final float[][] cacheK = kvCacheK[layerIdx];
+        final float[][] cacheV = kvCacheV[layerIdx];
 
-        for (int h = 0; h < numHeads; h++) {
+        IntStream.range(0, numHeads).parallel().forEach(h -> {
             int kvH = kvHeadForQueryHead(h);
-            int qOff = h * headDim;
-            float[] kHead = kvCacheK[layerIdx][kvH];
-            float[] vHead = kvCacheV[layerIdx][kvH];
-
-            // Q·K dot products
-            for (int p = 0; p <= pos; p++) {
-                int kOff = p * headDim;
-                float dot = 0;
-                for (int d = 0; d < headDim; d++) {
-                    dot += decQ[qOff + d] * kHead[kOff + d];
-                }
-                decScores[p] = dot * scale;
+            int qOff = h * headDimLocal;
+            int outOff = h * headDimLocal;
+            float[] kHead = cacheK[kvH];
+            float[] vHead = cacheV[kvH];
+            float[] scores = new float[posLocal + 1];
+            for (int p = 0; p <= posLocal; p++) {
+                scores[p] = SimdOps.dot(decQ, qOff, kHead, p * headDimLocal, headDimLocal) * scale;
             }
-
-            // Softmax
-            softmax(decScores, pos + 1);
-
-            // Weighted sum of V
-            int outOff = h * headDim;
-            for (int p = 0; p <= pos; p++) {
-                float w = decScores[p];
+            softmax(scores, posLocal + 1);
+            for (int p = 0; p <= posLocal; p++) {
+                float w = scores[p];
                 if (w < 1e-8f) continue;
-                int vOff = p * headDim;
-                for (int d = 0; d < headDim; d++) {
-                    decAttnOut[outOff + d] += w * vHead[vOff + d];
-                }
+                SimdOps.axpy(decAttnOut, outOff, w, vHead, p * headDimLocal, headDimLocal);
             }
-        }
+        });
         profAttnNs += System.nanoTime() - t0;
 
         // ── O projection → decOProj ──────────────────────────────────
@@ -512,40 +504,38 @@ public final class Qwen2Runtime {
             }
         }
 
-        // ── Causal Self-Attention (GQA) ──────────────────────────────
-        float[] attnOut = new float[seqLen * qSize];
-        float scale = (float) (1.0 / Math.sqrt(headDim));
+        // ── Causal Self-Attention (GQA, parallel over s×h + SIMD) ──────
+        final float[] attnOut = new float[seqLen * qSize];
+        final float scale = (float) (1.0 / Math.sqrt(headDim));
+        final int qSizeLocal = qSize;
+        final int headDimLocal = headDim;
+        final int numHeadsLocal = numHeads;
+        final int startPosLocal = startPos;
+        final float[] qLocal = q;
+        final float[][] cacheK = kvCacheK[layerIdx];
+        final float[][] cacheV = kvCacheV[layerIdx];
+        final int totalTasks = seqLen * numHeadsLocal;
 
-        for (int s = 0; s < seqLen; s++) {
-            int queryPos = startPos + s;
-            for (int h = 0; h < numHeads; h++) {
-                int kvH = kvHeadForQueryHead(h);
-                int qOff = s * qSize + h * headDim;
-                float[] kHead = kvCacheK[layerIdx][kvH];
-                float[] vHead = kvCacheV[layerIdx][kvH];
-
-                float[] scores = new float[queryPos + 1];
-                for (int p = 0; p <= queryPos; p++) {
-                    int kOff = p * headDim;
-                    float dot = 0;
-                    for (int d = 0; d < headDim; d++) {
-                        dot += q[qOff + d] * kHead[kOff + d];
-                    }
-                    scores[p] = dot * scale;
-                }
-
-                softmax(scores, scores.length);
-
-                int outOff = s * qSize + h * headDim;
-                for (int p = 0; p <= queryPos; p++) {
-                    float w = scores[p];
-                    int vOff = p * headDim;
-                    for (int d = 0; d < headDim; d++) {
-                        attnOut[outOff + d] += w * vHead[vOff + d];
-                    }
-                }
+        IntStream.range(0, totalTasks).parallel().forEach(idx -> {
+            int s = idx / numHeadsLocal;
+            int h = idx - s * numHeadsLocal;
+            int queryPos = startPosLocal + s;
+            int kvH = kvHeadForQueryHead(h);
+            int qOff = s * qSizeLocal + h * headDimLocal;
+            int outOff = qOff;
+            float[] kHead = cacheK[kvH];
+            float[] vHead = cacheV[kvH];
+            float[] scores = new float[queryPos + 1];
+            for (int p = 0; p <= queryPos; p++) {
+                scores[p] = SimdOps.dot(qLocal, qOff, kHead, p * headDimLocal, headDimLocal) * scale;
             }
-        }
+            softmax(scores, scores.length);
+            for (int p = 0; p <= queryPos; p++) {
+                float w = scores[p];
+                if (w < 1e-8f) continue;
+                SimdOps.axpy(attnOut, outOff, w, vHead, p * headDimLocal, headDimLocal);
+            }
+        });
 
         // ── O projection ─────────────────────────────────────────────
         float[] oProjOut = new float[seqLen * hidden];

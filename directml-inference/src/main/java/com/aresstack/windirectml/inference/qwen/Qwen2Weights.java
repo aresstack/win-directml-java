@@ -113,12 +113,7 @@ public final class Qwen2Weights implements AutoCloseable {
             final int kLocal = K;
             final float[] dLocal = data;
             IntStream.range(0, nLocal).parallel().forEach(n -> {
-                float sum = 0f;
-                int offset = n * kLocal;
-                for (int k = 0; k < kLocal; k++) {
-                    sum += dLocal[offset + k] * x[k];
-                }
-                y[n] += sum;
+                y[n] += SimdOps.dot(dLocal, n * kLocal, x, 0, kLocal);
             });
         }
 
@@ -131,13 +126,7 @@ public final class Qwen2Weights implements AutoCloseable {
             IntStream.range(0, total).parallel().forEach(idx -> {
                 int s = idx / nLocal;
                 int n = idx - s * nLocal;
-                int xOff = s * kLocal;
-                int wOff = n * kLocal;
-                float sum = 0f;
-                for (int k = 0; k < kLocal; k++) {
-                    sum += dLocal[wOff + k] * x[xOff + k];
-                }
-                y[s * nLocal + n] += sum;
+                y[s * nLocal + n] += SimdOps.dot(dLocal, n * kLocal, x, s * kLocal, kLocal);
             });
         }
     }
