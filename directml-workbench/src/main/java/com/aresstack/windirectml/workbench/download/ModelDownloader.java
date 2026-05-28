@@ -120,31 +120,6 @@ public final class ModelDownloader {
     }
 
     /**
-     * Download Qwen2.5-Coder 0.5B model files using the default download configuration.
-     *
-     * @param repo      HuggingFace repository for the Qwen ONNX model candidate
-     * @param targetDir local directory to save model files into
-     * @param force     if true, overwrite existing files
-     * @param logger    callback for progress messages
-     * @see #downloadQwen(QwenModelDownloadConfig, Path, boolean, Consumer)
-     */
-    public static void downloadQwen(String repo, Path targetDir, boolean force, Consumer<String> logger)
-            throws IOException, InterruptedException {
-        var config = new QwenModelDownloadConfig(
-                repo,
-                QwenModelDownloadConfig.DEFAULT.onnxSubdir(),
-                QwenModelDownloadConfig.DEFAULT.modelFile(),
-                QwenModelDownloadConfig.DEFAULT.externalDataFile(),
-                QwenModelDownloadConfig.DEFAULT.localModelFile(),
-                QwenModelDownloadConfig.DEFAULT.localDataFile(),
-                QwenModelDownloadConfig.DEFAULT.rootFiles(),
-                QwenModelDownloadConfig.DEFAULT.optionalFiles(),
-                QwenModelDownloadConfig.DEFAULT.localDirName()
-        );
-        downloadQwen(config, targetDir, force, logger);
-    }
-
-    /**
      * Download Qwen2.5-Coder model files from a HuggingFace ONNX candidate repo
      * using an explicit configuration object.
      *
