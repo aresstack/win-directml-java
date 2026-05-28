@@ -49,7 +49,7 @@ class ModelDownloadUrlsTest {
         assertFalse(urls.isEmpty());
         // Model and data files via onnx subdir
         assertTrue(urls.stream().anyMatch(u ->
-                u.contains("/onnx/model.onnx") && !u.contains("model.onnx.data")));
+                u.contains("/onnx/model.onnx") && !u.contains("model.onnx_data")));
         assertTrue(urls.stream().anyMatch(u -> u.contains("/onnx/model.onnx_data")));
         // Root files (tokenizer, config)
         assertTrue(urls.stream().anyMatch(u ->
