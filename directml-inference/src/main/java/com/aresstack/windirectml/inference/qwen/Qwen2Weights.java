@@ -60,44 +60,72 @@ public final class Qwen2Weights implements AutoCloseable {
             byte[] zeroPoints, // packed uint4 zero points
             int N, int K, int blockSize
     ) {
-        /** Dequantize and compute y += x @ W^T. */
+        /**
+         * Dequantize and compute y += x @ W^T — parallel over output rows.
+         */
         public void matvec(float[] x, float[] y) {
-            int blocksPerRow = K / blockSize;
-            for (int n = 0; n < N; n++) {
+            final int blocksPerRow = K / blockSize;
+            final byte[] qw = qWeight;
+            final float[] sc = scales;
+            final byte[] zp = zeroPoints;
+            final int bs = blockSize;
+            IntStream.range(0, N).parallel().forEach(n -> {
                 float sum = 0f;
-                int qOffset = n * blocksPerRow * (blockSize / 2);
+                int qOffset = n * blocksPerRow * (bs / 2);
                 int scaleOffset = n * blocksPerRow;
                 for (int blk = 0; blk < blocksPerRow; blk++) {
-                    float scale = scales[scaleOffset + blk];
+                    float scale = sc[scaleOffset + blk];
                     int zpIdx = n * blocksPerRow + blk;
-                    int zpByte = zeroPoints[zpIdx / 2] & 0xFF;
-                    int zp = (zpIdx % 2 == 0) ? (zpByte & 0xF) : (zpByte >>> 4);
-
-                    int kBase = blk * blockSize;
-                    int qBase = qOffset + blk * (blockSize / 2);
-                    for (int j = 0; j < blockSize / 2; j++) {
-                        int packed = qWeight[qBase + j] & 0xFF;
-                        int w0 = (packed & 0xF) - zp;
-                        int w1 = (packed >>> 4) - zp;
+                    int zpByte = zp[zpIdx / 2] & 0xFF;
+                    int zpVal = (zpIdx % 2 == 0) ? (zpByte & 0xF) : (zpByte >>> 4);
+                    int kBase = blk * bs;
+                    int qBase = qOffset + blk * (bs / 2);
+                    for (int j = 0; j < bs / 2; j++) {
+                        int packed = qw[qBase + j] & 0xFF;
+                        int w0 = (packed & 0xF) - zpVal;
+                        int w1 = (packed >>> 4) - zpVal;
                         sum += x[kBase + 2 * j] * (w0 * scale);
                         sum += x[kBase + 2 * j + 1] * (w1 * scale);
                     }
                 }
                 y[n] += sum;
-            }
+            });
         }
 
-        /** Batch matvec: Y += X @ W^T for seqLen rows. */
+        /** Batch matvec: Y += X @ W^T for seqLen rows — parallel over (s, n). */
         public void matmul(float[] x, float[] y, int seqLen) {
-            for (int s = 0; s < seqLen; s++) {
-                int xOff = s * K;
-                int yOff = s * N;
-                float[] xRow = new float[K];
-                System.arraycopy(x, xOff, xRow, 0, K);
-                float[] yRow = new float[N];
-                matvec(xRow, yRow);
-                for (int i = 0; i < N; i++) y[yOff + i] += yRow[i];
-            }
+            final int nLocal = N;
+            final int kLocal = K;
+            final int blocksPerRow = kLocal / blockSize;
+            final byte[] qw = qWeight;
+            final float[] sc = scales;
+            final byte[] zp = zeroPoints;
+            final int bs = blockSize;
+            final int total = seqLen * nLocal;
+            IntStream.range(0, total).parallel().forEach(idx -> {
+                int s = idx / nLocal;
+                int n = idx - s * nLocal;
+                float sum = 0f;
+                int xOff = s * kLocal;
+                int qOffset = n * blocksPerRow * (bs / 2);
+                int scaleOffset = n * blocksPerRow;
+                for (int blk = 0; blk < blocksPerRow; blk++) {
+                    float scale = sc[scaleOffset + blk];
+                    int zpIdx = n * blocksPerRow + blk;
+                    int zpByte = zp[zpIdx / 2] & 0xFF;
+                    int zpVal = (zpIdx % 2 == 0) ? (zpByte & 0xF) : (zpByte >>> 4);
+                    int kBase = blk * bs;
+                    int qBase = qOffset + blk * (bs / 2);
+                    for (int j = 0; j < bs / 2; j++) {
+                        int packed = qw[qBase + j] & 0xFF;
+                        int w0 = (packed & 0xF) - zpVal;
+                        int w1 = (packed >>> 4) - zpVal;
+                        sum += x[xOff + kBase + 2 * j] * (w0 * scale);
+                        sum += x[xOff + kBase + 2 * j + 1] * (w1 * scale);
+                    }
+                }
+                y[s * nLocal + n] += sum;
+            });
         }
     }
 
