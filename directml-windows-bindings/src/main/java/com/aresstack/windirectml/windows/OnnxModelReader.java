@@ -103,17 +103,24 @@ public final class OnnxModelReader {
         try {
             // ModelProto: field 7 = graph (GraphProto)
             while (buf.hasRemaining()) {
+                int loopStart = buf.position();
                 int tag = readVarint32(buf);
                 int fieldNum = tag >>> 3;
                 int wireType = tag & 0x7;
                 if (fieldNum == 7 && wireType == 2) {
                     int len = readVarint32(buf);
-                    int end = buf.position() + len;
+                    // Clamp to buffer limit: ONNX Community exports include external
+                    // raw_data stubs in the outer length, inflating it past EOF.
+                    int end = Math.min(buf.position() + len, buf.limit());
                     graph[0] = parseGraph(buf, end);
                     buf.position(end);
                 } else {
                     skipField(buf, wireType);
                 }
+                // Safety: if no progress was made (e.g. corrupt tag at EOF), abort
+                // to avoid an infinite loop. Without this guard, readVarint32 on an
+                // empty buffer returns 0 and skipField(_, 0) also makes no progress.
+                if (buf.position() == loopStart) break;
             }
         } catch (RuntimeException e) {
             // Wrap underflow / illegal-argument errors with the byte offset so the
@@ -141,6 +148,7 @@ public final class OnnxModelReader {
         String name = "";
 
         while (buf.position() < end) {
+            int loopStart = buf.position();
             int tag = readVarint32(buf);
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
@@ -148,7 +156,7 @@ public final class OnnxModelReader {
                 case 1 -> { // repeated NodeProto node
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int nodeEnd = buf.position() + len;
+                        int nodeEnd = Math.min(buf.position() + len, buf.limit());
                         nodes.add(parseNode(buf, nodeEnd));
                         buf.position(nodeEnd);
                     } else skipField(buf, wireType);
@@ -172,7 +180,7 @@ public final class OnnxModelReader {
                 case 11 -> { // repeated ValueInfoProto input
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int viEnd = buf.position() + len;
+                        int viEnd = Math.min(buf.position() + len, buf.limit());
                         String n = parseValueInfoName(buf, viEnd);
                         buf.position(viEnd);
                         if (n != null) inputNames.add(n);
@@ -181,7 +189,7 @@ public final class OnnxModelReader {
                 case 12 -> { // repeated ValueInfoProto output
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int viEnd = buf.position() + len;
+                        int viEnd = Math.min(buf.position() + len, buf.limit());
                         String n = parseValueInfoName(buf, viEnd);
                         buf.position(viEnd);
                         if (n != null) outputNames.add(n);
@@ -189,6 +197,9 @@ public final class OnnxModelReader {
                 }
                 default -> skipField(buf, wireType);
             }
+            // Safety: if no progress was made (corrupt tag / EOF / inflated end),
+            // abort to prevent an infinite loop.
+            if (buf.position() == loopStart) break;
         }
         return new OnnxGraph(name, nodes, initializers, inputNames, outputNames);
     }
@@ -203,6 +214,7 @@ public final class OnnxModelReader {
         Map<String, Object> attrs = new LinkedHashMap<>();
 
         while (buf.position() < end) {
+            int loopStart = buf.position();
             int tag = readVarint32(buf);
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
@@ -214,13 +226,14 @@ public final class OnnxModelReader {
                 case 5 -> { // AttributeProto
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int aEnd = buf.position() + len;
+                        int aEnd = Math.min(buf.position() + len, buf.limit());
                         parseAttribute(buf, aEnd, attrs);
                         buf.position(aEnd);
                     } else skipField(buf, wireType);
                 }
                 default -> skipField(buf, wireType);
             }
+            if (buf.position() == loopStart) break;
         }
         return new OnnxNode(opType, inputs, outputs, attrs);
     }
@@ -235,6 +248,7 @@ public final class OnnxModelReader {
         List<Long> ints = new ArrayList<>();
 
         while (buf.position() < end) {
+            int loopStart = buf.position();
             int tag = readVarint32(buf);
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
@@ -249,14 +263,19 @@ public final class OnnxModelReader {
                 case 8 -> { // repeated int64 ints (packed or repeated)
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int pEnd = buf.position() + len;
-                        while (buf.position() < pEnd) ints.add(readVarint64(buf));
+                        int pEnd = Math.min(buf.position() + len, buf.limit());
+                        while (buf.position() < pEnd) {
+                            int innerStart = buf.position();
+                            ints.add(readVarint64(buf));
+                            if (buf.position() == innerStart) break;
+                        }
                     } else if (wireType == 0) {
                         ints.add(readVarint64(buf));
                     } else skipField(buf, wireType);
                 }
                 default -> skipField(buf, wireType);
             }
+            if (buf.position() == loopStart) break;
         }
 
         if (!attrName.isEmpty()) {
@@ -284,6 +303,7 @@ public final class OnnxModelReader {
         int dataLocation = 0; // TensorProto.data_location (field 14)
 
         while (buf.position() < end) {
+            int loopStart = buf.position();
             int tag = readVarint32(buf);
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
@@ -291,8 +311,12 @@ public final class OnnxModelReader {
                 case 1 -> { // repeated int64 dims (packed or repeated)
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int pEnd = buf.position() + len;
-                        while (buf.position() < pEnd) dims.add(readVarint64(buf));
+                        int pEnd = Math.min(buf.position() + len, buf.limit());
+                        while (buf.position() < pEnd) {
+                            int innerStart = buf.position();
+                            dims.add(readVarint64(buf));
+                            if (buf.position() == innerStart) break;
+                        }
                     } else if (wireType == 0) {
                         dims.add(readVarint64(buf));
                     } else skipField(buf, wireType);
@@ -314,9 +338,13 @@ public final class OnnxModelReader {
                 case 5 -> { // repeated int32 int32_data (packed varints)
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int pEnd = buf.position() + len;
+                        int pEnd = Math.min(buf.position() + len, buf.limit());
                         int32Values = new ArrayList<>();
-                        while (buf.position() < pEnd) int32Values.add(readVarint32(buf));
+                        while (buf.position() < pEnd) {
+                            int innerStart = buf.position();
+                            int32Values.add(readVarint32(buf));
+                            if (buf.position() == innerStart) break;
+                        }
                     } else if (wireType == 0) {
                         if (int32Values == null) int32Values = new ArrayList<>();
                         int32Values.add(readVarint32(buf));
@@ -358,6 +386,7 @@ public final class OnnxModelReader {
                 }
                 default -> skipField(buf, wireType);
             }
+            if (buf.position() == loopStart) break;
         }
 
         // Build the final float[] and byte[] based on data type.
@@ -423,6 +452,7 @@ public final class OnnxModelReader {
     private static String parseValueInfoName(ByteBuffer buf, int end) {
         String name = null;
         while (buf.position() < end) {
+            int loopStart = buf.position();
             int tag = readVarint32(buf);
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
@@ -431,6 +461,7 @@ public final class OnnxModelReader {
             } else {
                 skipField(buf, wireType);
             }
+            if (buf.position() == loopStart) break;
         }
         return name;
     }
@@ -471,12 +502,14 @@ public final class OnnxModelReader {
     private static void skipField(ByteBuffer buf, int wireType) {
         switch (wireType) {
             case 0 -> readVarint64(buf);          // varint
-            case 1 -> buf.position(buf.position() + 8);  // 64-bit
+            case 1 -> buf.position(Math.min(buf.position() + 8, buf.limit()));  // 64-bit
             case 2 -> {                            // length-delimited
                 int len = readVarint32(buf);
-                buf.position(buf.position() + len);
+                // Clamp to limit so an inflated length (from external raw_data stubs
+                // or a truncated file) cannot throw IllegalArgumentException.
+                buf.position(Math.min(buf.position() + len, buf.limit()));
             }
-            case 5 -> buf.position(buf.position() + 4);  // 32-bit
+            case 5 -> buf.position(Math.min(buf.position() + 4, buf.limit()));  // 32-bit
             default -> throw new RuntimeException("Unknown wire type: " + wireType);
         }
     }
