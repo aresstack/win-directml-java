@@ -113,7 +113,7 @@ public final class SummarizerPanel extends JPanel {
             return;
         }
         if (isQwenTestModel(selected)) {
-            label.setText(" 🧪 CPU test (planned)");
+            label.setText(" 🧪 experimental (DirectML)");
             return;
         }
         String statusText = switch (entry.status()) {
@@ -156,7 +156,7 @@ public final class SummarizerPanel extends JPanel {
         appendResult("Loading generation model: " + selectedModel
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
         if (qwenTestModel) {
-            appendResult("  NOTE: Qwen is running through the Workbench CPU test path.");
+            appendResult("  NOTE: Qwen GPU acceleration depends on the selected backend (see Config tab).");
         }
 
         new SwingWorker<Void, Void>() {
@@ -204,12 +204,13 @@ public final class SummarizerPanel extends JPanel {
             throws InferenceException {
         validateQwenModelFiles(modelDir);
         long start = System.nanoTime();
-        QwenInferenceEngine engine = new QwenInferenceEngine(modelDir, maxTokens);
+        String backend = model.getBackend().name().toLowerCase();
+        QwenInferenceEngine engine = new QwenInferenceEngine(modelDir, maxTokens, backend);
         try {
-            appendResult("Initializing Qwen CPU runtime...");
+            appendResult("Initializing Qwen runtime (backend=" + backend + ")...");
             engine.initialize();
             appendResult("Model loaded in " + elapsedMs(start) + " ms");
-            appendResult("Prefill running (CPU)... first token may take a while for long prompts.");
+            appendResult("Prefill running... first token may take a while for long prompts.");
             appendResult("");
             appendResult("OUTPUT:");
             long genStart = System.nanoTime();

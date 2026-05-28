@@ -4,6 +4,7 @@ import com.aresstack.windirectml.inference.InferenceEngine;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.InferenceRequest;
 import com.aresstack.windirectml.inference.InferenceResult;
+import com.aresstack.windirectml.windows.WindowsBindings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,8 +44,22 @@ import java.nio.file.Path;
  * <ul>
  *   <li>ChatML template instead of Phi-3 role tokens</li>
  *   <li>Qwen BPE tokenizer (byte-level, ~152k vocab) instead of SentencePiece</li>
- *   <li>CPU-only: no DirectML/GPU path in this initial implementation</li>
- *   <li>GQA attention with separate Q/KV head counts</li>
+ *   <li>DirectML GPU path via {@link QwenGpuKernels} (fused QKV + fused gate+up)</li>
+ *   <li>GQA attention with separate Q/KV head counts (attention stays on CPU)</li>
+ * </ul>
+ *
+ * <h2>Backend selection</h2>
+ * <ul>
+ *   <li>{@code "directml"} — always use GPU; fail if DirectML is not available</li>
+ *   <li>{@code "auto"} — try GPU, silently fall back to CPU</li>
+ *   <li>{@code "cpu"} — always CPU; no GPU init</li>
+ * </ul>
+ *
+ * <h2>System properties</h2>
+ * <ul>
+ *   <li>{@code qwen.gpu.layers} — number of decoder layers on GPU (default: all)</li>
+ *   <li>{@code qwen.gpu.lmhead} — place lm_head on GPU (default: {@code false}
+ *       to save ~544 MB VRAM on small iGPUs)</li>
  * </ul>
  */
 public class QwenInferenceEngine implements InferenceEngine {
@@ -53,6 +68,7 @@ public class QwenInferenceEngine implements InferenceEngine {
 
     private final Path modelDir;
     private final int defaultMaxTokens;
+    private final String backend;   // "directml" | "cpu" | "auto"
 
     private Qwen2Config config;
     private QwenTokenizer tokenizer;
@@ -60,15 +76,31 @@ public class QwenInferenceEngine implements InferenceEngine {
     private Qwen2Runtime runtime;
     private boolean ready = false;
 
+    // GPU resources (initialised during initialize() when backend != "cpu")
+    private WindowsBindings wb;
+    private QwenGpuKernels gpuKernels;
+
     /**
-     * Create a new Qwen inference engine.
+     * Create a new Qwen inference engine (CPU-only).
      *
      * @param modelDir        path to the model directory
      * @param defaultMaxTokens default maximum tokens if not specified in request
      */
     public QwenInferenceEngine(Path modelDir, int defaultMaxTokens) {
+        this(modelDir, defaultMaxTokens, "cpu");
+    }
+
+    /**
+     * Create a new Qwen inference engine with backend selection.
+     *
+     * @param modelDir         path to the model directory
+     * @param defaultMaxTokens default maximum tokens if not specified in request
+     * @param backend          "directml", "auto", or "cpu"
+     */
+    public QwenInferenceEngine(Path modelDir, int defaultMaxTokens, String backend) {
         this.modelDir = modelDir;
         this.defaultMaxTokens = defaultMaxTokens > 0 ? defaultMaxTokens : 256;
+        this.backend = backend != null ? backend : "cpu";
     }
 
     @Override
@@ -100,11 +132,43 @@ public class QwenInferenceEngine implements InferenceEngine {
             // Load weights
             weights = Qwen2Weights.load(modelDir, config);
 
-            // Create runtime
-            runtime = new Qwen2Runtime(config, weights, tokenizer);
+            // ── GPU acceleration ──────────────────────────────────────
+            if (!"cpu".equalsIgnoreCase(backend) && WindowsBindings.isSupported()) {
+                try {
+                    wb = new WindowsBindings();
+                    wb.init(backend);
+                    if (wb.hasDirectMl()) {
+                        int gpuLayerCount = Integer.getInteger("qwen.gpu.layers",
+                                config.numHiddenLayers());
+                        boolean gpuLmHead = Boolean.parseBoolean(
+                                System.getProperty("qwen.gpu.lmhead", "false"));
+                        gpuKernels = QwenGpuKernels.create(
+                                wb, weights, config, gpuLayerCount, gpuLmHead);
+                        log.info("GPU acceleration: {}/{} layers on GPU, lmHead={}",
+                                gpuKernels.getGpuLayers(), config.numHiddenLayers(),
+                                gpuKernels.hasLmHead());
+                    } else {
+                        log.warn("DirectML device not available, falling back to CPU");
+                        cleanupGpu();
+                    }
+                } catch (Exception e) {
+                    if ("auto".equalsIgnoreCase(backend)) {
+                        log.warn("GPU init failed, falling back to CPU: {}", e.getMessage());
+                        cleanupGpu();
+                    } else {
+                        cleanupGpu();
+                        throw new InferenceException(
+                                "GPU initialization failed: " + e.getMessage(), e);
+                    }
+                }
+            }
+
+            // Create runtime (gpuKernels may be null → CPU-only)
+            runtime = new Qwen2Runtime(config, weights, tokenizer, gpuKernels);
 
             long elapsed = System.currentTimeMillis() - t0;
-            log.info("QwenInferenceEngine initialized in {} ms", elapsed);
+            log.info("QwenInferenceEngine initialized in {} ms (backend={})",
+                    elapsed, gpuKernels != null ? "GPU(" + gpuKernels.getGpuLayers() + " layers)" : "CPU");
             ready = true;
 
         } catch (Exception e) {
@@ -163,6 +227,7 @@ public class QwenInferenceEngine implements InferenceEngine {
     public void shutdown() {
         log.info("Shutting down QwenInferenceEngine");
         ready = false;
+        cleanupGpu();
         if (weights != null) {
             try {
                 weights.close();
@@ -176,8 +241,31 @@ public class QwenInferenceEngine implements InferenceEngine {
         config = null;
     }
 
+    /**
+     * Clean up GPU resources (idempotent).
+     */
+    private void cleanupGpu() {
+        if (gpuKernels != null) {
+            try {
+                gpuKernels.close();
+            } catch (Exception e) {
+                log.warn("Error closing GPU kernels: {}", e.getMessage());
+            }
+            gpuKernels = null;
+        }
+        if (wb != null) {
+            try {
+                wb.close();
+            } catch (Exception e) {
+                log.warn("Error closing WindowsBindings: {}", e.getMessage());
+            }
+            wb = null;
+        }
+    }
+
     private void cleanupFailedInitialization() {
         ready = false;
+        cleanupGpu();
         if (weights != null) {
             try {
                 weights.close();

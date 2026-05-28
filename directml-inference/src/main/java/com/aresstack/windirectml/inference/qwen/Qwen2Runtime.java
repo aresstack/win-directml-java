@@ -38,7 +38,8 @@ import java.util.stream.IntStream;
  * <ul>
  *   <li>Greedy decoding only (no sampling/beam search)</li>
  *   <li>Single-batch (batch_size=1)</li>
- *   <li>CPU-only (no DirectML acceleration)</li>
+ *   <li>Attention + norms on CPU; projections optionally on GPU via
+ *       {@link QwenGpuKernels}</li>
  * </ul>
  */
 public final class Qwen2Runtime {
@@ -49,6 +50,7 @@ public final class Qwen2Runtime {
     private final Qwen2Weights weights;
     private final QwenTokenizer tokenizer;
     private final int qHeadsPerKvHead;
+    private final QwenGpuKernels gpuKernels;  // null if CPU-only
 
     // ── KV Cache (per-head layout for cache locality) ────────────────────
     // Layout: [layer][head][pos * headDim]
@@ -66,12 +68,14 @@ public final class Qwen2Runtime {
     private final float[] decQ;           // [qSize]
     private final float[] decK;           // [kvSize]
     private final float[] decV;           // [kvSize]
+    private final float[] decQKV;         // [qSize + 2*kvSize] — fused QKV GPU output
     private final float[] decAttnOut;     // [qSize]
     private final float[] decOProj;       // [hidden]
     private final float[] decResidual;    // [hidden]
     private final float[] decPostNorm;    // [hidden]
-    private final float[] decGate;        // [intermediateSize]
-    private final float[] decUp;          // [intermediateSize]
+    private final float[] decGate;        // [intermediateSize]  (CPU path)
+    private final float[] decUp;          // [intermediateSize]  (CPU path)
+    private final float[] decGateUp;      // [2*intermediateSize] (GPU path)
     private final float[] decMlpAct;      // [intermediateSize]
     private final float[] decDown;        // [hidden]
     private final float[] decScores;      // [maxPos] — attention scores
@@ -98,9 +102,23 @@ public final class Qwen2Runtime {
      * @param tokenizer Qwen BPE tokenizer
      */
     public Qwen2Runtime(Qwen2Config config, Qwen2Weights weights, QwenTokenizer tokenizer) {
+        this(config, weights, tokenizer, null);
+    }
+
+    /**
+     * Construct a Qwen2 runtime with optional GPU acceleration.
+     *
+     * @param config     model configuration
+     * @param weights    loaded model weights
+     * @param tokenizer  Qwen BPE tokenizer
+     * @param gpuKernels optional DirectML GPU kernels; {@code null} = CPU-only
+     */
+    public Qwen2Runtime(Qwen2Config config, Qwen2Weights weights, QwenTokenizer tokenizer,
+                        QwenGpuKernels gpuKernels) {
         this.config = config;
         this.weights = weights;
         this.tokenizer = tokenizer;
+        this.gpuKernels = gpuKernels;
 
         int numLayers = config.numHiddenLayers();
         int numHeads = config.numAttentionHeads();
@@ -126,12 +144,14 @@ public final class Qwen2Runtime {
         decQ        = new float[qSize];
         decK        = new float[kvSize];
         decV        = new float[kvSize];
+        decQKV = new float[qSize + 2 * kvSize];
         decAttnOut  = new float[qSize];
         decOProj    = new float[hidden];
         decResidual = new float[hidden];
         decPostNorm = new float[hidden];
         decGate     = new float[intermediate];
         decUp       = new float[intermediate];
+        decGateUp = new float[intermediate * 2];
         decMlpAct   = new float[intermediate];
         decDown     = new float[hidden];
         decScores   = new float[maxPos];
@@ -154,7 +174,10 @@ public final class Qwen2Runtime {
             }
         }
 
-        log.info("Qwen2Runtime: CPU-only mode, {} layers, {} heads ({}KV), headDim={}, GQA ratio={}:1",
+        log.info("Qwen2Runtime: {} mode, {} layers, {} heads ({}KV), headDim={}, GQA ratio={}:1",
+                gpuKernels != null
+                        ? "GPU(" + gpuKernels.getGpuLayers() + " layers)"
+                        : "CPU-only",
                 numLayers, numHeads, kvHeads, config.headDim(), qHeadsPerKvHead);
     }
 
@@ -286,8 +309,12 @@ public final class Qwen2Runtime {
         rmsNorm(lastHidden, weights.finalNormWeight, config.rmsNormEps());
 
         float[] logits = new float[config.vocabSize()];
-        Arrays.fill(logits, 0);
-        weights.lmHead.matvec(lastHidden, logits);
+        if (gpuKernels != null && gpuKernels.hasLmHead()) {
+            gpuKernels.lmHead().matvec(lastHidden, logits);
+        } else {
+            Arrays.fill(logits, 0);
+            weights.lmHead.matvec(lastHidden, logits);
+        }
 
         cachedSeqLen = seqLen;
         return logits;
@@ -318,8 +345,12 @@ public final class Qwen2Runtime {
 
         // LM head → decLogits
         t0 = System.nanoTime();
-        Arrays.fill(decLogits, 0);
-        weights.lmHead.matvec(decBuf, decLogits);
+        if (gpuKernels != null && gpuKernels.hasLmHead()) {
+            gpuKernels.lmHead().matvec(decBuf, decLogits);
+        } else {
+            Arrays.fill(decLogits, 0);
+            weights.lmHead.matvec(decBuf, decLogits);
+        }
         profLmHeadNs += System.nanoTime() - t0;
 
         cachedSeqLen = pos + 1;
@@ -346,12 +377,20 @@ public final class Qwen2Runtime {
 
         // ── Q/K/V Projections ────────────────────────────────────────
         t0 = System.nanoTime();
-        Arrays.fill(decQ, 0);
-        Arrays.fill(decK, 0);
-        Arrays.fill(decV, 0);
-        lw.qProj().matvec(decNormed, decQ);
-        lw.kProj().matvec(decNormed, decK);
-        lw.vProj().matvec(decNormed, decV);
+        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+            // Fused QKV on GPU → output layout: [Q | K | V]
+            gpuKernels.qkvFused(layerIdx).matvec(decNormed, decQKV);
+            System.arraycopy(decQKV, 0, decQ, 0, qSize);
+            System.arraycopy(decQKV, qSize, decK, 0, kvSize);
+            System.arraycopy(decQKV, qSize + kvSize, decV, 0, kvSize);
+        } else {
+            Arrays.fill(decQ, 0);
+            Arrays.fill(decK, 0);
+            Arrays.fill(decV, 0);
+            lw.qProj().matvec(decNormed, decQ);
+            lw.kProj().matvec(decNormed, decK);
+            lw.vProj().matvec(decNormed, decV);
+        }
         // Apply attention biases if present
         if (lw.qBias() != null) addBias(decQ, lw.qBias());
         if (lw.kBias() != null) addBias(decK, lw.kBias());
@@ -405,8 +444,12 @@ public final class Qwen2Runtime {
 
         // ── O projection → decOProj ──────────────────────────────────
         t0 = System.nanoTime();
-        Arrays.fill(decOProj, 0);
-        lw.oProj().matvec(decAttnOut, decOProj);
+        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+            gpuKernels.oProj(layerIdx).matvec(decAttnOut, decOProj);
+        } else {
+            Arrays.fill(decOProj, 0);
+            lw.oProj().matvec(decAttnOut, decOProj);
+        }
         profProjNs += System.nanoTime() - t0;
 
         // ── Residual 1 → decResidual ─────────────────────────────────
@@ -422,26 +465,37 @@ public final class Qwen2Runtime {
 
         // ── MLP: gate_proj + up_proj → SwiGLU → down_proj ────────────
         t0 = System.nanoTime();
-        Arrays.fill(decGate, 0);
-        Arrays.fill(decUp, 0);
-        lw.gateProj().matvec(decPostNorm, decGate);
-        lw.upProj().matvec(decPostNorm, decUp);
+        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+            // Fused gate+up on GPU → output layout: [gate | up]
+            gpuKernels.gateUpFused(layerIdx).matvec(decPostNorm, decGateUp);
+        } else {
+            Arrays.fill(decGate, 0);
+            Arrays.fill(decUp, 0);
+            lw.gateProj().matvec(decPostNorm, decGate);
+            lw.upProj().matvec(decPostNorm, decUp);
+        }
         profProjNs += System.nanoTime() - t0;
 
         // SwiGLU activation: silu(gate) * up, where silu(x) = x * sigmoid(x)
         t0 = System.nanoTime();
         int intermediate = config.intermediateSize();
+        boolean gpuLayer = gpuKernels != null && gpuKernels.hasLayer(layerIdx);
         for (int i = 0; i < intermediate; i++) {
-            float gate = decGate[i];
+            float gate = gpuLayer ? decGateUp[i] : decGate[i];
+            float up = gpuLayer ? decGateUp[intermediate + i] : decUp[i];
             float sigmoid = 1.0f / (1.0f + (float) Math.exp(-gate));
-            decMlpAct[i] = (gate * sigmoid) * decUp[i];
+            decMlpAct[i] = (gate * sigmoid) * up;
         }
         profActNs += System.nanoTime() - t0;
 
         // down_proj
         t0 = System.nanoTime();
-        Arrays.fill(decDown, 0);
-        lw.downProj().matvec(decMlpAct, decDown);
+        if (gpuLayer) {
+            gpuKernels.downProj(layerIdx).matvec(decMlpAct, decDown);
+        } else {
+            Arrays.fill(decDown, 0);
+            lw.downProj().matvec(decMlpAct, decDown);
+        }
         profProjNs += System.nanoTime() - t0;
 
         // ── Residual 2 → hiddenIo (output, in-place) ────────────────
@@ -474,9 +528,22 @@ public final class Qwen2Runtime {
         float[] q = new float[seqLen * qSize];
         float[] k = new float[seqLen * kvSize];
         float[] v = new float[seqLen * kvSize];
-        lw.qProj().matmul(normed, q, seqLen);
-        lw.kProj().matmul(normed, k, seqLen);
-        lw.vProj().matmul(normed, v, seqLen);
+        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+            // Per-token GPU dispatch: fused QKV, one call per position in the sequence
+            float[] row = new float[hidden];
+            float[] qkvRow = new float[gpuKernels.qkvFusedN];
+            for (int s = 0; s < seqLen; s++) {
+                System.arraycopy(normed, s * hidden, row, 0, hidden);
+                gpuKernels.qkvFused(layerIdx).matvec(row, qkvRow);
+                System.arraycopy(qkvRow, 0, q, s * qSize, qSize);
+                System.arraycopy(qkvRow, qSize, k, s * kvSize, kvSize);
+                System.arraycopy(qkvRow, qSize + kvSize, v, s * kvSize, kvSize);
+            }
+        } else {
+            lw.qProj().matmul(normed, q, seqLen);
+            lw.kProj().matmul(normed, k, seqLen);
+            lw.vProj().matmul(normed, v, seqLen);
+        }
         // Apply attention biases if present (broadcast across seq positions)
         if (lw.qBias() != null) addBiasBatched(q, lw.qBias(), seqLen);
         if (lw.kBias() != null) addBiasBatched(k, lw.kBias(), seqLen);
@@ -539,7 +606,17 @@ public final class Qwen2Runtime {
 
         // ── O projection ─────────────────────────────────────────────
         float[] oProjOut = new float[seqLen * hidden];
-        lw.oProj().matmul(attnOut, oProjOut, seqLen);
+        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+            float[] row = new float[qSize];
+            float[] tmpOut = new float[hidden];
+            for (int s = 0; s < seqLen; s++) {
+                System.arraycopy(attnOut, s * qSize, row, 0, qSize);
+                gpuKernels.oProj(layerIdx).matvec(row, tmpOut);
+                System.arraycopy(tmpOut, 0, oProjOut, s * hidden, hidden);
+            }
+        } else {
+            lw.oProj().matmul(attnOut, oProjOut, seqLen);
+        }
 
         // ── Residual 1 + Post-attention RMSNorm ──────────────────────
         float[] residual1 = new float[seqLen * hidden];
@@ -559,8 +636,19 @@ public final class Qwen2Runtime {
         int intermediate = config.intermediateSize();
         float[] gate = new float[seqLen * intermediate];
         float[] up = new float[seqLen * intermediate];
-        lw.gateProj().matmul(postNormed, gate, seqLen);
-        lw.upProj().matmul(postNormed, up, seqLen);
+        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+            float[] row = new float[hidden];
+            float[] guRow = new float[gpuKernels.gateUpFusedN]; // [2 * intermediate]
+            for (int s = 0; s < seqLen; s++) {
+                System.arraycopy(postNormed, s * hidden, row, 0, hidden);
+                gpuKernels.gateUpFused(layerIdx).matvec(row, guRow);
+                System.arraycopy(guRow, 0, gate, s * intermediate, intermediate);
+                System.arraycopy(guRow, intermediate, up, s * intermediate, intermediate);
+            }
+        } else {
+            lw.gateProj().matmul(postNormed, gate, seqLen);
+            lw.upProj().matmul(postNormed, up, seqLen);
+        }
 
         // SwiGLU: silu(gate) * up
         float[] mlpActivation = new float[seqLen * intermediate];
@@ -575,7 +663,17 @@ public final class Qwen2Runtime {
 
         // down_proj
         float[] downOut = new float[seqLen * hidden];
-        lw.downProj().matmul(mlpActivation, downOut, seqLen);
+        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+            float[] row = new float[intermediate];
+            float[] tmpOut = new float[hidden];
+            for (int s = 0; s < seqLen; s++) {
+                System.arraycopy(mlpActivation, s * intermediate, row, 0, intermediate);
+                gpuKernels.downProj(layerIdx).matvec(row, tmpOut);
+                System.arraycopy(tmpOut, 0, downOut, s * hidden, hidden);
+            }
+        } else {
+            lw.downProj().matmul(mlpActivation, downOut, seqLen);
+        }
 
         // ── Residual 2 ──────────────────────────────────────────────
         float[] output = new float[seqLen * hidden];
@@ -735,9 +833,11 @@ public final class Qwen2Runtime {
         double totalMs = totalDecode / 1e6;
         double perToken = totalMs / profSteps;
         double pctDivisor = totalDecode > 0 ? totalDecode : 1;
+        int gpuL = gpuKernels != null ? gpuKernels.getGpuLayers() : 0;
 
         return String.format(
                 "[Qwen2 Decode Profile] %d tokens, %.1f ms total, %.1f ms/token%n"
+                        + "  Mode:          %s%n"
                 + "  Prefill:       %.1f ms%n"
                 + "  Projections:   %.1f ms avg (%.0f%%)%n"
                 + "  Attention:     %.1f ms avg (%.0f%%)%n"
@@ -745,6 +845,7 @@ public final class Qwen2Runtime {
                 + "  SwiGLU:        %.1f ms avg (%.0f%%)%n"
                 + "  LM head:       %.1f ms avg (%.0f%%)",
                 profSteps, totalMs, perToken,
+                gpuL > 0 ? "GPU (" + gpuL + " layers, lmHead=" + gpuKernels.hasLmHead() + ")" : "CPU-only",
                 profPrefillNs / 1e6,
                 profProjNs / 1e6 / profSteps, 100.0 * profProjNs / pctDivisor,
                 profAttnNs / 1e6 / profSteps, 100.0 * profAttnNs / pctDivisor,
