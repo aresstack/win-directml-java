@@ -158,6 +158,33 @@ public final class ModelDownloader {
         }
     }
 
+    /**
+     * Download model files using a {@link ModelDownloadManifest}.
+     *
+     * <p>Each file descriptor in the manifest provides the effective download URL
+     * (which may have been overridden by the user) and the local filename.
+     *
+     * @param manifest  the download manifest with effective URLs
+     * @param targetDir local directory to save model files into
+     * @param force     if true, overwrite existing files
+     * @param logger    callback for progress messages
+     */
+    public static void downloadFromManifest(ModelDownloadManifest manifest, Path targetDir,
+                                            boolean force, Consumer<String> logger)
+            throws IOException, InterruptedException {
+        Files.createDirectories(targetDir);
+
+        var client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(30))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .build();
+
+        for (ModelFileDescriptor desc : manifest.files()) {
+            downloadFileFromUrl(client, desc.currentUrl(), desc.localFilename(),
+                    targetDir, force, logger, desc.required());
+        }
+    }
+
     private static void downloadFile(HttpClient client, String repo,
                                      String remotePath, String localFilename,
                                      Path targetDir, boolean force,
@@ -172,6 +199,49 @@ public final class ModelDownloader {
         }
 
         String url = HF_BASE_URL + "/" + repo + "/resolve/main/" + remotePath;
+        logger.accept("  Downloading: " + localFilename + " ...");
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofMinutes(30))
+                .GET()
+                .build();
+
+        HttpResponse<InputStream> response = client.send(request,
+                HttpResponse.BodyHandlers.ofInputStream());
+
+        if (response.statusCode() == 200) {
+            try (InputStream in = response.body()) {
+                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            long sizeKb = Files.size(target) / 1024;
+            logger.accept("  Downloaded: " + localFilename + " (" + sizeKb + " KB)");
+        } else if (response.statusCode() == 404 && !required) {
+            logger.accept("  Optional file not found (skipped): " + localFilename);
+        } else {
+            String msg = "HTTP " + response.statusCode() + " for " + localFilename
+                    + " (url: " + url + ")";
+            if (required) {
+                throw new IOException(msg);
+            } else {
+                logger.accept("  Warning: " + msg);
+            }
+        }
+    }
+
+    private static void downloadFileFromUrl(HttpClient client, String url,
+                                            String localFilename, Path targetDir,
+                                            boolean force, Consumer<String> logger,
+                                            boolean required)
+            throws IOException, InterruptedException {
+
+        Path target = targetDir.resolve(localFilename);
+
+        if (Files.exists(target) && !force) {
+            logger.accept("  Skipping (exists): " + localFilename);
+            return;
+        }
+
         logger.accept("  Downloading: " + localFilename + " ...");
 
         HttpRequest request = HttpRequest.newBuilder()
