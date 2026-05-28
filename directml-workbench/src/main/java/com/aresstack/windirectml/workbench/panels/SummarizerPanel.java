@@ -177,7 +177,6 @@ public final class SummarizerPanel extends JPanel {
         }
 
         final int effectiveMaxTokens = maxTokens;
-        cancelBtn.setEnabled(qwenTestModel);
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
@@ -242,7 +241,11 @@ public final class SummarizerPanel extends JPanel {
             String formattedPrompt = com.aresstack.windirectml.inference.qwen.QwenChatTemplate.formatChat(
                     systemPrompt, text);
             com.aresstack.windirectml.inference.qwen.Qwen2Runtime runtime = engine.getRuntime();
+            // Reset any stale cancellation before wiring the runtime and enabling the button.
+            runtime.resetCancelled();
             activeQwenRuntime = runtime;
+            // Enable cancel only now that activeQwenRuntime is assigned and ready.
+            SwingUtilities.invokeLater(() -> cancelBtn.setEnabled(true));
 
             // Set prefill progress listener to report to UI
             runtime.setPrefillProgressListener((layer, totalLayers, elapsedMs, seqLen) -> {

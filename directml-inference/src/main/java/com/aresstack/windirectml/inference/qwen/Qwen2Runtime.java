@@ -186,7 +186,7 @@ public final class Qwen2Runtime {
          *
          * @param layer        completed layer (1-based)
          * @param totalLayers  total number of layers
-         * @param elapsedMs    milliseconds elapsed since prefill started
+         * @param elapsedMs    milliseconds taken by this individual layer (not cumulative)
          * @param seqLen       sequence length being processed
          */
         void onLayerComplete(int layer, int totalLayers, long elapsedMs, int seqLen);
@@ -207,6 +207,14 @@ public final class Qwen2Runtime {
      */
     public boolean isCancelled() {
         return cancelled;
+    }
+
+    /**
+     * Reset the cancellation flag. Must be called before starting a new generation
+     * to ensure any previous cancellation state does not carry over.
+     */
+    public void resetCancelled() {
+        this.cancelled = false;
     }
 
     /**
@@ -238,7 +246,6 @@ public final class Qwen2Runtime {
      * @return generated text (excluding the prompt)
      */
     public String generateStreaming(String prompt, int maxTokens, TokenConsumer consumer) {
-        this.cancelled = false;
         int[] inputIds = tokenizer.encode(prompt);
 
         resetProfile();
@@ -330,24 +337,26 @@ public final class Qwen2Runtime {
 
         // Process each layer
         int totalLayers = config.numHiddenLayers();
-        long layerStart = System.nanoTime();
+        long prefillStart = System.nanoTime();
         for (int l = 0; l < totalLayers; l++) {
             if (cancelled) {
                 log.info("Prefill cancelled at layer {}/{}", l + 1, totalLayers);
                 return new float[config.vocabSize()];
             }
+            long layerT0 = System.nanoTime();
             hiddenStates = processLayerPrefill(l, hiddenStates, seqLen, 0);
-            long elapsed = (System.nanoTime() - layerStart) / 1_000_000L;
+            long layerElapsedMs = (System.nanoTime() - layerT0) / 1_000_000L;
+            long cumulativeElapsedMs = (System.nanoTime() - prefillStart) / 1_000_000L;
             if (l == 0 || (l + 1) % 4 == 0 || l == totalLayers - 1) {
-                log.info("Prefill layer {}/{} done ({} ms elapsed, seqLen={})",
-                        l + 1, totalLayers, elapsed, seqLen);
+                log.info("Prefill layer {}/{} done ({} ms, {} ms cumulative, seqLen={})",
+                        l + 1, totalLayers, layerElapsedMs, cumulativeElapsedMs, seqLen);
             }
-            if (elapsed > PREFILL_LAYER_WARN_THRESHOLD_MS && l == 0) {
+            if (layerElapsedMs > PREFILL_LAYER_WARN_THRESHOLD_MS && l == 0) {
                 log.warn("Prefill layer 1 took {} ms — CPU fallback is very slow for this model. "
-                        + "Consider using DirectML acceleration or cancelling.", elapsed);
+                        + "Consider using DirectML acceleration or cancelling.", layerElapsedMs);
             }
             if (prefillProgressListener != null) {
-                prefillProgressListener.onLayerComplete(l + 1, totalLayers, elapsed, seqLen);
+                prefillProgressListener.onLayerComplete(l + 1, totalLayers, layerElapsedMs, seqLen);
             }
         }
 
