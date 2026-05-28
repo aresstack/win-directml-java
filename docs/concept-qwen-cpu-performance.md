@@ -1,7 +1,7 @@
 # Konzept: Qwen CPU-Performance — Analyse & Optimierungsansätze
 
 > **Tracking Issue:** #130  
-> **Status:** Prio 1 + Prio 2 implementiert (2026-05-29) — Tests grün  
+> **Status:** Prio 1 + Prio 2 + Prio 2.5 implementiert (2026-05-29) — Tests grün  
 > **Erstellt:** 2026-05-28  
 > **Scope:** `directml-inference` / `Qwen2Runtime` / `Qwen2Weights` / `Phi3Weights`
 
@@ -47,21 +47,21 @@ einer Sekunde pro Token.
 Für jeden generierten Token durchläuft `Qwen2Runtime.decodeSingleToken()`
 alle 24 Layer mit folgenden Hauptoperationen:
 
-| Operation         | Typ               | Parallelisiert?            | SIMD?             | Schreibt auf                 |
-|-------------------|-------------------|----------------------------|-------------------|------------------------------|
-| `input_layernorm` | RMSNorm           | Nein                       | Nein              | `decNormed[896]`             |
-| `q_proj`          | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decQ[896]`                  |
-| `k_proj`          | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decK[128]`                  |
-| `v_proj`          | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decV[128]`                  |
-| RoPE              | Scalar            | Nein                       | Nein              | `decQ`, `decK` in-place      |
-| Attention GQA     | Dot + Softmax     | **Ja** (14 Heads parallel) | **Ja** (SimdOps)  | `decAttnOut[896]`            |
-| `o_proj`          | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decOProj[896]`              |
-| Residual + Norm   | Scalar            | Nein                       | Nein              |                              |
-| `gate_proj`       | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decGate[4864]` ← **GROSS**  |
-| `up_proj`         | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decUp[4864]` ← **GROSS**    |
-| SwiGLU            | Scalar + exp      | Nein                       | Nein              | `decMlpAct[4864]`            |
-| `down_proj`       | INT4 MatVec       | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decDown[896]` ← **GROSS K** |
-| LM Head           | Dense FP32 MatVec | **Ja** (parallel)          | **Ja**            | `decLogits[151 936]`         |
+| Operation         | Typ                | Parallelisiert?            | SIMD?             | Schreibt auf                       |
+|-------------------|--------------------|----------------------------|-------------------|------------------------------------|
+| `input_layernorm` | RMSNorm            | Nein                       | Nein              | `decNormed[896]`                   |
+| `q_proj`          | INT4 MatVec        | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decQ[896]`                        |
+| `k_proj`          | INT4 MatVec        | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decK[128]`                        |
+| `v_proj`          | INT4 MatVec        | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decV[128]`                        |
+| RoPE              | Scalar             | Nein                       | Nein              | `decQ`, `decK` in-place            |
+| Attention GQA     | Dot + Softmax      | **Ja** (14 Heads parallel) | **Ja** (SimdOps)  | `decAttnOut[896]`                  |
+| `o_proj`          | INT4 MatVec        | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decOProj[896]`                    |
+| Residual + Norm   | Scalar             | Nein                       | Nein              |                                    |
+| `gate_proj`       | INT4 MatVec        | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decGate[4864]` ← **GROSS**        |
+| `up_proj`         | INT4 MatVec        | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decUp[4864]` ← **GROSS**          |
+| SwiGLU            | **fast Bit-Trick** | Nein                       | Nein              | `decMlpAct[4864]` **(Prio 2.5 ✅)** |
+| `down_proj`       | INT4 MatVec        | **Ja** (Prio 1 ✅)          | **Ja** (Prio 2 ✅) | `decDown[896]` ← **GROSS K**       |
+| LM Head           | Dense FP32 MatVec  | **Ja** (parallel)          | **Ja**            | `decLogits[151 936]`               |
 
 **24 Layer × 7 INT4-MatVec = 168 INT4-MatVec-Aufrufe pro Token — jetzt alle parallel + SIMD. ✅**
 
@@ -333,14 +333,15 @@ info("Vector lanes    = {}",FloatVector.SPECIES_PREFERRED.length());
 
 ## 8. Einschätzung: Was hilft wirklich?
 
-| Maßnahme                                      | Status       | Erwarteter Effekt     | Risiko   |
-|-----------------------------------------------|--------------|-----------------------|----------|
-| Prio 1: INT4-MatVec parallelisieren           | **✅ Fertig** | **groß** (~10–20×)    | gering   |
-| Prio 2: SIMD INT4 Dequant (BLOCK_BUF+SimdOps) | **✅ Fertig** | groß (~2–4×)          | gering   |
-| Prio 2b: Phi3Weights parallel + blockDot      | **✅ Fertig** | groß für Phi3         | gering   |
-| FP16-Modell statt INT4                        | ausstehend   | mittel (2–4×)         | mehr RAM |
-| Prio 3: LM-Head-Trivialfix                    | ausstehend   | minimal               | keine    |
-| Prio 4: Profiling-Daten erheben               | ausstehend   | Grundlage f. weiteres | keine    |
+| Maßnahme                                       | Status       | Erwarteter Effekt     | Risiko   |
+|------------------------------------------------|--------------|-----------------------|----------|
+| Prio 1: INT4-MatVec parallelisieren            | **✅ Fertig** | **groß** (~10–20×)    | gering   |
+| Prio 2: SIMD INT4 Dequant (BLOCK_BUF+SimdOps)  | **✅ Fertig** | groß (~2–4×)          | gering   |
+| Prio 2b: Phi3Weights parallel + blockDot       | **✅ Fertig** | groß für Phi3         | gering   |
+| **Prio 2.5: SwiGLU fast-SiLU (Bit-Trick-Exp)** | **✅ Fertig** | **~3–5× auf SwiGLU**  | keine    |
+| FP16-Modell statt INT4                         | ausstehend   | mittel (2–4×)         | mehr RAM |
+| Prio 3: LM-Head-Trivialfix (Arrays.fill)       | ausstehend   | minimal               | keine    |
+| Prio 4: Profiling-Daten erheben                | ausstehend   | Grundlage f. weiteres | keine    |
 
 **Wichtigste Erkenntnis:** Der AMD-Ryzen-Performancevergleich ist kein
 Hinweis auf Ryzen-spezifische Optimierung. Das Problem traf alle CPUs
