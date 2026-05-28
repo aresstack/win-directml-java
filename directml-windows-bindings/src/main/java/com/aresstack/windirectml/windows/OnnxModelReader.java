@@ -160,7 +160,10 @@ public final class OnnxModelReader {
                 case 5 -> { // repeated TensorProto initializer
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int tEnd = buf.position() + len;
+                        // Clamp to buffer limit: ONNX Community exports emit a raw_data
+                        // stub whose declared length matches the external file size,
+                        // which inflates the outer TensorProto length past EOF.
+                        int tEnd = Math.min(buf.position() + len, buf.limit());
                         OnnxTensor t = parseTensor(buf, tEnd);
                         buf.position(tEnd);
                         if (t != null) initializers.put(t.name, t);
@@ -337,7 +340,9 @@ public final class OnnxModelReader {
                             log.warn("Tensor '{}' raw_data length {} exceeds remaining buffer {} "
                                             + "— skipping inline data (will be resolved from external refs)",
                                     name, Integer.toUnsignedString(len), buf.remaining());
-                            buf.position(end);  // jump to end of this TensorProto
+                            // Jump to end of this TensorProto, clamped to buffer limit
+                            // (external-data stubs can also inflate the outer message length).
+                            buf.position(Math.min(end, buf.limit()));
                         } else {
                             rawData = new byte[len];
                             buf.get(rawData);
