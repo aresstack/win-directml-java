@@ -181,19 +181,18 @@ public final class WorkbenchLauncher {
      */
     static List<String> buildCandidateList() {
         List<String> candidates = new ArrayList<String>();
-        String sep = File.separator;
         String exe = isWindows() ? "java.exe" : "java";
 
         // 1. JAVA_HOME_21_X64
         String jh21 = System.getenv("JAVA_HOME_21_X64");
         if (jh21 != null && !jh21.isEmpty()) {
-            candidates.add(jh21 + sep + "bin" + sep + exe);
+            candidates.add(new File(new File(jh21, "bin"), exe).getAbsolutePath());
         }
 
         // 2. JAVA_HOME
         String jh = System.getenv("JAVA_HOME");
         if (jh != null && !jh.isEmpty()) {
-            candidates.add(jh + sep + "bin" + sep + exe);
+            candidates.add(new File(new File(jh, "bin"), exe).getAbsolutePath());
         }
 
         // 3. Every java on PATH
@@ -232,14 +231,14 @@ public final class WorkbenchLauncher {
     }
 
     private static void addWindowsFallbackCandidates(List<String> candidates, String root, String exe) {
-        String sep = File.separator;
         // Eclipse Adoptium / Temurin
         File adoptiumDir = new File(root, "Eclipse Adoptium");
         if (adoptiumDir.isDirectory()) {
             File[] jdks = adoptiumDir.listFiles();
             if (jdks != null) {
                 for (File jdk : jdks) {
-                    candidates.add(jdk.getAbsolutePath() + sep + "bin" + sep + exe);
+                    File bin = new File(new File(jdk, "bin"), exe);
+                    candidates.add(bin.getAbsolutePath());
                 }
             }
         }
@@ -251,7 +250,7 @@ public final class WorkbenchLauncher {
                 File[] entries = dir.listFiles();
                 if (entries != null) {
                     for (File entry : entries) {
-                        File bin = new File(entry, "bin" + sep + exe);
+                        File bin = new File(new File(entry, "bin"), exe);
                         if (bin.exists()) {
                             candidates.add(bin.getAbsolutePath());
                         }
