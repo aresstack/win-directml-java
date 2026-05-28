@@ -134,6 +134,23 @@ public final class ModelDownloader {
     public static void downloadQwen(QwenModelDownloadConfig config, Path targetDir,
                                     boolean force, Consumer<String> logger)
             throws IOException, InterruptedException {
+        downloadFromManifest(ModelDownloadUrls.manifestForQwen(config), targetDir, force, logger);
+    }
+
+    /**
+     * Download model files using a {@link ModelDownloadManifest}.
+     *
+     * <p>Each file descriptor in the manifest provides the effective download URL
+     * (which may have been overridden by the user) and the local filename.
+     *
+     * @param manifest  the download manifest with effective URLs
+     * @param targetDir local directory to save model files into
+     * @param force     if true, overwrite existing files
+     * @param logger    callback for progress messages
+     */
+    public static void downloadFromManifest(ModelDownloadManifest manifest, Path targetDir,
+                                            boolean force, Consumer<String> logger)
+            throws IOException, InterruptedException {
         Files.createDirectories(targetDir);
 
         var client = HttpClient.newBuilder()
@@ -141,20 +158,9 @@ public final class ModelDownloader {
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
 
-        // Model files live under the configured subdir in the remote repo
-        downloadFile(client, config.repo(), config.remoteModelPath(), config.localModelFile(),
-                targetDir, force, logger, true);
-        downloadFile(client, config.repo(), config.remoteDataPath(), config.localDataFile(),
-                targetDir, force, logger, true);
-
-        // Config/tokenizer files live at the repo root
-        for (String file : config.rootFiles()) {
-            downloadFile(client, config.repo(), file, file, targetDir, force, logger, true);
-        }
-
-        // Optional files
-        for (String file : config.optionalFiles()) {
-            downloadFile(client, config.repo(), file, file, targetDir, force, logger, false);
+        for (ModelFileDescriptor desc : manifest.files()) {
+            downloadFileFromUrl(client, desc.currentUrl(), desc.localFilename(),
+                    targetDir, force, logger, desc.required());
         }
     }
 
@@ -199,6 +205,78 @@ public final class ModelDownloader {
             } else {
                 logger.accept("  Warning: " + msg);
             }
+        }
+    }
+
+    private static void downloadFileFromUrl(HttpClient client, String url,
+                                            String localFilename, Path targetDir,
+                                            boolean force, Consumer<String> logger,
+                                            boolean required)
+            throws IOException, InterruptedException {
+
+        Path target = targetDir.resolve(localFilename);
+
+        if (Files.exists(target) && !force) {
+            logger.accept("  Skipping (exists): " + localFilename);
+            return;
+        }
+
+        String sanitizedUrl = sanitizeUrl(url, localFilename, required, logger);
+        if (sanitizedUrl == null) {
+            return;
+        }
+
+        logger.accept("  Downloading: " + localFilename + " ...");
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(parseUriOrThrow(sanitizedUrl, localFilename, required))
+                .timeout(Duration.ofMinutes(30))
+                .GET()
+                .build();
+
+        HttpResponse<InputStream> response = client.send(request,
+                HttpResponse.BodyHandlers.ofInputStream());
+
+        if (response.statusCode() == 200) {
+            try (InputStream in = response.body()) {
+                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            long sizeKb = Files.size(target) / 1024;
+            logger.accept("  Downloaded: " + localFilename + " (" + sizeKb + " KB)");
+        } else if (response.statusCode() == 404 && !required) {
+            logger.accept("  Optional file not found (skipped): " + localFilename);
+        } else {
+            String msg = "HTTP " + response.statusCode() + " for " + localFilename
+                    + " (url: " + sanitizedUrl + ")";
+            if (required) {
+                throw new IOException(msg);
+            } else {
+                logger.accept("  Warning: " + msg);
+            }
+        }
+    }
+
+    private static String sanitizeUrl(String url, String localFilename, boolean required,
+                                      Consumer<String> logger) throws IOException {
+        String sanitized = url == null ? "" : url.trim();
+        if (!sanitized.isEmpty()) {
+            return sanitized;
+        }
+        if (required) {
+            throw new IOException("Invalid required download URL for " + localFilename
+                    + ": value is blank");
+        }
+        logger.accept("  Optional file URL is blank (skipped): " + localFilename);
+        return null;
+    }
+
+    private static URI parseUriOrThrow(String url, String localFilename, boolean required)
+            throws IOException {
+        try {
+            return URI.create(url);
+        } catch (IllegalArgumentException ex) {
+            throw new IOException("Invalid " + (required ? "required" : "optional")
+                    + " download URL for " + localFilename + ": " + url, ex);
         }
     }
 }

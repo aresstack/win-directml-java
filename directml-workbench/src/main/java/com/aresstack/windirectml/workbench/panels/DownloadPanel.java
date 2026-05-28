@@ -1,16 +1,13 @@
 package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.workbench.WorkbenchModel;
-import com.aresstack.windirectml.workbench.download.DownloadFolderOpener;
-import com.aresstack.windirectml.workbench.download.ModelDownloader;
-import com.aresstack.windirectml.workbench.download.ModelDownloadUrls;
-import com.aresstack.windirectml.workbench.download.QwenModelDownloadConfig;
+import com.aresstack.windirectml.workbench.download.*;
 
 import javax.swing.*;
 import java.awt.*;
-import java.awt.datatransfer.StringSelection;
 import java.nio.file.Path;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Panel with download buttons for supported models from Hugging Face.
@@ -20,13 +17,18 @@ public final class DownloadPanel extends JPanel {
     private final WorkbenchModel model;
     private final JTextArea logArea;
     private final JCheckBox forceCheckbox;
+    private final DownloadOverrideStore overrideStore;
+
+    /** In-memory manifests keyed by model id, updated when user presses OK in config dialog. */
+    private final Map<String, ModelDownloadManifest> manifests = new HashMap<>();
 
     public DownloadPanel(WorkbenchModel model) {
         this.model = model;
+        this.overrideStore = new DownloadOverrideStore(DownloadOverrideStore.defaultStorePath());
         setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        // Buttons panel – each row: [Download] [Copy URL] [Open Folder]
+        // Buttons panel – each row: [Download] [Config] [Open Folder]
         var buttons = new JPanel(new GridLayout(0, 3, 4, 4));
 
         addEmbeddingRow(buttons, "Download MiniLM (all-MiniLM-L6-v2)",
@@ -63,49 +65,75 @@ public final class DownloadPanel extends JPanel {
     // ---- Row builders ----
 
     private void addEmbeddingRow(JPanel buttons, String label, String repo, String folder) {
+        var manifest = overrideStore.applyOverrides(
+                ModelDownloadUrls.manifestForEmbedding(repo, folder));
+        manifests.put(manifest.modelId(), manifest);
+
         var downloadBtn = new JButton(label);
-        downloadBtn.addActionListener(e -> startDownload(repo, folder));
+        downloadBtn.addActionListener(e -> startManifestDownload(folder));
         buttons.add(downloadBtn);
 
-        buttons.add(createCopyUrlButton(() -> ModelDownloadUrls.forEmbeddingModel(repo)));
+        buttons.add(createConfigButton(folder));
         buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(folder)));
     }
 
     private void addPhi3Row(JPanel buttons) {
+        var manifest = overrideStore.applyOverrides(ModelDownloadUrls.manifestForPhi3());
+        manifests.put(manifest.modelId(), manifest);
+        String modelId = manifest.modelId();
+
         var phi3Btn = new JButton("Download Phi-3 Mini 4K Instruct (Summarizer)");
-        phi3Btn.addActionListener(e -> startPhi3Download());
+        phi3Btn.addActionListener(e -> startManifestDownload(modelId));
         buttons.add(phi3Btn);
 
-        buttons.add(createCopyUrlButton(ModelDownloadUrls::forPhi3));
-        buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve("phi-3-mini-4k-instruct-onnx")));
+        buttons.add(createConfigButton(modelId));
+        buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(manifest.localDirName())));
     }
 
     private void addQwenRow(JPanel buttons) {
+        var config = QwenModelDownloadConfig.DEFAULT;
+        var manifest = overrideStore.applyOverrides(ModelDownloadUrls.manifestForQwen(config));
+        manifests.put(manifest.modelId(), manifest);
+        String modelId = manifest.modelId();
+
         var qwenBtn = new JButton("Download Qwen2.5-Coder 0.5B");
         qwenBtn.setToolTipText("Download Qwen2.5-Coder 0.5B for local Workbench testing.");
-        qwenBtn.addActionListener(e -> startQwenDownload());
+        qwenBtn.addActionListener(e -> startManifestDownload(modelId));
         buttons.add(qwenBtn);
 
-        var config = QwenModelDownloadConfig.DEFAULT;
-        buttons.add(createCopyUrlButton(() -> ModelDownloadUrls.forQwen(config)));
+        buttons.add(createConfigButton(modelId));
         buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(config.localDirName())));
     }
 
-    // ---- Copy URL button ----
+    // ---- Config button ----
 
-    private JButton createCopyUrlButton(java.util.function.Supplier<List<String>> urlsSupplier) {
-        var btn = new JButton("\uD83D\uDCCB"); // clipboard emoji as compact icon
-        btn.setToolTipText("Copy download URLs");
-        btn.setMargin(new Insets(2, 4, 2, 4));
-        btn.getAccessibleContext().setAccessibleName("Copy download URLs");
-        btn.addActionListener(e -> {
-            var urls = urlsSupplier.get();
-            String text = String.join("\n", urls);
-            var selection = new StringSelection(text);
-            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
-            appendLog("Copied " + urls.size() + " download URL(s) to clipboard.");
-        });
+    private JButton createConfigButton(String modelId) {
+        var btn = new JButton("\u2699"); // gear icon
+        btn.setToolTipText("Configure download URLs");
+        btn.setMargin(new Insets(0, 0, 0, 0));
+        Dimension sq = new Dimension(28, 28);
+        btn.setPreferredSize(sq);
+        btn.setMinimumSize(sq);
+        btn.setMaximumSize(sq);
+        btn.getAccessibleContext().setAccessibleName("Configure download URLs");
+        btn.addActionListener(e -> openConfigDialog(modelId));
         return btn;
+    }
+
+    private void openConfigDialog(String modelId) {
+        var manifest = manifests.get(modelId);
+        if (manifest == null) return;
+
+        var dialog = new DownloadUrlConfigDialog(
+                SwingUtilities.getWindowAncestor(this), manifest);
+        dialog.setVisible(true); // blocks (modal)
+
+        if (dialog.isAccepted()) {
+            var updated = manifest.withAllUrls(dialog.getEditedUrls());
+            manifests.put(modelId, updated);
+            overrideStore.storeOverrides(updated);
+            appendLog("Updated download URLs for: " + modelId);
+        }
     }
 
     // ---- Open folder button ----
@@ -122,16 +150,21 @@ public final class DownloadPanel extends JPanel {
         return btn;
     }
 
-    private void startDownload(String repo, String folder) {
+    // ---- Download using manifest ----
+
+    private void startManifestDownload(String modelId) {
+        var manifest = manifests.get(modelId);
+        if (manifest == null) return;
+
         boolean force = forceCheckbox.isSelected();
-        var targetDir = model.getModelRoot().resolve(folder);
-        appendLog("Starting download: " + repo + " -> " + targetDir);
+        var targetDir = model.getModelRoot().resolve(manifest.localDirName());
+        appendLog("Starting download: " + modelId + " -> " + targetDir);
 
         new SwingWorker<Boolean, String>() {
             @Override
             protected Boolean doInBackground() {
                 try {
-                    ModelDownloader.download(repo, targetDir, force, this::publish);
+                    ModelDownloader.downloadFromManifest(manifest, targetDir, force, this::publish);
                     return true;
                 } catch (Exception ex) {
                     publish("ERROR: " + ex.getMessage());
@@ -148,83 +181,9 @@ public final class DownloadPanel extends JPanel {
             protected void done() {
                 try {
                     boolean ok = get();
-                    appendLog((ok ? "Download finished: " : "Download ended with errors: ") + folder);
+                    appendLog((ok ? "Download finished: " : "Download ended with errors: ") + modelId);
                 } catch (Exception ex) {
-                    appendLog("Download ended with errors: " + folder + " (" + ex.getMessage() + ")");
-                }
-            }
-        }.execute();
-    }
-
-    private void startPhi3Download() {
-        boolean force = forceCheckbox.isSelected();
-        var targetDir = model.getModelRoot().resolve("phi-3-mini-4k-instruct-onnx");
-        appendLog("Starting Phi-3 download (ONNX/GenAI layout from "
-                + ModelDownloader.PHI3_SUBDIR + ") -> " + targetDir);
-        appendLog("  Required files: " + ModelDownloader.PHI3_REQUIRED_FILES);
-
-        new SwingWorker<Boolean, String>() {
-            @Override
-            protected Boolean doInBackground() {
-                try {
-                    ModelDownloader.downloadPhi3(targetDir, force, this::publish);
-                    return true;
-                } catch (Exception ex) {
-                    publish("ERROR: " + ex.getMessage());
-                    return false;
-                }
-            }
-
-            @Override
-            protected void process(java.util.List<String> chunks) {
-                for (var msg : chunks) appendLog(msg);
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    boolean ok = get();
-                    appendLog((ok ? "Phi-3 download finished: "
-                            : "Phi-3 download ended with errors: ") + targetDir);
-                } catch (Exception ex) {
-                    appendLog("Phi-3 download ended with errors: " + ex.getMessage());
-                }
-            }
-        }.execute();
-    }
-
-    private void startQwenDownload() {
-        boolean force = forceCheckbox.isSelected();
-        var config = com.aresstack.windirectml.workbench.download.QwenModelDownloadConfig.DEFAULT;
-        var targetDir = model.getModelRoot().resolve(config.localDirName());
-        appendLog("Starting Qwen2.5-Coder 0.5B download -> " + targetDir);
-        appendLog("  Required files: " + config.requiredLocalFiles());
-
-        new SwingWorker<Boolean, String>() {
-            @Override
-            protected Boolean doInBackground() {
-                try {
-                    ModelDownloader.downloadQwen(config, targetDir, force, this::publish);
-                    return true;
-                } catch (Exception ex) {
-                    publish("ERROR: " + ex.getMessage());
-                    return false;
-                }
-            }
-
-            @Override
-            protected void process(java.util.List<String> chunks) {
-                for (var msg : chunks) appendLog(msg);
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    boolean ok = get();
-                    appendLog((ok ? "Qwen download finished: "
-                            : "Qwen download ended with errors: ") + targetDir);
-                } catch (Exception ex) {
-                    appendLog("Qwen download ended with errors: " + ex.getMessage());
+                    appendLog("Download ended with errors: " + modelId + " (" + ex.getMessage() + ")");
                 }
             }
         }.execute();

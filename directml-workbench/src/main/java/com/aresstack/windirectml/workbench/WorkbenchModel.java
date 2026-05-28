@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.workbench;
 
 import com.aresstack.windirectml.runtime.facade.Backend;
+import com.aresstack.windirectml.workbench.download.DownloadOverrideStore;
 
 import java.nio.file.Path;
 
@@ -10,7 +11,7 @@ import java.nio.file.Path;
 public final class WorkbenchModel {
 
     private volatile Backend backend = Backend.AUTO;
-    private volatile Path modelRoot = Path.of("model");
+    private volatile Path modelRoot = DownloadOverrideStore.defaultModelRoot();
     private volatile String embeddingModel = "all-MiniLM-L6-v2";
     private volatile String rerankerModel = "cross-encoder-ms-marco-MiniLM-L-6-v2";
     private volatile String summarizerModel = "microsoft/Phi-3-mini-4k-instruct-onnx";
