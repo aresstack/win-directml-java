@@ -243,11 +243,11 @@ public final class DownloadOverrideStore {
         int end = i + 1;
         while (end < s.length()) {
             char c = s.charAt(end);
-            if (c == '\\') { end += 2; continue; }
+            if (c == '\\') { end = Math.min(end + 2, s.length()); continue; }
             if (c == '"') break;
             end++;
         }
-        return s.substring(i + 1, end).replace("\\\"", "\"").replace("\\\\", "\\");
+        return s.substring(i + 1, Math.min(end, s.length())).replace("\\\"", "\"").replace("\\\\", "\\");
     }
 
     private static int advancePastString(String s, int i) {
@@ -255,7 +255,7 @@ public final class DownloadOverrideStore {
         i++;
         while (i < s.length()) {
             char c = s.charAt(i);
-            if (c == '\\') { i += 2; continue; }
+            if (c == '\\') { i = Math.min(i + 2, s.length()); continue; }
             if (c == '"') return i + 1;
             i++;
         }
@@ -267,7 +267,7 @@ public final class DownloadOverrideStore {
         boolean inString = false;
         for (int i = openPos; i < s.length(); i++) {
             char c = s.charAt(i);
-            if (c == '\\' && inString) { i++; continue; }
+            if (c == '\\' && inString) { if (i + 1 < s.length()) i++; continue; }
             if (c == '"') { inString = !inString; continue; }
             if (inString) continue;
             if (c == '{') depth++;
