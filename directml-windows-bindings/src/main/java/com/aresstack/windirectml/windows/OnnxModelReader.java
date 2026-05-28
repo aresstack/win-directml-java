@@ -100,19 +100,29 @@ public final class OnnxModelReader {
 
         OnnxGraph[] graph = new OnnxGraph[1];
 
-        // ModelProto: field 7 = graph (GraphProto)
-        while (buf.hasRemaining()) {
-            int tag = readVarint32(buf);
-            int fieldNum = tag >>> 3;
-            int wireType = tag & 0x7;
-            if (fieldNum == 7 && wireType == 2) {
-                int len = readVarint32(buf);
-                int end = buf.position() + len;
-                graph[0] = parseGraph(buf, end);
-                buf.position(end);
-            } else {
-                skipField(buf, wireType);
+        try {
+            // ModelProto: field 7 = graph (GraphProto)
+            while (buf.hasRemaining()) {
+                int tag = readVarint32(buf);
+                int fieldNum = tag >>> 3;
+                int wireType = tag & 0x7;
+                if (fieldNum == 7 && wireType == 2) {
+                    int len = readVarint32(buf);
+                    int end = buf.position() + len;
+                    graph[0] = parseGraph(buf, end);
+                    buf.position(end);
+                } else {
+                    skipField(buf, wireType);
+                }
             }
+        } catch (RuntimeException e) {
+            // Wrap underflow / illegal-argument errors with the byte offset so the
+            // caller (e.g. describeUnsupportedFormat) can produce a useful message
+            // instead of a bare "BufferUnderflowException (no detail message)".
+            throw new IOException("Failed to parse ONNX model '" + onnxFile.getFileName()
+                    + "' at byte offset " + buf.position() + " of " + bytes.length
+                    + " (" + e.getClass().getSimpleName()
+                    + (e.getMessage() != null ? ": " + e.getMessage() : "") + ")", e);
         }
 
         if (graph[0] == null) throw new IOException("No graph found in ONNX model");
@@ -256,6 +266,11 @@ public final class OnnxModelReader {
 
     // ── TensorProto ──────────────────────────────────────────────────────
 
+    /**
+     * TensorProto.DataLocation enum: DEFAULT = 0 (inline), EXTERNAL = 1.
+     */
+    private static final int DATA_LOCATION_EXTERNAL = 1;
+
     private static OnnxTensor parseTensor(ByteBuffer buf, int end) {
         List<Long> dims = new ArrayList<>();
         int dataType = 0;
@@ -263,6 +278,7 @@ public final class OnnxModelReader {
         float[] floatData = null;
         byte[] rawData = null;
         List<Integer> int32Values = null; // from field 5 (packed varints)
+        int dataLocation = 0; // TensorProto.data_location (field 14)
 
         while (buf.position() < end) {
             int tag = readVarint32(buf);
@@ -307,22 +323,39 @@ public final class OnnxModelReader {
                     if (wireType == 2) name = readString(buf);
                     else skipField(buf, wireType);
                 }
-                case 9, 13 -> { // raw byte data (field 13 = raw_data, field 9 = quantized data variant)
+                case 9 -> { // raw_data (bytes) — inline raw tensor payload
                     if (wireType == 2) {
                         int len = readVarint32(buf);
+                        if (len < 0 || len > buf.remaining()) {
+                            throw new RuntimeException("Tensor '" + name + "' raw_data length " + len
+                                    + " exceeds remaining buffer " + buf.remaining()
+                                    + " (file likely truncated or external)");
+                        }
                         rawData = new byte[len];
                         buf.get(rawData);
                     } else skipField(buf, wireType);
+                }
+                case 13 -> { // external_data (repeated StringStringEntryProto) — skip, parsed elsewhere
+                    skipField(buf, wireType);
+                }
+                case 14 -> { // data_location (DataLocation enum)
+                    if (wireType == 0) dataLocation = readVarint32(buf);
+                    else skipField(buf, wireType);
                 }
                 default -> skipField(buf, wireType);
             }
         }
 
-        // Build the final float[] and byte[] based on data type
+        // Build the final float[] and byte[] based on data type.
+        // For external tensors (data_location == EXTERNAL), the inline payload
+        // is empty: weights live in model.onnx_data and are resolved separately.
         float[] data;
         byte[] rawBytes;
 
-        if (floatData != null) {
+        if (dataLocation == DATA_LOCATION_EXTERNAL) {
+            data = new float[0];
+            rawBytes = new byte[0];
+        } else if (floatData != null) {
             // FLOAT tensor with explicit float_data
             data = floatData;
             rawBytes = new byte[0];

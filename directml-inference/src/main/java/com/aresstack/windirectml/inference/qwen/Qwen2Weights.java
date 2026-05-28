@@ -1048,8 +1048,17 @@ public final class Qwen2Weights implements AutoCloseable {
         } catch (IOException | RuntimeException e) {
             String msg = e.getMessage();
             if (msg == null || msg.isBlank()) {
-                msg = e.getClass().getSimpleName() + " (no detail message)";
+                // Walk to the root cause so we don't lose useful framing (e.g. when
+                // the parser wraps a BufferUnderflowException with byte-offset info).
+                Throwable root = e;
+                while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                String rootMsg = root.getMessage();
+                msg = e.getClass().getSimpleName()
+                        + (rootMsg != null && !rootMsg.isBlank()
+                        ? " (" + rootMsg + ")"
+                        : " (" + root.getClass().getSimpleName() + " — no detail; model may be truncated or use an unsupported ONNX layout)");
             }
+            log.warn("Qwen model directory at {} is not a supported ONNX layout", modelDir, e);
             return "Unsupported Qwen ONNX format: " + msg;
         }
     }
