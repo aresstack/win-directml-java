@@ -47,7 +47,8 @@ public record Qwen2Config(
         @JsonProperty("max_position_embeddings") int maxPositionEmbeddings,
         @JsonProperty("intermediate_size") int intermediateSize,
         @JsonProperty("rms_norm_eps") float rmsNormEps,
-        @JsonProperty("rope_theta") float ropeTheta
+        @JsonProperty("rope_theta") float ropeTheta,
+        @JsonProperty("tie_word_embeddings") boolean tieWordEmbeddings
 ) {
     /** Derived: dimension per attention head = hidden_size / num_attention_heads. */
     public int headDim() {

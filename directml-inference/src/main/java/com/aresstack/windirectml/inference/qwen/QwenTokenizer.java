@@ -176,10 +176,24 @@ public final class QwenTokenizer {
         int mergeCount = mergesNode.size();
         Map<Long, Integer> mergeRanks = new HashMap<>(mergeCount * 2);
         for (int i = 0; i < mergeCount; i++) {
-            String merge = mergesNode.get(i).asText();
-            int sep = merge.indexOf(' ');
-            String a = merge.substring(0, sep);
-            String b = merge.substring(sep + 1);
+            JsonNode entry = mergesNode.get(i);
+            String a, b;
+            if (entry.isArray() && entry.size() == 2) {
+                // New tokenizer.json format (tokenizers >= 0.20): merges is an
+                // array of ["a", "b"] pairs.
+                a = entry.get(0).asText();
+                b = entry.get(1).asText();
+            } else {
+                // Legacy format: merges is an array of "a b" strings.
+                String merge = entry.asText();
+                int sep = merge.indexOf(' ');
+                if (sep < 0) {
+                    throw new IOException("Invalid merge entry at index " + i
+                            + ": expected '<a> <b>' or [\"a\",\"b\"], got: " + merge);
+                }
+                a = merge.substring(0, sep);
+                b = merge.substring(sep + 1);
+            }
             mergeRanks.put(pairKey(a, b), i);
         }
 

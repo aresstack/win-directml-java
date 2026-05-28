@@ -289,8 +289,18 @@ public final class Qwen2Weights implements AutoCloseable {
             log.info("Loaded final norm weight");
 
             // ── LM head ─────────────────────────────────────────────────
-            WeightMatrix lmHead = loadLmHead(config, graph, matmulWeightNames, externalRefs, inlineTensors, extData, isQuantized);
-            log.info("Loaded lm_head: [{}, {}]", config.vocabSize(), config.hiddenSize());
+            WeightMatrix lmHead;
+            if (config.tieWordEmbeddings() && !isQuantized) {
+                // Qwen2 0.5B (and most small variants) tie lm_head to embed_tokens.
+                // The HuggingFace ONNX export omits lm_head.weight as a separate
+                // tensor in this case — reuse the embedding matrix directly.
+                log.info("Using tied lm_head (tie_word_embeddings=true): reusing embed_tokens [{}, {}]",
+                        config.vocabSize(), config.hiddenSize());
+                lmHead = new DenseWeightMatrix(new DenseWeight(embedTokens, config.vocabSize(), config.hiddenSize()));
+            } else {
+                lmHead = loadLmHead(config, graph, matmulWeightNames, externalRefs, inlineTensors, extData, isQuantized);
+                log.info("Loaded lm_head: [{}, {}]", config.vocabSize(), config.hiddenSize());
+            }
 
             log.info("All Qwen2 weights loaded successfully");
             return new Qwen2Weights(config, raf, channel, extData,
@@ -859,17 +869,19 @@ public final class Qwen2Weights implements AutoCloseable {
         Map<String, ExternalTensorRef> refs = new LinkedHashMap<>();
 
         while (buf.hasRemaining()) {
+            int loopStart = buf.position();
             int tag = readVarint32(buf);
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
             if (fieldNum == 7 && wireType == 2) {
                 int len = readVarint32(buf);
-                int end = buf.position() + len;
+                int end = Math.min(buf.position() + len, buf.limit());
                 parseGraphForExternalRefs(buf, end, refs);
                 buf.position(end);
             } else {
                 skipField(buf, wireType);
             }
+            if (buf.position() == loopStart) break;
         }
         log.info("Found {} external tensor references", refs.size());
         return refs;
@@ -878,18 +890,20 @@ public final class Qwen2Weights implements AutoCloseable {
     private static void parseGraphForExternalRefs(ByteBuffer buf, int end,
                                                    Map<String, ExternalTensorRef> refs) {
         while (buf.position() < end) {
+            int loopStart = buf.position();
             int tag = readVarint32(buf);
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
             if (fieldNum == 5 && wireType == 2) {
                 int len = readVarint32(buf);
-                int tEnd = buf.position() + len;
+                int tEnd = Math.min(buf.position() + len, buf.limit());
                 ExternalTensorRef ref = parseTensorForExternalRef(buf, tEnd);
                 buf.position(tEnd);
                 if (ref != null) refs.put(ref.name, ref);
             } else {
                 skipField(buf, wireType);
             }
+            if (buf.position() == loopStart) break;
         }
     }
 
@@ -902,6 +916,7 @@ public final class Qwen2Weights implements AutoCloseable {
         long extLength = 0;
 
         while (buf.position() < end) {
+            int loopStart = buf.position();
             int tag = readVarint32(buf);
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
@@ -909,8 +924,12 @@ public final class Qwen2Weights implements AutoCloseable {
                 case 1 -> {
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int pEnd = buf.position() + len;
-                        while (buf.position() < pEnd) dims.add(readVarint64(buf));
+                        int pEnd = Math.min(buf.position() + len, buf.limit());
+                        while (buf.position() < pEnd) {
+                            int innerStart = buf.position();
+                            dims.add(readVarint64(buf));
+                            if (buf.position() == innerStart) break;
+                        }
                     } else if (wireType == 0) dims.add(readVarint64(buf));
                     else skipField(buf, wireType);
                 }
@@ -925,7 +944,7 @@ public final class Qwen2Weights implements AutoCloseable {
                 case 13 -> {
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int eEnd = buf.position() + len;
+                        int eEnd = Math.min(buf.position() + len, buf.limit());
                         String[] kv = parseStringStringEntry(buf, eEnd);
                         buf.position(eEnd);
                         if (kv != null) {
@@ -941,7 +960,7 @@ public final class Qwen2Weights implements AutoCloseable {
                         dataLocation = readVarint32(buf);
                     } else if (wireType == 2) {
                         int len = readVarint32(buf);
-                        int eEnd = buf.position() + len;
+                        int eEnd = Math.min(buf.position() + len, buf.limit());
                         String[] kv = parseStringStringEntry(buf, eEnd);
                         buf.position(eEnd);
                         if (kv != null) {
@@ -958,6 +977,7 @@ public final class Qwen2Weights implements AutoCloseable {
                 }
                 default -> skipField(buf, wireType);
             }
+            if (buf.position() == loopStart) break;
         }
 
         if (dataLocation == 1 && !name.isEmpty()) {
@@ -971,12 +991,14 @@ public final class Qwen2Weights implements AutoCloseable {
     private static String[] parseStringStringEntry(ByteBuffer buf, int end) {
         String key = null, value = null;
         while (buf.position() < end) {
+            int loopStart = buf.position();
             int tag = readVarint32(buf);
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
             if (fieldNum == 1 && wireType == 2) key = readString(buf);
             else if (fieldNum == 2 && wireType == 2) value = readString(buf);
             else skipField(buf, wireType);
+            if (buf.position() == loopStart) break;
         }
         return (key != null && value != null) ? new String[]{key, value} : null;
     }
@@ -1016,9 +1038,12 @@ public final class Qwen2Weights implements AutoCloseable {
     private static void skipField(ByteBuffer buf, int wireType) {
         switch (wireType) {
             case 0 -> { while (buf.hasRemaining() && (buf.get() & 0x80) != 0) {} }
-            case 1 -> buf.position(buf.position() + 8);
-            case 2 -> { int len = readVarint32(buf); buf.position(buf.position() + len); }
-            case 5 -> buf.position(buf.position() + 4);
+            case 1 -> buf.position(Math.min(buf.position() + 8, buf.limit()));
+            case 2 -> {
+                int len = readVarint32(buf);
+                buf.position(Math.min(buf.position() + len, buf.limit()));
+            }
+            case 5 -> buf.position(Math.min(buf.position() + 4, buf.limit()));
             default -> {}
         }
     }

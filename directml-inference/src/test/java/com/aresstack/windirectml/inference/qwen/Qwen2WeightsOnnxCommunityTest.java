@@ -233,7 +233,7 @@ class Qwen2WeightsOnnxCommunityTest {
     @Test
     void loadFinalNormFallsBackToInlineOnnxCommunityName() throws Exception {
         Map<String, OnnxModelReader.OnnxTensor> inline = new HashMap<>();
-        Qwen2Config config = new Qwen2Config(896, 14, 24, 2, 151936, 32768, 4864, 1e-6f, 1_000_000f);
+        Qwen2Config config = new Qwen2Config(896, 14, 24, 2, 151936, 32768, 4864, 1e-6f, 1_000_000f, false);
         String name = "model.layers." + config.numHiddenLayers() + ".final_norm_layernorm.weight";
         float[] expected = new float[]{0.5f, 0.6f};
         inline.put(name, new OnnxModelReader.OnnxTensor(
