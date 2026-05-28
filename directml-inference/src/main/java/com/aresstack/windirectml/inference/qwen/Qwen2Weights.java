@@ -3,6 +3,7 @@ package com.aresstack.windirectml.inference.qwen;
 import com.aresstack.windirectml.windows.OnnxModelReader;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
+import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,6 +16,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.function.Predicate;
 
 /**
  * Reads Qwen2.5-Coder weights from ONNX model graph + external data file.
@@ -167,8 +169,19 @@ public final class Qwen2Weights implements AutoCloseable {
             float[] postNormWeight,      // [hiddenSize]
             WeightMatrix gateProj,       // [intermediateSize, hiddenSize]
             WeightMatrix upProj,         // [intermediateSize, hiddenSize]
-            WeightMatrix downProj        // [hiddenSize, intermediateSize]
-    ) {}
+            WeightMatrix downProj,       // [hiddenSize, intermediateSize]
+            float[] qBias,              // [qSize] or null
+            float[] kBias,              // [kvSize] or null
+            float[] vBias               // [kvSize] or null
+    ) {
+        /** Constructor without biases for backward compatibility. */
+        public LayerWeights(float[] inputNormWeight, WeightMatrix qProj, WeightMatrix kProj,
+                            WeightMatrix vProj, WeightMatrix oProj, float[] postNormWeight,
+                            WeightMatrix gateProj, WeightMatrix upProj, WeightMatrix downProj) {
+            this(inputNormWeight, qProj, kProj, vProj, oProj, postNormWeight,
+                    gateProj, upProj, downProj, null, null, null);
+        }
+    }
 
     // ── Instance fields ──────────────────────────────────────────────────
 
@@ -239,6 +252,7 @@ public final class Qwen2Weights implements AutoCloseable {
             extData.order(ByteOrder.LITTLE_ENDIAN);
 
             Map<String, ExternalTensorRef> externalRefs = parseExternalRefs(onnxPath);
+            Map<String, OnnxTensor> inlineTensors = graph.initializers();
 
             // Map MatMulNBits outputs to weight tensor names
             Map<String, String[]> matmulWeightNames = new LinkedHashMap<>();
@@ -258,24 +272,24 @@ public final class Qwen2Weights implements AutoCloseable {
             log.info("Model format: {}", isQuantized ? "INT4 quantized (MatMulNBits)" : "dense FLOAT16/FLOAT");
 
             // ── Embedding ────────────────────────────────────────────────
-            float[] embedTokens = loadEmbedding(config, externalRefs, extData);
+            float[] embedTokens = loadEmbedding(config, externalRefs, inlineTensors, extData);
             log.info("Loaded embedding: [{}, {}]", config.vocabSize(), config.hiddenSize());
 
             // ── Layers ───────────────────────────────────────────────────
             LayerWeights[] layerWeights = new LayerWeights[config.numHiddenLayers()];
             for (int l = 0; l < config.numHiddenLayers(); l++) {
-                layerWeights[l] = loadLayer(l, config, graph, externalRefs, matmulWeightNames, extData, isQuantized);
+                layerWeights[l] = loadLayer(l, config, graph, externalRefs, inlineTensors, matmulWeightNames, extData, isQuantized);
                 if ((l + 1) % 8 == 0 || l == config.numHiddenLayers() - 1) {
                     log.info("Loaded {}/{} layers", l + 1, config.numHiddenLayers());
                 }
             }
 
             // ── Final norm ───────────────────────────────────────────────
-            float[] finalNormWeight = loadNormWeight("model.norm.weight", externalRefs, extData);
+            float[] finalNormWeight = loadFinalNormWeight(config, externalRefs, inlineTensors, extData);
             log.info("Loaded final norm weight");
 
             // ── LM head ─────────────────────────────────────────────────
-            WeightMatrix lmHead = loadLmHead(config, graph, matmulWeightNames, externalRefs, extData, isQuantized);
+            WeightMatrix lmHead = loadLmHead(config, graph, matmulWeightNames, externalRefs, inlineTensors, extData, isQuantized);
             log.info("Loaded lm_head: [{}, {}]", config.vocabSize(), config.hiddenSize());
 
             log.info("All Qwen2 weights loaded successfully");
@@ -302,16 +316,17 @@ public final class Qwen2Weights implements AutoCloseable {
 
     private static float[] loadEmbedding(Qwen2Config config,
                                           Map<String, ExternalTensorRef> externalRefs,
+                                          Map<String, OnnxTensor> inlineTensors,
                                           MappedByteBuffer extData) throws IOException {
         // Try common Qwen embedding weight names
-        ExternalTensorRef ref = externalRefs.get("model.embed_tokens.weight");
-        if (ref == null) {
-            ref = externalRefs.get("embed_tokens.weight");
-        }
-        if (ref == null) {
+        float[] data = loadOptionalTensorWithAlternatives(
+                List.of("model.embed_tokens.weight", "embed_tokens.weight"),
+                externalRefs, inlineTensors, extData
+        );
+        if (data == null) {
             throw new IOException("Embedding weight not found. Expected 'model.embed_tokens.weight' in ONNX external data.");
         }
-        return readFloatTensorAsFloat32(extData, ref, "model.embed_tokens.weight");
+        return data;
     }
 
     // ── Per-layer loading ────────────────────────────────────────────────
@@ -319,16 +334,18 @@ public final class Qwen2Weights implements AutoCloseable {
     private static LayerWeights loadLayer(int layerIdx, Qwen2Config config,
                                           OnnxGraph graph,
                                           Map<String, ExternalTensorRef> externalRefs,
+                                          Map<String, OnnxTensor> inlineTensors,
                                           Map<String, String[]> matmulWeightNames,
                                           MappedByteBuffer extData,
                                           boolean isQuantized) throws IOException {
         String prefix = "model.layers." + layerIdx;
 
-        // Norm weights (external fp16)
-        float[] inputNorm = loadNormWeight(prefix + ".input_layernorm.weight", externalRefs, extData);
-        float[] postNorm = loadNormWeight(prefix + ".post_attention_layernorm.weight", externalRefs, extData);
+        // Norm weights (external fp16) — try HF-style then ONNX Community style
+        float[] inputNorm = loadNormWeightWithAlternatives(prefix, "input_layernorm", externalRefs, inlineTensors, extData);
+        float[] postNorm = loadNormWeightWithAlternatives(prefix, "post_attention_layernorm", externalRefs, inlineTensors, extData);
 
         WeightMatrix qProj, kProj, vProj, oProj, gateProj, upProj, downProj;
+        float[] qBias = null, kBias = null, vBias = null;
 
         if (isQuantized) {
             // Load from MatMulNBits graph structure
@@ -340,17 +357,59 @@ public final class Qwen2Weights implements AutoCloseable {
             upProj = loadQuantizedProjection(layerIdx, "up_proj", graph, matmulWeightNames, externalRefs, extData);
             downProj = loadQuantizedProjection(layerIdx, "down_proj", graph, matmulWeightNames, externalRefs, extData);
         } else {
-            // Load from external fp16 tensors
-            qProj = loadDenseProjection(prefix + ".self_attn.q_proj.weight", config.qSize(), config.hiddenSize(), externalRefs, extData);
-            kProj = loadDenseProjection(prefix + ".self_attn.k_proj.weight", config.kvSize(), config.hiddenSize(), externalRefs, extData);
-            vProj = loadDenseProjection(prefix + ".self_attn.v_proj.weight", config.kvSize(), config.hiddenSize(), externalRefs, extData);
-            oProj = loadDenseProjection(prefix + ".self_attn.o_proj.weight", config.hiddenSize(), config.qSize(), externalRefs, extData);
-            gateProj = loadDenseProjection(prefix + ".mlp.gate_proj.weight", config.intermediateSize(), config.hiddenSize(), externalRefs, extData);
-            upProj = loadDenseProjection(prefix + ".mlp.up_proj.weight", config.intermediateSize(), config.hiddenSize(), externalRefs, extData);
-            downProj = loadDenseProjection(prefix + ".mlp.down_proj.weight", config.hiddenSize(), config.intermediateSize(), externalRefs, extData);
+            // Detect naming convention: HF-style vs ONNX Community style
+            boolean onnxCommunity = isOnnxCommunityFormat(prefix, externalRefs, inlineTensors);
+
+            if (onnxCommunity) {
+                // ONNX Community format: model.layers.N.attn.X_proj.MatMul.weight
+                // Weights are stored as [in, out] (ONNX natural format for Y = X @ W)
+                qProj = loadDenseProjectionTransposed(prefix + ".attn.q_proj.MatMul.weight", config.qSize(), config.hiddenSize(), externalRefs, inlineTensors, extData);
+                kProj = loadDenseProjectionTransposed(prefix + ".attn.k_proj.MatMul.weight", config.kvSize(), config.hiddenSize(), externalRefs, inlineTensors, extData);
+                vProj = loadDenseProjectionTransposed(prefix + ".attn.v_proj.MatMul.weight", config.kvSize(), config.hiddenSize(), externalRefs, inlineTensors, extData);
+                oProj = loadDenseProjectionTransposed(prefix + ".attn.o_proj.MatMul.weight", config.hiddenSize(), config.qSize(), externalRefs, inlineTensors, extData);
+                gateProj = loadDenseProjectionTransposed(prefix + ".mlp.gate_proj.MatMul.weight", config.intermediateSize(), config.hiddenSize(), externalRefs, inlineTensors, extData);
+                upProj = loadDenseProjectionTransposed(prefix + ".mlp.up_proj.MatMul.weight", config.intermediateSize(), config.hiddenSize(), externalRefs, inlineTensors, extData);
+                downProj = loadDenseProjectionTransposed(prefix + ".mlp.down_proj.MatMul.weight", config.hiddenSize(), config.intermediateSize(), externalRefs, inlineTensors, extData);
+
+                // Load optional bias tensors (ONNX Community: model.layers.N.attn.X_proj.Add.bias)
+                qBias = loadOptionalBias(prefix + ".attn.q_proj.Add.bias", externalRefs, inlineTensors, extData, config.qSize());
+                kBias = loadOptionalBias(prefix + ".attn.k_proj.Add.bias", externalRefs, inlineTensors, extData, config.kvSize());
+                vBias = loadOptionalBias(prefix + ".attn.v_proj.Add.bias", externalRefs, inlineTensors, extData, config.kvSize());
+            } else {
+                // HF-style format: model.layers.N.self_attn.X_proj.weight
+                // Weights are stored as [out, in] (PyTorch convention)
+                qProj = loadDenseProjection(prefix + ".self_attn.q_proj.weight", config.qSize(), config.hiddenSize(), externalRefs, inlineTensors, extData);
+                kProj = loadDenseProjection(prefix + ".self_attn.k_proj.weight", config.kvSize(), config.hiddenSize(), externalRefs, inlineTensors, extData);
+                vProj = loadDenseProjection(prefix + ".self_attn.v_proj.weight", config.kvSize(), config.hiddenSize(), externalRefs, inlineTensors, extData);
+                oProj = loadDenseProjection(prefix + ".self_attn.o_proj.weight", config.hiddenSize(), config.qSize(), externalRefs, inlineTensors, extData);
+                gateProj = loadDenseProjection(prefix + ".mlp.gate_proj.weight", config.intermediateSize(), config.hiddenSize(), externalRefs, inlineTensors, extData);
+                upProj = loadDenseProjection(prefix + ".mlp.up_proj.weight", config.intermediateSize(), config.hiddenSize(), externalRefs, inlineTensors, extData);
+                downProj = loadDenseProjection(prefix + ".mlp.down_proj.weight", config.hiddenSize(), config.intermediateSize(), externalRefs, inlineTensors, extData);
+
+                // HF-style may also have biases (model.layers.N.self_attn.X_proj.bias)
+                qBias = loadOptionalBias(prefix + ".self_attn.q_proj.bias", externalRefs, inlineTensors, extData, config.qSize());
+                kBias = loadOptionalBias(prefix + ".self_attn.k_proj.bias", externalRefs, inlineTensors, extData, config.kvSize());
+                vBias = loadOptionalBias(prefix + ".self_attn.v_proj.bias", externalRefs, inlineTensors, extData, config.kvSize());
+            }
         }
 
-        return new LayerWeights(inputNorm, qProj, kProj, vProj, oProj, postNorm, gateProj, upProj, downProj);
+        if (qBias != null && layerIdx == 0) {
+            log.info("Attention biases found (q={}, k={}, v={})",
+                    qBias.length, kBias != null ? kBias.length : 0, vBias != null ? vBias.length : 0);
+        }
+
+        return new LayerWeights(inputNorm, qProj, kProj, vProj, oProj, postNorm,
+                gateProj, upProj, downProj, qBias, kBias, vBias);
+    }
+
+    /**
+     * Detect whether the export uses ONNX Community naming (model.layers.N.attn.X_proj.MatMul.weight)
+     * vs HuggingFace naming (model.layers.N.self_attn.X_proj.weight).
+     */
+    private static boolean isOnnxCommunityFormat(String layerPrefix,
+                                                 Map<String, ExternalTensorRef> externalRefs,
+                                                 Map<String, OnnxTensor> inlineTensors) {
+        return tensorExists(layerPrefix + ".attn.q_proj.MatMul.weight", externalRefs, inlineTensors);
     }
 
     // ── Quantized weight loading ─────────────────────────────────────────
@@ -419,25 +478,143 @@ public final class Qwen2Weights implements AutoCloseable {
 
     private static WeightMatrix loadDenseProjection(String tensorName, int N, int K,
                                                     Map<String, ExternalTensorRef> externalRefs,
+                                                    Map<String, OnnxTensor> inlineTensors,
                                                     MappedByteBuffer extData) throws IOException {
-        ExternalTensorRef ref = externalRefs.get(tensorName);
-        if (ref == null) {
+        TensorData tensor = resolveFloatTensor(tensorName, externalRefs, inlineTensors, extData);
+        if (tensor == null) {
             throw new IOException("Dense weight not found: " + tensorName);
         }
-        float[] data = readFloatTensorAsFloat32(extData, ref, tensorName);
-        return new DenseWeightMatrix(new DenseWeight(data, N, K));
+        validateMatrixShape(tensorName, tensor.dims(), N, K);
+        return new DenseWeightMatrix(new DenseWeight(tensor.data(), N, K));
+    }
+
+    /**
+     * Load a dense projection from ONNX Community format where weights are stored
+     * in [K, N] layout (ONNX natural: Y = X @ W). Transposes to [N, K] for the
+     * runtime which computes y = W @ x (equivalent to y = x @ W^T with W as [N, K]).
+     */
+    private static WeightMatrix loadDenseProjectionTransposed(String tensorName, int N, int K,
+                                                              Map<String, ExternalTensorRef> externalRefs,
+                                                              Map<String, OnnxTensor> inlineTensors,
+                                                              MappedByteBuffer extData) throws IOException {
+        TensorData tensor = resolveFloatTensor(tensorName, externalRefs, inlineTensors, extData);
+        if (tensor == null) {
+            throw new IOException("Dense weight not found: " + tensorName
+                    + ". Available tensors containing 'weight': "
+                    + tensorKeysContaining("weight", externalRefs, inlineTensors).stream().limit(5).toList());
+        }
+        float[] rawData = tensor.data();
+
+        // Verify dimensions match expectation [K, N] from the ONNX file
+        long[] dims = tensor.dims();
+        if (dims.length == 2 && dims[0] == K && dims[1] == N) {
+            // Expected [K, N] layout — transpose to [N, K]
+            float[] transposed = new float[N * K];
+            for (int n = 0; n < N; n++) {
+                for (int k = 0; k < K; k++) {
+                    transposed[n * K + k] = rawData[k * N + n];
+                }
+            }
+            return new DenseWeightMatrix(new DenseWeight(transposed, N, K));
+        } else if (dims.length == 2 && dims[0] == N && dims[1] == K) {
+            // Already [N, K] — no transpose needed
+            return new DenseWeightMatrix(new DenseWeight(rawData, N, K));
+        } else {
+            throw new IOException("Unexpected dimensions for " + tensorName + ": "
+                    + Arrays.toString(dims) + ", expected [" + K + ", " + N + "] or [" + N + ", " + K + "]");
+        }
+    }
+
+    /**
+     * Load an optional bias tensor. Returns null if the tensor is not present.
+     */
+    private static float[] loadOptionalBias(String tensorName,
+                                            Map<String, ExternalTensorRef> externalRefs,
+                                            Map<String, OnnxTensor> inlineTensors,
+                                            MappedByteBuffer extData,
+                                            int expectedSize) throws IOException {
+        TensorData tensor = resolveFloatTensor(tensorName, externalRefs, inlineTensors, extData);
+        if (tensor == null) {
+            return null;
+        }
+        validateVectorShape(tensorName, tensor.dims(), tensor.data().length, expectedSize);
+        return tensor.data();
     }
 
     // ── Norm weight loading ──────────────────────────────────────────────
 
     private static float[] loadNormWeight(String tensorName,
                                           Map<String, ExternalTensorRef> externalRefs,
+                                          Map<String, OnnxTensor> inlineTensors,
                                           MappedByteBuffer extData) throws IOException {
-        ExternalTensorRef ref = externalRefs.get(tensorName);
-        if (ref == null) {
+        TensorData tensor = resolveFloatTensor(tensorName, externalRefs, inlineTensors, extData);
+        if (tensor == null) {
             throw new IOException("Norm weight not found: " + tensorName);
         }
-        return readFloatTensorAsFloat32(extData, ref, tensorName);
+        return tensor.data();
+    }
+
+    /**
+     * Load per-layer norm weights, trying HF-style and ONNX Community style names.
+     * HF: prefix + ".input_layernorm.weight"
+     * ONNX Community: prefix + ".input_layernorm.weight" (same) or alternative patterns
+     */
+    private static float[] loadNormWeightWithAlternatives(String layerPrefix, String normName,
+                                                          Map<String, ExternalTensorRef> externalRefs,
+                                                          Map<String, OnnxTensor> inlineTensors,
+                                                          MappedByteBuffer extData) throws IOException {
+        // Standard HF-style name
+        String primary = layerPrefix + "." + normName + ".weight";
+        float[] primaryData = loadOptionalTensor(primary, externalRefs, inlineTensors, extData);
+        if (primaryData != null) {
+            return primaryData;
+        }
+
+        // ONNX Community alternative: LayerNormalization variant
+        String altLayerNorm = layerPrefix + "." + normName + "_layernorm.weight";
+        float[] altData = loadOptionalTensor(altLayerNorm, externalRefs, inlineTensors, extData);
+        if (altData != null) {
+            return altData;
+        }
+
+        throw new IOException("Norm weight not found: tried '" + primary + "' and '" + altLayerNorm
+                + "'. Available norm-like tensors: "
+                + tensorKeysMatching(k -> k.contains(layerPrefix) && (k.contains("norm") || k.contains("Norm")),
+                externalRefs, inlineTensors));
+    }
+
+    /**
+     * Load the final RMSNorm weight, trying multiple naming conventions.
+     * HF: "model.norm.weight"
+     * ONNX Community: "model.layers.{numLayers}.final_norm_layernorm.weight" or "model.norm.weight"
+     */
+    private static float[] loadFinalNormWeight(Qwen2Config config,
+                                               Map<String, ExternalTensorRef> externalRefs,
+                                               Map<String, OnnxTensor> inlineTensors,
+                                               MappedByteBuffer extData) throws IOException {
+        // HF-style
+        float[] norm = loadOptionalTensor("model.norm.weight", externalRefs, inlineTensors, extData);
+        if (norm != null) {
+            return norm;
+        }
+
+        // ONNX Community: final_norm stored as a pseudo-layer after the last actual layer
+        String onnxCommunityName = "model.layers." + config.numHiddenLayers() + ".final_norm_layernorm.weight";
+        norm = loadOptionalTensor(onnxCommunityName, externalRefs, inlineTensors, extData);
+        if (norm != null) {
+            return norm;
+        }
+
+        // Try without the layer index prefix
+        norm = loadOptionalTensor("model.final_norm_layernorm.weight", externalRefs, inlineTensors, extData);
+        if (norm != null) {
+            return norm;
+        }
+
+        throw new IOException("Final norm weight not found. Tried: 'model.norm.weight', '"
+                + onnxCommunityName + "'. Available norm-like tensors: "
+                + tensorKeysMatching(k -> k.contains("norm") && !k.contains("layers.0"),
+                externalRefs, inlineTensors));
     }
 
     // ── LM Head loading ──────────────────────────────────────────────────
@@ -445,6 +622,7 @@ public final class Qwen2Weights implements AutoCloseable {
     private static WeightMatrix loadLmHead(Qwen2Config config, OnnxGraph graph,
                                            Map<String, String[]> matmulWeightNames,
                                            Map<String, ExternalTensorRef> externalRefs,
+                                           Map<String, OnnxTensor> inlineTensors,
                                            MappedByteBuffer extData,
                                            boolean isQuantized) throws IOException {
         if (isQuantized) {
@@ -458,18 +636,157 @@ public final class Qwen2Weights implements AutoCloseable {
             }
             throw new IOException("LM head quantized weight not found in ONNX graph");
         } else {
-            // Dense FP16 lm_head
-            ExternalTensorRef ref = externalRefs.get("lm_head.weight");
-            if (ref == null) {
-                // Qwen may tie embeddings (shared weight). Check for model.lm_head.weight
-                ref = externalRefs.get("model.lm_head.weight");
+            // Dense FP16 lm_head — try multiple naming patterns
+            // ONNX Community: may use lm_head.MatMul.weight
+            String onnxCommunityName = "lm_head.MatMul.weight";
+            TensorData tensor = resolveFirstFloatTensor(
+                    List.of("lm_head.weight", "model.lm_head.weight", onnxCommunityName),
+                    externalRefs, inlineTensors, extData
+            );
+            if (tensor == null) {
+                throw new IOException("LM head weight not found. Tried: 'lm_head.weight', "
+                        + "'model.lm_head.weight', '" + onnxCommunityName + "' in ONNX tensors.");
             }
-            if (ref == null) {
-                throw new IOException("LM head weight not found. Expected 'lm_head.weight' in ONNX external data.");
+
+            float[] data = tensor.data();
+            long[] dims = tensor.dims();
+            int vocabSize = config.vocabSize();
+            int hiddenSize = config.hiddenSize();
+
+            // Check if transposed: ONNX Community stores as [hiddenSize, vocabSize]
+            if (dims.length == 2 && dims[0] == hiddenSize && dims[1] == vocabSize) {
+                // Transpose [hiddenSize, vocabSize] → [vocabSize, hiddenSize]
+                float[] transposed = new float[vocabSize * hiddenSize];
+                for (int v = 0; v < vocabSize; v++) {
+                    for (int h = 0; h < hiddenSize; h++) {
+                        transposed[v * hiddenSize + h] = data[h * vocabSize + v];
+                    }
+                }
+                return new DenseWeightMatrix(new DenseWeight(transposed, vocabSize, hiddenSize));
             }
-            float[] data = readFloatTensorAsFloat32(extData, ref, "lm_head.weight");
-            return new DenseWeightMatrix(new DenseWeight(data, config.vocabSize(), config.hiddenSize()));
+            if (!(dims.length == 2 && dims[0] == vocabSize && dims[1] == hiddenSize)) {
+                throw new IOException("Unexpected dimensions for LM head: " + Arrays.toString(dims)
+                        + ", expected [" + hiddenSize + ", " + vocabSize + "] or ["
+                        + vocabSize + ", " + hiddenSize + "]");
+            }
+            return new DenseWeightMatrix(new DenseWeight(data, vocabSize, hiddenSize));
         }
+    }
+
+    /** Tensor payload and shape resolved from either external data refs or inline initializers. */
+    private record TensorData(float[] data, long[] dims) {}
+
+    private static TensorData resolveFirstFloatTensor(List<String> names,
+                                                      Map<String, ExternalTensorRef> externalRefs,
+                                                      Map<String, OnnxTensor> inlineTensors,
+                                                      MappedByteBuffer extData) throws IOException {
+        for (String name : names) {
+            TensorData tensor = resolveFloatTensor(name, externalRefs, inlineTensors, extData);
+            if (tensor != null) {
+                return tensor;
+            }
+        }
+        return null;
+    }
+
+    private static float[] loadOptionalTensor(String tensorName,
+                                              Map<String, ExternalTensorRef> externalRefs,
+                                              Map<String, OnnxTensor> inlineTensors,
+                                              MappedByteBuffer extData) throws IOException {
+        TensorData tensor = resolveFloatTensor(tensorName, externalRefs, inlineTensors, extData);
+        return tensor != null ? tensor.data() : null;
+    }
+
+    private static float[] loadOptionalTensorWithAlternatives(List<String> names,
+                                                              Map<String, ExternalTensorRef> externalRefs,
+                                                              Map<String, OnnxTensor> inlineTensors,
+                                                              MappedByteBuffer extData) throws IOException {
+        TensorData tensor = resolveFirstFloatTensor(names, externalRefs, inlineTensors, extData);
+        return tensor != null ? tensor.data() : null;
+    }
+
+    private static TensorData resolveFloatTensor(String tensorName,
+                                                 Map<String, ExternalTensorRef> externalRefs,
+                                                 Map<String, OnnxTensor> inlineTensors,
+                                                 MappedByteBuffer extData) throws IOException {
+        ExternalTensorRef ref = externalRefs.get(tensorName);
+        if (ref != null) {
+            return new TensorData(readFloatTensorAsFloat32(extData, ref, tensorName), ref.dims);
+        }
+        OnnxTensor inline = inlineTensors.get(tensorName);
+        if (hasInlineData(inline)) {
+            return new TensorData(readInlineTensorAsFloat32(inline, tensorName), inline.dims());
+        }
+        return null;
+    }
+
+    private static float[] readInlineTensorAsFloat32(OnnxTensor tensor, String tensorName) throws IOException {
+        if (tensor.dataType() == OnnxModelReader.ONNX_FLOAT) {
+            if (tensor.data().length > 0) {
+                return tensor.data();
+            }
+            if (tensor.rawBytes().length > 0) {
+                ByteBuffer bb = ByteBuffer.wrap(tensor.rawBytes()).order(ByteOrder.LITTLE_ENDIAN);
+                float[] result = new float[tensor.rawBytes().length / 4];
+                for (int i = 0; i < result.length; i++) {
+                    result[i] = bb.getFloat();
+                }
+                return result;
+            }
+        } else if (tensor.dataType() == OnnxModelReader.ONNX_FLOAT16 && tensor.rawBytes().length > 0) {
+            ByteBuffer bb = ByteBuffer.wrap(tensor.rawBytes()).order(ByteOrder.LITTLE_ENDIAN);
+            float[] result = new float[tensor.rawBytes().length / 2];
+            for (int i = 0; i < result.length; i++) {
+                result[i] = fp16ToFp32(bb.getShort());
+            }
+            return result;
+        }
+        throw new IOException("Unsupported inline tensor data for " + tensorName + ": "
+                + onnxTypeName(tensor.dataType()) + " (" + tensor.dataType() + ")");
+    }
+
+    private static void validateMatrixShape(String tensorName, long[] dims, int N, int K) throws IOException {
+        if (!(dims.length == 2 && dims[0] == N && dims[1] == K)) {
+            throw new IOException("Unexpected dimensions for " + tensorName + ": "
+                    + Arrays.toString(dims) + ", expected [" + N + ", " + K + "]");
+        }
+    }
+
+    private static void validateVectorShape(String tensorName, long[] dims, int length, int expectedSize) throws IOException {
+        if (length != expectedSize) {
+            throw new IOException("Unexpected size for " + tensorName + ": " + length
+                    + ", expected " + expectedSize + " (dims=" + Arrays.toString(dims) + ")");
+        }
+    }
+
+    private static boolean tensorExists(String tensorName,
+                                        Map<String, ExternalTensorRef> externalRefs,
+                                        Map<String, OnnxTensor> inlineTensors) {
+        OnnxTensor inline = inlineTensors.get(tensorName);
+        return externalRefs.containsKey(tensorName)
+                || hasInlineData(inline);
+    }
+
+    private static Set<String> tensorKeysContaining(String fragment,
+                                                    Map<String, ExternalTensorRef> externalRefs,
+                                                    Map<String, OnnxTensor> inlineTensors) {
+        return tensorKeysMatching(name -> name.contains(fragment), externalRefs, inlineTensors);
+    }
+
+    private static Set<String> tensorKeysMatching(Predicate<String> predicate,
+                                                  Map<String, ExternalTensorRef> externalRefs,
+                                                  Map<String, OnnxTensor> inlineTensors) {
+        Set<String> names = new LinkedHashSet<>();
+        externalRefs.keySet().stream().filter(predicate).forEach(names::add);
+        inlineTensors.entrySet().stream()
+                .filter(e -> hasInlineData(e.getValue()) && predicate.test(e.getKey()))
+                .map(Map.Entry::getKey)
+                .forEach(names::add);
+        return names;
+    }
+
+    private static boolean hasInlineData(OnnxTensor tensor) {
+        return tensor != null && (tensor.data().length > 0 || tensor.rawBytes().length > 0);
     }
 
     // ── FP16 reading ─────────────────────────────────────────────────────
@@ -729,7 +1046,11 @@ public final class Qwen2Weights implements AutoCloseable {
             validateExternalTensorTypes(refs, matmulWeightNames, !matmulWeightNames.isEmpty());
             return null;
         } catch (IOException | RuntimeException e) {
-            return "Unsupported Qwen ONNX format: " + e.getMessage();
+            String msg = e.getMessage();
+            if (msg == null || msg.isBlank()) {
+                msg = e.getClass().getSimpleName() + " (no detail message)";
+            }
+            return "Unsupported Qwen ONNX format: " + msg;
         }
     }
 

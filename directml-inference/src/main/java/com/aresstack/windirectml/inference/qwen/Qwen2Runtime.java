@@ -344,6 +344,10 @@ public final class Qwen2Runtime {
         lw.qProj().matvec(decNormed, decQ);
         lw.kProj().matvec(decNormed, decK);
         lw.vProj().matvec(decNormed, decV);
+        // Apply attention biases if present
+        if (lw.qBias() != null) addBias(decQ, lw.qBias());
+        if (lw.kBias() != null) addBias(decK, lw.kBias());
+        if (lw.vBias() != null) addBias(decV, lw.vBias());
         profProjNs += System.nanoTime() - t0;
 
         // ── RoPE ─────────────────────────────────────────────────────
@@ -474,6 +478,10 @@ public final class Qwen2Runtime {
         lw.qProj().matmul(normed, q, seqLen);
         lw.kProj().matmul(normed, k, seqLen);
         lw.vProj().matmul(normed, v, seqLen);
+        // Apply attention biases if present (broadcast across seq positions)
+        if (lw.qBias() != null) addBiasBatched(q, lw.qBias(), seqLen);
+        if (lw.kBias() != null) addBiasBatched(k, lw.kBias(), seqLen);
+        if (lw.vBias() != null) addBiasBatched(v, lw.vBias(), seqLen);
 
         // ── RoPE ─────────────────────────────────────────────────────
         for (int s = 0; s < seqLen; s++) {
@@ -626,6 +634,24 @@ public final class Qwen2Runtime {
         float rms = (float) (1.0 / Math.sqrt(sumSq / x.length + eps));
         for (int i = 0; i < x.length; i++) {
             x[i] = x[i] * rms * weight[i];
+        }
+    }
+
+    /** Add bias vector to a single-position output: out[i] += bias[i]. */
+    private static void addBias(float[] out, float[] bias) {
+        for (int i = 0; i < bias.length; i++) {
+            out[i] += bias[i];
+        }
+    }
+
+    /** Add bias vector to batched output: out[s * dim + i] += bias[i] for each sequence position. */
+    private static void addBiasBatched(float[] out, float[] bias, int seqLen) {
+        int dim = bias.length;
+        for (int s = 0; s < seqLen; s++) {
+            int offset = s * dim;
+            for (int i = 0; i < dim; i++) {
+                out[offset + i] += bias[i];
+            }
         }
     }
 
