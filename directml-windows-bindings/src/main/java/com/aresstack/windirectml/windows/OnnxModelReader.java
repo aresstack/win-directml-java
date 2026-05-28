@@ -326,13 +326,22 @@ public final class OnnxModelReader {
                 case 9 -> { // raw_data (bytes) — inline raw tensor payload
                     if (wireType == 2) {
                         int len = readVarint32(buf);
-                        if (len < 0 || len > buf.remaining()) {
-                            throw new RuntimeException("Tensor '" + name + "' raw_data length " + len
-                                    + " exceeds remaining buffer " + buf.remaining()
-                                    + " (file likely truncated or external)");
+                        if (len < 0 || Integer.toUnsignedLong(len) > buf.remaining()) {
+                            // Raw data length exceeds the available buffer — the tensor data
+                            // cannot be read inline. This occurs in ONNX Community models where
+                            // lm_head (or other large tensors) is stored in the external data
+                            // file but its TensorProto still carries a raw_data stub whose
+                            // encoded length exceeds the model.onnx file size.
+                            // Recovery: skip to the TensorProto boundary so parsing can
+                            // continue normally; the tensor will be resolved from externalRefs.
+                            log.warn("Tensor '{}' raw_data length {} exceeds remaining buffer {} "
+                                            + "— skipping inline data (will be resolved from external refs)",
+                                    name, Integer.toUnsignedString(len), buf.remaining());
+                            buf.position(end);  // jump to end of this TensorProto
+                        } else {
+                            rawData = new byte[len];
+                            buf.get(rawData);
                         }
-                        rawData = new byte[len];
-                        buf.get(rawData);
                     } else skipField(buf, wireType);
                 }
                 case 13 -> { // external_data (repeated StringStringEntryProto) — skip, parsed elsewhere
