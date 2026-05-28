@@ -48,9 +48,9 @@ class DownloadManifestTest {
         assertTrue(manifest.files().stream().anyMatch(f ->
                 f.localFilename().equals("model.onnx") && f.required()));
         assertTrue(manifest.files().stream().anyMatch(f ->
-                f.localFilename().equals("model.onnx.data") && f.required()));
+                f.localFilename().equals("model.onnx_data") && f.required()));
         assertTrue(manifest.files().stream().anyMatch(f ->
-                f.localFilename().equals("model.onnx.data")
+                f.localFilename().equals("model.onnx_data")
                         && f.defaultUrl().endsWith("/onnx/model.onnx_data")
                         && f.required()));
         assertTrue(manifest.files().stream().anyMatch(f ->
