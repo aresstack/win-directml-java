@@ -95,8 +95,9 @@ public final class DownloadPanel extends JPanel {
 
     private JButton createCopyUrlButton(java.util.function.Supplier<List<String>> urlsSupplier) {
         var btn = new JButton("\uD83D\uDCCB"); // clipboard emoji as compact icon
-        btn.setToolTipText("Copy download URL");
+        btn.setToolTipText("Copy download URLs");
         btn.setMargin(new Insets(2, 4, 2, 4));
+        btn.getAccessibleContext().setAccessibleName("Copy download URLs");
         btn.addActionListener(e -> {
             var urls = urlsSupplier.get();
             String text = String.join("\n", urls);
@@ -113,6 +114,7 @@ public final class DownloadPanel extends JPanel {
         var btn = new JButton("\uD83D\uDCC2"); // open folder emoji as compact icon
         btn.setToolTipText("Open target folder");
         btn.setMargin(new Insets(2, 4, 2, 4));
+        btn.getAccessibleContext().setAccessibleName("Open target folder");
         btn.addActionListener(e -> {
             Path folder = folderSupplier.get();
             DownloadFolderOpener.openFolder(folder, this::appendLog);
