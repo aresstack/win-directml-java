@@ -86,6 +86,93 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private boolean prepared = false;
     private boolean closed = false;
 
+    // ── INT4 GPU mode (V3.0 — 8× memory-bandwidth reduction) ─────────────────
+    /**
+     * Set {@code -Ddirectml.int4.gpu.disabled=true} to force the legacy FP32/DML
+     * GEMM path (useful for benchmarking or debugging). Defaults to enabled.
+     */
+    private static final boolean INT4_GPU_ENABLED =
+            !Boolean.getBoolean("directml.int4.gpu.disabled");
+
+    /**
+     * Whether this instance uses the INT4 GPU compute path or the legacy DML FP32 path.
+     */
+    private final boolean useInt4Gpu;
+    private int int4BlockSize;             // quantisation block size (e.g., 128)
+    private MemorySegment int4WeightBuf;   // GPU default buffer: packed INT4 [N * K/2 bytes]
+    private MemorySegment int4ScalesBuf;   // GPU default buffer: FP32 scales [N * blocksPerRow * 4]
+    private MemorySegment int4ZpBuf;       // GPU default buffer: packed INT4 zero-points
+    private GpuComputeKernel int4Shader;   // compiled HLSL INT4 MatVec kernel
+    private long[] int4UavAddrs;           // pre-cached GPU VAs: [X, QW, Scales, ZP, Y]
+    private int[] int4Constants;           // pre-cached constants: [N, K, blockSize]
+
+    // ── HLSL shader source for INT4 block-quantised matrix-vector product ────
+    // Registers: u0=X (FP32 input), u1=QW (packed INT4 weights),
+    //            u2=Scales (FP32), u3=ZP (packed INT4), u4=Y (FP32 output)
+    // Constants (b0): N, K, blockSz
+    //
+    // One thread handles one output row n. Reads 4 packed INT4 bytes at a time
+    // (= 8 nibbles = 8 weights) for efficient 4-byte-aligned VRAM access.
+    // Bandwidth: only N*K/2 bytes of weight data vs N*K*4 for FP32 → 8× reduction.
+    private static final String INT4_MATVEC_HLSL = """
+            RWByteAddressBuffer X      : register(u0);
+            RWByteAddressBuffer QW     : register(u1);
+            RWByteAddressBuffer Scales : register(u2);
+            RWByteAddressBuffer ZP     : register(u3);
+            RWByteAddressBuffer Y      : register(u4);
+            cbuffer CB : register(b0) { uint N; uint K; uint blockSz; };
+            
+            [numthreads(64, 1, 1)]
+            void CSMain(uint3 tid : SV_DispatchThreadID) {
+                uint n = tid.x;
+                if (n >= N) return;
+            
+                uint blocksPerRow = K / blockSz;
+                float sum = 0.0;
+            
+                for (uint blk = 0; blk < blocksPerRow; blk++) {
+                    uint scIdx = n * blocksPerRow + blk;
+            
+                    // FP32 scale for this block
+                    float scale = asfloat(Scales.Load(scIdx * 4));
+            
+                    // Packed uint4 zero-point nibble (2 per byte, low nibble first)
+                    uint zpByteIdx  = scIdx / 2;
+                    uint zpDword    = ZP.Load((zpByteIdx / 4) * 4);
+                    uint zpByte     = (zpDword >> ((zpByteIdx % 4) * 8)) & 0xFF;
+                    float zpVal = (scIdx % 2u == 0u) ? float(zpByte & 0xFu)
+                                                     : float(zpByte >> 4u);
+            
+                    // Base byte offset in QW for row n, block blk
+                    uint qByteBase = n * blocksPerRow * (blockSz / 2) + blk * (blockSz / 2);
+                    // Base k-index for this block
+                    uint kBase = blk * blockSz;
+            
+                    // Process 4 bytes (8 nibbles = 8 weights) per inner iteration.
+                    // qByteBase is always 4-aligned (blockSz multiple of 8), so
+                    // QW.Load(qByteBase + j) is always 4-byte-aligned.
+                    for (uint j = 0; j < blockSz / 2; j += 4) {
+                        uint dword = QW.Load(qByteBase + j);
+                        uint b0 = dword & 0xFF;
+                        uint b1 = (dword >> 8)  & 0xFF;
+                        uint b2 = (dword >> 16) & 0xFF;
+                        uint b3 =  dword >> 24;
+                        uint kOff = kBase + j * 2;
+                        sum += (float(b0 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+0)*4));
+                        sum += (float(b0 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+1)*4));
+                        sum += (float(b1 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+2)*4));
+                        sum += (float(b1 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+3)*4));
+                        sum += (float(b2 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+4)*4));
+                        sum += (float(b2 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+5)*4));
+                        sum += (float(b3 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+6)*4));
+                        sum += (float(b3 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+7)*4));
+                    }
+                }
+            
+                Y.Store(n * 4, asuint(sum));
+            }
+            """;
+
     /**
      * Create a MatMulNBits kernel for a specific weight matrix.
      *
@@ -104,13 +191,18 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         this.arena = Arena.ofShared();
         this.N = N;
         this.K = K;
+        this.useInt4Gpu = INT4_GPU_ENABLED;
 
         try {
-            long t0 = System.nanoTime();
-            float[] dequantized = dequantizeInt4(qWeight, scales, zeroPoints, N, K, blockSize);
-            log.info("Dequantized [{}, {}] INT4→FP32 in {} ms",
-                    N, K, (System.nanoTime() - t0) / 1_000_000);
-            prepareGpu(dequantized);
+            if (useInt4Gpu) {
+                prepareInt4Gpu(qWeight, scales, zeroPoints, blockSize);
+            } else {
+                long t0 = System.nanoTime();
+                float[] dequantized = dequantizeInt4(qWeight, scales, zeroPoints, N, K, blockSize);
+                log.info("Dequantized [{}, {}] INT4→FP32 in {} ms (legacy DML path)",
+                        N, K, (System.nanoTime() - t0) / 1_000_000);
+                prepareGpu(dequantized);
+            }
         } catch (WindowsNativeException e) {
             arena.close();
             throw new RuntimeException("MatMulNBitsKernel preparation failed", e);
@@ -141,6 +233,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         this.arena = Arena.ofShared();
         this.N = N;
         this.K = K;
+        this.useInt4Gpu = false;  // pre-dequantized path always uses DML FP32
 
         try {
             prepareGpu(fp32Weights);
@@ -148,6 +241,76 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             arena.close();
             throw new RuntimeException("MatMulNBitsKernel preparation failed (FP32 path)", e);
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // INT4 GPU preparation (V3.0 — keeps INT4 on GPU, 8× bandwidth reduction)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * INT4 GPU path: upload packed INT4 weights + scales + zero-points to GPU,
+     * compile the custom HLSL INT4-MatVec shader, and pre-allocate execution
+     * infrastructure. Replaces the DML FP32 GEMM path entirely.
+     */
+    private void prepareInt4Gpu(byte[] qWeight, float[] scales, byte[] zeroPoints,
+                                int blockSize) throws WindowsNativeException {
+        this.int4BlockSize = blockSize;
+        var dev = wb.getD3d12Device();
+        var queue = wb.getCommandQueue();
+
+        int blocksPerRow = K / blockSize;
+        long qBytes = (long) N * (K / 2);                    // packed INT4
+        long scaleBytes = (long) N * blocksPerRow * Float.BYTES;  // FP32 scales
+        long zpBytes = ((long) N * blocksPerRow + 1) / 2;      // packed INT4 ZP
+
+        log.info("INT4 GPU mode [{}, {}]: weight={} KB, scales={} KB, zp={} KB (was {} MB FP32)",
+                N, K, qBytes / 1024, scaleBytes / 1024, zpBytes / 1024,
+                (long) N * K * 4 / (1024 * 1024));
+
+        // Upload INT4 weights to GPU
+        int4WeightBuf = D3D12Bindings.createDefaultBuffer(dev, qBytes, arena);
+        D3D12Bindings.uploadBytes(dev, queue, int4WeightBuf, qWeight, arena);
+
+        // Upload FP32 scales to GPU (reuse uploadFloats)
+        int4ScalesBuf = D3D12Bindings.createDefaultBuffer(dev, scaleBytes, arena);
+        D3D12Bindings.uploadFloats(dev, queue, int4ScalesBuf, scales, arena);
+
+        // Upload INT4 zero-points to GPU
+        int4ZpBuf = D3D12Bindings.createDefaultBuffer(dev, zpBytes, arena);
+        D3D12Bindings.uploadBytes(dev, queue, int4ZpBuf, zeroPoints, arena);
+
+        // Create input and output GPU buffers (same size as legacy path)
+        long inputBytes = (long) K * Float.BYTES;
+        long outputBytes = (long) N * Float.BYTES;
+        inputBuf = D3D12Bindings.createDefaultBuffer(dev, inputBytes, arena);
+        outputBuf = D3D12Bindings.createDefaultBuffer(dev, outputBytes, arena);
+
+        // Pre-allocate exec infrastructure (staging, cmd allocator, fence, barriers)
+        // Pass null for dml — INT4 mode does not use DirectML
+        prepareExecInfraInt4(dev, inputBytes, outputBytes);
+
+        // Compile INT4 MatVec shader (on the shared execCmdList for MH caching)
+        int4Shader = new GpuComputeKernel(wb, execCmdList,
+                INT4_MATVEC_HLSL, "int4_matvec",
+                5,   // 5 UAVs: X, QW, Scales, ZP, Y
+                3,   // 3 constants: N, K, blockSize
+                64); // 64 threads per group → dispatch N/64 groups
+
+        // Pre-cache GPU VAs and constants (fixed for lifetime of this kernel)
+        int4UavAddrs = new long[]{
+                D3D12Bindings.getGpuVirtualAddress(inputBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4WeightBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4ScalesBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4ZpBuf),
+                D3D12Bindings.getGpuVirtualAddress(outputBuf)
+        };
+        int4Constants = new int[]{N, K, blockSize};
+
+        prepared = true;
+        log.info("MatMulNBitsKernel (INT4 GPU) ready: [{}, {}] — {}/{} bytes on GPU vs {} legacy",
+                N, K, qBytes + scaleBytes + zpBytes,
+                qBytes + scaleBytes + zpBytes,
+                (long) N * K * 4);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -232,6 +395,78 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         prepared = true;
         log.info("MatMulNBitsKernel ready: [{}, {}] on GPU (optimized single-submit)", N, K);
+    }
+
+    // ── INT4-only execution infrastructure (no DML, no descriptor heap) ─────
+
+    /**
+     * Like {@link #prepareExecInfra} but skips all DirectML-specific setup.
+     * Used by the INT4 GPU path which drives a custom HLSL compute shader.
+     */
+    private void prepareExecInfraInt4(MemorySegment dev, long inputBytes, long outputBytes)
+            throws WindowsNativeException {
+
+        uploadBuf = D3D12Bindings.createUploadBuffer(dev, inputBytes, arena);
+        readbackBuf = D3D12Bindings.createReadbackBuffer(dev, outputBytes, arena);
+        mappedUpload = D3D12Bindings.mapResource(uploadBuf, arena);
+        mappedReadback = D3D12Bindings.mapResource(readbackBuf, arena);
+
+        execAllocator = D3D12Bindings.createCommandAllocator(dev,
+                D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, arena);
+        execCmdList = D3D12Bindings.createCommandList(dev,
+                D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, execAllocator, arena);
+        D3D12Bindings.closeCommandList(execCmdList);
+
+        execFence = D3D12Bindings.createFence(dev, 0, arena);
+        fenceValue = 0;
+
+        // Barrier: input COPY_DEST → UAV (used before INT4 dispatch)
+        barrierInputToUAV = allocTransitionBarrier(inputBuf,
+                D3D12Bindings.D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        // Barrier: output UAV → COPY_SOURCE
+        barrierOutputToCS = allocTransitionBarrier(outputBuf,
+                D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE);
+        // Cleanup barriers
+        barrierInputToCommon = allocTransitionBarrier(inputBuf,
+                D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
+        barrierOutputToCommon = allocTransitionBarrier(outputBuf,
+                D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE,
+                D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
+
+        // heapArrayPtr not used in INT4 mode (no descriptor heap needed)
+        // cmdListArrayPtr used by standalone matvec()
+        cmdListArrayPtr = arena.allocate(ValueLayout.ADDRESS);
+        cmdListArrayPtr.set(ValueLayout.ADDRESS, 0, execCmdList);
+
+        // Pre-cache MethodHandles needed by both INT4 dispatch and standalone matvec()
+        var queue = wb.getCommandQueue();
+        mhResetAllocator = DxgiBindings.vtableMethod(execAllocator, 8,
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+        mhResetCmdList = DxgiBindings.vtableMethod(execCmdList, 10,
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                        ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+        mhCopyBufferRegion = DxgiBindings.vtableMethod(execCmdList, 15,
+                FunctionDescriptor.ofVoid(ValueLayout.ADDRESS,
+                        ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
+                        ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
+                        ValueLayout.JAVA_LONG));
+        mhResourceBarrier = DxgiBindings.vtableMethod(execCmdList, 26,
+                FunctionDescriptor.ofVoid(ValueLayout.ADDRESS,
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+        mhCloseCmdList = DxgiBindings.vtableMethod(execCmdList, 9,
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+        mhExecuteCmdLists = DxgiBindings.vtableMethod(queue, 10,
+                FunctionDescriptor.ofVoid(ValueLayout.ADDRESS,
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+        mhQueueSignal = DxgiBindings.vtableMethod(queue, 14,
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                        ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+        mhFenceGetCompleted = DxgiBindings.vtableMethod(execFence, 8,
+                FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+        // mhRecordDispatch, mhSetDescriptorHeaps, heapArrayPtr left null — not used in INT4 mode
     }
 
     // ── Pre-cached MethodHandles for zero-overhead hot path (V1.2) ──────
@@ -469,12 +704,12 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     /**
      * Compute y = x @ W^T on GPU, writing result into a caller-provided buffer.
      * <p>
-     * <b>V1.2 zero-alloc hot path</b>: upload, DML dispatch, and readback are
-     * combined into a <b>single command list submission</b>. All resources
-     * (staging buffers, command allocator, command list, fence, binding table,
-     * barrier structs, and MethodHandles) are pre-allocated and reused across
-     * calls. <b>Zero heap allocation, zero MethodHandle creation</b> in the
-     * hot path. Only one GPU synchronization point per call.
+     * <b>V1.2 zero-alloc hot path</b>: upload, dispatch, and readback are combined
+     * into a single command list submission with a single fence wait.
+     * <p>
+     * <b>V3.0 INT4 mode</b>: dispatches a custom HLSL compute shader reading
+     * packed INT4 weights directly from VRAM — ~8× less memory bandwidth than
+     * the legacy FP32/DML GEMM path.
      *
      * @param x   input vector [K]
      * @param out output vector [N] (must have length ≥ N)
@@ -498,14 +733,16 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             HResult.check(hr, "CommandList::Reset");
 
             // 3. Record: upload → barrier → dispatch → barrier → readback
-            //    V1.3: Removed redundant UAV barrier (the transition barrier
-            //    output UAV→COPY_SOURCE already provides necessary synchronization).
-            //    Cleanup barriers to COMMON remain because D3D12 only decays
-            //    implicitly-promoted resources, not explicitly-transitioned ones.
             mhCopyBufferRegion.invokeExact(execCmdList, inputBuf, 0L, uploadBuf, 0L, inputBytes);
             mhResourceBarrier.invokeExact(execCmdList, 1, barrierInputToUAV);
-            mhSetDescriptorHeaps.invokeExact(execCmdList, 1, heapArrayPtr);
-            mhRecordDispatch.invokeExact(cmdRecorder, execCmdList, compiledGemm, execBindingTable);
+            if (useInt4Gpu) {
+                // V3.0: custom HLSL INT4 compute dispatch — no descriptor heap needed
+                int4Shader.recordDispatch(execCmdList, int4UavAddrs, int4Constants, N);
+            } else {
+                // Legacy: DML GEMM with FP32 weight buffer
+                mhSetDescriptorHeaps.invokeExact(execCmdList, 1, heapArrayPtr);
+                mhRecordDispatch.invokeExact(cmdRecorder, execCmdList, compiledGemm, execBindingTable);
+            }
             mhResourceBarrier.invokeExact(execCmdList, 1, barrierOutputToCS);
             mhCopyBufferRegion.invokeExact(execCmdList, readbackBuf, 0L, outputBuf, 0L, outputBytes);
             mhResourceBarrier.invokeExact(execCmdList, 1, barrierInputToCommon);
@@ -568,15 +805,16 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         long outputBytes = (long) N * Float.BYTES;
 
         try {
-            // 1. Write input to persistently-mapped upload buffer (kernel-local)
             MemorySegment.copy(x, 0, mappedUpload, ValueLayout.JAVA_FLOAT, 0, K);
-
-            // 2. Record: upload → barrier → set heaps → dispatch → barrier → readback
             var cl = pipeline.getCommandList();
             mhCopyBufferRegion.invokeExact(cl, inputBuf, 0L, uploadBuf, 0L, inputBytes);
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
-            mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
-            mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+            if (useInt4Gpu) {
+                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, N);
+            } else {
+                mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
+                mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+            }
             mhResourceBarrier.invokeExact(cl, 1, barrierOutputToCS);
             mhCopyBufferRegion.invokeExact(cl, readbackBuf, 0L, outputBuf, 0L, outputBytes);
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToCommon);
@@ -597,9 +835,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     }
 
     /**
-     * Record this kernel's dispatch that reads input from a GPU-resident buffer
-     * instead of uploading from CPU. Used when the activation is already on GPU
-     * (e.g., output of a previous operation in the same command list).
+     * Record this kernel's dispatch that reads input from a GPU-resident buffer.
      *
      * @param pipeline       the shared GPU pipeline (recording state)
      * @param gpuInputBuf    GPU default buffer containing the input [K] floats
@@ -613,11 +849,14 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         try {
             var cl = pipeline.getCommandList();
-            // Copy from GPU-resident source → this kernel's input buffer
             mhCopyBufferRegion.invokeExact(cl, inputBuf, 0L, gpuInputBuf, 0L, gpuInputBytes);
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
-            mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
-            mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+            if (useInt4Gpu) {
+                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, N);
+            } else {
+                mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
+                mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+            }
             mhResourceBarrier.invokeExact(cl, 1, barrierOutputToCS);
             // Leave output in COPY_SOURCE state (caller chains further or reads back)
         } catch (Throwable t) {
@@ -665,8 +904,12 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             var cl = pipeline.getCommandList();
             mhCopyBufferRegion.invokeExact(cl, inputBuf, 0L, uploadBuf, 0L, inputBytes);
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
-            mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
-            mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+            if (useInt4Gpu) {
+                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, N);
+            } else {
+                mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
+                mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+            }
             // Output stays in UAV — no readback, no cleanup
         } catch (Throwable t) {
             throw new RuntimeException("MatMulNBitsKernel.recordBatchFromCpu failed", t);
@@ -674,7 +917,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     }
 
     /**
-     * Record only the DML dispatch — input buffer already contains data in UAV state
+     * Record only the dispatch — input buffer already contains data in UAV state
      * (written by a preceding compute shader, e.g., RMSNorm or SwiGLU).
      * <p>
      * Caller must ensure a UAV barrier between the compute write and this dispatch.
@@ -686,8 +929,12 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         if (!prepared) throw new IllegalStateException("Kernel not prepared");
         try {
             var cl = pipeline.getCommandList();
-            mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
-            mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+            if (useInt4Gpu) {
+                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, N);
+            } else {
+                mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
+                mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+            }
             // Output stays in UAV
         } catch (Throwable t) {
             throw new RuntimeException("MatMulNBitsKernel.recordBatchDispatchOnly failed", t);
@@ -802,6 +1049,12 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         if (uploadBuf != null) D3D12Bindings.unmapResource(uploadBuf);
         if (readbackBuf != null) D3D12Bindings.unmapResource(readbackBuf);
 
+        // Release INT4 GPU mode resources (if active)
+        if (int4Shader != null) int4Shader.close();
+        if (int4WeightBuf != null) DxgiBindings.release(int4WeightBuf);
+        if (int4ScalesBuf != null) DxgiBindings.release(int4ScalesBuf);
+        if (int4ZpBuf != null) DxgiBindings.release(int4ZpBuf);
+
         // Release pre-allocated execution infrastructure (reverse creation order)
         if (execBindingTable != null) DxgiBindings.release(execBindingTable);
         if (execFence != null) DxgiBindings.release(execFence);
@@ -810,7 +1063,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         if (readbackBuf != null) DxgiBindings.release(readbackBuf);
         if (uploadBuf != null) DxgiBindings.release(uploadBuf);
 
-        // Release operator resources
+        // Release DML/FP32 operator resources (only in legacy mode)
         if (cmdRecorder != null) DxgiBindings.release(cmdRecorder);
         if (descriptorHeap != null) DxgiBindings.release(descriptorHeap);
         if (compiledGemm != null) DxgiBindings.release(compiledGemm);

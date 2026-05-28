@@ -779,6 +779,41 @@ public final class D3D12Bindings {
     }
 
     /**
+     * Upload raw byte data to a GPU default-heap buffer.
+     * <p>
+     * Used to upload packed INT4 weight data (and other non-float tensors) to GPU.
+     * After this call the destination resource is in COMMON state (buffer decay rule).
+     *
+     * @param device      D3D12 device
+     * @param queue       command queue
+     * @param dstResource destination GPU buffer (default heap, COMMON state)
+     * @param data        source byte array
+     * @param arena       lifetime arena for temporary objects
+     */
+    public static void uploadBytes(MemorySegment device, MemorySegment queue,
+                                   MemorySegment dstResource, byte[] data,
+                                   Arena arena) throws WindowsNativeException {
+        long sizeBytes = data.length;
+        MemorySegment uploadBuf = createUploadBuffer(device, sizeBytes, arena);
+        MemorySegment allocator = null;
+        MemorySegment cmdList = null;
+        try {
+            MemorySegment mapped = mapResource(uploadBuf, arena);
+            MemorySegment.copy(data, 0, mapped, ValueLayout.JAVA_BYTE, 0, data.length);
+            unmapResource(uploadBuf);
+
+            allocator = createCommandAllocator(device, D3D12_COMMAND_LIST_TYPE_DIRECT, arena);
+            cmdList = createCommandList(device, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, arena);
+            copyBufferRegion(cmdList, dstResource, 0, uploadBuf, 0, sizeBytes);
+            executeAndWait(device, queue, cmdList, arena);
+        } finally {
+            if (cmdList != null) DxgiBindings.release(cmdList);
+            if (allocator != null) DxgiBindings.release(allocator);
+            DxgiBindings.release(uploadBuf);
+        }
+    }
+
+    /**
      * Upload float data to {@code dstResource} with explicit resource-state
      * transitions around the copy.
      * <p>
