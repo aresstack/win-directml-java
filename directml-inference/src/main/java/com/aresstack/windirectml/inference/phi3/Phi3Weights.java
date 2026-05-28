@@ -15,6 +15,7 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.stream.IntStream;
 
 /**
  * Reads Phi-3-mini weights from the ONNX model graph + external data file.
@@ -59,31 +60,50 @@ public final class Phi3Weights implements AutoCloseable {
          * @param x   input vector [K]
          * @param y   output vector [N] (accumulated, not zeroed)
          */
-        public void matvec(float[] x, float[] y) {
-            int blocksPerRow = K / blockSize;
-            for (int n = 0; n < N; n++) {
-                float sum = 0f;
-                int qOffset = n * blocksPerRow * (blockSize / 2);
-                int scaleOffset = n * blocksPerRow;
-                for (int blk = 0; blk < blocksPerRow; blk++) {
-                    float scale = scales[scaleOffset + blk];
-                    int zpIdx = n * blocksPerRow + blk;
-                    // Zero point: 2 per byte, low nibble first
-                    int zpByte = zeroPoints[zpIdx / 2] & 0xFF;
-                    int zp = (zpIdx % 2 == 0) ? (zpByte & 0xF) : (zpByte >>> 4);
+        /**
+         * Thread-local dequantization buffer (max blockSize = 256).
+         */
+        private static final ThreadLocal<float[]> BLOCK_BUF =
+                ThreadLocal.withInitial(() -> new float[256]);
 
-                    int kBase = blk * blockSize;
-                    int qBase = qOffset + blk * (blockSize / 2);
-                    for (int j = 0; j < blockSize / 2; j++) {
-                        int packed = qWeight[qBase + j] & 0xFF;
-                        int w0 = (packed & 0xF) - zp;
-                        int w1 = (packed >>> 4) - zp;
-                        sum += x[kBase + 2 * j] * (w0 * scale);
-                        sum += x[kBase + 2 * j + 1] * (w1 * scale);
+        /**
+         * Compact scalar dot product on a dequantised block buffer.
+         * The JIT can auto-vectorise this simple loop more effectively than
+         * the original nibble-extraction loop.
+         */
+        private static float blockDot(float[] w, float[] x, int xOff, int len) {
+            float s = 0f;
+            for (int i = 0; i < len; i++) s += w[i] * x[xOff + i];
+            return s;
+        }
+
+        public void matvec(float[] x, float[] y) {
+            final int blocksPerRow = K / blockSize;
+            final byte[] qw = qWeight;
+            final float[] sc = scales;
+            final byte[] zpArr = zeroPoints;
+            final int bs = blockSize;
+            IntStream.range(0, N).parallel().forEach(n -> {
+                float sum = 0f;
+                int qOffset = n * blocksPerRow * (bs / 2);
+                int scaleOffset = n * blocksPerRow;
+                float[] wBuf = BLOCK_BUF.get();   // thread-local — zero GC pressure
+                for (int blk = 0; blk < blocksPerRow; blk++) {
+                    float scale = sc[scaleOffset + blk];
+                    int zpIdx = n * blocksPerRow + blk;
+                    int zpByte = zpArr[zpIdx / 2] & 0xFF;
+                    float zpVal = (float) ((zpIdx % 2 == 0) ? (zpByte & 0xF) : (zpByte >>> 4));
+                    int kBase = blk * bs;
+                    int qBase = qOffset + blk * (bs / 2);
+                    for (int j = 0; j < bs / 2; j++) {
+                        int packed = qw[qBase + j] & 0xFF;
+                        wBuf[2 * j] = ((packed & 0xF) - zpVal) * scale;
+                        wBuf[2 * j + 1] = ((packed >>> 4) - zpVal) * scale;
                     }
+                    sum += blockDot(wBuf, x, kBase, bs);
                 }
                 y[n] += sum;
-            }
+            });
         }
 
         /**
@@ -94,15 +114,38 @@ public final class Phi3Weights implements AutoCloseable {
          * @param seqLen number of rows
          */
         public void matmul(float[] x, float[] y, int seqLen) {
-            for (int s = 0; s < seqLen; s++) {
-                int xOff = s * K;
-                int yOff = s * N;
-                float[] xRow = new float[K];
-                System.arraycopy(x, xOff, xRow, 0, K);
-                float[] yRow = new float[N];
-                matvec(xRow, yRow);
-                System.arraycopy(yRow, 0, y, yOff, N);
-            }
+            final int nLocal = N;
+            final int kLocal = K;
+            final int blocksPerRow = kLocal / blockSize;
+            final byte[] qw = qWeight;
+            final float[] sc = scales;
+            final byte[] zpArr = zeroPoints;
+            final int bs = blockSize;
+            final int total = seqLen * nLocal;
+            IntStream.range(0, total).parallel().forEach(idx -> {
+                int s = idx / nLocal;
+                int n = idx - s * nLocal;
+                float sum = 0f;
+                int xOff = s * kLocal;
+                int qOffset = n * blocksPerRow * (bs / 2);
+                int scaleOffset = n * blocksPerRow;
+                float[] wBuf = BLOCK_BUF.get();   // thread-local — zero GC pressure
+                for (int blk = 0; blk < blocksPerRow; blk++) {
+                    float scale = sc[scaleOffset + blk];
+                    int zpIdx = n * blocksPerRow + blk;
+                    int zpByte = zpArr[zpIdx / 2] & 0xFF;
+                    float zpVal = (float) ((zpIdx % 2 == 0) ? (zpByte & 0xF) : (zpByte >>> 4));
+                    int kBase = blk * bs;
+                    int qBase = qOffset + blk * (bs / 2);
+                    for (int j = 0; j < bs / 2; j++) {
+                        int packed = qw[qBase + j] & 0xFF;
+                        wBuf[2 * j] = ((packed & 0xF) - zpVal) * scale;
+                        wBuf[2 * j + 1] = ((packed >>> 4) - zpVal) * scale;
+                    }
+                    sum += blockDot(wBuf, x, xOff + kBase, bs);
+                }
+                y[s * nLocal + n] += sum;
+            });
         }
     }
 
