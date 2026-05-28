@@ -218,7 +218,29 @@ public final class DownloadOverrideStore {
     }
 
     private static String escapeJson(String s) {
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        var out = new StringBuilder(s.length() + 8);
+        out.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> out.append("\\\"");
+                case '\\' -> out.append("\\\\");
+                case '\b' -> out.append("\\b");
+                case '\f' -> out.append("\\f");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+                }
+            }
+        }
+        out.append('"');
+        return out.toString();
     }
 
     private static String readAll(Reader reader) throws IOException {
@@ -247,7 +269,10 @@ public final class DownloadOverrideStore {
             if (c == '"') break;
             end++;
         }
-        return s.substring(i + 1, Math.min(end, s.length())).replace("\\\"", "\"").replace("\\\\", "\\");
+        if (end >= s.length() || s.charAt(end) != '"') {
+            throw new IOException("Unterminated string starting at pos " + i);
+        }
+        return unescapeJsonString(s.substring(i + 1, end));
     }
 
     private static int advancePastString(String s, int i) {
@@ -274,5 +299,42 @@ public final class DownloadOverrideStore {
             if (c == '}') { depth--; if (depth == 0) return i; }
         }
         throw new IOException("Unmatched brace at pos " + openPos);
+    }
+
+    private static String unescapeJsonString(String s) throws IOException {
+        var out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c != '\\') {
+                out.append(c);
+                continue;
+            }
+            if (i + 1 >= s.length()) {
+                throw new IOException("Invalid JSON escape at end of string");
+            }
+            char esc = s.charAt(++i);
+            switch (esc) {
+                case '"', '\\', '/' -> out.append(esc);
+                case 'b' -> out.append('\b');
+                case 'f' -> out.append('\f');
+                case 'n' -> out.append('\n');
+                case 'r' -> out.append('\r');
+                case 't' -> out.append('\t');
+                case 'u' -> {
+                    if (i + 4 >= s.length()) {
+                        throw new IOException("Invalid unicode escape in JSON string");
+                    }
+                    String hex = s.substring(i + 1, i + 5);
+                    try {
+                        out.append((char) Integer.parseInt(hex, 16));
+                    } catch (NumberFormatException e) {
+                        throw new IOException("Invalid unicode escape in JSON string: \\u" + hex, e);
+                    }
+                    i += 4;
+                }
+                default -> throw new IOException("Unsupported JSON escape: \\" + esc);
+            }
+        }
+        return out.toString();
     }
 }

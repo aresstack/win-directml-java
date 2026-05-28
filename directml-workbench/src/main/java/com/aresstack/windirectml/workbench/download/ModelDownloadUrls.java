@@ -59,22 +59,15 @@ public final class ModelDownloadUrls {
      */
     public static ModelDownloadManifest manifestForQwen(QwenModelDownloadConfig config) {
         var descriptors = new ArrayList<ModelFileDescriptor>();
-
-        String modelUrl = buildUrl(config.repo(), config.remoteModelPath());
-        descriptors.add(new ModelFileDescriptor(
-                config.localModelFile(), true, modelUrl, modelUrl, config.localModelFile()));
-
-        String dataUrl = buildUrl(config.repo(), config.remoteDataPath());
-        descriptors.add(new ModelFileDescriptor(
-                config.localDataFile(), true, dataUrl, dataUrl, config.localDataFile()));
-
+        addQwenDescriptor(descriptors, config.modelFile(), true,
+                config.onnxSubdir() + "/" + config.modelFile(), config.localModelFile(), config.repo());
+        addQwenDescriptor(descriptors, config.externalDataFile(), true,
+                config.onnxSubdir() + "/" + config.externalDataFile(), config.localDataFile(), config.repo());
         for (String file : config.rootFiles()) {
-            String url = buildUrl(config.repo(), file);
-            descriptors.add(new ModelFileDescriptor(file, true, url, url, file));
+            addQwenDescriptor(descriptors, file, true, file, file, config.repo());
         }
         for (String file : config.optionalFiles()) {
-            String url = buildUrl(config.repo(), file);
-            descriptors.add(new ModelFileDescriptor(file, false, url, url, file));
+            addQwenDescriptor(descriptors, file, false, file, file, config.repo());
         }
         return new ModelDownloadManifest(config.localDirName(), config.localDirName(),
                 List.copyOf(descriptors));
@@ -125,16 +118,16 @@ public final class ModelDownloadUrls {
      * @return list of fully-qualified download URLs
      */
     public static List<String> forQwen(QwenModelDownloadConfig config) {
-        var urls = new ArrayList<String>();
-        urls.add(buildUrl(config.repo(), config.remoteModelPath()));
-        urls.add(buildUrl(config.repo(), config.remoteDataPath()));
-        for (String file : config.rootFiles()) {
-            urls.add(buildUrl(config.repo(), file));
-        }
-        for (String file : config.optionalFiles()) {
-            urls.add(buildUrl(config.repo(), file));
-        }
-        return List.copyOf(urls);
+        return manifestForQwen(config).files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+    private static void addQwenDescriptor(List<ModelFileDescriptor> descriptors, String displayName,
+                                          boolean required, String remotePath, String localFilename,
+                                          String repo) {
+        String url = buildUrl(repo, remotePath);
+        descriptors.add(new ModelFileDescriptor(displayName, required, url, url, localFilename));
     }
 
     private static String buildUrl(String repo, String remotePath) {

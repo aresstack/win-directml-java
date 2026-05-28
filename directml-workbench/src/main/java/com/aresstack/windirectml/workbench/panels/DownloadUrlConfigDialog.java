@@ -8,6 +8,8 @@ import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Dialog that shows all downloadable files for a model with editable URL fields.
@@ -22,6 +24,8 @@ import java.util.List;
  * <p>OK accepts edits; Cancel discards them.
  */
 public final class DownloadUrlConfigDialog extends JDialog {
+
+    private static final Logger LOG = Logger.getLogger(DownloadUrlConfigDialog.class.getName());
 
     private final List<JTextField> urlFields = new ArrayList<>();
     private boolean accepted = false;
@@ -77,7 +81,15 @@ public final class DownloadUrlConfigDialog extends JDialog {
             copyBtn.addActionListener(e -> {
                 String url = urlFields.get(fieldIndex).getText();
                 var selection = new StringSelection(url);
-                Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+                try {
+                    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+                } catch (HeadlessException | IllegalStateException | SecurityException ex) {
+                    LOG.log(Level.WARNING, "Could not copy URL to clipboard", ex);
+                    JOptionPane.showMessageDialog(this,
+                            "Could not copy URL to clipboard: " + ex.getMessage(),
+                            "Clipboard unavailable",
+                            JOptionPane.WARNING_MESSAGE);
+                }
             });
             gbc.gridx = 2;
             gbc.weightx = 0;

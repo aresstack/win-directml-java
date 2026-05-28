@@ -48,7 +48,11 @@ class DownloadManifestTest {
         assertTrue(manifest.files().stream().anyMatch(f ->
                 f.localFilename().equals("model.onnx") && f.required()));
         assertTrue(manifest.files().stream().anyMatch(f ->
-                f.localFilename().equals("model.onnx_data") && f.required()));
+                f.localFilename().equals("model.onnx.data") && f.required()));
+        assertTrue(manifest.files().stream().anyMatch(f ->
+                f.localFilename().equals("model.onnx.data")
+                        && f.defaultUrl().endsWith("/onnx/model.onnx_data")
+                        && f.required()));
         assertTrue(manifest.files().stream().anyMatch(f ->
                 f.localFilename().equals("added_tokens.json") && !f.required()));
     }
@@ -135,6 +139,29 @@ class DownloadManifestTest {
         String content = Files.readString(storeFile);
         assertFalse(content.contains("model.onnx"),
                 "Should not persist entries where current==default");
+    }
+
+    @Test
+    void overrideStoreParsesJsonEscapesInUrls(@TempDir Path tempDir) throws IOException {
+        Path storeFile = tempDir.resolve("overrides.json");
+        String json = "{\n"
+                + "  \"phi-3-mini-4k-instruct-onnx\": {\n"
+                + "    \"model.onnx\": \"https:\\/\\/example.com\\/artifact?x=1\\u0026y=2\"\n"
+                + "  }\n"
+                + "}\n";
+        Files.writeString(storeFile, json);
+
+        var store = new DownloadOverrideStore(storeFile);
+        store.load();
+        var manifest = ModelDownloadUrls.manifestForPhi3();
+        var result = store.applyOverrides(manifest);
+
+        assertEquals("https://example.com/artifact?x=1&y=2",
+                result.files().stream()
+                        .filter(f -> f.localFilename().equals("model.onnx"))
+                        .findFirst()
+                        .orElseThrow()
+                        .currentUrl());
     }
 
     @Test

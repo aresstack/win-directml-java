@@ -134,28 +134,7 @@ public final class ModelDownloader {
     public static void downloadQwen(QwenModelDownloadConfig config, Path targetDir,
                                     boolean force, Consumer<String> logger)
             throws IOException, InterruptedException {
-        Files.createDirectories(targetDir);
-
-        var client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
-
-        // Model files live under the configured subdir in the remote repo
-        downloadFile(client, config.repo(), config.remoteModelPath(), config.localModelFile(),
-                targetDir, force, logger, true);
-        downloadFile(client, config.repo(), config.remoteDataPath(), config.localDataFile(),
-                targetDir, force, logger, true);
-
-        // Config/tokenizer files live at the repo root
-        for (String file : config.rootFiles()) {
-            downloadFile(client, config.repo(), file, file, targetDir, force, logger, true);
-        }
-
-        // Optional files
-        for (String file : config.optionalFiles()) {
-            downloadFile(client, config.repo(), file, file, targetDir, force, logger, false);
-        }
+        downloadFromManifest(ModelDownloadUrls.manifestForQwen(config), targetDir, force, logger);
     }
 
     /**

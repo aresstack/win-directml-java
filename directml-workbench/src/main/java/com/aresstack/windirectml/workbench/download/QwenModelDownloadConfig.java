@@ -14,7 +14,7 @@ import java.util.List;
  * @param modelFile       ONNX graph filename in the remote subdir (e.g. "model.onnx")
  * @param externalDataFile external data filename in the remote subdir (e.g. "model.onnx_data")
  * @param localModelFile  local filename for the ONNX graph (e.g. "model.onnx")
- * @param localDataFile   local filename for the external data (e.g. "model.onnx_data")
+ * @param localDataFile   local filename for the external data (e.g. "model.onnx.data")
  * @param rootFiles       config/tokenizer files at the repo root that are required
  * @param optionalFiles   optional files at the repo root (download is best-effort)
  * @param localDirName    local directory name under the model root
@@ -38,7 +38,7 @@ public record QwenModelDownloadConfig(
             "model.onnx",
             "model.onnx_data",
             "model.onnx",
-            "model.onnx_data",
+            "model.onnx.data",
             List.of("tokenizer.json", "config.json", "tokenizer_config.json", "special_tokens_map.json"),
             List.of("added_tokens.json"),
             "qwen2.5-coder-0.5b-directml-int4"
