@@ -33,7 +33,7 @@ class ModelDownloaderQwenLayoutTest {
         assertEquals("onnx-community/Qwen2.5-Coder-0.5B-Instruct", config.repo());
         assertEquals("onnx", config.onnxSubdir());
         assertEquals("model.onnx", config.modelFile());
-        assertEquals("model.onnx.data", config.externalDataFile());
+        assertEquals("model.onnx_data", config.externalDataFile());
         assertEquals("model.onnx.data", config.localDataFile());
     }
 
@@ -41,7 +41,7 @@ class ModelDownloaderQwenLayoutTest {
     void remotePathsAreCorrect() {
         var config = QwenModelDownloadConfig.DEFAULT;
         assertEquals("onnx/model.onnx", config.remoteModelPath());
-        assertEquals("onnx/model.onnx.data", config.remoteDataPath());
+        assertEquals("onnx/model.onnx_data", config.remoteDataPath());
     }
 
     @Test

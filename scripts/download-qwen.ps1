@@ -4,7 +4,7 @@
 # Source: onnx-community/Qwen2.5-Coder-0.5B-Instruct (onnx/ subdir)
 # Layout matches QwenModelDownloadConfig.DEFAULT in the Java workbench:
 #   onnx/model.onnx         → model.onnx          (ONNX graph)
-#   onnx/model.onnx.data    → model.onnx.data      (external weights, ~350 MB)
+#   onnx/model.onnx_data    → model.onnx.data      (external weights, ~350 MB)
 #   tokenizer.json          → tokenizer.json       (from repo root)
 #   config.json             → config.json          (from repo root)
 #   tokenizer_config.json   → tokenizer_config.json(from repo root)
@@ -45,7 +45,7 @@ $onnxBase    = "$hfBase/$OnnxSubdir"
 # --- ONNX model files (from the onnx/ subdir) ---
 $onnxFiles = @(
     @{ Remote = 'model.onnx';      Local = 'model.onnx' },
-    @{ Remote = 'model.onnx.data'; Local = 'model.onnx.data' }
+    @{ Remote = 'model.onnx_data'; Local = 'model.onnx.data' }
 )
 
 foreach ($entry in $onnxFiles) {
@@ -98,7 +98,7 @@ foreach ($f in $rootOptional) {
 if ($Validate) {
     Write-Host ""
     Write-Host "  File validation:"
-    $allRequired = @('model.onnx', 'model.onnx.data') + $rootRequired
+    $allRequired = @('model.onnx') + $rootRequired
     $missing = @()
     foreach ($f in $allRequired) {
         $dst = Join-Path $targetDir $f
@@ -115,6 +115,16 @@ if ($Validate) {
     }
     if ($missing.Count -gt 0) {
         throw "Required files missing after download: $($missing -join ', ')"
+    }
+
+    $primaryData = Join-Path $targetDir 'model.onnx.data'
+    $legacyData = Join-Path $targetDir 'model.onnx_data'
+    if (Test-Path $primaryData) {
+        Write-Host "    external data file              model.onnx.data (preferred)"
+    } elseif (Test-Path $legacyData) {
+        Write-Host "    external data file              model.onnx_data (legacy fallback)"
+    } else {
+        throw "Required external data file missing after download: model.onnx.data (or legacy model.onnx_data)"
     }
 }
 

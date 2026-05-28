@@ -50,7 +50,7 @@ class ModelDownloadUrlsTest {
         // Model and data files via onnx subdir
         assertTrue(urls.stream().anyMatch(u ->
                 u.contains("/onnx/model.onnx") && !u.contains("model.onnx.data")));
-        assertTrue(urls.stream().anyMatch(u -> u.contains("/onnx/model.onnx.data")));
+        assertTrue(urls.stream().anyMatch(u -> u.contains("/onnx/model.onnx_data")));
         // Root files (tokenizer, config)
         assertTrue(urls.stream().anyMatch(u ->
                 u.endsWith("/tokenizer.json")));
@@ -86,11 +86,11 @@ class ModelDownloadUrlsTest {
     }
 
     /**
-     * Regression: the external data file URL must use the correct remote filename
-     * (model.onnx.data), not a legacy/incorrect variant.
+     * Regression: the external data file URL must use the remote underscore filename
+     * while local storage still uses dot-separated naming.
      */
     @Test
-    void qwenExternalDataUrlUsesCorrectRemoteName() {
+    void qwenExternalDataUrlUsesRemoteUnderscoreName() {
         var config = QwenModelDownloadConfig.DEFAULT;
         var urls = ModelDownloadUrls.forQwen(config);
         String expectedDataUrl = "https://huggingface.co/"
@@ -98,9 +98,8 @@ class ModelDownloadUrlsTest {
                 + config.onnxSubdir() + "/" + config.externalDataFile();
         assertTrue(urls.contains(expectedDataUrl),
                 "Expected URL " + expectedDataUrl + " not found in: " + urls);
-        // Must NOT contain the underscore variant
-        assertFalse(urls.stream().anyMatch(u -> u.contains("model.onnx_data")),
-                "URLs must not contain invalid model.onnx_data path");
+        assertTrue(urls.stream().anyMatch(u -> u.contains("model.onnx_data")),
+                "URLs must contain remote model.onnx_data path");
     }
 
     /**
@@ -112,7 +111,7 @@ class ModelDownloadUrlsTest {
                 "onnx-community/Qwen2.5-Coder-0.5B-Instruct",
                 "onnx",
                 "model.onnx",
-                "model.onnx.data",
+                "model.onnx_data",
                 "model.onnx",
                 "model.onnx.data",
                 java.util.List.of("tokenizer.json", "config.json", "tokenizer_config.json", "special_tokens_map.json"),
@@ -122,7 +121,7 @@ class ModelDownloadUrlsTest {
         var urls = ModelDownloadUrls.forQwen(configNoOptional);
         // All required files are still present
         assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model.onnx")));
-        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model.onnx.data")));
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model.onnx_data")));
         assertTrue(urls.stream().anyMatch(u -> u.endsWith("/tokenizer.json")));
         assertTrue(urls.stream().anyMatch(u -> u.endsWith("/config.json")));
         assertTrue(urls.stream().anyMatch(u -> u.endsWith("/tokenizer_config.json")));
