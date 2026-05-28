@@ -233,7 +233,8 @@ class Qwen2WeightsOnnxCommunityTest {
     @Test
     void loadFinalNormFallsBackToInlineOnnxCommunityName() throws Exception {
         Map<String, OnnxModelReader.OnnxTensor> inline = new HashMap<>();
-        String name = "model.layers.24.final_norm_layernorm.weight";
+        Qwen2Config config = new Qwen2Config(896, 14, 24, 2, 151936, 32768, 4864, 1e-6f, 1_000_000f);
+        String name = "model.layers." + config.numHiddenLayers() + ".final_norm_layernorm.weight";
         float[] expected = new float[]{0.5f, 0.6f};
         inline.put(name, new OnnxModelReader.OnnxTensor(
                 name, new long[]{2}, OnnxModelReader.ONNX_FLOAT, expected, new byte[0]));
@@ -242,7 +243,6 @@ class Qwen2WeightsOnnxCommunityTest {
                 "loadFinalNormWeight", Qwen2Config.class, Map.class, Map.class, java.nio.MappedByteBuffer.class);
         m.setAccessible(true);
 
-        Qwen2Config config = new Qwen2Config(896, 14, 24, 2, 151936, 32768, 4864, 1e-6f, 1_000_000f);
         float[] actual = (float[]) m.invoke(null, config, Map.of(), inline, null);
         assertArrayEquals(expected, actual);
     }

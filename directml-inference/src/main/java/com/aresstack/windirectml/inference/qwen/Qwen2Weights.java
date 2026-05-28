@@ -16,6 +16,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.function.Predicate;
 
 /**
  * Reads Qwen2.5-Coder weights from ONNX model graph + external data file.
@@ -672,6 +673,7 @@ public final class Qwen2Weights implements AutoCloseable {
         }
     }
 
+    /** Tensor payload and shape resolved from either external data refs or inline initializers. */
     private record TensorData(float[] data, long[] dims) {}
 
     private static TensorData resolveFirstFloatTensor(List<String> names,
@@ -712,7 +714,7 @@ public final class Qwen2Weights implements AutoCloseable {
             return new TensorData(readFloatTensorAsFloat32(extData, ref, tensorName), ref.dims);
         }
         OnnxTensor inline = inlineTensors.get(tensorName);
-        if (inline != null && (inline.data().length > 0 || inline.rawBytes().length > 0)) {
+        if (hasInlineData(inline)) {
             return new TensorData(readInlineTensorAsFloat32(inline, tensorName), inline.dims());
         }
         return null;
@@ -760,9 +762,9 @@ public final class Qwen2Weights implements AutoCloseable {
     private static boolean tensorExists(String tensorName,
                                         Map<String, ExternalTensorRef> externalRefs,
                                         Map<String, OnnxTensor> inlineTensors) {
+        OnnxTensor inline = inlineTensors.get(tensorName);
         return externalRefs.containsKey(tensorName)
-                || (inlineTensors.containsKey(tensorName)
-                && (inlineTensors.get(tensorName).data().length > 0 || inlineTensors.get(tensorName).rawBytes().length > 0));
+                || hasInlineData(inline);
     }
 
     private static Set<String> tensorKeysContaining(String fragment,
@@ -771,16 +773,20 @@ public final class Qwen2Weights implements AutoCloseable {
         return tensorKeysMatching(name -> name.contains(fragment), externalRefs, inlineTensors);
     }
 
-    private static Set<String> tensorKeysMatching(java.util.function.Predicate<String> predicate,
+    private static Set<String> tensorKeysMatching(Predicate<String> predicate,
                                                   Map<String, ExternalTensorRef> externalRefs,
                                                   Map<String, OnnxTensor> inlineTensors) {
         Set<String> names = new LinkedHashSet<>();
         externalRefs.keySet().stream().filter(predicate).forEach(names::add);
         inlineTensors.entrySet().stream()
-                .filter(e -> (e.getValue().data().length > 0 || e.getValue().rawBytes().length > 0) && predicate.test(e.getKey()))
+                .filter(e -> hasInlineData(e.getValue()) && predicate.test(e.getKey()))
                 .map(Map.Entry::getKey)
                 .forEach(names::add);
         return names;
+    }
+
+    private static boolean hasInlineData(OnnxTensor tensor) {
+        return tensor != null && (tensor.data().length > 0 || tensor.rawBytes().length > 0);
     }
 
     // ── FP16 reading ─────────────────────────────────────────────────────
