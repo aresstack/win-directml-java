@@ -49,8 +49,8 @@ class ModelDownloadUrlsTest {
         assertFalse(urls.isEmpty());
         // Model and data files via onnx subdir
         assertTrue(urls.stream().anyMatch(u ->
-                u.contains("/onnx/model.onnx") && !u.contains("model.onnx_data")));
-        assertTrue(urls.stream().anyMatch(u -> u.contains("/onnx/model.onnx_data")));
+                u.contains("/onnx/model.onnx") && !u.contains("model.onnx.data")));
+        assertTrue(urls.stream().anyMatch(u -> u.contains("/onnx/model.onnx.data")));
         // Root files (tokenizer, config)
         assertTrue(urls.stream().anyMatch(u ->
                 u.endsWith("/tokenizer.json")));
@@ -67,5 +67,67 @@ class ModelDownloadUrlsTest {
         for (String url : embUrls) {
             assertTrue(url.startsWith("https://huggingface.co/"), "URL should start with HF base: " + url);
         }
+    }
+
+    /**
+     * Regression: copied Qwen URLs must exactly match the remote paths used by the downloader.
+     * If someone updates the config remote paths but forgets URL generation, this test fails.
+     */
+    @Test
+    void qwenCopiedUrlsMatchDownloaderManifestUrls() {
+        var config = QwenModelDownloadConfig.DEFAULT;
+        var copiedUrls = ModelDownloadUrls.forQwen(config);
+        var manifest = ModelDownloadUrls.manifestForQwen(config);
+        var manifestUrls = manifest.files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+        assertEquals(manifestUrls, copiedUrls,
+                "Copied URLs must be identical to downloader manifest URLs");
+    }
+
+    /**
+     * Regression: the external data file URL must use the correct remote filename
+     * (model.onnx.data), not a legacy/incorrect variant.
+     */
+    @Test
+    void qwenExternalDataUrlUsesCorrectRemoteName() {
+        var config = QwenModelDownloadConfig.DEFAULT;
+        var urls = ModelDownloadUrls.forQwen(config);
+        String expectedDataUrl = "https://huggingface.co/"
+                + config.repo() + "/resolve/main/"
+                + config.onnxSubdir() + "/" + config.externalDataFile();
+        assertTrue(urls.contains(expectedDataUrl),
+                "Expected URL " + expectedDataUrl + " not found in: " + urls);
+        // Must NOT contain the underscore variant
+        assertFalse(urls.stream().anyMatch(u -> u.contains("model.onnx_data")),
+                "URLs must not contain invalid model.onnx_data path");
+    }
+
+    /**
+     * Regression: optional files missing from the list must not corrupt required URLs.
+     */
+    @Test
+    void qwenOptionalFileAbsenceDoesNotAffectRequiredUrls() {
+        var configNoOptional = new QwenModelDownloadConfig(
+                "onnx-community/Qwen2.5-Coder-0.5B-Instruct",
+                "onnx",
+                "model.onnx",
+                "model.onnx.data",
+                "model.onnx",
+                "model.onnx.data",
+                java.util.List.of("tokenizer.json", "config.json", "tokenizer_config.json", "special_tokens_map.json"),
+                java.util.List.of(),  // no optional files
+                "qwen2.5-coder-0.5b-directml-int4"
+        );
+        var urls = ModelDownloadUrls.forQwen(configNoOptional);
+        // All required files are still present
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model.onnx")));
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model.onnx.data")));
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/tokenizer.json")));
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/config.json")));
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/tokenizer_config.json")));
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/special_tokens_map.json")));
+        // Optional file is absent
+        assertFalse(urls.stream().anyMatch(u -> u.endsWith("/added_tokens.json")));
     }
 }

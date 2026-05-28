@@ -24,11 +24,11 @@ import java.nio.file.Path;
  */
 public final class QwenModelDirValidator {
 
-    /** Primary external data filename (matches onnx-community export). */
-    public static final String DATA_FILE_PRIMARY = "model.onnx_data";
+    /** Primary external data filename (matches onnx-community HuggingFace layout). */
+    public static final String DATA_FILE_PRIMARY = "model.onnx.data";
 
-    /** Alternative external data filename (dot-separated convention). */
-    public static final String DATA_FILE_ALT = "model.onnx.data";
+    /** Alternative external data filename (underscore convention, legacy). */
+    public static final String DATA_FILE_ALT = "model.onnx_data";
 
     /** Required files in download/setup order (aligned with #100 contract). */
     private static final String[] REQUIRED_FILES = {

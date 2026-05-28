@@ -391,7 +391,7 @@ public final class OnnxModelReader {
 
         // Build the final float[] and byte[] based on data type.
         // For external tensors (data_location == EXTERNAL), the inline payload
-        // is empty: weights live in model.onnx_data and are resolved separately.
+        // is empty: weights live in model.onnx.data (or model.onnx_data) and are resolved separately.
         float[] data;
         byte[] rawBytes;
 

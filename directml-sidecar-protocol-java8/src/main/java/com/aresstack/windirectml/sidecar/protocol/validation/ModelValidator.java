@@ -74,7 +74,7 @@ public final class ModelValidator {
         ModelExpectation.Builder builder = ModelExpectation.builder(label)
                 .require("config.json", "tokenizer.json", "tokenizer_config.json",
                         "special_tokens_map.json", "model.onnx")
-                .eitherOf("model.onnx_data", "model.onnx.data")
+                .eitherOf("model.onnx.data", "model.onnx_data")
                 .tokenizerType("BPE")
                 .notReady("planned: ONNX source TBD/research; runtime not yet implemented");
         // Shape values for known variants (hidden_size, num_hidden_layers, num_attention_heads)

@@ -4,7 +4,7 @@
 # Source: onnx-community/Qwen2.5-Coder-0.5B-Instruct (onnx/ subdir)
 # Layout matches QwenModelDownloadConfig.DEFAULT in the Java workbench:
 #   onnx/model.onnx         → model.onnx          (ONNX graph)
-#   onnx/model.onnx_data    → model.onnx_data      (external weights, ~350 MB)
+#   onnx/model.onnx.data    → model.onnx.data      (external weights, ~350 MB)
 #   tokenizer.json          → tokenizer.json       (from repo root)
 #   config.json             → config.json          (from repo root)
 #   tokenizer_config.json   → tokenizer_config.json(from repo root)
@@ -45,7 +45,7 @@ $onnxBase    = "$hfBase/$OnnxSubdir"
 # --- ONNX model files (from the onnx/ subdir) ---
 $onnxFiles = @(
     @{ Remote = 'model.onnx';      Local = 'model.onnx' },
-    @{ Remote = 'model.onnx_data'; Local = 'model.onnx_data' }
+    @{ Remote = 'model.onnx.data'; Local = 'model.onnx.data' }
 )
 
 foreach ($entry in $onnxFiles) {
@@ -98,7 +98,7 @@ foreach ($f in $rootOptional) {
 if ($Validate) {
     Write-Host ""
     Write-Host "  File validation:"
-    $allRequired = @('model.onnx', 'model.onnx_data') + $rootRequired
+    $allRequired = @('model.onnx', 'model.onnx.data') + $rootRequired
     $missing = @()
     foreach ($f in $allRequired) {
         $dst = Join-Path $targetDir $f

@@ -96,7 +96,7 @@ class QwenModelDirValidatorTest {
         Files.writeString(tmp.resolve("model.onnx"), "");
         String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
         assertNotNull(msg);
-        assertTrue(msg.contains("model.onnx_data"), msg);
+        assertTrue(msg.contains("model.onnx.data"), msg);
     }
 
     @Test
@@ -129,16 +129,16 @@ class QwenModelDirValidatorTest {
 
     @Test
     void resolveExternalDataPathPrefersPrimary(@TempDir Path tmp) throws Exception {
-        Files.writeString(tmp.resolve("model.onnx_data"), "primary");
+        Files.writeString(tmp.resolve("model.onnx.data"), "primary");
         Path resolved = QwenModelDirValidator.resolveExternalDataPath(tmp);
-        assertEquals(tmp.resolve("model.onnx_data"), resolved);
+        assertEquals(tmp.resolve("model.onnx.data"), resolved);
     }
 
     @Test
     void resolveExternalDataPathFallsBackToAlt(@TempDir Path tmp) throws Exception {
-        Files.writeString(tmp.resolve("model.onnx.data"), "alt");
+        Files.writeString(tmp.resolve("model.onnx_data"), "alt");
         Path resolved = QwenModelDirValidator.resolveExternalDataPath(tmp);
-        assertEquals(tmp.resolve("model.onnx.data"), resolved);
+        assertEquals(tmp.resolve("model.onnx_data"), resolved);
     }
 
     @Test

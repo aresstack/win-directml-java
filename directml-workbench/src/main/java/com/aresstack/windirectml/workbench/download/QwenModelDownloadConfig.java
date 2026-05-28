@@ -12,7 +12,7 @@ import java.util.List;
  * @param repo            Hugging Face repository identifier (e.g. "onnx-community/Qwen2.5-Coder-0.5B-Instruct")
  * @param onnxSubdir      subdirectory in the repo containing model.onnx and external data (e.g. "onnx")
  * @param modelFile       ONNX graph filename in the remote subdir (e.g. "model.onnx")
- * @param externalDataFile external data filename in the remote subdir (e.g. "model.onnx_data")
+ * @param externalDataFile external data filename in the remote subdir (e.g. "model.onnx.data")
  * @param localModelFile  local filename for the ONNX graph (e.g. "model.onnx")
  * @param localDataFile   local filename for the external data (e.g. "model.onnx.data")
  * @param rootFiles       config/tokenizer files at the repo root that are required
@@ -36,7 +36,7 @@ public record QwenModelDownloadConfig(
             "onnx-community/Qwen2.5-Coder-0.5B-Instruct",
             "onnx",
             "model.onnx",
-            "model.onnx_data",
+            "model.onnx.data",
             "model.onnx",
             "model.onnx.data",
             List.of("tokenizer.json", "config.json", "tokenizer_config.json", "special_tokens_map.json"),
