@@ -259,7 +259,7 @@ public final class ModelDownloader {
     private static String sanitizeUrl(String url, String localFilename, boolean required,
                                       Consumer<String> logger) throws IOException {
         String sanitized = url == null ? "" : url.trim();
-        if (!sanitized.isBlank()) {
+        if (!sanitized.isEmpty()) {
             return sanitized;
         }
         if (required) {
