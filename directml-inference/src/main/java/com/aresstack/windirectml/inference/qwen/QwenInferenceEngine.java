@@ -52,13 +52,24 @@ import java.nio.file.Path;
  *   <li>{@code "directml"} — always use GPU; fail if DirectML is not available</li>
  *   <li>{@code "auto"} — try GPU, silently fall back to CPU</li>
  *   <li>{@code "cpu"} — always CPU; no GPU init</li>
+ *   <li>{@code "hybrid"} — max GPU offload: same as AUTO but additionally
+ *       forces lm_head onto the GPU (overrides {@code qwen.gpu.lmhead}).
+ *       Use this on hardened/locked-down Windows hosts where CPU INT4
+ *       SIMD is throttled by AV / AppLocker / thermal limits and even a
+ *       slow Intel iGPU outperforms the CPU by 100x+. The historic
+ *       "GPU prefill + CPU decode" semantic has been removed — it was
+ *       counter-productive on exactly the hosts the mode was meant for.</li>
  * </ul>
  *
  * <h2>System properties</h2>
  * <ul>
  *   <li>{@code qwen.gpu.layers} — number of decoder layers on GPU (default: all)</li>
- *   <li>{@code qwen.gpu.lmhead} — place lm_head on GPU (default: {@code false}
- *       to save ~544 MB VRAM on small iGPUs)</li>
+ *   <li>{@code qwen.gpu.lmhead} — place lm_head on GPU (default: {@code true};
+ *       set to {@code false} only if VRAM is tight — the lm_head matrix is
+ *       ~70 MB INT4 for Qwen 0.5B's 151 936-word vocab. On Intel iGPU hosts
+ *       CPU lm_head has been measured at 40 s/token, which alone exceeds
+ *       the sum of ALL other per-token work — GPU lm_head is essentially
+ *       mandatory there.)</li>
  * </ul>
  */
 public class QwenInferenceEngine implements InferenceEngine {
@@ -143,8 +154,19 @@ public class QwenInferenceEngine implements InferenceEngine {
                     if (wb.hasDirectMl()) {
                         int gpuLayerCount = Integer.getInteger("qwen.gpu.layers",
                                 config.numHiddenLayers());
-                        boolean gpuLmHead = Boolean.parseBoolean(
-                                System.getProperty("qwen.gpu.lmhead", "false"));
+                        // HYBRID forces lm_head onto the GPU regardless of the
+                        // qwen.gpu.lmhead system property: on hardened/locked-down
+                        // hosts CPU INT4 matvec of the 151 936 x 896 lm_head can
+                        // dwarf ALL projection cost combined (we have measured
+                        // 40 s/token on such a host). The ~70 MB INT4 VRAM cost
+                        // is negligible on any GPU capable of running Qwen 0.5B.
+                        // Default lmhead policy outside HYBRID is now also `true`
+                        // for the same reason — the historic `false` default
+                        // optimised for VRAM scarcity that no realistic Qwen-0.5B
+                        // host actually faces.
+                        boolean hybridMode = "hybrid".equalsIgnoreCase(backend);
+                        boolean gpuLmHead = hybridMode || Boolean.parseBoolean(
+                                System.getProperty("qwen.gpu.lmhead", "true"));
                         gpuKernels = QwenGpuKernels.create(
                                 wb, weights, config, gpuLayerCount, gpuLmHead);
                         // V2.0: Create shared GPU pipeline (batched MLP, 48 fence-waits/token)
@@ -178,25 +200,30 @@ public class QwenInferenceEngine implements InferenceEngine {
                 }
             }
 
-            // Create runtime. In HYBRID mode the GPU pipeline is kept around
-            // for batched prefill (Qwen2Runtime.processLayerPrefill always checks
-            // gpuPipeline/gpuKernels), but per-token decode is forced onto the CPU
-            // path so the 24x2 = 48 per-token GPU fence-waits don't dominate the
-            // decode budget on Intel iGPU hosts.
+            // Create runtime. HYBRID semantics REVISED 2026-05:
+            //   old: GPU prefill + CPU decode — turned out useless on hardened
+            //        hosts where CPU INT4 matvec is 100-600x slower than GPU
+            //        even with iGPU per-submission overhead.
+            //   new: "max GPU offload" — same kernel use as AUTO/DIRECTML for
+            //        both prefill and decode, PLUS lm_head on GPU. This is the
+            //        only viable mode on hardened laptops; on free-running
+            //        multi-core CPUs AUTO behaves identically now (lm_head
+            //        default is also true). useGpuForDecode therefore stays true.
             final boolean hybridMode = "hybrid".equalsIgnoreCase(backend);
             runtime = new Qwen2Runtime(config, weights, tokenizer, gpuKernels, gpuPipeline,
-                    /* useGpuForDecode */ !hybridMode);
+                    /* useGpuForDecode */ true);
 
             long elapsed = System.currentTimeMillis() - t0;
             String backendDesc;
             if ("hybrid".equalsIgnoreCase(backend) && gpuPipeline != null) {
-                backendDesc = "HYBRID(GPU prefill + CPU decode, "
-                        + gpuKernels.getGpuLayers() + " layers on GPU for prefill)";
+                backendDesc = "HYBRID(max GPU offload, "
+                        + gpuKernels.getGpuLayers() + " layers + lm_head on GPU)";
             } else if (gpuPipeline != null) {
                 backendDesc = "GPU-V2(" + gpuKernels.getGpuLayers() + " layers, mlpBatch="
-                        + gpuPipeline.isMlpBatchEnabled() + ")";
+                        + gpuPipeline.isMlpBatchEnabled() + ", lmHead=" + gpuKernels.hasLmHead() + ")";
             } else if (gpuKernels != null) {
-                backendDesc = "GPU-V1(" + gpuKernels.getGpuLayers() + " layers)";
+                backendDesc = "GPU-V1(" + gpuKernels.getGpuLayers() + " layers, lmHead="
+                        + gpuKernels.hasLmHead() + ")";
             } else {
                 backendDesc = "CPU";
             }
