@@ -54,10 +54,91 @@ darum, einzelne Kernels zu beschleunigen.
 
 ### Opt-A: Batched GEMM im Prefill (Submission-Count seqLen → 1 pro Projektion)
 
-**Aufwand**: ~1 Tag · **Risiko**: niedrig · **Wirkung**: Prefill 129 s → ~10–15 s
+**Aufwand**: ~1 Tag · **Risiko**: niedrig · **Wirkung erwartet**: Prefill 129 s → ~10–15 s
+· **Wirkung gemessen**: Prefill 129 s → **77 s** (Faktor 1.55, nicht 8–13 wie erwartet)
 · **Status: ✅ implementiert 2026-05-29** (siehe `MatMulNBitsKernel.matmulBatch`,
 `QwenGpuPipeline.qkvFusedBatch/oProjBatch/gateUpFusedBatch/downProjBatch`,
 `Qwen2Runtime.processLayerPrefill`)
+
+#### 2026-05-29 — Warum nur 1.55× und nicht 8–15×?
+
+Die Annahme "Submission-Count fällt auf 1/seqLen → wall-clock fällt proportional"
+war falsch. Auf Intel-iGPU bestimmt **Compute-Zeit**, nicht Submission-Zahl,
+die batched-GEMM-Latenz, sobald M ≥ 64. Konkret:
+
+| Pfad               | Submissions/Layer | GPU-Compute/Layer          | Wall/Layer |
+|--------------------|-------------------|----------------------------|------------|
+| Per-Token (vorher) | 600 (150 × 4)     | 150 × 4 × ~3 ms ≈ 1 800 ms | ~5 200 ms  |
+| Batched (jetzt)    | 4                 | 4 × ~700 ms ≈ 2 800 ms     | ~3 200 ms  |
+| Differenz          | −596              | +1 000 ms                  | −2 000 ms  |
+
+Eingespart wurden ~2 s/Layer Fence-Overhead — aber die naive HLSL-Schleife
+(`FP32_MATMUL_BATCH_HLSL` mit unrolled-by-4) skaliert deutlich schlechter als
+DML's optimierter `MatMulNBits` Operator. Konkrete Ursachen:
+
+1. **Kein Tiling, kein groupshared**: jeder Thread lädt die ganze K-Spalte
+   von X aus dem HBM für sich. Bei M=150, N=4864, K=896 sind das
+   150 × 4864 × 896 × 4 Byte = ~2.6 GB Reads gegen ~5 MB unique Daten —
+   ~500× over-fetch.
+2. **FP32-Weights statt INT4**: `qkvFused` und `gateUpFused` laufen nach
+   `fromDequantizedWeights` als FP32-Buffer (~17 MB für gateUp) statt 4 MB INT4.
+   Memory-Bandbreite saturiert die iGPU.
+3. **DML's MatMulNBits ist ein hand-tuned Kernel**: Intel-DirectML-Backend
+   nutzt vermutlich SIMD16-Wave-Ops + cooperative loads, die unser naiver
+   Shader nicht hat.
+
+#### Follow-up Opt-A-2: Ersatz der naiven HLSL durch DML-MatMulNBits-Batched
+
+DML's `MatMulNBits` unterstützt nativ `M > 1` via den `M`-Parameter im
+Operator-Descriptor. Wir bauen den Operator beim ersten `matmulBatch(M)`-Call
+lazy mit dem konkreten `M` (oder mit `M_max` und re-binding pro Call) und
+ersetzen damit `INT4_MATMUL_BATCH_HLSL` und `FP32_MATMUL_BATCH_HLSL`.
+
+**Aufwand**: ~0.5 Tag · **Risiko**: niedrig (DML-Operator existiert bereits
+für M=1, nur `MatMulNBitsDesc.M = M` setzen) · **Wirkung erwartet**: Prefill
+77 s → ~15–25 s (×3–5, weil DML-Kernel ~10× schneller pro Element ist).
+
+#### Follow-up Opt-A-3: HLSL-Tiling + groupshared für FP32-Pfad
+
+Falls Opt-A-2 für FP32-Kernel (`qkvFused`, `gateUpFused`) nicht funktioniert
+(diese sind nicht INT4-GPU-resident), zweite Option: HLSL umschreiben mit
+Thread-Group-Tiling — pro Thread-Group `[16, 16]` Output-Tile, X-Tile in
+groupshared lädt jeder Thread nur 1/256 der K-Spalte:
+
+```hlsl
+[numthreads(16, 16, 1)]
+void CSMain(uint3 gid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
+    groupshared float xTile[16][TILE_K];  // 16 rows × TILE_K cols of X
+    groupshared float wTile[TILE_K][16];  // TILE_K rows × 16 cols of W
+    float acc = 0;
+    for (uint kk = 0; kk < K; kk += TILE_K) {
+        // cooperative load: 256 threads load 16 × TILE_K X-tile in 1/16 calls each
+        // cooperative load: 256 threads load TILE_K × 16 W-tile
+        GroupMemoryBarrierWithGroupSync();
+        for (uint k = 0; k < TILE_K; k++) acc += xTile[ltid.y][k] * wTile[k][ltid.x];
+        GroupMemoryBarrierWithGroupSync();
+    }
+    Output[(gid.y*16 + ltid.y) * N + (gid.x*16 + ltid.x)] = acc;
+}
+```
+
+**Aufwand**: ~1 Tag · **Wirkung erwartet**: zusätzlich ×2–3 (Memory-Bandwidth
+reduziert sich um Faktor TILE_K, hier 32).
+
+#### Follow-up Opt-A-4: FP32 → INT4 vereinheitlichen
+
+`qkvFused` und `gateUpFused` sind nur deshalb FP32, weil sie aus mehreren
+ONNX-Tensoren konkateniert werden (Q,K,V bzw. gate,up). Wenn wir die
+`MatMulNBitsKernel.fromDequantizedWeights`-Konstruktion durch eine
+INT4-Re-Quantisierung der konkatenierten Weights ersetzen, läuft der
+schnellere INT4-Pfad mit ~4× weniger Memory-Traffic.
+
+**Aufwand**: ~1 Tag · **Risiko**: mittel (Re-Quant-Fehler kann Output
+beschädigen — Test gegen CPU-Referenz nötig) · **Wirkung erwartet**: ×2.
+
+**Empfohlene Reihenfolge**: A-2 (DML-Batched) zuerst — geringster Aufwand,
+höchste Wirkung, kein neuer Kernel-Code. Wenn Prefill danach immer noch
+> 30 s, dann A-3 + A-4.
 
 #### Problem
 
@@ -104,55 +185,178 @@ mit SIMD), das ist schon schnell genug (~50 ms für seqLen=150).
 
 ### Opt-B: Attention auf GPU mit GPU-residentem KV-Cache (Decode 3.5 s → ~2.5 s/Token)
 
-**Aufwand**: 2–3 Tage · **Risiko**: mittel · **Wirkung**:
+**Aufwand**: 2–3 Tage · **Risiko**: mittel · **Status**: 🚧 in Arbeit 2026-05-29
 
-- Spart 900 ms CPU-Attention/Token
+**Wirkung**:
+
+- Spart 907 ms CPU-Attention/Token (gemessen im aktuellen HYBRID-Profil)
 - Spart 24 Readbacks (Q|K|V → CPU) und 24 Uploads (attnOut → GPU)
-- Saldiert: ~24 weniger Submissions (qkvFused darf gleich in die Attention
-  weiterfließen, ohne zwischendurch readback)
+- Saldiert: ~700–900 ms Decode-Latenz → erwartet **2.5–2.8 s/Token**
+- Submission-Count bleibt 49 (qkvFused-Submission absorbiert Attention)
 
-#### Lösung
+#### Architektur (an existierende `batchMlp` angelehnt)
 
-1. **GPU-residenter KV-Cache**: pro Layer ein `[maxSeqLen, kvHeads, headDim]`
-   `D3D12_HEAP_TYPE_DEFAULT`-Buffer für K und V. Größe für Qwen 0.5B:
-   `4096 × 2 × 64 × 4 = 2 MB / Layer / K = 96 MB für K+V × 24 Layer`.
-   Passt locker in iGPU-VRAM.
-2. **HLSL-Compute-Shader `gqa_attention`**:
-    - Input: Q `[qHeads, headDim]` (GPU-Buffer von qkvFused),
-      K-Cache `[seqLen, kvHeads, headDim]`,
-      V-Cache `[seqLen, kvHeads, headDim]`
-    - Output: attnOut `[qHeads, headDim]`
-    - Pro Q-Head: Dot(Q, K[p]) für alle p ≤ pos, Softmax, Σ w·V[p].
-    - Thread-Group-Layout: ein Group pro Q-Head, jeder Thread arbeitet
-      auf einem Range von KV-Positionen.
-3. **KV-Cache-Append-Kernel**: nach RoPE auf K/V die neuen Werte an Position
-   `pos` ins Cache-Buffer schreiben (1 winziger Dispatch oder per
-   `D3D12_COPY_REGION` zwischen GPU-Buffern).
-4. **Pipeline-Integration**: in `QwenGpuPipeline` neue Methode
-   `qkvAttnFused(layerIdx, normedHidden, attnOut)`, die qkvFused +
-   RoPE-Apply + KV-Append + Attention in einer Command-List mit einem
-   einzigen `submitAndWait()` aufzeichnet.
+Der existierende `QwenGpuPipeline.batchMlp` (siehe oben) zeigt das Muster:
+6 GPU-Ops in 1 Submission, Zwischenergebnisse GPU-resident in den
+Kernel-eigenen Input/Output-Buffern, einzige Roundtrips sind
+Upload(hiddenInput) am Anfang und Readback(hiddenOut) am Ende.
 
-Per Layer Decode reduziert sich damit auf:
+Opt-B macht dasselbe für Submission 1:
 
-- 1 Submission: qkvFused + RoPE + KVAppend + Attention
-- 1 Submission: batchMlp (unverändert)
-- **= 2 Submissions/Layer × 24 Layer + 1 lm_head = 49 → 49 Submissions** ❌
+```
+Submission 1 (NEU — qkvAttnFused):
+  upload(normedHidden)
+  → dispatch qkvFused GEMM   (Out: oProj.inputBuf[qSize+2kvSize] in qkv-Layout)
+  → dispatch rope_qk         (in-place auf Q-Range + K-Range im qkv-Buffer, pos im CB)
+  → dispatch kv_append       (kopiert K,V aus qkv-Buffer an Position pos im KVCache)
+  → dispatch gqa_attention   (liest Q + KVCache[0..pos] → schreibt attnOut nach oProj.inputBuf)
+  → readback NUR für Debug-Modus; sonst attnOut bleibt GPU-resident
 
-Hmm — Submission-Count bleibt gleich, weil batchMlp schon vorher eigene
-Submission war. Was wir sparen: die 900 ms CPU-Attention und die zwei
-Readback/Upload-Cycles in jeder Submission. Net ~700–900 ms Decode-Latenz.
+Submission 2 (existing batchMlp, leicht modifiziert):
+  // attnOut liegt bereits in oProj.inputBuf — KEIN upload mehr
+  → dispatch o_proj          ... (Rest unverändert)
+```
+
+Submission 1 ersetzt: 1 upload + 1 dispatch + 1 readback (vorher) + 38 ms CPU-Attention.
+Neue Submission 1 hat: 1 upload + 4 dispatches + 0 readbacks = ein einzelner Fence-Wait,
+ca. 30–50 ms statt vorher ~70 ms (Submission + CPU-Attention).
+
+#### Implementierungs-Schritte (granular)
+
+**Schritt 1: GPU-residenter KV-Cache (`QwenGpuKvCache.java`, neue Klasse)**
+
+Pro Layer ein `[maxSeqLen, kvHeads * headDim]`-Buffer für K und einer für V
+im `D3D12_HEAP_TYPE_DEFAULT`. Größe für Qwen 0.5B: `4096 × 2 × 64 × 4 = 2 MB / Layer / K
+= 96 MB für 24 Layer × (K+V)`. Cap auf 4096 Positionen (statt config
+maxPos=32k) — dynamisches Realloc beim Überschreiten.
+
+API:
+
+```java
+class QwenGpuKvCache {
+    QwenGpuKvCache(WindowsBindings wb, int numLayers, int kvHeads, int headDim, int maxPos);
+    MemorySegment kCache(int layer);  // GPU-Buffer
+    MemorySegment vCache(int layer);
+    void reset();                      // pos=0 (keine memory-clear nötig, indexed Reads)
+    int currentPos();
+    void advance();                    // pos++
+}
+```
+
+**Schritt 2: HLSL-Shader (`QwenAttentionShaders.java`)**
+
+3 neue Shader, alle nach dem `Phi3ComputeShaders.RMSNORM_HLSL`-Muster:
+
+```hlsl
+// rope_qk.hlsl  — in-place RoPE auf Q (qHeads) und K (kvHeads) im QKV-Buffer
+RWByteAddressBuffer QKV : register(u0);
+ByteAddressBuffer Cos : register(t0);   // [headDim/2]
+ByteAddressBuffer Sin : register(t0);
+cbuffer CB : register(b0) { uint qSize; uint kvSize; uint headDim; uint pos; };
+// Thread = (head_idx, dim_in_half). Apply Givens rotation on (x[i], x[i+halfDim]).
+```
+
+```hlsl
+// kv_append.hlsl  — K|V aus qkv-Buffer an Position pos im KVCache schreiben
+ByteAddressBuffer QKV : register(t0);
+RWByteAddressBuffer KCache : register(u0);
+RWByteAddressBuffer VCache : register(u1);
+cbuffer CB : register(b0) { uint qSize; uint kvSize; uint pos; };
+// Thread = i in [0..kvSize). KCache[pos*kvSize + i] = QKV[qSize + i]
+```
+
+```hlsl
+// gqa_attention.hlsl  — GQA causal attention, online softmax
+ByteAddressBuffer Q : register(t0);         // [qHeads * headDim]  (= QKV[0..qSize])
+ByteAddressBuffer KCache : register(t1);    // [maxPos, kvHeads, headDim]
+ByteAddressBuffer VCache : register(t2);
+RWByteAddressBuffer Out : register(u0);     // [qHeads * headDim]
+cbuffer CB : register(b0) { uint qHeads; uint kvHeads; uint headDim; uint pos; float scale; };
+// 1 Thread-Group pro Q-Head; jeder Thread des Group bearbeitet einen Range
+// von KV-Positionen, online softmax mit groupshared max/sum-Reduktion.
+[numthreads(64, 1, 1)]
+void CSMain(uint3 gid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
+    uint qh = gid.x;
+    uint kvh = qh / (qHeads / kvHeads);
+    groupshared float gMax;
+    groupshared float gSum;
+    // Pass 1: max over scores  → gMax
+    // Pass 2: sum exp(score - gMax)  → gSum
+    // Pass 3: out = Σ (exp - gMax)/gSum * V
+    // Numerisch stabil + GQA-Mapping korrekt.
+}
+```
+
+**Schritt 3: `qkvAttnFused` in `QwenGpuPipeline`**
+
+```java
+public void qkvAttnFused(int layerIdx, float[] normedHidden, int pos) {
+    pipeline.begin();
+    var cl = pipeline.getCommandList();
+    var qkvK = kernels.qkvFused(layerIdx);
+    var oK = kernels.oProj(layerIdx);
+    // 1. upload normedHidden → qkvK.inputBuf  +  dispatch qkv GEMM → qkvK.outputBuf
+    qkvK.recordBatchFromCpu(pipeline, normedHidden);
+    // 2. RoPE in-place on qkvK.outputBuf
+    attnShaders.rope().recordDispatch(cl, {qkvBuf, cosBuf, sinBuf}, {qSize, kvSize, headDim, pos}, dispatchN);
+    // 3. KV-append: copy K|V slices from qkvBuf into kvCache.kBuf, vBuf at row pos
+    attnShaders.kvAppend().recordDispatch(cl, {qkvBuf, kvCache.k(layerIdx), kvCache.v(layerIdx)}, {qSize, kvSize, pos}, kvSize);
+    // 4. GQA → oK.inputBuf (= attnOut)
+    attnShaders.gqa().recordDispatch(cl, {qkvBuf, kvCache.k(layerIdx), kvCache.v(layerIdx), oK.inputBuf}, {qHeads, kvHeads, headDim, pos, scaleBits}, qHeads);
+    // KEINE readback — attnOut bleibt in oK.inputBuf, batchMlp liest ihn dort
+    pipeline.submitAndWait();
+}
+```
+
+**Schritt 4: `batchMlp` ohne upload-Step**
+
+Neue Variante `batchMlpGpuResident(hiddenInput, hiddenOut, layerIdx)`: überspringt
+den `oK.recordBatchFromCpu(pipeline, attnOutput)`-Step (attnOut ist schon
+GPU-resident), Rest identisch.
+
+**Schritt 5: Decode-Pfad in `Qwen2Runtime.decodeSingleToken`**
+
+Wenn `qwen.gpu.attention=true`:
+
+```java
+if (gpuAttention && useGpuForDecode) {
+    gpuPipeline.qkvAttnFused(layerIdx, decNormed, pos);  // Submission 1 (GPU attn)
+    gpuPipeline.batchMlpGpuResident(hiddenIo, hiddenIo, layerIdx);  // Submission 2 (existing)
+    return;
+}
+```
+
+**Schritt 6: Prefill-Anbindung**
+
+Prefill muss den GPU-KV-Cache populieren, sonst startet Decode mit leerem
+Cache. Zwei Varianten:
+
+- (a) Prefill bleibt CPU-Attention, schreibt am Ende des Prefills den
+  vollständigen K/V-Tensor per Upload in den GPU-KV-Cache (1 Upload pro
+  Layer am Prefill-Ende).
+- (b) Prefill nutzt ebenfalls `qkvAttnFused`-Batched, K/V landen direkt im
+  GPU-Cache (benötigt M-dim im rope/kvAppend/gqa, aufwendiger).
+
+Variante (a) ist niedrigeres Risiko und liefert die volle Decode-Wirkung.
+In dieser Iteration zuerst (a), später (b) als Folge-Opt.
 
 #### Risiken
 
-- HLSL-Shader für GQA + dynamische Softmax muss numerisch korrekt sein
-  (max-substraction für Stabilität, FP32-Akkumulator).
-- RoPE-Application auf GPU-residenter Q/K — kann als separater Mini-Shader
-  oder direkt im qkv-Output-Shader inline laufen.
-- KV-Cache-Reset zwischen Generationen muss sauber funktionieren.
-- Buffer-Größen wachsen mit `maxPositionEmbeddings` — bei Qwen 0.5B mit
-  32k Context-Window wären das ~768 MB. Daher cap auf realistisches
-  Maximum (z.B. 4096) und dynamisch reallozieren.
+- **Online-Softmax in HLSL muss bit-nah zur CPU-Referenz sein** — sonst
+  Divergenz in Token-Sequenz nach 5–10 Tokens. Test-Pfad: `qwen.gpu.attention=true`
+  vs `false` mit deterministischem Prompt, beide müssen identische Token-IDs
+  liefern.
+- **GQA-Mapping**: Q-Head `h` liest KVCache mit `kvh = h / (qHeads/kvHeads)`.
+  In HLSL als Integer-Division.
+- **KV-Cache-Reset zwischen Generationen**: `pos` wird beim `resetCache()` auf 0
+  zurückgesetzt, Buffer-Inhalt darf alt bleiben (wird nicht gelesen wegen
+  causal mask + `pos`-Bound).
+- **RoPE-Tabelle auf GPU**: einmalig beim Pipeline-Start hochladen
+  (halfDim × maxPos × 4 Byte = 256 KB für maxPos=4096, headDim=64).
+- **Buffer-Größe**: 96 MB GPU-KV-Cache für 24 Layer × 4096 maxPos. iGPU
+  teilt sich VRAM mit Host-RAM — unkritisch.
+- **Backward-Kompat**: Feature-Flag `qwen.gpu.attention` default `false`,
+  damit der validierte 3.5 s/Token-HYBRID-Pfad nicht regrediert.
 
 ### Opt-C: Single-Dispatch Decoder Layer (Decode 3.5 s → ~1 s/Token)
 
