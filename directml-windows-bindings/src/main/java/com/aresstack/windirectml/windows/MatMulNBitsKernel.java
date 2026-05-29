@@ -108,13 +108,15 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
     // ── Batched matmul (Opt-A: prefill) — lazily allocated on first matmulBatch call ─────
     private GpuComputeKernel int4BatchShader;
+    private GpuComputeKernel fp32BatchShader;       // for !useInt4Gpu kernels (qkvFused, gateUpFused)
     private MemorySegment int4BatchInputBuf;        // GPU default [maxBatchM, K]
     private MemorySegment int4BatchOutputBuf;       // GPU default [maxBatchM, N]
     private MemorySegment int4BatchUploadBuf;       // upload heap [maxBatchM * K * 4 bytes]
     private MemorySegment int4BatchReadbackBuf;     // readback heap [maxBatchM * N * 4 bytes]
     private MemorySegment int4BatchMappedUpload;    // persistently mapped upload
     private MemorySegment int4BatchMappedReadback;  // persistently mapped readback
-    private long[] int4BatchUavAddrs;               // [X_batch, QW, Scales, ZP, Y_batch]
+    private long[] int4BatchUavAddrs;               // INT4 mode: [X_batch, QW, Scales, ZP, Y_batch]
+    private long[] fp32BatchUavAddrs;               // FP32 mode: [X_batch, W, Y_batch]
     private int batchCapacityM = 0;                 // currently-allocated capacity
     private MemorySegment barrierBatchInputToUAV;
     private MemorySegment barrierBatchOutputToCS;
@@ -250,6 +252,37 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                     }
                 }
             
+                Y.Store((m * N + n) * 4, asuint(sum));
+            }
+            """;
+
+    // FP32 batched matmul shader for pre-dequantized weights (qkvFused, gateUpFused).
+    // Same M-row batching contract as INT4_MATMUL_BATCH_HLSL; weight buffer is
+    // [N, K] row-major FP32 (held in weightBuf for legacy/FP32 mode kernels).
+    private static final String FP32_MATMUL_BATCH_HLSL = """
+            RWByteAddressBuffer X : register(u0);
+            RWByteAddressBuffer W : register(u1);
+            RWByteAddressBuffer Y : register(u2);
+            cbuffer CB : register(b0) { uint N; uint K; uint M; };
+            
+            [numthreads(64, 1, 1)]
+            void CSMain(uint3 tid : SV_DispatchThreadID) {
+                uint flat = tid.x;
+                uint total = M * N;
+                if (flat >= total) return;
+                uint m = flat / N;
+                uint n = flat - m * N;
+            
+                uint xBase = m * K;
+                uint wBase = n * K;
+                float sum = 0.0;
+                // K is always a multiple of 8 for Qwen/Phi shapes — unroll by 4.
+                for (uint k = 0; k < K; k += 4) {
+                    sum += asfloat(X.Load((xBase + k    ) * 4)) * asfloat(W.Load((wBase + k    ) * 4));
+                    sum += asfloat(X.Load((xBase + k + 1) * 4)) * asfloat(W.Load((wBase + k + 1) * 4));
+                    sum += asfloat(X.Load((xBase + k + 2) * 4)) * asfloat(W.Load((wBase + k + 2) * 4));
+                    sum += asfloat(X.Load((xBase + k + 3) * 4)) * asfloat(W.Load((wBase + k + 3) * 4));
+                }
                 Y.Store((m * N + n) * 4, asuint(sum));
             }
             """;
@@ -1032,7 +1065,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      * back to per-row dispatches (callers should still use {@link #matvec}).
      */
     public boolean supportsBatch() {
-        return useInt4Gpu;
+        return prepared;   // both INT4 and FP32 paths support matmulBatch now
     }
 
     /**
@@ -1050,8 +1083,6 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      */
     public void matmulBatch(float[] xBatch, float[] outBatch, int M) {
         if (!prepared) throw new IllegalStateException("Kernel not prepared");
-        if (!useInt4Gpu) throw new UnsupportedOperationException(
-                "matmulBatch only supported in INT4-GPU mode");
         if (M < 1 || M > MAX_BATCH_M) throw new IllegalArgumentException(
                 "M out of range [1, " + MAX_BATCH_M + "]: " + M);
         if (xBatch.length < (long) M * K) throw new IllegalArgumentException(
@@ -1067,7 +1098,12 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         long inputBytes = (long) M * K * Float.BYTES;
         long outputBytes = (long) M * N * Float.BYTES;
-        int[] batchConstants = new int[]{N, K, int4BlockSize, M};
+        // INT4 mode: {N, K, blockSize, M}; FP32 mode: {N, K, M}
+        int[] batchConstants = useInt4Gpu
+                ? new int[]{N, K, int4BlockSize, M}
+                : new int[]{N, K, M};
+        long[] batchUavs = useInt4Gpu ? int4BatchUavAddrs : fp32BatchUavAddrs;
+        GpuComputeKernel batchShader = useInt4Gpu ? int4BatchShader : fp32BatchShader;
 
         try {
             // 1. Upload xBatch to persistently-mapped upload buffer.
@@ -1084,7 +1120,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhCopyBufferRegion.invokeExact(execCmdList,
                     int4BatchInputBuf, 0L, int4BatchUploadBuf, 0L, inputBytes);
             mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchInputToUAV);
-            int4BatchShader.recordDispatch(execCmdList, int4BatchUavAddrs, batchConstants, M * N);
+            batchShader.recordDispatch(execCmdList, batchUavs, batchConstants, M * N);
             mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchOutputToCS);
             mhCopyBufferRegion.invokeExact(execCmdList,
                     int4BatchReadbackBuf, 0L, int4BatchOutputBuf, 0L, outputBytes);
@@ -1157,23 +1193,37 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         int4BatchMappedUpload = D3D12Bindings.mapResource(int4BatchUploadBuf, arena);
         int4BatchMappedReadback = D3D12Bindings.mapResource(int4BatchReadbackBuf, arena);
 
-        // Compile the batched shader on first call (5 UAVs, 4 constants).
-        if (int4BatchShader == null) {
-            int4BatchShader = new GpuComputeKernel(wb, execCmdList,
-                    INT4_MATMUL_BATCH_HLSL, "int4_matmul_batch",
-                    5,   // UAVs: X, QW, Scales, ZP, Y
-                    4,   // constants: N, K, blockSize, M
-                    64); // 64 threads per group
+        // Compile the batched shader on first call (mode-dependent: INT4 vs FP32).
+        if (useInt4Gpu) {
+            if (int4BatchShader == null) {
+                int4BatchShader = new GpuComputeKernel(wb, execCmdList,
+                        INT4_MATMUL_BATCH_HLSL, "int4_matmul_batch",
+                        5,   // UAVs: X, QW, Scales, ZP, Y
+                        4,   // constants: N, K, blockSize, M
+                        64);
+            }
+            int4BatchUavAddrs = new long[]{
+                    D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
+                    D3D12Bindings.getGpuVirtualAddress(int4WeightBuf),
+                    D3D12Bindings.getGpuVirtualAddress(int4ScalesBuf),
+                    D3D12Bindings.getGpuVirtualAddress(int4ZpBuf),
+                    D3D12Bindings.getGpuVirtualAddress(int4BatchOutputBuf)
+            };
+        } else {
+            // FP32 / pre-dequantized weight path (used by qkvFused, gateUpFused).
+            if (fp32BatchShader == null) {
+                fp32BatchShader = new GpuComputeKernel(wb, execCmdList,
+                        FP32_MATMUL_BATCH_HLSL, "fp32_matmul_batch",
+                        3,   // UAVs: X, W, Y
+                        3,   // constants: N, K, M
+                        64);
+            }
+            fp32BatchUavAddrs = new long[]{
+                    D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
+                    D3D12Bindings.getGpuVirtualAddress(weightBuf),
+                    D3D12Bindings.getGpuVirtualAddress(int4BatchOutputBuf)
+            };
         }
-
-        // Re-cache UAV addresses (the batch buffers just changed identity).
-        int4BatchUavAddrs = new long[]{
-                D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
-                D3D12Bindings.getGpuVirtualAddress(int4WeightBuf),
-                D3D12Bindings.getGpuVirtualAddress(int4ScalesBuf),
-                D3D12Bindings.getGpuVirtualAddress(int4ZpBuf),
-                D3D12Bindings.getGpuVirtualAddress(int4BatchOutputBuf)
-        };
 
         // Re-allocate barriers against the new resources.
         barrierBatchInputToUAV = allocTransitionBarrier(int4BatchInputBuf,
@@ -1306,6 +1356,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         // Release INT4 GPU mode resources (if active)
         if (int4Shader != null) int4Shader.close();
         if (int4BatchShader != null) int4BatchShader.close();
+        if (fp32BatchShader != null) fp32BatchShader.close();
         if (int4WeightBuf != null) DxgiBindings.release(int4WeightBuf);
         if (int4ScalesBuf != null) DxgiBindings.release(int4ScalesBuf);
         if (int4ZpBuf != null) DxgiBindings.release(int4ZpBuf);
