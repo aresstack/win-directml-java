@@ -136,45 +136,157 @@ public final class QwenGpuKernels implements AutoCloseable {
     // ── Kernel builders ──────────────────────────────────────────────────
 
     /**
-     * Fused Q+K+V: dequantize/extract each projection separately,
-     * concatenate rows into {@code [qSize+kvSize+kvSize, hidden]}, upload once.
+     * Fused Q+K+V: prefer INT4-rowwise concat (Opt-A-3), fallback to FP32 dequant+concat.
      */
     private static MatMulNBitsKernel createFusedQKV(WindowsBindings wb,
                                                     Qwen2Weights.LayerWeights lw,
                                                     int qSize, int kvSize, int hidden,
                                                     int layerIdx) {
+        int fusedN = qSize + 2 * kvSize;
+
+        // Opt-A-3: try INT4-rowwise concat first
+        Qwen2Weights.QuantizedWeight fusedQ = tryFuseQuantizedRowwise(
+                lw.qProj(), lw.kProj(), lw.vProj());
+        if (fusedQ != null) {
+            log.debug("layer.{} QKV fused INT4 [{}, {}] (Opt-A-3)", layerIdx, fusedN, hidden);
+            return new MatMulNBitsKernel(wb, fusedQ.N(), fusedQ.K(),
+                    fusedQ.qWeight(), fusedQ.scales(), fusedQ.zeroPoints(), fusedQ.blockSize());
+        }
+
+        // Fallback: FP32 dequant + concat (legacy path)
         float[] qDeq = dequantOrExtract(lw.qProj());
         float[] kDeq = dequantOrExtract(lw.kProj());
         float[] vDeq = dequantOrExtract(lw.vProj());
-
-        int fusedN = qSize + 2 * kvSize;
         float[] fused = new float[fusedN * hidden];
         System.arraycopy(qDeq, 0, fused, 0, qSize * hidden);
         System.arraycopy(kDeq, 0, fused, qSize * hidden, kvSize * hidden);
         System.arraycopy(vDeq, 0, fused, (qSize + kvSize) * hidden, kvSize * hidden);
 
-        log.debug("layer.{} QKV fused [{}, {}]", layerIdx, fusedN, hidden);
+        log.debug("layer.{} QKV fused FP32 [{}, {}] (legacy)", layerIdx, fusedN, hidden);
         return MatMulNBitsKernel.fromDequantizedWeights(wb, fusedN, hidden, fused);
     }
 
     /**
-     * Fused gate+up: dequantize/extract each projection separately,
-     * concatenate rows into {@code [2*intermediateSize, hidden]}, upload once.
+     * Fused gate+up: prefer INT4-rowwise concat (Opt-A-3), fallback to FP32 dequant+concat.
      */
     private static MatMulNBitsKernel createFusedGateUp(WindowsBindings wb,
                                                        Qwen2Weights.LayerWeights lw,
                                                        int intermediate, int hidden,
                                                        int layerIdx) {
+        int fusedN = 2 * intermediate;
+
+        // Opt-A-3: try INT4-rowwise concat first
+        Qwen2Weights.QuantizedWeight fusedQ = tryFuseQuantizedRowwise(
+                lw.gateProj(), lw.upProj());
+        if (fusedQ != null) {
+            log.debug("layer.{} gate+up fused INT4 [{}, {}] (Opt-A-3)", layerIdx, fusedN, hidden);
+            return new MatMulNBitsKernel(wb, fusedQ.N(), fusedQ.K(),
+                    fusedQ.qWeight(), fusedQ.scales(), fusedQ.zeroPoints(), fusedQ.blockSize());
+        }
+
+        // Fallback: FP32 dequant + concat (legacy path)
         float[] gDeq = dequantOrExtract(lw.gateProj());
         float[] uDeq = dequantOrExtract(lw.upProj());
-
-        int fusedN = 2 * intermediate;
         float[] fused = new float[fusedN * hidden];
         System.arraycopy(gDeq, 0, fused, 0, intermediate * hidden);
         System.arraycopy(uDeq, 0, fused, intermediate * hidden, intermediate * hidden);
 
-        log.debug("layer.{} gate+up fused [{}, {}]", layerIdx, fusedN, hidden);
+        log.debug("layer.{} gate+up fused FP32 [{}, {}] (legacy)", layerIdx, fusedN, hidden);
         return MatMulNBitsKernel.fromDequantizedWeights(wb, fusedN, hidden, fused);
+    }
+
+    // ── Opt-A-3: INT4 rowwise concat helper ─────────────────────────────
+
+    /**
+     * Try to fuse multiple INT4-quantized weight matrices by rowwise concatenation.
+     * <p>
+     * Returns a single {@code QuantizedWeight} with {@code N = N1+N2+...} if all
+     * pre-flight conditions hold; returns {@code null} otherwise (caller must use
+     * FP32 fallback). Reasons for {@code null}:
+     * <ul>
+     *   <li>Any input is not a {@code QuantizedWeightMatrix} (e.g. DenseWeightMatrix).</li>
+     *   <li>K or blockSize differs between parts.</li>
+     *   <li>{@code (N_part * blocksPerRow) % 2 != 0} for any part except the last
+     *       — byte-aligned concat of packed nibble zeroPoints would require bit-shifting,
+     *       not currently implemented. Triggers a one-shot WARN log so we know if a
+     *       future model needs the bit-shift path.</li>
+     * </ul>
+     *
+     * @param parts WeightMatrix instances to concatenate (rowwise: parts[0] rows on top)
+     * @return fused QuantizedWeight or null if not all parts are INT4-fusable
+     */
+    private static Qwen2Weights.QuantizedWeight tryFuseQuantizedRowwise(
+            Qwen2Weights.WeightMatrix... parts) {
+        if (parts.length == 0) return null;
+
+        // All parts must be QuantizedWeightMatrix
+        Qwen2Weights.QuantizedWeight[] qs = new Qwen2Weights.QuantizedWeight[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            if (!(parts[i] instanceof Qwen2Weights.QuantizedWeightMatrix qwm)) return null;
+            qs[i] = qwm.inner();
+        }
+
+        int K = qs[0].K();
+        int blockSize = qs[0].blockSize();
+        int blocksPerRow = K / blockSize;
+
+        // Validate K, blockSize, and byte-alignment of zeroPoints per part
+        for (int i = 0; i < qs.length; i++) {
+            if (qs[i].K() != K || qs[i].blockSize() != blockSize) {
+                log.warn("tryFuseQuantizedRowwise: part {} has K={} blockSize={} but expected K={} blockSize={} — falling back to FP32",
+                        i, qs[i].K(), qs[i].blockSize(), K, blockSize);
+                return null;
+            }
+            // All parts except the last must have N_i * blocksPerRow % 2 == 0
+            // so packed-nibble zeroPoints arrays are byte-aligned at the boundary.
+            if (i < qs.length - 1 && (qs[i].N() * blocksPerRow) % 2 != 0) {
+                log.warn("tryFuseQuantizedRowwise: part {} N={}*blocksPerRow={} not byte-aligned — falling back to FP32 (bit-shift path not implemented)",
+                        i, qs[i].N(), blocksPerRow);
+                return null;
+            }
+        }
+
+        // Compute concatenated N
+        int fusedN = 0;
+        for (Qwen2Weights.QuantizedWeight q : qs) fusedN += q.N();
+
+        // Concat qWeight: each row has K/2 bytes, row-major, plain System.arraycopy
+        int rowBytes = K / 2;
+        byte[] fusedQ = new byte[fusedN * rowBytes];
+        int qOff = 0;
+        for (Qwen2Weights.QuantizedWeight q : qs) {
+            int partBytes = q.N() * rowBytes;
+            System.arraycopy(q.qWeight(), 0, fusedQ, qOff, partBytes);
+            qOff += partBytes;
+        }
+
+        // Concat scales: each row has blocksPerRow floats, row-major
+        float[] fusedScales = new float[fusedN * blocksPerRow];
+        int sOff = 0;
+        for (Qwen2Weights.QuantizedWeight q : qs) {
+            int partFloats = q.N() * blocksPerRow;
+            System.arraycopy(q.scales(), 0, fusedScales, sOff, partFloats);
+            sOff += partFloats;
+        }
+
+        // Concat zeroPoints (packed nibbles, global flat).
+        // Total nibbles = fusedN * blocksPerRow; bytes = (totalNibbles + 1) / 2.
+        int totalZpNibbles = fusedN * blocksPerRow;
+        int totalZpBytes = (totalZpNibbles + 1) / 2;
+        byte[] fusedZp = new byte[totalZpBytes];
+        int zOff = 0;
+        for (Qwen2Weights.QuantizedWeight q : qs) {
+            int partNibbles = q.N() * blocksPerRow;
+            int partBytes = (partNibbles + 1) / 2;
+            // Pre-flight guaranteed byte-alignment for all but the last part,
+            // so System.arraycopy is safe (last part may have a half-byte tail,
+            // but that fits naturally at the end of fusedZp).
+            System.arraycopy(q.zeroPoints(), 0, fusedZp, zOff, partBytes);
+            zOff += partBytes;
+        }
+
+        return new Qwen2Weights.QuantizedWeight(fusedQ, fusedScales, fusedZp,
+                fusedN, K, blockSize);
     }
 
     /**

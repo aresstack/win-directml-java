@@ -226,6 +226,93 @@ Folgereihenfolge nach Opt-A-2 v2:
    wird für längere Prompts entscheidend.
 3. Wenn nein: weitere Diagnose mit per-stage-Zahlen.
 
+#### Messung Opt-A-2 v2 (2026-05-29, Intel UHD, seqLen=49)
+
+v2 ist **eindeutig aktiv** (1× `Compiled compute shader 'fp32_matmul_batch_tiled'`,
+close() schließt Shader nicht mehr). Aber: Prefill ist nur minimal besser.
+
+| Stage            | v1 (ms) | v2 (ms) | Δ                                      |
+|------------------|---------|---------|----------------------------------------|
+| qkvBatch FP32    | 3 899   | 3 234   | −665                                   |
+| oProjBatch INT4  | 3 708   | 3 131   | −577                                   |
+| gateUpBatch FP32 | 20 447  | 24 604  | +4 157 (Mess-Varianz, Logik identisch) |
+| downBatch INT4   | 11 347  | 11 713  | +366                                   |
+| attn CPU         | 18 271  | 20 991  | +2 720                                 |
+| **sum**          | 57 674  | 63 676  | +6 002                                 |
+
+Fazit: Compile-Overhead war **viel kleiner** als 30 s geschätzt — die 95
+vermiedenen Compiles haben nur ~1.2 s gespart. Die `300-900 ms`-pro-Compile-
+Schätzung war ~30× zu hoch. **Opt-A-2 ist ausgereizt.**
+
+#### Opt-A-3: INT4-Fused-Kernels für QKV und gate/up (2026-05-29, **WURZEL**)
+
+**Aufwand**: ~1 Tag · **Risiko**: niedrig-mittel · **Status: 🚧 in Arbeit**
+
+Wurzel-Befund im Profil: `gateUpBatch` läuft **FP32** (24.6 s, 39% der
+Prefill-Zeit), `downBatch` läuft **INT4** (11.7 s). Beide haben INT4-Gewichte
+im Modell. Grund in `QwenGpuKernels.createFusedGateUp` (Z. 164-178):
+
+```java
+float[] gDeq = dequantOrExtract(lw.gateProj());   // INT4 → FP32 dequant
+float[] uDeq = dequantOrExtract(lw.upProj());     // INT4 → FP32 dequant
+float[] fused = new float[2 * intermediate * hidden];   // concat
+return MatMulNBitsKernel.fromDequantizedWeights(wb, fusedN, hidden, fused);
+// ↑ setzt useInt4Gpu = false → FP32 GEMM Pfad
+```
+
+Gleicher Bug in `createFusedQKV` (Z. 142-158). Das war architektonisch
+motiviert (1 fused submission statt 2 oder 3), aber kostet Faktor 8 an
+Speicher-Bandbreite (FP32 = 32 MB/Layer durch L3 statt 4 MB INT4).
+
+**Bandbreitenrechnung** (gate+up, Qwen2.5-0.5B):
+
+| Format         | Bytes/Layer | Prefill (24 Layer, seqLen=49)             |
+|----------------|-------------|-------------------------------------------|
+| FP32 (heute)   | 33 MB       | 24.6 s                                    |
+| INT4 (Opt-A-3) | 4 MB        | **erwartet ~5 s** (8× weniger Bandbreite) |
+
+Gleiche Logik für QKV: 1.1 MB FP32 → 0.14 MB INT4 (3.2 s → ~1 s).
+
+**Fix:** Helper-Methode `fuseQuantizedRowwise(QuantizedWeight... parts)`
+in `QwenGpuKernels` die `qWeight`, `scales`, `zeroPoints` zeilenweise
+konkateniert (kein FP32-Dequant). Resultat: ein größeres `QuantizedWeight`
+mit `N = N1 + N2 + ...`, dann an den primären `MatMulNBitsKernel`-
+Konstruktor übergeben → INT4-GPU-Pfad.
+
+**Layout-Validierung** (Qwen2.5-0.5B, blockSize=32, K=896 → blocksPerRow=28):
+
+- qWeight: `[N × K/2]` bytes, row-major → trivialer zeilenweiser concat
+- scales:  `[N × blocksPerRow]` floats, row-major → trivialer concat
+- zeroPoints: `[(N × blocksPerRow + 1) / 2]` bytes, global packed nibbles.
+  Aber: 896 × 28 = 25 088 (gerade), 128 × 28 = 3 584 (gerade),
+  4 864 × 28 = 136 192 (gerade), 9 728 × 28 = 272 384 (gerade)
+  → **alle Teilmatrizen byte-aligned** → byte-arrays direkt konkatenierbar.
+
+Safety-Check im Helper: assert `(N_part × blocksPerRow) % 2 == 0` für jeden
+Teil außer dem letzten, sonst RuntimeException mit Fallback-Hinweis auf
+bit-shift-Pfad (für andere Modelle ggf. nachrüsten).
+
+**Pre-flight Bedingungen** (alle parts müssen gelten):
+
+1. Alle `parts[i].K() == parts[0].K()` (gleiche Input-Dim)
+2. Alle `parts[i].blockSize() == parts[0].blockSize()` (gleicher Block)
+3. `(parts[i].N() * blocksPerRow) % 2 == 0` für i < parts.length−1
+
+**Wirkung erwartet**: Prefill 64 s → **~30–35 s** @ seqLen=49.
+Decode unverändert (gleiche Anzahl Submissions, gleiche FLOPS).
+Token-Sequenz byte-identisch (INT4-Pfad numerisch identisch zu FP32 Dequant,
+weil die FP32-Variante intern denselben Dequant macht — nur im Vorfeld).
+
+**Akzeptanz**:
+
+1. Log zeigt `INT4 GPU mode [9728, 896]` für gateUp (statt heute Upload-Log
+   `Uploaded weight [9728, 896] to GPU (33 MB)`).
+2. `gateUpBatch` < 8 s in Per-Stage-Messung.
+3. Token-Sequenz byte-identisch zu v2 (FP32-fused).
+
+**Risiko**: Wenn Token-Sequenz abweicht → ein Concat-Index ist falsch.
+Dann mit Single-Layer-Test (Layer 0 only) gegen FP32-Referenz vergleichen.
+
 #### Follow-up Opt-A-3: HLSL-Tiling + groupshared für FP32-Pfad
 
 Falls Opt-A-2 für FP32-Kernel (`qkvFused`, `gateUpFused`) nicht funktioniert
