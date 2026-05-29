@@ -50,7 +50,17 @@ public final class QwenGpuPipeline implements AutoCloseable {
     private final QwenGpuKernels kernels;
     private ComputeKernelSet computeKernels;   // null if shader compilation fails
     private AttentionKernelSet attentionKernels;  // null if Opt-B shaders fail to compile
-    private QwenGpuKvCache kvCache;             // null until setKvCache() is called
+    private QwenGpuKvCache kvCache;             // null until lazy attention enable succeeds
+
+    // ── Lazy Opt-B request: KV cache is allocated AFTER first prefill so it doesn't
+    //    compete with matmulBatch scratch buffers for GPU memory on Intel iGPU. ──
+    private WindowsBindings deferredWb;
+    private int deferredKvMaxSeqLen;
+    private int deferredKvHeads;
+    private int deferredHeadDim;
+    private int deferredNumLayers;
+    private boolean attnRequested = false;
+    private boolean attnLazyAttempted = false;
 
     // ── GPU-resident intermediate buffer (residual, survives within a layer) ─
     private MemorySegment residualBuf;
@@ -457,6 +467,56 @@ public final class QwenGpuPipeline implements AutoCloseable {
     }
 
     /**
+     * Register a lazy Opt-B GPU-attention request. The actual KV cache buffers
+     * are NOT allocated here — they are deferred until
+     * {@link #tryEnableLazyGpuAttention()} is called, which happens after the
+     * first prefill so the KV cache does not compete with matmulBatch scratch
+     * buffers for GPU memory on tight-VRAM hosts (Intel iGPU).
+     */
+    public void requestLazyGpuAttention(WindowsBindings wb, int numLayers,
+                                        int kvHeadsArg, int headDimArg, int maxSeqLen) {
+        if (kvHeadsArg != kvHeads || headDimArg != headDim) {
+            throw new IllegalArgumentException("KV cache shape mismatch with model config");
+        }
+        this.deferredWb = wb;
+        this.deferredNumLayers = numLayers;
+        this.deferredKvHeads = kvHeadsArg;
+        this.deferredHeadDim = headDimArg;
+        this.deferredKvMaxSeqLen = maxSeqLen;
+        this.attnRequested = true;
+        log.info("QwenGpuPipeline Opt-B: lazy attention requested (maxSeqLen={}); KV cache will allocate after first prefill",
+                maxSeqLen);
+    }
+
+    /**
+     * Lazily allocate the GPU-resident KV cache (if requested via
+     * {@link #requestLazyGpuAttention}) and attach it. Safe to call multiple
+     * times; only the first call attempts allocation. Returns true iff the
+     * cache is now attached. On allocation failure (GPU out-of-memory) this
+     * method logs a warning and returns false; callers should then keep using
+     * the CPU attention path — byte-identical to before.
+     */
+    public boolean tryEnableLazyGpuAttention() {
+        if (kvCache != null) return true;
+        if (!attnRequested || attnLazyAttempted) return kvCache != null;
+        attnLazyAttempted = true;
+        if (attentionKernels == null) {
+            log.warn("Opt-B lazy enable skipped: attention shaders did not compile");
+            return false;
+        }
+        try {
+            QwenGpuKvCache c = new QwenGpuKvCache(deferredWb, deferredNumLayers,
+                    deferredKvHeads, deferredHeadDim, deferredKvMaxSeqLen);
+            setKvCache(c);
+            return true;
+        } catch (Throwable t) {
+            log.warn("Opt-B lazy KV cache allocation failed - staying on CPU attention path: {}",
+                    t.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * True iff the full Opt-B GPU-resident decode path is available:
      * MLP-batch shaders compiled, postNorm weights uploaded, attention shaders
      * compiled, and a KV cache attached.
@@ -683,6 +743,17 @@ public final class QwenGpuPipeline implements AutoCloseable {
         closed = true;
         if (attentionKernels != null) attentionKernels.close();
         if (computeKernels != null) computeKernels.close();
+        // KV cache lifetime is owned by the pipeline when allocated via
+        // requestLazyGpuAttention(). If it was attached externally via setKvCache(),
+        // the caller is responsible for closing it; we don't double-close.
+        if (kvCache != null && attnRequested && attnLazyAttempted) {
+            try {
+                kvCache.close();
+            } catch (Exception e) {
+                log.warn("Error closing internal KV cache: {}", e.getMessage());
+            }
+            kvCache = null;
+        }
         pipeline.close();
         log.info("QwenGpuPipeline closed");
     }

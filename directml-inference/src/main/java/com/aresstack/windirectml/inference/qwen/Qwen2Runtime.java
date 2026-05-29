@@ -464,10 +464,15 @@ public final class Qwen2Runtime {
 
         cachedSeqLen = seqLen;
 
-        // ── Opt-B: upload CPU-built KV cache to GPU for GPU-resident decode ──
-        // After prefill, all KV state lives in CPU arrays kvCacheK/V[layer][kvH].
-        // The Opt-B decode path reads K/V from the GPU-resident QwenGpuKvCache,
-        // so we must mirror the prefill state into the GPU buffers exactly once.
+        // ── Opt-B: lazy KV cache enable + upload ──
+        // Try to enable the GPU-resident KV cache NOW — prefill batch scratch is
+        // fully allocated, so the GPU memory peak is known. On Intel iGPU this
+        // is the only timing that fits both batch scratch (~860 MB for seqLen=256)
+        // AND the KV cache (~48 MB) into the available VRAM. If allocation fails,
+        // tryEnableLazyGpuAttention logs a warning and decode keeps the CPU path.
+        if (gpuPipeline != null) {
+            gpuPipeline.tryEnableLazyGpuAttention();
+        }
         if (gpuPipeline != null && gpuPipeline.isAttnGpuResidentEnabled()) {
             long upStart = System.nanoTime();
             int uploaded = 0;

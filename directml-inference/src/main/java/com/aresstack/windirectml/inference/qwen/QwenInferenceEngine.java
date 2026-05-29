@@ -178,37 +178,31 @@ public class QwenInferenceEngine implements InferenceEngine {
                             // Opt-B: GPU-resident attention (KV cache + rope + GQA on GPU).
                             // ENABLED BY DEFAULT (2026-05-29) - drops decode from ~3.7 s/token to ~1 s/token
                             // on Intel iGPU. Disable with -Dqwen.gpu.attention=false if it causes issues.
-                            // Auto-disables (with log warning) if not all decoder layers have GPU kernels.
+                            //
+                            // The KV cache is requested here but actually allocated LAZILY at the end
+                            // of the first prefill, so it doesn't compete with matmulBatch scratch
+                            // buffers for GPU memory (which would OOM Intel iGPUs).
                             boolean attnFlag = Boolean.parseBoolean(
                                     System.getProperty("qwen.gpu.attention", "true"));
                             if (attnFlag
                                     && gpuKernels.getGpuLayers() == config.numHiddenLayers()) {
-                                try {
-                                    int kvMaxSeq = Integer.getInteger(
-                                            "qwen.gpu.attention.maxseqlen", 4096);
-                                    gpuKvCache = new QwenGpuKvCache(wb,
-                                            config.numHiddenLayers(),
-                                            config.numKeyValueHeads(),
-                                            config.headDim(),
-                                            kvMaxSeq);
-                                    gpuPipeline.setKvCache(gpuKvCache);
-                                    log.info("Opt-B enabled: GPU-resident KV cache + attention (maxSeqLen={})",
-                                            kvMaxSeq);
-                                } catch (Exception ke) {
-                                    log.warn("Opt-B KV cache init failed - GPU-resident attention disabled: {}",
-                                            ke.getMessage());
-                                    gpuKvCache = null;
-                                }
+                                int kvMaxSeq = Integer.getInteger(
+                                        "qwen.gpu.attention.maxseqlen", 2048);
+                                gpuPipeline.requestLazyGpuAttention(wb,
+                                        config.numHiddenLayers(),
+                                        config.numKeyValueHeads(),
+                                        config.headDim(),
+                                        kvMaxSeq);
                             } else if (attnFlag) {
                                 log.warn("Opt-B requested but only {}/{} layers on GPU - GPU-resident attention disabled (set qwen.gpu.layers={})",
                                         gpuKernels.getGpuLayers(), config.numHiddenLayers(),
                                         config.numHiddenLayers());
                             }
 
-                            log.info("GPU acceleration: {}/{} layers on GPU, lmHead={}, pipeline=V2.0 (mlpBatch={}, attnGpuResident={})",
+                            log.info("GPU acceleration: {}/{} layers on GPU, lmHead={}, pipeline=V2.0 (mlpBatch={}, attnLazy={})",
                                     gpuKernels.getGpuLayers(), config.numHiddenLayers(),
                                     gpuKernels.hasLmHead(), gpuPipeline.isMlpBatchEnabled(),
-                                    gpuPipeline.isAttnGpuResidentEnabled());
+                                    attnFlag);
                         } catch (Exception pe) {
                             log.warn("GPU pipeline V2.0 failed, using V1 per-kernel dispatch: {}",
                                     pe.getMessage());
@@ -345,14 +339,9 @@ public class QwenInferenceEngine implements InferenceEngine {
             }
             gpuPipeline = null;
         }
-        if (gpuKvCache != null) {
-            try {
-                gpuKvCache.close();
-            } catch (Exception e) {
-                log.warn("Error closing GPU KV cache: {}", e.getMessage());
-            }
-            gpuKvCache = null;
-        }
+        // KV cache lifetime is now owned by the pipeline (lazy allocation).
+        // The legacy gpuKvCache field is kept null and ignored.
+        gpuKvCache = null;
         if (gpuKernels != null) {
             try {
                 gpuKernels.close();
