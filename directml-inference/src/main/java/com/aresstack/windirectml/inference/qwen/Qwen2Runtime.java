@@ -3,9 +3,11 @@ package com.aresstack.windirectml.inference.qwen;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
 import java.util.stream.IntStream;
 
@@ -296,14 +298,31 @@ public final class Qwen2Runtime {
         log.info("Prefill: {} tokens in {} ms", inputIds.length, String.format("%.1f", profPrefillNs / 1e6));
 
         // ── Decode loop ──────────────────────────────────────────────
-        List<Integer> generatedIds = new ArrayList<>();
+        int[] generatedIds = new int[maxTokens];
+        int generatedCount = 0;
+
+        // Incremental UTF-8 byte accumulator for the streaming delta. The
+        // previous implementation re-decoded `generatedIds.stream().toArray()`
+        // every token — O(N^2) over the whole conversation. With a 200-token
+        // output that meant ~20k redundant HashMap lookups in UNICODE_TO_BYTE
+        // accumulated over the run. Now we decode each new token's bytes once
+        // and append to a ByteArrayOutputStream — O(N) total. The byte buffer
+        // also correctly resolves multi-byte UTF-8 codepoints that span two
+        // tokens (the partial bytes carry across iterations).
+        ByteArrayOutputStream decodedBytes = new ByteArrayOutputStream(256);
         String previousText = "";
+
+        // Periodic profile log so the user can see WHERE time is going during
+        // a long decode without waiting for the run to finish.
+        final int profileLogEveryTokens = Integer.getInteger("qwen.profile.log.every", 16);
+        long decodeWallStart = System.nanoTime();
+        long lastProfileWall = decodeWallStart;
 
         for (int step = 0; step < maxTokens; step++) {
 
-            // Repetition penalty
-            if (repetitionPenalty > 1.0f && !generatedIds.isEmpty()) {
-                applyRepetitionPenalty(logits, generatedIds);
+            // Repetition penalty (cheap, only touches the generatedCount unique ids)
+            if (repetitionPenalty > 1.0f && generatedCount > 0) {
+                applyRepetitionPenalty(logits, generatedIds, generatedCount);
             }
 
             int nextToken = argmax(logits);
@@ -312,12 +331,16 @@ public final class Qwen2Runtime {
                 break;
             }
 
-            generatedIds.add(nextToken);
+            generatedIds[generatedCount++] = nextToken;
 
-            // Decode accumulated IDs to text
-            String fullText = tokenizer.decode(
-                    generatedIds.stream().mapToInt(Integer::intValue).toArray(), true);
-            String delta = fullText.substring(previousText.length());
+            // Incremental decode: decode just this token's bytes and append.
+            byte[] tokBytes = tokenizer.decode(new int[]{nextToken}, true)
+                    .getBytes(StandardCharsets.UTF_8);
+            decodedBytes.write(tokBytes, 0, tokBytes.length);
+            String fullText = decodedBytes.toString(StandardCharsets.UTF_8);
+            String delta = fullText.length() >= previousText.length()
+                    ? fullText.substring(previousText.length())
+                    : "";
             previousText = fullText;
 
             if (consumer != null) {
@@ -327,10 +350,29 @@ public final class Qwen2Runtime {
             // Decode next token
             logits = decodeSingleToken(nextToken);
             profSteps++;
+
+            // Periodic profile log — emit after every K decoded tokens so the
+            // user sees real per-stage timing while the run is still going.
+            if (profileLogEveryTokens > 0 && profSteps % profileLogEveryTokens == 0) {
+                long now = System.nanoTime();
+                double sinceLastSec = (now - lastProfileWall) / 1e9;
+                double tokensPerSec = profileLogEveryTokens / Math.max(1e-9, sinceLastSec);
+                lastProfileWall = now;
+                log.info("Decode progress: {} tokens, last {} took {} s ({} tok/s) — profile so far:\n{}",
+                        profSteps, profileLogEveryTokens,
+                        String.format("%.2f", sinceLastSec),
+                        String.format("%.2f", tokensPerSec),
+                        buildProfileSummary());
+            }
         }
 
         lastProfile = buildProfileSummary();
-        log.debug("Profile: {}", lastProfile);
+        double totalDecodeSec = (System.nanoTime() - decodeWallStart) / 1e9;
+        log.info("Decode complete: {} tokens in {} s ({} tok/s)\n{}",
+                profSteps,
+                String.format("%.2f", totalDecodeSec),
+                String.format("%.2f", profSteps / Math.max(1e-9, totalDecodeSec)),
+                lastProfile);
 
         return previousText;
     }
@@ -956,17 +998,21 @@ public final class Qwen2Runtime {
 
     // ── Repetition penalty ───────────────────────────────────────────────
 
-    private void applyRepetitionPenalty(float[] logits, List<Integer> generatedIds) {
-        boolean[] seen = new boolean[logits.length];
-        for (int id : generatedIds) {
-            if (id >= 0 && id < logits.length && !seen[id]) {
-                seen[id] = true;
-                if (logits[id] > 0) {
-                    logits[id] /= repetitionPenalty;
-                } else {
-                    logits[id] *= repetitionPenalty;
-                }
-            }
+    /**
+     * Apply a repetition penalty to all previously-generated token logits.
+     * Uses a small {@link HashSet} (typically &lt;= maxTokens, i.e. a few hundred
+     * entries) to deduplicate — the previous implementation allocated a fresh
+     * {@code boolean[vocabSize]} (= 594 KB for Qwen 0.5B's 151 936-word vocab)
+     * per token and burned ~120 MB of GC pressure over a 200-token decode.
+     */
+    private void applyRepetitionPenalty(float[] logits, int[] generatedIds, int count) {
+        Set<Integer> seen = new HashSet<>(count * 2);
+        for (int i = 0; i < count; i++) {
+            int id = generatedIds[i];
+            if (id < 0 || id >= logits.length) continue;
+            if (!seen.add(id)) continue;
+            float v = logits[id];
+            logits[id] = v > 0 ? v / repetitionPenalty : v * repetitionPenalty;
         }
     }
 
