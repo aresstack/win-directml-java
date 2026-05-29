@@ -175,11 +175,12 @@ public class QwenInferenceEngine implements InferenceEngine {
                             gpuPipeline = new QwenGpuPipeline(wb, gpuKernels, config);
                             gpuPipeline.uploadLayerWeights(wb, weights, config);
 
-                            // Opt-B: optional GPU-resident attention (KV cache + rope + GQA on GPU).
-                            // Disabled by default; enable with -Dqwen.gpu.attention=true.
-                            // Requires ALL decoder layers to have GPU kernels (no mixed mode).
+                            // Opt-B: GPU-resident attention (KV cache + rope + GQA on GPU).
+                            // ENABLED BY DEFAULT (2026-05-29) - drops decode from ~3.7 s/token to ~1 s/token
+                            // on Intel iGPU. Disable with -Dqwen.gpu.attention=false if it causes issues.
+                            // Auto-disables (with log warning) if not all decoder layers have GPU kernels.
                             boolean attnFlag = Boolean.parseBoolean(
-                                    System.getProperty("qwen.gpu.attention", "false"));
+                                    System.getProperty("qwen.gpu.attention", "true"));
                             if (attnFlag
                                     && gpuKernels.getGpuLayers() == config.numHiddenLayers()) {
                                 try {
