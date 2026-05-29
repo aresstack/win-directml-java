@@ -659,11 +659,22 @@ kein neuer HLSL-Code. Aufwand für C *nach* B: ~0.5 Tag.
 
 1. **B-Step 1**: GPU-KV-Cache-Buffer (`QwenGpuKvCache.java`,
    D3D12 DEFAULT-Heap, 24 × 2 × (4096 × kvHeads × headDim × 4 B) ≈ 96 MB).
-2. **B-Step 2**: HLSL-Shader (`QwenAttentionShaders.java`): `rope_qk`,
-   `kv_append`, `gqa_attention` mit online-softmax. **Isoliert testen**
-   gegen CPU-Referenz (z.B. ein dediziertes JUnit gegen einen festen
-   Q/K-Tensor) BEVOR End-to-End-Integration — sonst sind
-   Token-Sequenz-Divergenzen im Smoke-Test nicht auf B vs. CPU rückführbar.
+   ✅ **implementiert 2026-05-29** (`directml-inference/.../QwenGpuKvCache.java`).
+   Layout `[kvHead → pos → d]`, ein D3D12 DEFAULT-Buffer pro Layer pro K/V,
+   `uploadFromCpu(layer, seqLen, cpuK, cpuV)` baut staging-Array mit Tail=0
+   und uploadet via `D3D12Bindings.uploadFloats`. Cached GPU-VAs pro Layer.
+2. **B-Step 2**: HLSL-Shader (`QwenAttentionShaders.java`): `rope_and_append`
+   (RoPE auf Q + rotiertes K + V in KCache/VCache schreiben),
+   `gqa_attention_decode` (online-softmax, 1 Threadgroup pro Q-Head,
+   headDim Threads kooperieren über Positionen).
+   ✅ **implementiert 2026-05-29** (`directml-windows-bindings/.../QwenAttentionShaders.java`).
+   GPT-J-style RoPE (Pairing `(x[i], x[halfDim+i])`), `sincos()` on-the-fly
+   (kein cos/sin-Table-Upload nötig). FlashAttention-Recurrence:
+   `m_new = max(m, score); alpha = exp(m-m_new); s = s*alpha + exp(score-m_new);
+   outVal = outVal*alpha + e*V`.
+   ⚠️ **Isoliert testen gegen CPU-Referenz BEVOR End-to-End-Integration** —
+   sonst sind Token-Sequenz-Divergenzen im Smoke-Test nicht auf B vs. CPU
+   rückführbar (siehe Selbstdisziplin-Notiz).
 3. **B-Step 3**: `qkvAttnFused(layerIdx, normedHidden, pos)` in
    `QwenGpuPipeline` als eigene Submission (attnOut bleibt GPU-resident in
    `oProj.inputBuf`).
