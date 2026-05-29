@@ -684,6 +684,12 @@ kein neuer HLSL-Code. Aufwand für C *nach* B: ~0.5 Tag.
    `gradlew.bat :directml-windows-bindings:test --tests QwenAttentionShadersGpuTest -Dqwen.gpu.test=true`.
    Wenn der Test grün ist: Shader sind korrekt, weitere Token-Sequenz-
    Divergenzen müssen Wiring-Bugs in Steps 3–6 sein.
+   ✅ **Beide Tests grün 2026-05-29** auf Intel UHD iGPU (DML FL 5.0).
+   Zwei Shader-Fixes auf dem Weg: (a) early-return `if (t >= headDim) return`
+   in gqa_attention_decode durch `bool active` Maske ersetzt — sonst HLSL
+   error X4026 (sync in varying flow control); (b) Tree-Reduce-Barriers
+   sitzen jetzt korrekt nach dem if-Block, nicht innen.
+   **→ Shader-Korrektheit ist jetzt bewiesener Anker für Steps 3–6.**
 3. **B-Step 3**: `qkvAttnFused(layerIdx, normedHidden, pos)` in
    `QwenGpuPipeline` als eigene Submission (attnOut bleibt GPU-resident in
    `oProj.inputBuf`).

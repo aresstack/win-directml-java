@@ -192,7 +192,12 @@ public final class QwenAttentionShaders {
             void CSMain(uint3 gid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
                 uint h = gid.x;
                 uint t = ltid.x;
-                if (t >= headDim) return;
+                // NOTE: no early-return on (t >= headDim) — it would put the
+                // following GroupMemoryBarrierWithGroupSync calls into varying
+                // flow control (HLSL error X4026). Instead, all 64 threads run
+                // every loop iteration; threads outside [0..headDim) contribute
+                // 0 to partial dots and skip the final store.
+                bool active = (t < headDim);
             
                 float scale = asfloat(scaleBits);
                 uint kvH = h / qHeadsPerKvHead;
@@ -200,7 +205,7 @@ public final class QwenAttentionShaders {
                 uint kvCacheBase = kvH * maxSeqLen * headDim;
             
                 // Load Q[h][t] into groupshared (reused across all positions).
-                float qVal = asfloat(Q.Load(qOff * 4));
+                float qVal = active ? asfloat(Q.Load(qOff * 4)) : 0.0f;
                 qShared[t] = qVal;
             
                 if (t == 0) {
@@ -212,14 +217,17 @@ public final class QwenAttentionShaders {
             
                 for (uint p = 0; p < seqLen; p++) {
                     uint kvOff = (kvCacheBase + p * headDim + t) * 4;
-                    float kVal = asfloat(KCache.Load(kvOff));
-                    float vVal = asfloat(VCache.Load(kvOff));
+                    float kVal = active ? asfloat(KCache.Load(kvOff)) : 0.0f;
+                    float vVal = active ? asfloat(VCache.Load(kvOff)) : 0.0f;
             
-                    // Partial dot: thread t contributes qShared[t] * kVal
+                    // Partial dot: thread t contributes qShared[t] * kVal.
+                    // Inactive threads contribute 0 (qShared[t] is 0 for them).
                     partialDots[t] = qShared[t] * kVal;
                     GroupMemoryBarrierWithGroupSync();
             
-                    // Tree reduction for headDim=64
+                    // Tree reduction across all 64 threads (group size).
+                    // Barriers sit AFTER the if-blocks so every thread reaches
+                    // them (uniform flow control at the barrier point).
                     if (t < 32) partialDots[t] += partialDots[t + 32];
                     GroupMemoryBarrierWithGroupSync();
                     if (t < 16) partialDots[t] += partialDots[t + 16];
@@ -246,9 +254,11 @@ public final class QwenAttentionShaders {
                     outVal = outVal * gsAlpha + gsE * vVal;
                 }
             
-                // Normalize and store
-                float invS = 1.0f / gsS;
-                AttnOut.Store((h * headDim + t) * 4, asuint(outVal * invS));
+                // Normalize and store (only active threads write)
+                if (active) {
+                    float invS = 1.0f / gsS;
+                    AttnOut.Store((h * headDim + t) * 4, asuint(outVal * invS));
+                }
             }
             """;
 
