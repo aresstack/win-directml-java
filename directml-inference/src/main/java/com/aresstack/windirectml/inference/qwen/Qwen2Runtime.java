@@ -96,6 +96,12 @@ public final class Qwen2Runtime {
     private long profActNs;
     private long profLmHeadNs;
     private long profPrefillNs;
+    // Per-stage prefill timing (Opt-A-2 diagnosis 2026-05-29). Aggregated over all 24 layers.
+    private long profPrefillQkvBatchNs;
+    private long profPrefillOProjBatchNs;
+    private long profPrefillGuBatchNs;
+    private long profPrefillDownBatchNs;
+    private long profPrefillAttnNs;
     private int profSteps;
     private String lastProfile;
 
@@ -409,6 +415,12 @@ public final class Qwen2Runtime {
         // Process each layer
         int totalLayers = config.numHiddenLayers();
         long layerStart = System.nanoTime();
+        // Reset per-stage prefill counters (Opt-A-2 diagnosis).
+        profPrefillQkvBatchNs = 0;
+        profPrefillOProjBatchNs = 0;
+        profPrefillGuBatchNs = 0;
+        profPrefillDownBatchNs = 0;
+        profPrefillAttnNs = 0;
         for (int l = 0; l < totalLayers; l++) {
             hiddenStates = processLayerPrefill(l, hiddenStates, seqLen, 0);
             if (l == 0 || (l + 1) % 4 == 0 || l == totalLayers - 1) {
@@ -417,6 +429,23 @@ public final class Qwen2Runtime {
                         l + 1, totalLayers, elapsed, seqLen);
             }
         }
+        // Per-stage prefill breakdown so we can see WHERE prefill time goes.
+        // Opt-A-2 only touched FP32 batched shader (qkvFused + gateUpFused).
+        // oProj + downProj run INT4 batched shader (unchanged).
+        // cpuOther = (overall Prefill ms from outer log) - sumStages.
+        long perStageSumMs = (profPrefillQkvBatchNs + profPrefillOProjBatchNs
+                + profPrefillGuBatchNs + profPrefillDownBatchNs
+                + profPrefillAttnNs) / 1_000_000L;
+        log.info("Prefill per-stage ({} layers, seqLen={}): qkvBatch(FP32)={} ms, "
+                        + "oProjBatch(INT4)={} ms, gateUpBatch(FP32)={} ms, downBatch(INT4)={} ms, "
+                        + "attn(CPU)={} ms; sumStages={} ms",
+                totalLayers, seqLen,
+                profPrefillQkvBatchNs / 1_000_000L,
+                profPrefillOProjBatchNs / 1_000_000L,
+                profPrefillGuBatchNs / 1_000_000L,
+                profPrefillDownBatchNs / 1_000_000L,
+                profPrefillAttnNs / 1_000_000L,
+                perStageSumMs);
 
         // Final norm + logits (only for last position)
         float[] lastHidden = new float[hidden];
@@ -691,7 +720,9 @@ public final class Qwen2Runtime {
             // Opt-A: ONE batched GPU dispatch over the whole sequence (was seqLen dispatches).
             int stride = gpuKernels.qkvFusedN;
             float[] qkvBatch = new float[seqLen * stride];
+            long tQkv = System.nanoTime();
             gpuPipeline.qkvFusedBatch(layerIdx, normed, qkvBatch, seqLen);
+            profPrefillQkvBatchNs += System.nanoTime() - tQkv;
             for (int s = 0; s < seqLen; s++) {
                 int base = s * stride;
                 System.arraycopy(qkvBatch, base, q, s * qSize, qSize);
@@ -757,6 +788,7 @@ public final class Qwen2Runtime {
         final float[][] cacheV = kvCacheV[layerIdx];
         final int totalTasks = seqLen * numHeadsLocal;
 
+        long tAttn = System.nanoTime();
         IntStream.range(0, totalTasks).parallel().forEach(idx -> {
             int s = idx / numHeadsLocal;
             int h = idx - s * numHeadsLocal;
@@ -777,12 +809,15 @@ public final class Qwen2Runtime {
                 SimdOps.axpy(attnOut, outOff, w, vHead, p * headDimLocal, headDimLocal);
             }
         });
+        profPrefillAttnNs += System.nanoTime() - tAttn;
 
         // ── O projection ─────────────────────────────────────────────
         float[] oProjOut = new float[seqLen * hidden];
         if (gpuPipeline != null && gpuPipeline.hasLayer(layerIdx) && gpuPipeline.supportsBatch(layerIdx)) {
             // Opt-A: batched o_proj over the whole sequence (was seqLen dispatches).
+            long tOProj = System.nanoTime();
             gpuPipeline.oProjBatch(layerIdx, attnOut, oProjOut, seqLen);
+            profPrefillOProjBatchNs += System.nanoTime() - tOProj;
         } else if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
             float[] row = new float[qSize];
             float[] tmpOut = new float[hidden];
@@ -821,7 +856,9 @@ public final class Qwen2Runtime {
             // Opt-A: batched gate+up over the whole sequence (was seqLen dispatches).
             int stride = gpuKernels.gateUpFusedN; // 2 * intermediate
             float[] guBatch = new float[seqLen * stride];
+            long tGu = System.nanoTime();
             gpuPipeline.gateUpFusedBatch(layerIdx, postNormed, guBatch, seqLen);
+            profPrefillGuBatchNs += System.nanoTime() - tGu;
             for (int s = 0; s < seqLen; s++) {
                 int base = s * stride;
                 System.arraycopy(guBatch, base, gate, s * intermediate, intermediate);
@@ -859,7 +896,9 @@ public final class Qwen2Runtime {
         float[] downOut = new float[seqLen * hidden];
         if (gpuPipeline != null && gpuPipeline.hasLayer(layerIdx) && gpuPipeline.supportsBatch(layerIdx)) {
             // Opt-A: batched down_proj over the whole sequence (was seqLen dispatches).
+            long tDown = System.nanoTime();
             gpuPipeline.downProjBatch(layerIdx, mlpActivation, downOut, seqLen);
+            profPrefillDownBatchNs += System.nanoTime() - tDown;
         } else if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
             float[] row = new float[intermediate];
             float[] tmpOut = new float[hidden];
