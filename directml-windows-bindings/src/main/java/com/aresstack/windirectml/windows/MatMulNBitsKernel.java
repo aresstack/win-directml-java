@@ -107,8 +107,21 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private int[] int4Constants;           // pre-cached constants: [N, K, blockSize]
 
     // ── Batched matmul (Opt-A: prefill) — lazily allocated on first matmulBatch call ─────
-    private GpuComputeKernel int4BatchShader;
-    private GpuComputeKernel fp32BatchShader;       // for !useInt4Gpu kernels (qkvFused, gateUpFused)
+    // Opt-A-2 v2 (2026-05-29): the batch *shaders* are SHARED across all kernel
+    // instances. The HLSL source is identical for every layer × projection, so
+    // compiling it 96 times (one per kernel) wasted ~30–40 s of prefill on
+    // Intel iGPU per the diagnosis log. Static + lazy init = compile once,
+    // reuse for every kernel. Per-kernel scratch buffers, barriers and UAV
+    // address tables stay instance-private (they bind to the kernel's own
+    // weight buffers + input/output buffers).
+    //
+    // The static shaders are intentionally leaked for the lifetime of the JVM
+    // (a few KB per PSO + RootSig) — ref-counting them across kernel close()
+    // would re-introduce the compile-on-first-use cost when a kernel is
+    // recreated for the next model load.
+    private static volatile GpuComputeKernel sharedInt4BatchShader;
+    private static volatile GpuComputeKernel sharedFp32BatchShader;
+    private static final Object batchShaderLock = new Object();
     private MemorySegment int4BatchInputBuf;        // GPU default [maxBatchM, K]
     private MemorySegment int4BatchOutputBuf;       // GPU default [maxBatchM, N]
     private MemorySegment int4BatchUploadBuf;       // upload heap [maxBatchM * K * 4 bytes]
@@ -1147,7 +1160,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 ? new int[]{N, K, int4BlockSize, M}
                 : new int[]{N, K, M, nTilesFp32};
         long[] batchUavs = useInt4Gpu ? int4BatchUavAddrs : fp32BatchUavAddrs;
-        GpuComputeKernel batchShader = useInt4Gpu ? int4BatchShader : fp32BatchShader;
+        GpuComputeKernel batchShader = useInt4Gpu ? sharedInt4BatchShader : sharedFp32BatchShader;
         // INT4: 1 thread/output cell (groupSize=64). FP32 tiled: 1 thread group
         // per [16,16] output tile (groupSize=256) → elementCount = nTiles*mTiles*256.
         int dispatchElements = useInt4Gpu
@@ -1243,13 +1256,20 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         int4BatchMappedReadback = D3D12Bindings.mapResource(int4BatchReadbackBuf, arena);
 
         // Compile the batched shader on first call (mode-dependent: INT4 vs FP32).
+        // Opt-A-2 v2: shaders are SHARED across all kernel instances — compiled
+        // once per JVM, reused for every layer × projection. This eliminates
+        // ~30–40 s of redundant DXC compile overhead on Intel iGPU prefill.
         if (useInt4Gpu) {
-            if (int4BatchShader == null) {
-                int4BatchShader = new GpuComputeKernel(wb, execCmdList,
-                        INT4_MATMUL_BATCH_HLSL, "int4_matmul_batch",
-                        5,   // UAVs: X, QW, Scales, ZP, Y
-                        4,   // constants: N, K, blockSize, M
-                        64);
+            if (sharedInt4BatchShader == null) {
+                synchronized (batchShaderLock) {
+                    if (sharedInt4BatchShader == null) {
+                        sharedInt4BatchShader = new GpuComputeKernel(wb, execCmdList,
+                                INT4_MATMUL_BATCH_HLSL, "int4_matmul_batch",
+                                5,   // UAVs: X, QW, Scales, ZP, Y
+                                4,   // constants: N, K, blockSize, M
+                                64);
+                    }
+                }
             }
             int4BatchUavAddrs = new long[]{
                     D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
@@ -1261,12 +1281,16 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         } else {
             // FP32 / pre-dequantized weight path (used by qkvFused, gateUpFused).
             // Opt-A-2: tiled shader, 4 root constants (N, K, M, nTiles), groupSize=256.
-            if (fp32BatchShader == null) {
-                fp32BatchShader = new GpuComputeKernel(wb, execCmdList,
-                        FP32_MATMUL_BATCH_HLSL, "fp32_matmul_batch_tiled",
-                        3,    // UAVs: X, W, Y
-                        4,    // constants: N, K, M, nTiles
-                        256); // 16×16 threads per output tile
+            if (sharedFp32BatchShader == null) {
+                synchronized (batchShaderLock) {
+                    if (sharedFp32BatchShader == null) {
+                        sharedFp32BatchShader = new GpuComputeKernel(wb, execCmdList,
+                                FP32_MATMUL_BATCH_HLSL, "fp32_matmul_batch_tiled",
+                                3,    // UAVs: X, W, Y
+                                4,    // constants: N, K, M, nTiles
+                                256); // 16×16 threads per output tile
+                    }
+                }
             }
             fp32BatchUavAddrs = new long[]{
                     D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
@@ -1405,8 +1429,10 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         // Release INT4 GPU mode resources (if active)
         if (int4Shader != null) int4Shader.close();
-        if (int4BatchShader != null) int4BatchShader.close();
-        if (fp32BatchShader != null) fp32BatchShader.close();
+        // NOTE: sharedInt4BatchShader / sharedFp32BatchShader are static and
+        // intentionally NOT closed here — they live for the JVM lifetime so
+        // subsequent QwenInferenceEngine instances reuse them without paying
+        // the ~30 s DXC compile cost again (Opt-A-2 v2 fix, 2026-05-29).
         if (int4WeightBuf != null) DxgiBindings.release(int4WeightBuf);
         if (int4ScalesBuf != null) DxgiBindings.release(int4ScalesBuf);
         if (int4ZpBuf != null) DxgiBindings.release(int4ZpBuf);

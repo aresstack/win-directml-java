@@ -156,6 +156,76 @@ und TILE_K=16 in groupshared:
 2. Token-Sequenz für Smoke-Prompt byte-identisch zu Pre-Opt-A-2-Run.
 3. Build + Smoke-Test grün.
 
+#### Messung Opt-A-2 v1 (2026-05-29, Intel UHD Notebook, seqLen=49)
+
+Gemessen: Prefill 58.5 s für seqLen=49. Nur 7 % besser als der Pre-Tile-Run,
+statt erwarteter 3–5×. **Root cause via Per-Stage-Log gefunden**
+(`Qwen2Runtime.profPrefillQkvBatchNs` etc., committed im selben Run):
+
+```
+Prefill per-stage (24 layers, seqLen=49):
+  qkvBatch  (FP32) =  3 899 ms     7 %    (von Opt-A-2 angefasst)
+  oProjBatch(INT4) =  3 708 ms     7 %    (unverändert)
+  gateUpBatch(FP32)= 20 447 ms    35 %    (von Opt-A-2 angefasst, größte Stage)
+  downBatch (INT4) = 11 347 ms    19 %    (unverändert)
+  attn      (CPU)  = 18 271 ms    31 %    (CPU GQA, wächst quadratisch mit seqLen)
+  sumStages        = 57 674 ms   ≈ Prefill total
+```
+
+Im selben Log: **96 separate `Compiled compute shader 'fp32_matmul_batch_tiled'`-
+Zeilen** (24 Layer × 4 Projektions-Kernel = 96 `MatMulNBitsKernel`-Instanzen,
+jede instanz-eigene `fp32BatchShader`-Field, jede ruft `ensureBatchCapacity`
+und kompiliert auf eigene Faust). Bei ~150–900 ms pro Compile = **~30–40 s
+purer DXC-Overhead im Prefill**. Mein Tile-Shader IST schneller als der alte
+(compute-wise), aber der Compile-Overhead war im alten Pfad ebenfalls da und
+wird durch den größeren Tile-Shader nur sichtbarer.
+
+#### Opt-A-2 v2 (Shader-Sharing, 2026-05-29) — implementiert
+
+**Aufwand**: ~30 min · **Risiko**: niedrig · **Status: ✅ implementiert 2026-05-29**
+
+Fix: `int4BatchShader` und `fp32BatchShader` als `private static volatile
+GpuComputeKernel sharedInt4BatchShader / sharedFp32BatchShader` mit
+Double-Checked-Locking deklarieren. Erster `matmulBatch`-Aufruf je Modus
+kompiliert den Shader, alle 95 weiteren Kernel-Instanzen benutzen dieselbe
+GpuComputeKernel-Instanz wieder.
+
+PSO + RootSignature sind D3D12-Device-weit gültig. Die gecachten
+MethodHandles in `GpuComputeKernel` arbeiten via Vtable-Slot — funktionieren
+für jede `ID3D12GraphicsCommandList` desselben Typs, also kann eine
+Kernel-Instanz die GpuComputeKernel der ersten benutzen.
+
+Die static Shader werden **intentional NICHT in `close()` freigegeben** —
+sie leben für JVM-Lifetime. Speicherkosten: ~10 KB pro PSO+RootSig
+(vernachlässigbar). Vorteil: zweites Modell-Load profitiert direkt vom
+bereits kompilierten Shader.
+
+**Wirkung erwartet**: Prefill 58 s (seqLen=49) → **~25–30 s** — sparen die
+~30 s Compile-Overhead direkt ein. Compute-Zeit unverändert.
+
+**Akzeptanz**:
+
+1. Log zeigt nur **2** "Compiled compute shader"-Zeilen statt 96
+   (einmal `int4_matmul_batch`, einmal `fp32_matmul_batch_tiled`).
+2. Prefill < 35 s für seqLen=49.
+3. Token-Sequenz byte-identisch.
+
+#### Was Opt-A-2 NICHT lösen kann
+
+Die Per-Stage-Messung zeigt: selbst nach Eliminierung des Compile-Overheads
+bleibt **gateUpBatch ~14 s** (24 Layer × ~580 ms compute) und **attn(CPU)
+~18 s**. Bei seqLen=150 wäre CPU-Attention quadratisch teurer (≈ 168 s
+allein!). Bedeutung: **Opt-B (GPU-Attention) wird ab Prompt-Länge seqLen ≥ 80
+die einzige wirksame weitere Optimierung sein**, weil CPU-Attention sonst
+alles dominiert.
+
+Folgereihenfolge nach Opt-A-2 v2:
+
+1. Opt-A-2 v2 testen → erwartet Prefill ~25–30 s @ seqLen=49
+2. Wenn ja: B+C-Paket angehen. Opt-B-Schritt 6 (Prefill mit GPU-Attention)
+   wird für längere Prompts entscheidend.
+3. Wenn nein: weitere Diagnose mit per-stage-Zahlen.
+
 #### Follow-up Opt-A-3: HLSL-Tiling + groupshared für FP32-Pfad
 
 Falls Opt-A-2 für FP32-Kernel (`qkvFused`, `gateUpFused`) nicht funktioniert
