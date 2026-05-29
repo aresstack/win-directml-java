@@ -2,6 +2,7 @@ package com.aresstack.windirectml.inference.qwen;
 
 import com.aresstack.windirectml.windows.*;
 import com.aresstack.windirectml.windows.QwenComputeShaders.ComputeKernelSet;
+import com.aresstack.windirectml.windows.QwenAttentionShaders.AttentionKernelSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,6 +49,8 @@ public final class QwenGpuPipeline implements AutoCloseable {
     private final GpuPipeline pipeline;
     private final QwenGpuKernels kernels;
     private ComputeKernelSet computeKernels;   // null if shader compilation fails
+    private AttentionKernelSet attentionKernels;  // null if Opt-B shaders fail to compile
+    private QwenGpuKvCache kvCache;             // null until setKvCache() is called
 
     // ── GPU-resident intermediate buffer (residual, survives within a layer) ─
     private MemorySegment residualBuf;
@@ -63,6 +66,14 @@ public final class QwenGpuPipeline implements AutoCloseable {
     private final int hidden;
     private final int intermediate;
     private final float rmsNormEps;
+    // Cached for Opt-B GPU-resident attention path
+    private final int numHeads;
+    private final int kvHeads;
+    private final int headDim;
+    private final int qSize;
+    private final int kvSize;
+    private final int qHeadsPerKvHead;
+    private final float ropeTheta;
     private boolean mlpBatchEnabled = false;
     private boolean weightsUploaded = false;
     private boolean closed = false;
@@ -83,6 +94,13 @@ public final class QwenGpuPipeline implements AutoCloseable {
         this.hidden = config.hiddenSize();
         this.intermediate = config.intermediateSize();
         this.rmsNormEps = config.rmsNormEps();
+        this.numHeads = config.numAttentionHeads();
+        this.kvHeads = config.numKeyValueHeads();
+        this.headDim = config.headDim();
+        this.qSize = config.qSize();
+        this.kvSize = config.kvSize();
+        this.qHeadsPerKvHead = numHeads / kvHeads;
+        this.ropeTheta = config.ropeTheta();
 
         // Size the shared staging buffers:
         //   upload   = max(hidden, qkvFusedN)  — largest GEMM input
@@ -105,6 +123,16 @@ public final class QwenGpuPipeline implements AutoCloseable {
                     e.getMessage());
             computeKernels = null;
             mlpBatchEnabled = false;
+        }
+
+        // Compile Opt-B attention shaders (rope_and_append + gqa_attention_decode)
+        try {
+            attentionKernels = QwenAttentionShaders.createAll(wb, pipeline.getCommandList());
+            log.info("QwenGpuPipeline Opt-B: attention shaders compiled (GPU-resident decode available once setKvCache is called)");
+        } catch (Exception e) {
+            log.warn("Opt-B attention shader compilation failed - GPU-resident decode disabled: {}",
+                    e.getMessage());
+            attentionKernels = null;
         }
 
         // ── MLP batch buffers (only if shaders compiled) ─────────────────────
@@ -375,6 +403,186 @@ public final class QwenGpuPipeline implements AutoCloseable {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Opt-B: GPU-resident decode (QKV + RoPE + GQA attention + MLP in ONE submission)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Attach the GPU-resident KV cache. Must be called once after construction
+     * (and after {@link #uploadLayerWeights}) before the first
+     * {@link #decodeLayerGpuResident} call.
+     *
+     * <p>Passing a cache whose dimensions disagree with the model config is a bug
+     * and is rejected.
+     */
+    public void setKvCache(QwenGpuKvCache cache) {
+        if (cache.getKvHeads() != kvHeads || cache.getHeadDim() != headDim) {
+            throw new IllegalArgumentException("KV cache shape mismatch: cache="
+                    + cache.getKvHeads() + "x" + cache.getHeadDim()
+                    + " config=" + kvHeads + "x" + headDim);
+        }
+        this.kvCache = cache;
+        log.info("QwenGpuPipeline Opt-B: KV cache attached (maxSeqLen={}, {} layers) - GPU-resident decode enabled={}",
+                cache.getMaxSeqLen(), cache.getNumLayers(), isAttnGpuResidentEnabled());
+    }
+
+    /**
+     * True iff the full Opt-B GPU-resident decode path is available:
+     * MLP-batch shaders compiled, postNorm weights uploaded, attention shaders
+     * compiled, and a KV cache attached.
+     */
+    public boolean isAttnGpuResidentEnabled() {
+        return mlpBatchEnabled && weightsUploaded
+                && attentionKernels != null && kvCache != null;
+    }
+
+    /**
+     * Single-submission GPU-resident decoder layer (B-Step 3+4 fused with C-Step 1).
+     *
+     * <p>Records 9 GPU operations into ONE command list and fence-waits once:
+     * <ol>
+     *   <li>Upload {@code normedHidden} -> qkv input; qkv_fused GEMM</li>
+     *   <li>rope_and_append: rotate Q in place; rotate K and append K|V to KV cache[pos]</li>
+     *   <li>gqa_attention_decode: read Q + KV cache[0..pos] -> write attnOut into oProj.input</li>
+     *   <li>o_proj GEMM (input already GPU-resident)</li>
+     *   <li>Upload {@code hiddenInput} -> residualBuf; Add(oProj + residual -> residual)</li>
+     *   <li>RMSNorm(residual, postNormWeight -> gateUp.input)</li>
+     *   <li>gate_up_fused GEMM; SwiGLU -> down.input</li>
+     *   <li>down_proj GEMM; Add(residual + down -> residual)</li>
+     *   <li>Transition residual -> COPY_SOURCE; readback into {@code hiddenOut}</li>
+     * </ol>
+     *
+     * <p>Per token (24 layers): 24 submissions vs. 48 with V2.0 MLP-batch only.
+     * Q/K/V/attnOut never cross the CPU boundary; KV cache lives entirely on the GPU.
+     *
+     * @param layerIdx     decoder layer index
+     * @param normedHidden RMSNorm(hiddenInput) [hidden] - input to QKV
+     * @param hiddenInput  hidden state entering this layer [hidden] - residual source
+     * @param hiddenOut    where to write the layer output [hidden] - may alias hiddenInput
+     * @param pos          current decode position (the slot KV will be written to)
+     */
+    public void decodeLayerGpuResident(int layerIdx, float[] normedHidden,
+                                       float[] hiddenInput, float[] hiddenOut,
+                                       int pos) {
+        if (!isAttnGpuResidentEnabled()) {
+            throw new IllegalStateException(
+                    "Opt-B GPU-resident decode not available: mlpBatch=" + mlpBatchEnabled
+                            + " weightsUploaded=" + weightsUploaded
+                            + " attentionKernels=" + (attentionKernels != null)
+                            + " kvCache=" + (kvCache != null));
+        }
+        if (pos < 0 || pos >= kvCache.getMaxSeqLen()) {
+            throw new IllegalArgumentException("pos=" + pos
+                    + " out of [0.." + kvCache.getMaxSeqLen() + ")");
+        }
+
+        long hiddenBytes = (long) hidden * Float.BYTES;
+
+        MatMulNBitsKernel qkvK = kernels.qkvFused(layerIdx);
+        MatMulNBitsKernel oK = kernels.oProj(layerIdx);
+        MatMulNBitsKernel guK = kernels.gateUpFused(layerIdx);
+        MatMulNBitsKernel downK = kernels.downProj(layerIdx);
+
+        pipeline.begin();
+        var cl = pipeline.getCommandList();
+
+        // ── 1. QKV GEMM: upload normedHidden + dispatch → qkvK.outputBuf = [Q|K|V] ──
+        qkvK.recordBatchFromCpu(pipeline, normedHidden);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        // ── 2. ROPE + APPEND KV: bind one fused buffer to (Q,K,V) UAVs via byte offsets ──
+        // After: Q rotated in place at qkvBase..qkvBase+qSize;
+        //        rotated K and V written to KV cache[layer][..][pos]
+        long qkvBase = D3D12Bindings.getGpuVirtualAddress(qkvK.getOutputBuf());
+        long qAddr = qkvBase;
+        long kAddr = qkvBase + (long) qSize * Float.BYTES;
+        long vAddr = qkvBase + (long) (qSize + kvSize) * Float.BYTES;
+        long kCacheAddr = kvCache.getKAddr(layerIdx);
+        long vCacheAddr = kvCache.getVAddr(layerIdx);
+        int ropeThetaBits = Float.floatToRawIntBits(ropeTheta);
+        int halfDim = headDim / 2;
+        attentionKernels.ropeAndAppend().recordDispatch(cl,
+                new long[]{qAddr, kAddr, vAddr, kCacheAddr, vCacheAddr},
+                new int[]{numHeads, kvHeads, headDim, pos,
+                        kvCache.getMaxSeqLen(), ropeThetaBits},
+                (numHeads + kvHeads) * halfDim);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        // ── 3. GQA attention decode: Q + KCache[0..pos] + VCache[0..pos] → oK.inputBuf ──
+        long attnOutAddr = D3D12Bindings.getGpuVirtualAddress(oK.getInputBuf());
+        float scale = (float) (1.0 / Math.sqrt(headDim));
+        int scaleBits = Float.floatToRawIntBits(scale);
+        int seqLen = pos + 1;
+        attentionKernels.gqaAttentionDecode().recordDispatch(cl,
+                new long[]{qAddr, kCacheAddr, vCacheAddr, attnOutAddr},
+                new int[]{numHeads, kvHeads, headDim, qHeadsPerKvHead,
+                        seqLen, kvCache.getMaxSeqLen(), scaleBits},
+                numHeads * headDim);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        // ── 4. o_proj GEMM (input is already in oK.inputBuf from GQA attention) ──
+        oK.recordBatchDispatchOnly(pipeline);
+
+        // ── 5. Upload hiddenInput → residualBuf; Add(oProj + residual → residual) ──
+        pipeline.recordUpload(hiddenInput, 0, hidden, residualBuf, 0);
+        pipeline.recordBarrier(barrierResidualCopyDestToUav);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        computeKernels.add().recordDispatch(cl,
+                new long[]{
+                        D3D12Bindings.getGpuVirtualAddress(oK.getOutputBuf()),
+                        D3D12Bindings.getGpuVirtualAddress(residualBuf),
+                        D3D12Bindings.getGpuVirtualAddress(residualBuf)
+                },
+                new int[]{hidden},
+                hidden);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        // ── 6. RMSNorm(residual, postNormWeight → gateUp.input) ──
+        int epsBits = Float.floatToRawIntBits(rmsNormEps);
+        computeKernels.rmsNorm().recordDispatch(cl,
+                new long[]{
+                        D3D12Bindings.getGpuVirtualAddress(residualBuf),
+                        D3D12Bindings.getGpuVirtualAddress(postNormWeightBufs[layerIdx]),
+                        D3D12Bindings.getGpuVirtualAddress(guK.getInputBuf())
+                },
+                new int[]{hidden, epsBits},
+                1);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        // ── 7. gate_up GEMM, SwiGLU, down_proj GEMM ──
+        guK.recordBatchDispatchOnly(pipeline);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        computeKernels.swiglu().recordDispatch(cl,
+                new long[]{
+                        D3D12Bindings.getGpuVirtualAddress(guK.getOutputBuf()),
+                        D3D12Bindings.getGpuVirtualAddress(downK.getInputBuf())
+                },
+                new int[]{intermediate},
+                intermediate);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        downK.recordBatchDispatchOnly(pipeline);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        // ── 8. Add(residual + downOut → residual) ──
+        computeKernels.add().recordDispatch(cl,
+                new long[]{
+                        D3D12Bindings.getGpuVirtualAddress(residualBuf),
+                        D3D12Bindings.getGpuVirtualAddress(downK.getOutputBuf()),
+                        D3D12Bindings.getGpuVirtualAddress(residualBuf)
+                },
+                new int[]{hidden},
+                hidden);
+
+        // ── 9. Transition residualBuf → COPY_SOURCE, readback into hiddenOut ──
+        pipeline.recordBarrier(barrierResidualUavToCopySource);
+        pipeline.recordReadback(residualBuf, 0, hiddenBytes);
+        pipeline.submitAndWait();
+        pipeline.readbackInto(hiddenOut, 0, hidden);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Accessors
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -407,6 +615,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
     public void close() {
         if (closed) return;
         closed = true;
+        if (attentionKernels != null) attentionKernels.close();
         if (computeKernels != null) computeKernels.close();
         pipeline.close();
         log.info("QwenGpuPipeline closed");
