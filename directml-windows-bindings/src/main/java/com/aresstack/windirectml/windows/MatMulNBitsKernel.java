@@ -259,31 +259,73 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     // FP32 batched matmul shader for pre-dequantized weights (qkvFused, gateUpFused).
     // Same M-row batching contract as INT4_MATMUL_BATCH_HLSL; weight buffer is
     // [N, K] row-major FP32 (held in weightBuf for legacy/FP32 mode kernels).
+    //
+    // Opt-A-2 (2026-05-29): tiled with groupshared memory. Each thread group
+    // computes a [TILE, TILE] = [16, 16] output sub-tile. 256 threads per
+    // group cooperatively load a [TILE, TILE_K] = [16, 16] X-sub-tile and a
+    // [TILE_K, TILE] = [16, 16] W-sub-tile into groupshared per K-iteration,
+    // then each thread accumulates TILE_K=16 multiply-adds out of groupshared.
+    //
+    // HBM traffic per output tile drops from 256 × (2K) = 512K reads (naive)
+    // to 32 × K reads (tiled) — ~16× less for K=896 (Qwen 0.5B hidden).
+    //
+    // Dispatch: 1D, one thread group per output tile. Caller passes
+    // elementCount = mTiles * nTiles * 256, groupSize=256 → mTiles*nTiles groups.
+    // Constants include nTiles so the shader can decode 1D group-id to (gx, gy).
     private static final String FP32_MATMUL_BATCH_HLSL = """
             RWByteAddressBuffer X : register(u0);
             RWByteAddressBuffer W : register(u1);
             RWByteAddressBuffer Y : register(u2);
-            cbuffer CB : register(b0) { uint N; uint K; uint M; };
+            cbuffer CB : register(b0) { uint N; uint K; uint M; uint nTiles; };
             
-            [numthreads(64, 1, 1)]
-            void CSMain(uint3 tid : SV_DispatchThreadID) {
-                uint flat = tid.x;
-                uint total = M * N;
-                if (flat >= total) return;
-                uint m = flat / N;
-                uint n = flat - m * N;
+            #define TILE 16
+            #define TILE_K 16
+            groupshared float xTile[TILE * TILE_K];
+            groupshared float wTile[TILE_K * TILE];
             
-                uint xBase = m * K;
-                uint wBase = n * K;
-                float sum = 0.0;
-                // K is always a multiple of 8 for Qwen/Phi shapes — unroll by 4.
-                for (uint k = 0; k < K; k += 4) {
-                    sum += asfloat(X.Load((xBase + k    ) * 4)) * asfloat(W.Load((wBase + k    ) * 4));
-                    sum += asfloat(X.Load((xBase + k + 1) * 4)) * asfloat(W.Load((wBase + k + 1) * 4));
-                    sum += asfloat(X.Load((xBase + k + 2) * 4)) * asfloat(W.Load((wBase + k + 2) * 4));
-                    sum += asfloat(X.Load((xBase + k + 3) * 4)) * asfloat(W.Load((wBase + k + 3) * 4));
+            [numthreads(256, 1, 1)]
+            void CSMain(uint3 gid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
+                uint groupId = gid.x;
+                uint gx = groupId % nTiles;          // tile column (output N-direction)
+                uint gy = groupId / nTiles;          // tile row    (output M-direction)
+                uint t  = ltid.x;
+                uint tx = t % TILE;                  // within-tile column
+                uint ty = t / TILE;                  // within-tile row
+                uint m  = gy * TILE + ty;
+                uint n  = gx * TILE + tx;
+            
+                float acc = 0.0;
+                for (uint kk = 0; kk < K; kk += TILE_K) {
+                    // Cooperative load: 256 threads load one X-element each
+                    // (16*16 = 256 elements per X-tile) and one W-element each.
+                    uint xRow = gy * TILE + (t / TILE_K);
+                    uint xCol = kk + (t % TILE_K);
+                    uint wRow = kk + (t / TILE);
+                    uint wCol = gx * TILE + (t % TILE);
+            
+                    float xv = (xRow < M && xCol < K)
+                            ? asfloat(X.Load((xRow * K + xCol) * 4)) : 0.0;
+                    // W is [N, K] row-major — element W[wCol, wRow] at byte (wCol*K + wRow)*4.
+                    float wv = (wRow < K && wCol < N)
+                            ? asfloat(W.Load((wCol * K + wRow) * 4)) : 0.0;
+            
+                    xTile[(t / TILE_K) * TILE_K + (t % TILE_K)] = xv;
+                    wTile[(t / TILE) * TILE + (t % TILE)] = wv;
+            
+                    GroupMemoryBarrierWithGroupSync();
+            
+                    // Each thread accumulates ONE output cell (ty, tx) from the
+                    // loaded tiles. 16 multiply-adds per thread per K-iteration.
+                    for (uint k = 0; k < TILE_K; k++) {
+                        acc += xTile[ty * TILE_K + k] * wTile[k * TILE + tx];
+                    }
+            
+                    GroupMemoryBarrierWithGroupSync();
                 }
-                Y.Store((m * N + n) * 4, asuint(sum));
+            
+                if (m < M && n < N) {
+                    Y.Store((m * N + n) * 4, asuint(acc));
+                }
             }
             """;
 
@@ -1098,12 +1140,19 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         long inputBytes = (long) M * K * Float.BYTES;
         long outputBytes = (long) M * N * Float.BYTES;
-        // INT4 mode: {N, K, blockSize, M}; FP32 mode: {N, K, M}
+        // INT4 mode: {N, K, blockSize, M}; FP32 mode (tiled): {N, K, M, nTiles}
+        int nTilesFp32 = (N + 15) / 16;
+        int mTilesFp32 = (M + 15) / 16;
         int[] batchConstants = useInt4Gpu
                 ? new int[]{N, K, int4BlockSize, M}
-                : new int[]{N, K, M};
+                : new int[]{N, K, M, nTilesFp32};
         long[] batchUavs = useInt4Gpu ? int4BatchUavAddrs : fp32BatchUavAddrs;
         GpuComputeKernel batchShader = useInt4Gpu ? int4BatchShader : fp32BatchShader;
+        // INT4: 1 thread/output cell (groupSize=64). FP32 tiled: 1 thread group
+        // per [16,16] output tile (groupSize=256) → elementCount = nTiles*mTiles*256.
+        int dispatchElements = useInt4Gpu
+                ? M * N
+                : nTilesFp32 * mTilesFp32 * 256;
 
         try {
             // 1. Upload xBatch to persistently-mapped upload buffer.
@@ -1120,7 +1169,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhCopyBufferRegion.invokeExact(execCmdList,
                     int4BatchInputBuf, 0L, int4BatchUploadBuf, 0L, inputBytes);
             mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchInputToUAV);
-            batchShader.recordDispatch(execCmdList, batchUavs, batchConstants, M * N);
+            batchShader.recordDispatch(execCmdList, batchUavs, batchConstants, dispatchElements);
             mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchOutputToCS);
             mhCopyBufferRegion.invokeExact(execCmdList,
                     int4BatchReadbackBuf, 0L, int4BatchOutputBuf, 0L, outputBytes);
@@ -1211,12 +1260,13 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             };
         } else {
             // FP32 / pre-dequantized weight path (used by qkvFused, gateUpFused).
+            // Opt-A-2: tiled shader, 4 root constants (N, K, M, nTiles), groupSize=256.
             if (fp32BatchShader == null) {
                 fp32BatchShader = new GpuComputeKernel(wb, execCmdList,
-                        FP32_MATMUL_BATCH_HLSL, "fp32_matmul_batch",
-                        3,   // UAVs: X, W, Y
-                        3,   // constants: N, K, M
-                        64);
+                        FP32_MATMUL_BATCH_HLSL, "fp32_matmul_batch_tiled",
+                        3,    // UAVs: X, W, Y
+                        4,    // constants: N, K, M, nTiles
+                        256); // 16×16 threads per output tile
             }
             fp32BatchUavAddrs = new long[]{
                     D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),

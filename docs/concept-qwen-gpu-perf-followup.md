@@ -87,16 +87,74 @@ DML's optimierter `MatMulNBits` Operator. Konkrete Ursachen:
    nutzt vermutlich SIMD16-Wave-Ops + cooperative loads, die unser naiver
    Shader nicht hat.
 
-#### Follow-up Opt-A-2: Ersatz der naiven HLSL durch DML-MatMulNBits-Batched
+#### Follow-up Opt-A-2: HLSL-Tiling + groupshared für FP32-Batch-Shader
 
-DML's `MatMulNBits` unterstützt nativ `M > 1` via den `M`-Parameter im
-Operator-Descriptor. Wir bauen den Operator beim ersten `matmulBatch(M)`-Call
-lazy mit dem konkreten `M` (oder mit `M_max` und re-binding pro Call) und
-ersetzen damit `INT4_MATMUL_BATCH_HLSL` und `FP32_MATMUL_BATCH_HLSL`.
+**Korrektur 2026-05-29**: Ursprungs-Plan war "DML batched MatMulNBits".
+Das existiert nicht: im Code (`MatMulNBitsKernel.java`) ist der Name irreführend
+— es gibt nur einen `DML_OPERATOR_GEMM` mit hartem `A=[1,1,1,K]` (M=1) für
+Decode-Matvec. Der Batch-Pfad (`matmulBatch`) läuft über zwei eigene
+HLSL-Compute-Shader (`INT4_MATMUL_BATCH_HLSL` und `FP32_MATMUL_BATCH_HLSL`),
+beide naiv mit 1 Thread pro Output-Zelle ohne Tiling.
 
-**Aufwand**: ~0.5 Tag · **Risiko**: niedrig (DML-Operator existiert bereits
-für M=1, nur `MatMulNBitsDesc.M = M` setzen) · **Wirkung erwartet**: Prefill
-77 s → ~15–25 s (×3–5, weil DML-Kernel ~10× schneller pro Element ist).
+Der realistische, code-minimale 0.5-Tag-Win ist daher: **die existierenden
+Batch-Shader durch eine getilte Variante ersetzen**.
+
+**Problem im aktuellen `FP32_MATMUL_BATCH_HLSL`**:
+
+- 1 Thread = 1 Output-Zelle (m, n)
+- Jeder Thread liest K Elemente von X und K Elemente von W aus HBM
+- Keine Datenkooperation zwischen Threads, die dieselbe X-Zeile oder W-Spalte brauchen
+- Für gateUp (M=150, N=9728, K=896): ~10 GB HBM-Reads bei nur ~5 MB unique Daten
+  → ~2 000× over-fetch, Memory-Bandwidth saturiert
+
+**Lösung: `FP32_MATMUL_BATCH_TILED_HLSL`** mit Thread-Group-Tiling 16×16
+und TILE_K=16 in groupshared:
+
+- 1 Thread-Group berechnet einen [16, 16] Output-Tile (256 Threads)
+- Pro K-Iteration: 256 Threads laden kooperativ ein [16, 16] X-Tile und ein
+  [16, 16] W-Tile nach groupshared (1 Load/Thread/Iteration), dann jeder
+  Thread macht 16 Multiply-Adds aus dem groupshared
+- HBM-Reads pro Output-Tile: 16×K X + K×16 W = 32·K = 28 672 Bytes
+  statt 256·1792 = 458 752 Bytes → **~16× weniger HBM-Traffic**
+- Dispatch: 1D gehalten (über `SV_GroupID.x`, intern decoded zu (gx, gy))
+  — so bleibt `GpuComputeKernel.recordDispatch` unverändert
+
+**Aufwand**: ~0.5 Tag
+
+- Neuer HLSL-Konstanten-String `FP32_MATMUL_BATCH_TILED_HLSL` (~40 Zeilen)
+- Im `MatMulNBitsKernel.ensureBatchCapacity` FP32-Branch:
+    - Shader-Name auf neue Variante umstellen
+    - `groupSize` von 64 auf 256
+    - `numRootConsts` von 3 auf 4 (zusätzlich `nTiles = (N+15)/16` als Konstante,
+      damit der Shader Group-ID intern in (gx, gy) zerlegen kann)
+- In `matmulBatch` FP32-Branch:
+    - Constants-Array: `{N, K, M, (N+15)/16}` statt `{N, K, M}`
+    - Dispatch-`elementCount`: `((M+15)/16) * ((N+15)/16) * 256` statt `M*N`
+
+**Risiko**: niedrig
+
+- Korrektheits-Test: bestehender Smoke-Test (Qwen2.5-Coder-0.5B-Instruct mit
+  festem Prompt) muss byte-identische Token-Sequenz liefern wie der
+  pre-Opt-A-2-Run. Wenn Shader-Bug, divergiert Output sofort sichtbar.
+- INT4-Shader (oProj, downProj) bleibt zunächst unverändert, weil INT4-Tiling
+  durch die per-Block-128-Scale-Layout-Komplikation aufwendiger ist und in
+  Opt-A-3 separat behandelt wird.
+- M=1 wird vom Tiled-Shader korrekt verarbeitet (TILE-Padding via Bounds-Check
+  `if (m < M && n < N)` vor dem `Y.Store`).
+
+**Wirkung erwartet**: Prefill 77 s → **~15–25 s** (Faktor 3–5).
+
+- gateUp ist dominanter Kostenträger (N=9728 sehr groß) und am stärksten
+  bandwidth-bound → profitiert am meisten
+- qkvFused profitiert moderat (N=1152)
+- oProj/downProj bleiben unverändert (INT4-Pfad), tragen aber weniger zur
+  Gesamtzeit bei
+
+**Akzeptanz**:
+
+1. Profile-Log nach Opt-A-2 zeigt Prefill < 30 s (vorher 77 s).
+2. Token-Sequenz für Smoke-Prompt byte-identisch zu Pre-Opt-A-2-Run.
+3. Build + Smoke-Test grün.
 
 #### Follow-up Opt-A-3: HLSL-Tiling + groupshared für FP32-Pfad
 
@@ -406,23 +464,98 @@ echte Compute-Zeit ~200 ms → **~1 s/Token**.
 - Shader-Größe wird groß genug, dass GPU-Register-Allocation kritisch wird.
   Test-Pfad nötig: ein Layer-für-Layer Vergleich mit CPU-Referenz.
 
-## 4 Implementierungs-Reihenfolge
+## 4 Implementierungs-Reihenfolge (revidiert 2026-05-29)
 
-| # | Optimierung                     | Aufwand  | Wirkung               |
-|---|---------------------------------|----------|-----------------------|
-| 1 | Opt-A: Batched-GEMM Prefill     | 1 Tag    | Prefill 129 s → ~10 s |
-| 2 | Opt-B: GPU-Attention + KV-Cache | 2–3 Tage | Decode 3.5 s → ~2.5 s |
-| 3 | Opt-C: Single-Dispatch Layer    | ~1 Woche | Decode 2.5 s → ~1 s   |
+Die ursprüngliche Reihenfolge A → B → C hat sich nach realer Messung
+geändert. Aktueller, vereinbarter Plan:
 
-Reihenfolge ist intentional: Opt-A ist klein, low-risk, hoher ROI (Prefill
-ist *jetzt* der dominante UX-Schmerzpunkt nach dem HYBRID-Fix). Opt-B
-liefert dann den nächsten Decode-Schub, ohne die Architektur für Opt-C
-zu blockieren. Opt-C ist die teuerste, aber auch die einzige, die das
-Decode-Budget unter 1.5 s/Token drückt — sinnvoll nur, wenn der
-Use-Case lange Generationen (> 200 Tokens) braucht.
+| # | Optimierung                        | Aufwand  | Status  | Wirkung erwartet                |
+|---|------------------------------------|----------|---------|---------------------------------|
+| 1 | Opt-A v1: Batched GEMM Prefill     | 1 Tag    | ✅ done  | Prefill 129 s → 77 s (gemessen) |
+| 2 | Opt-A-2: HLSL Tiling + groupshared | 0.5 Tag  | ⏳ next  | Prefill 77 s → ~15–25 s         |
+| 3 | Opt-B + Opt-C als ein Paket        | 3–4 Tage | 🚧 wait | Decode 3.5 s → ~1 s/Token       |
 
-Nach Opt-A + Opt-B: 200 Tokens in ~10 s + 200 × 2.5 s ≈ **8.5 min**.
-Nach Opt-C: 200 Tokens in ~10 s + 200 × 1 s ≈ **3.5 min**.
+Nach Opt-A-2: 200 Tokens in ~20 s Prefill + 200 × 3.5 s Decode ≈ **12 min**.
+Nach Opt-A-2 + B+C: 200 Tokens in ~20 s + 200 × 1 s ≈ **3.7 min**.
+
+### Warum B+C als Paket statt einzeln
+
+Wir wollten ursprünglich C als unabhängige Folge-Optimierung
+("Single-Dispatch Decoder Layer, 1 Woche"). Bei genauer Analyse zeigt sich:
+**C ist algorithmisch eine Obermenge von B**, nicht ein Nachfolge-Schritt.
+Steps 3–5 des Single-Dispatch-Layers (RoPE auf Q/K, KV-Append, GQA-Attention)
+sind exakt Opt-B. Ohne GPU-residenten KV-Cache und GQA-HLSL-Shader kann C
+kein "Single Dispatch" sein, weil zwangsweise ein CPU-Attention-Roundtrip
+in der Mitte des Layers nötig wäre — das wäre dann faktisch wieder eine
+2-Submission-Lösung.
+
+Die ursprüngliche "1-Woche"-Schätzung für C ging davon aus, dass C *ohne*
+B-Infrastruktur gebaut wird — als monolithischer Shader inkl. eigener
+INT4-Dequant-Reimplementierung in HLSL. Das ist groß und riskant.
+
+Wenn wir B sauber bauen, ist C nur noch das **Mergen zweier
+Command-List-Recording-Sections in eine einzige Submission** — eine
+~50-Zeilen-Refaktorierung in `QwenGpuPipeline.batchMlp` / `qkvAttnFused`,
+kein neuer HLSL-Code. Aufwand für C *nach* B: ~0.5 Tag.
+
+### Konsolidierte B+C-Schritte (für den späteren Implementierungs-Block)
+
+1. **B-Step 1**: GPU-KV-Cache-Buffer (`QwenGpuKvCache.java`,
+   D3D12 DEFAULT-Heap, 24 × 2 × (4096 × kvHeads × headDim × 4 B) ≈ 96 MB).
+2. **B-Step 2**: HLSL-Shader (`QwenAttentionShaders.java`): `rope_qk`,
+   `kv_append`, `gqa_attention` mit online-softmax. **Isoliert testen**
+   gegen CPU-Referenz (z.B. ein dediziertes JUnit gegen einen festen
+   Q/K-Tensor) BEVOR End-to-End-Integration — sonst sind
+   Token-Sequenz-Divergenzen im Smoke-Test nicht auf B vs. CPU rückführbar.
+3. **B-Step 3**: `qkvAttnFused(layerIdx, normedHidden, pos)` in
+   `QwenGpuPipeline` als eigene Submission (attnOut bleibt GPU-resident in
+   `oProj.inputBuf`).
+4. **B-Step 4**: `batchMlpGpuResident(...)` Variante von `batchMlp`, die
+   den `attnOutput`-Upload-Step (`oK.recordBatchFromCpu`) überspringt.
+5. **B-Step 5**: Decode-Pfad-Wiring in `Qwen2Runtime.decodeSingleToken`
+   hinter Feature-Flag `qwen.gpu.attention=true` (default `false`, damit
+   der validierte HYBRID-Pfad nicht regrediert).
+6. **B-Step 6**: Prefill-Anbindung: KV-Cache am Ende des Prefills per
+   Upload aus dem CPU-Cache befüllen (1 Upload/Layer, vor erstem
+   Decode-Token). Variante (a) aus Opt-B-Beschreibung.
+7. **B-Akzeptanz**: Decode-Profile zeigt Attention < 100 ms/Token (vorher
+   907 ms), Total ≤ 2.8 s/Token. Token-Sequenz für Smoke-Prompt **byte-
+   identisch** zu HYBRID-Run.
+8. **C-Step 1**: `qkvAttnFused` + `batchMlpGpuResident` in EINE
+   Command-List schreiben, EIN `submitAndWait()` am Ende. Verifizieren,
+   dass alle GPU-Buffer (qkv-Buffer, oProj-Buffer, residualBuf,
+   downProj-Buffer) zwischen den Sections via UAV-Barriers korrekt
+   synchronisiert sind.
+9. **C-Akzeptanz**: Submission-Count fällt von 49 → 25 (über Fence-
+   Counter-Logging messbar). Decode-Total ≤ 1.2 s/Token. Token-Sequenz
+   weiterhin identisch zum CPU-Referenz-Run.
+
+### Warum nicht direkt C ohne B (Diskussion 2026-05-29)
+
+Getestet im Konzept-Review: ohne B-Schritte 1–4 würde der "Attention
+im Shader"-Step zu CPU-Attention-Fallback degenerieren, und der Resubmit
+zwischen Step 5 und Step 6 macht aus dem geplanten "1 Dispatch" effektiv
+2 Dispatches. Das HLSL-Korrektheits-Risiko (Online-Softmax, GQA-Mapping)
+ist in B und C identisch und muss in beiden Fällen einmal gelöst werden.
+Ein "direkt C"-Pfad spart also keinen Aufwand ein — er verhindert nur
+die isolierte Testbarkeit von B's GPU-Attention-Code.
+
+### Selbstdisziplin-Notiz für künftige Sessions
+
+Vor jedem neuen Implementierungs-Schritt **diese Tabelle und die
+B+C-Schritt-Liste oben lesen**. Insbesondere:
+
+- Opt-A-2 ist die *nächste* Aufgabe, nicht Opt-B. Reihenfolge ist absichtlich
+  so gewählt, weil Opt-A-2 risiko-arm und sofort UX-wirksam ist.
+- B-Step 2 (Shader-HLSL) muss vor B-Step 5 (Decode-Wiring) gegen
+  CPU-Referenz validiert sein. Wer das überspringt, debuggt 3 Tage lang
+  Token-Sequenz-Divergenzen, ohne zu wissen, ob der Shader oder das Wiring
+  schuld ist.
+- B-Step 6 (Prefill-KV-Cache-Upload) ist die kleinste, aber notwendigste
+  Lücke: ohne sie startet Decode mit leerem KV-Cache und produziert nur
+  Self-Attention auf den letzten Token statt auf den vollen Prompt-Kontext.
+- C kommt **erst nach B-Akzeptanz**. Wer C vorzieht, wenn B noch nicht
+  byte-identisch zur Referenz ist, hat keinen Validierungs-Anker mehr.
 
 ## 5 Akzeptanzkriterien
 
