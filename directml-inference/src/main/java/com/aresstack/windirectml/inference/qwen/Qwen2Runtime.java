@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ForkJoinPool;
 import java.util.stream.IntStream;
 
 /**
@@ -52,6 +53,7 @@ public final class Qwen2Runtime {
     private final int qHeadsPerKvHead;
     private final QwenGpuKernels gpuKernels;   // null if CPU-only
     private final QwenGpuPipeline gpuPipeline; // null if V1 or CPU-only
+    private final boolean useGpuForDecode;     // false in HYBRID mode — GPU only for prefill
 
     // ── KV Cache (per-head layout for cache locality) ────────────────────
     // Layout: [layer][head][pos * headDim]
@@ -130,11 +132,32 @@ public final class Qwen2Runtime {
      */
     public Qwen2Runtime(Qwen2Config config, Qwen2Weights weights, QwenTokenizer tokenizer,
                         QwenGpuKernels gpuKernels, QwenGpuPipeline gpuPipeline) {
+        this(config, weights, tokenizer, gpuKernels, gpuPipeline, true);
+    }
+
+    /**
+     * Construct a Qwen2 runtime with full backend control.
+     *
+     * @param config          model configuration
+     * @param weights         loaded model weights
+     * @param tokenizer       Qwen BPE tokenizer
+     * @param gpuKernels      optional DirectML GPU kernels; {@code null} = CPU-only
+     * @param gpuPipeline     optional V2.0 GPU pipeline; {@code null} = fall back to V1 or CPU
+     * @param useGpuForDecode if {@code false}, GPU is used only for prefill;
+     *                        per-token decode (and lm_head) stays on CPU. This is the
+     *                        {@code HYBRID} backend mode and is recommended on Intel
+     *                        iGPU hosts where the per-submission fence overhead
+     *                        dominates per-token decode cost.
+     */
+    public Qwen2Runtime(Qwen2Config config, Qwen2Weights weights, QwenTokenizer tokenizer,
+                        QwenGpuKernels gpuKernels, QwenGpuPipeline gpuPipeline,
+                        boolean useGpuForDecode) {
         this.config = config;
         this.weights = weights;
         this.tokenizer = tokenizer;
         this.gpuKernels = gpuKernels;
         this.gpuPipeline = gpuPipeline;
+        this.useGpuForDecode = useGpuForDecode;
 
         int numLayers = config.numHiddenLayers();
         int numHeads = config.numAttentionHeads();
@@ -190,14 +213,45 @@ public final class Qwen2Runtime {
             }
         }
 
+        String modeStr;
+        if (!useGpuForDecode && (gpuPipeline != null || gpuKernels != null)) {
+            modeStr = "HYBRID (GPU prefill + CPU decode)";
+        } else if (gpuPipeline != null) {
+            modeStr = "GPU-V2(pipeline, " + gpuPipeline.hasLayer(config.numHiddenLayers() - 1)
+                    + " layers, mlpBatch=" + gpuPipeline.isMlpBatchEnabled() + ")";
+        } else if (gpuKernels != null) {
+            modeStr = "GPU-V1(" + gpuKernels.getGpuLayers() + " layers)";
+        } else {
+            modeStr = "CPU-only";
+        }
         log.info("Qwen2Runtime: {} mode, {} layers, {} heads ({}KV), headDim={}, GQA ratio={}:1",
-                gpuPipeline != null
-                        ? "GPU-V2(pipeline, " + gpuPipeline.hasLayer(config.numHiddenLayers() - 1)
-                        + " layers, mlpBatch=" + gpuPipeline.isMlpBatchEnabled() + ")"
-                        : gpuKernels != null
-                        ? "GPU-V1(" + gpuKernels.getGpuLayers() + " layers)"
-                        : "CPU-only",
-                numLayers, numHeads, kvHeads, config.headDim(), qHeadsPerKvHead);
+                modeStr, numLayers, numHeads, kvHeads, config.headDim(), qHeadsPerKvHead);
+
+        // ── One-shot diagnostic: SIMD / parallelism / heap ──────────────────────────────────
+        // The CPU path's per-token cost is dominated by INT4 SIMD matvec
+        // (Qwen2Weights.QuantizedWeight.matvec).  Logging these three numbers
+        // here makes the next "why is decode/prefill slow?" investigation a
+        // one-line answer instead of a multi-hour code review.
+        Runtime rt = Runtime.getRuntime();
+        long maxHeapMb = rt.maxMemory() / (1024L * 1024L);
+        int avail = rt.availableProcessors();
+        int fjp = ForkJoinPool.commonPool().getParallelism();
+        log.info("Qwen2Runtime perf diag: SimdOps.enabled={}, availableProcessors={}, "
+                        + "commonPool.parallelism={}, maxHeap={}MB, jvm={} {}",
+                SimdOps.enabled(), avail, fjp, maxHeapMb,
+                System.getProperty("java.vm.name"), System.getProperty("java.version"));
+        if (!SimdOps.enabled()) {
+            log.warn("Qwen2Runtime: SIMD path DISABLED — jdk.incubator.vector module not loaded. "
+                    + "CPU matvec will be 4–16× slower than expected. Re-launch with "
+                    + "`--add-modules=jdk.incubator.vector` (the Workbench launcher adds it "
+                    + "automatically; direct `java -jar` invocations must add it explicitly).");
+        }
+        if (fjp < 2) {
+            log.warn("Qwen2Runtime: ForkJoinPool parallelism={} — CPU prefill/decode will be "
+                            + "single-threaded. On hardened/locked-down hosts check that the JVM is "
+                            + "not restricted via `-Djava.util.concurrent.ForkJoinPool.common.parallelism`.",
+                    fjp);
+        }
     }
 
     // ── Streaming callback ────────────────────────────────────────────────
@@ -343,6 +397,15 @@ public final class Qwen2Runtime {
 
     // ── Single-token decode (uses pre-allocated buffers) ─────────────────
 
+    /**
+     * True if any GPU acceleration is configured AND enabled for the decode path.
+     * In HYBRID mode this is false even when {@link #gpuPipeline} / {@link #gpuKernels}
+     * are non-null — the GPU is then reserved for prefill only.
+     */
+    private boolean gpuActiveForDecode() {
+        return useGpuForDecode && (gpuPipeline != null || gpuKernels != null);
+    }
+
     private float[] decodeSingleToken(int tokenId) {
         int hidden = config.hiddenSize();
         int pos = cachedSeqLen;
@@ -366,9 +429,9 @@ public final class Qwen2Runtime {
 
         // LM head → decLogits
         t0 = System.nanoTime();
-        if (gpuPipeline != null && gpuPipeline.hasLmHead()) {
+        if (useGpuForDecode && gpuPipeline != null && gpuPipeline.hasLmHead()) {
             gpuPipeline.lmHead(decBuf, decLogits);
-        } else if (gpuKernels != null && gpuKernels.hasLmHead()) {
+        } else if (useGpuForDecode && gpuKernels != null && gpuKernels.hasLmHead()) {
             gpuKernels.lmHead().matvec(decBuf, decLogits);
         } else {
             Arrays.fill(decLogits, 0);
@@ -392,9 +455,14 @@ public final class Qwen2Runtime {
         Qwen2Weights.LayerWeights lw = weights.layers[layerIdx];
         long t0;
 
-        // Determine execution path for this layer
-        final boolean usePipeline = gpuPipeline != null && gpuPipeline.hasLayer(layerIdx);
-        final boolean useKernels = !usePipeline && gpuKernels != null && gpuKernels.hasLayer(layerIdx);
+        // Determine execution path for this layer.
+        // HYBRID mode: GPU is reserved for prefill — single-token decode stays on CPU,
+        // because on Intel iGPU each GPU dispatch costs 10–40 ms of fence-wait overhead
+        // and 48 of them per token dominates the whole decode budget.
+        final boolean usePipeline = useGpuForDecode
+                && gpuPipeline != null && gpuPipeline.hasLayer(layerIdx);
+        final boolean useKernels = !usePipeline && useGpuForDecode
+                && gpuKernels != null && gpuKernels.hasLayer(layerIdx);
 
         // ── Pre-attention RMSNorm → decNormed ────────────────────────
         t0 = System.nanoTime();

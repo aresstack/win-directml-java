@@ -116,7 +116,7 @@ public final class LocalMlRuntime {
         EmbeddingModel model = switch (backend) {
             case CPU -> loadEmbeddingCpu(family, config);
             case DIRECTML -> loadEmbeddingDirectMl(family, config);
-            case AUTO -> loadEmbeddingAuto(family, config);
+            case AUTO, HYBRID -> loadEmbeddingAuto(family, config);
         };
 
         return new LocalEmbeddingModel(model, config.prefix());
@@ -137,7 +137,9 @@ public final class LocalMlRuntime {
         Reranker reranker = switch (backend) {
             case CPU -> BertCrossEncoderRerankers.loadCpu(modelDir);
             case DIRECTML -> BertCrossEncoderRerankers.loadDirectMl(modelDir);
-            case AUTO -> loadRerankerAuto(modelDir);
+            // HYBRID is Qwen2-specific (GPU prefill + CPU decode); for embedding/
+            // reranker encoders there is no decode loop, so HYBRID behaves like AUTO.
+            case AUTO, HYBRID -> loadRerankerAuto(modelDir);
         };
 
         return new LocalRerankerModel(reranker);

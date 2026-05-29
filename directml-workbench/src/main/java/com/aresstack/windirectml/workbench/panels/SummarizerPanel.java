@@ -181,7 +181,10 @@ public final class SummarizerPanel extends JPanel {
 
     private void runPhi3Summarizer(Path modelDir, String text, int maxTokens) throws Exception {
         validatePhi3ModelFiles(modelDir);
-        String backend = model.getBackend().name().toLowerCase();
+        // Phi3 has no hybrid prefill/decode split — map HYBRID to AUTO so the
+        // user's backend choice doesn't crash this engine. HYBRID is Qwen-specific.
+        String rawBackend = model.getBackend().name().toLowerCase();
+        String backend = "hybrid".equals(rawBackend) ? "auto" : rawBackend;
         long start = System.nanoTime();
         try (var summarizer = new Phi3Summarizer(modelDir, maxTokens, backend)) {
             appendResult("Initializing model...");

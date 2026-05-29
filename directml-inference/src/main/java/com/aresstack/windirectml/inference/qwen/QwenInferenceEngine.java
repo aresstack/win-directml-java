@@ -67,7 +67,7 @@ public class QwenInferenceEngine implements InferenceEngine {
 
     private final Path modelDir;
     private final int defaultMaxTokens;
-    private final String backend;   // "directml" | "cpu" | "auto"
+    private final String backend;   // "directml" | "cpu" | "auto" | "hybrid"
 
     private Qwen2Config config;
     private QwenTokenizer tokenizer;
@@ -136,7 +136,10 @@ public class QwenInferenceEngine implements InferenceEngine {
             if (!"cpu".equalsIgnoreCase(backend) && WindowsBindings.isSupported()) {
                 try {
                     wb = new WindowsBindings();
-                    wb.init(backend);
+                    // "hybrid" is not a known native backend name — map to "auto"
+                    // for the native init (the GPU is still required for prefill).
+                    String nativeBackend = "hybrid".equalsIgnoreCase(backend) ? "auto" : backend;
+                    wb.init(nativeBackend);
                     if (wb.hasDirectMl()) {
                         int gpuLayerCount = Integer.getInteger("qwen.gpu.layers",
                                 config.numHiddenLayers());
@@ -164,7 +167,7 @@ public class QwenInferenceEngine implements InferenceEngine {
                         cleanupGpu();
                     }
                 } catch (Exception e) {
-                    if ("auto".equalsIgnoreCase(backend)) {
+                    if ("auto".equalsIgnoreCase(backend) || "hybrid".equalsIgnoreCase(backend)) {
                         log.warn("GPU init failed, falling back to CPU: {}", e.getMessage());
                         cleanupGpu();
                     } else {
@@ -175,14 +178,29 @@ public class QwenInferenceEngine implements InferenceEngine {
                 }
             }
 
-            // Create runtime (gpuPipeline + gpuKernels may be null → CPU-only)
-            runtime = new Qwen2Runtime(config, weights, tokenizer, gpuKernels, gpuPipeline);
+            // Create runtime. In HYBRID mode the GPU pipeline is kept around
+            // for batched prefill (Qwen2Runtime.processLayerPrefill always checks
+            // gpuPipeline/gpuKernels), but per-token decode is forced onto the CPU
+            // path so the 24x2 = 48 per-token GPU fence-waits don't dominate the
+            // decode budget on Intel iGPU hosts.
+            final boolean hybridMode = "hybrid".equalsIgnoreCase(backend);
+            runtime = new Qwen2Runtime(config, weights, tokenizer, gpuKernels, gpuPipeline,
+                    /* useGpuForDecode */ !hybridMode);
 
             long elapsed = System.currentTimeMillis() - t0;
-            log.info("QwenInferenceEngine initialized in {} ms (backend={})",
-                    elapsed, gpuPipeline != null
-                            ? "GPU-V2(" + gpuKernels.getGpuLayers() + " layers, mlpBatch=" + gpuPipeline.isMlpBatchEnabled() + ")"
-                            : gpuKernels != null ? "GPU-V1(" + gpuKernels.getGpuLayers() + " layers)" : "CPU");
+            String backendDesc;
+            if ("hybrid".equalsIgnoreCase(backend) && gpuPipeline != null) {
+                backendDesc = "HYBRID(GPU prefill + CPU decode, "
+                        + gpuKernels.getGpuLayers() + " layers on GPU for prefill)";
+            } else if (gpuPipeline != null) {
+                backendDesc = "GPU-V2(" + gpuKernels.getGpuLayers() + " layers, mlpBatch="
+                        + gpuPipeline.isMlpBatchEnabled() + ")";
+            } else if (gpuKernels != null) {
+                backendDesc = "GPU-V1(" + gpuKernels.getGpuLayers() + " layers)";
+            } else {
+                backendDesc = "CPU";
+            }
+            log.info("QwenInferenceEngine initialized in {} ms (backend={})", elapsed, backendDesc);
             ready = true;
 
         } catch (Exception e) {
