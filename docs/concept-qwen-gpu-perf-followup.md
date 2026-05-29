@@ -675,6 +675,15 @@ kein neuer HLSL-Code. Aufwand für C *nach* B: ~0.5 Tag.
    ⚠️ **Isoliert testen gegen CPU-Referenz BEVOR End-to-End-Integration** —
    sonst sind Token-Sequenz-Divergenzen im Smoke-Test nicht auf B vs. CPU
    rückführbar (siehe Selbstdisziplin-Notiz).
+   ✅ **Validation-Test geschrieben 2026-05-29** (
+   `directml-windows-bindings/src/test/.../QwenAttentionShadersGpuTest.java`).
+   Kleine Geometrie (numHeads=2, kvHeads=1, headDim=8, maxSeqLen=4),
+   deterministischer RNG-Seed, vergleicht beide Shader gegen Java-Referenz
+   mit Toleranz 1e-4. Skipped per default (`@EnabledIfSystemProperty
+   qwen.gpu.test=true`), manuell auf Windows-Maschine ausführen mit
+   `gradlew.bat :directml-windows-bindings:test --tests QwenAttentionShadersGpuTest -Dqwen.gpu.test=true`.
+   Wenn der Test grün ist: Shader sind korrekt, weitere Token-Sequenz-
+   Divergenzen müssen Wiring-Bugs in Steps 3–6 sein.
 3. **B-Step 3**: `qkvAttnFused(layerIdx, normedHidden, pos)` in
    `QwenGpuPipeline` als eigene Submission (attnOut bleibt GPU-resident in
    `oProj.inputBuf`).
