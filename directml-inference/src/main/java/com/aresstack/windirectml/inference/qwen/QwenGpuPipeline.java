@@ -58,6 +58,10 @@ public final class QwenGpuPipeline implements AutoCloseable {
     // ── Per-layer GPU-resident postNorm weight buffers (uploaded once) ───────
     private MemorySegment[] postNormWeightBufs;   // [numLayers]
 
+    // ── Per-layer fused QKV bias buffers [qSize + 2*kvSize] (Opt-B; null when no biases) ──
+    private MemorySegment[] qkvBiasBufs;          // [numLayers] entry may be null
+    private boolean anyLayerHasQkvBias = false;
+
     // ── Pre-allocated barriers ──────────────────────────────────────────────
     private MemorySegment uavBarrier;
     private MemorySegment barrierResidualCopyDestToUav;
@@ -295,9 +299,36 @@ public final class QwenGpuPipeline implements AutoCloseable {
             D3D12Bindings.uploadFloats(dev, queue, postNormWeightBufs[l], w, arena);
         }
 
+        // Upload per-layer fused QKV biases (Opt-B requires them on GPU for
+        // GPU-resident decode; Qwen2 always has q/k/v biases, but we tolerate
+        // any subset being null and zero-fill the missing slices).
+        qkvBiasBufs = new MemorySegment[nLayers];
+        long qkvBiasFloats = (long) qSize + 2L * kvSize;
+        long qkvBiasBytes = qkvBiasFloats * Float.BYTES;
+        int uploadedBiasLayers = 0;
+        for (int l = 0; l < nLayers; l++) {
+            var lw = weights.layers[l];
+            float[] qB = lw.qBias();
+            float[] kB = lw.kBias();
+            float[] vB = lw.vBias();
+            if (qB == null && kB == null && vB == null) {
+                qkvBiasBufs[l] = null;
+                continue;
+            }
+            float[] fused = new float[(int) qkvBiasFloats];
+            if (qB != null) System.arraycopy(qB, 0, fused, 0, qSize);
+            if (kB != null) System.arraycopy(kB, 0, fused, qSize, kvSize);
+            if (vB != null) System.arraycopy(vB, 0, fused, qSize + kvSize, kvSize);
+            qkvBiasBufs[l] = D3D12Bindings.createDefaultBuffer(dev, qkvBiasBytes, arena);
+            D3D12Bindings.uploadFloats(dev, queue, qkvBiasBufs[l], fused, arena);
+            uploadedBiasLayers++;
+        }
+        anyLayerHasQkvBias = uploadedBiasLayers > 0;
+
         weightsUploaded = true;
-        log.info("Qwen postNorm weights uploaded to GPU: {} layers in {} ms",
-                nLayers, System.currentTimeMillis() - t0);
+        log.info("Qwen postNorm weights uploaded to GPU: {} layers, qkvBias layers={}/{} ({} KB each) in {} ms",
+                nLayers, uploadedBiasLayers, nLayers, qkvBiasBytes / 1024,
+                System.currentTimeMillis() - t0);
     }
 
     /**
@@ -436,6 +467,25 @@ public final class QwenGpuPipeline implements AutoCloseable {
     }
 
     /**
+     * Upload prefill CPU-built KV cache for one layer into the GPU-resident
+     * cache (B-Step 6). Delegates to {@link QwenGpuKvCache#uploadFromCpu}.
+     *
+     * @param layerIdx layer index
+     * @param seqLen   number of valid positions (prompt length)
+     * @param cpuK     CPU K cache: {@code float[kvHeads][>= seqLen*headDim]}
+     * @param cpuV     CPU V cache: {@code float[kvHeads][>= seqLen*headDim]}
+     * @throws IllegalStateException if no KV cache is attached
+     */
+    public void uploadKvCacheFromCpu(int layerIdx, int seqLen,
+                                     float[][] cpuK, float[][] cpuV) {
+        if (kvCache == null) {
+            throw new IllegalStateException(
+                    "Cannot upload KV cache - no QwenGpuKvCache attached (call setKvCache first)");
+        }
+        kvCache.uploadFromCpu(layerIdx, seqLen, cpuK, cpuV);
+    }
+
+    /**
      * Single-submission GPU-resident decoder layer (B-Step 3+4 fused with C-Step 1).
      *
      * <p>Records 9 GPU operations into ONE command list and fence-waits once:
@@ -489,10 +539,26 @@ public final class QwenGpuPipeline implements AutoCloseable {
         qkvK.recordBatchFromCpu(pipeline, normedHidden);
         pipeline.recordUavBarrier(uavBarrier);
 
+        // ── 1b. Add per-layer fused QKV bias (Qwen2 has q/k/v biases) ──
+        // No-op if layer has no biases.
+        long qkvBaseAddr = D3D12Bindings.getGpuVirtualAddress(qkvK.getOutputBuf());
+        int qkvN = qSize + 2 * kvSize;
+        if (qkvBiasBufs != null && qkvBiasBufs[layerIdx] != null) {
+            computeKernels.add().recordDispatch(cl,
+                    new long[]{
+                            qkvBaseAddr,
+                            D3D12Bindings.getGpuVirtualAddress(qkvBiasBufs[layerIdx]),
+                            qkvBaseAddr
+                    },
+                    new int[]{qkvN},
+                    qkvN);
+            pipeline.recordUavBarrier(uavBarrier);
+        }
+
         // ── 2. ROPE + APPEND KV: bind one fused buffer to (Q,K,V) UAVs via byte offsets ──
         // After: Q rotated in place at qkvBase..qkvBase+qSize;
         //        rotated K and V written to KV cache[layer][..][pos]
-        long qkvBase = D3D12Bindings.getGpuVirtualAddress(qkvK.getOutputBuf());
+        long qkvBase = qkvBaseAddr;
         long qAddr = qkvBase;
         long kAddr = qkvBase + (long) qSize * Float.BYTES;
         long vAddr = qkvBase + (long) (qSize + kvSize) * Float.BYTES;

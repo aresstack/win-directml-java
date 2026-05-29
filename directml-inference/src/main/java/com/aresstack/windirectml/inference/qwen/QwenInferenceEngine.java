@@ -90,6 +90,7 @@ public class QwenInferenceEngine implements InferenceEngine {
     private WindowsBindings wb;
     private QwenGpuKernels gpuKernels;
     private QwenGpuPipeline gpuPipeline;  // V2.0 shared pipeline (batched MLP)
+    private QwenGpuKvCache gpuKvCache;    // Opt-B GPU-resident KV cache (null unless qwen.gpu.attention=true)
 
     /**
      * Create a new Qwen inference engine (CPU-only).
@@ -173,9 +174,40 @@ public class QwenInferenceEngine implements InferenceEngine {
                         try {
                             gpuPipeline = new QwenGpuPipeline(wb, gpuKernels, config);
                             gpuPipeline.uploadLayerWeights(wb, weights, config);
-                            log.info("GPU acceleration: {}/{} layers on GPU, lmHead={}, pipeline=V2.0 (mlpBatch={})",
+
+                            // Opt-B: optional GPU-resident attention (KV cache + rope + GQA on GPU).
+                            // Disabled by default; enable with -Dqwen.gpu.attention=true.
+                            // Requires ALL decoder layers to have GPU kernels (no mixed mode).
+                            boolean attnFlag = Boolean.parseBoolean(
+                                    System.getProperty("qwen.gpu.attention", "false"));
+                            if (attnFlag
+                                    && gpuKernels.getGpuLayers() == config.numHiddenLayers()) {
+                                try {
+                                    int kvMaxSeq = Integer.getInteger(
+                                            "qwen.gpu.attention.maxseqlen", 4096);
+                                    gpuKvCache = new QwenGpuKvCache(wb,
+                                            config.numHiddenLayers(),
+                                            config.numKeyValueHeads(),
+                                            config.headDim(),
+                                            kvMaxSeq);
+                                    gpuPipeline.setKvCache(gpuKvCache);
+                                    log.info("Opt-B enabled: GPU-resident KV cache + attention (maxSeqLen={})",
+                                            kvMaxSeq);
+                                } catch (Exception ke) {
+                                    log.warn("Opt-B KV cache init failed - GPU-resident attention disabled: {}",
+                                            ke.getMessage());
+                                    gpuKvCache = null;
+                                }
+                            } else if (attnFlag) {
+                                log.warn("Opt-B requested but only {}/{} layers on GPU - GPU-resident attention disabled (set qwen.gpu.layers={})",
+                                        gpuKernels.getGpuLayers(), config.numHiddenLayers(),
+                                        config.numHiddenLayers());
+                            }
+
+                            log.info("GPU acceleration: {}/{} layers on GPU, lmHead={}, pipeline=V2.0 (mlpBatch={}, attnGpuResident={})",
                                     gpuKernels.getGpuLayers(), config.numHiddenLayers(),
-                                    gpuKernels.hasLmHead(), gpuPipeline.isMlpBatchEnabled());
+                                    gpuKernels.hasLmHead(), gpuPipeline.isMlpBatchEnabled(),
+                                    gpuPipeline.isAttnGpuResidentEnabled());
                         } catch (Exception pe) {
                             log.warn("GPU pipeline V2.0 failed, using V1 per-kernel dispatch: {}",
                                     pe.getMessage());
@@ -311,6 +343,14 @@ public class QwenInferenceEngine implements InferenceEngine {
                 log.warn("Error closing GPU pipeline: {}", e.getMessage());
             }
             gpuPipeline = null;
+        }
+        if (gpuKvCache != null) {
+            try {
+                gpuKvCache.close();
+            } catch (Exception e) {
+                log.warn("Error closing GPU KV cache: {}", e.getMessage());
+            }
+            gpuKvCache = null;
         }
         if (gpuKernels != null) {
             try {

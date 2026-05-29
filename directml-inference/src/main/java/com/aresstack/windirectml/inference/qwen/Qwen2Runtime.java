@@ -463,6 +463,29 @@ public final class Qwen2Runtime {
         }
 
         cachedSeqLen = seqLen;
+
+        // ── Opt-B: upload CPU-built KV cache to GPU for GPU-resident decode ──
+        // After prefill, all KV state lives in CPU arrays kvCacheK/V[layer][kvH].
+        // The Opt-B decode path reads K/V from the GPU-resident QwenGpuKvCache,
+        // so we must mirror the prefill state into the GPU buffers exactly once.
+        if (gpuPipeline != null && gpuPipeline.isAttnGpuResidentEnabled()) {
+            long upStart = System.nanoTime();
+            int uploaded = 0;
+            for (int l = 0; l < config.numHiddenLayers(); l++) {
+                if (kvCacheK[l] == null || kvCacheK[l][0] == null) continue;
+                try {
+                    gpuPipeline.uploadKvCacheFromCpu(l, seqLen, kvCacheK[l], kvCacheV[l]);
+                    uploaded++;
+                } catch (Exception e) {
+                    log.warn("Opt-B: KV cache upload failed for layer {} - falling back to CPU decode: {}",
+                            l, e.getMessage());
+                    return logits;
+                }
+            }
+            log.info("Opt-B: uploaded prefill KV cache to GPU ({} layers, seqLen={}, {} ms)",
+                    uploaded, seqLen, (System.nanoTime() - upStart) / 1_000_000L);
+        }
+
         return logits;
     }
 
@@ -534,12 +557,28 @@ public final class Qwen2Runtime {
                 && gpuPipeline != null && gpuPipeline.hasLayer(layerIdx);
         final boolean useKernels = !usePipeline && useGpuForDecode
                 && gpuKernels != null && gpuKernels.hasLayer(layerIdx);
+        // Opt-B: full GPU-resident decode (QKV+bias + RoPE + KV-append +
+        // GQA attention + o_proj + MLP in ONE submission). Activates only when
+        // -Dqwen.gpu.attention=true was set at startup AND all decoder layers
+        // have GPU kernels AND the KV cache was successfully attached.
+        final boolean useAttnResident = usePipeline
+                && gpuPipeline.isAttnGpuResidentEnabled();
 
         // ── Pre-attention RMSNorm → decNormed ────────────────────────
         t0 = System.nanoTime();
         System.arraycopy(hiddenIo, 0, decNormed, 0, hidden);
         rmsNorm(decNormed, lw.inputNormWeight(), config.rmsNormEps());
         profNormNs += System.nanoTime() - t0;
+
+        if (useAttnResident) {
+            // Single-submission fast path: decNormed → QKV (+bias) → RoPE → GQA → MLP
+            // → hiddenIo. CPU KV cache for this layer is intentionally NOT updated;
+            // all subsequent decodes must keep going through this same fast path.
+            t0 = System.nanoTime();
+            gpuPipeline.decodeLayerGpuResident(layerIdx, decNormed, hiddenIo, hiddenIo, pos);
+            profProjNs += System.nanoTime() - t0;
+            return;
+        }
 
         // ── Q/K/V Projections ────────────────────────────────────────
         t0 = System.nanoTime();
