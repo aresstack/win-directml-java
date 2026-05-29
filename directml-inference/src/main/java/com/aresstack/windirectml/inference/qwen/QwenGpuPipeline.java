@@ -179,6 +179,55 @@ public final class QwenGpuPipeline implements AutoCloseable {
         matvec(kernels.downProj(layerIdx), mlpAct, out);
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    // Batched GEMM helpers (Opt-A — prefill submission collapse)
+    //
+    // Each call submits ONE GPU dispatch over M rows instead of M dispatches
+    // of one row each. Used by Qwen2Runtime.processLayerPrefill to turn the
+    // per-token-row loop into a single GEMM per projection per layer.
+    // Decode keeps using the per-row qkvFused / oProj / gateUpFused / downProj.
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * True if all four projection kernels (qkvFused, oProj, gateUpFused, downProj)
+     * support the batched matmul path. False if any of them is on the legacy
+     * FP32/DML fallback that does not support batching.
+     */
+    public boolean supportsBatch(int layerIdx) {
+        return kernels.qkvFused(layerIdx).supportsBatch()
+                && kernels.oProj(layerIdx).supportsBatch()
+                && kernels.gateUpFused(layerIdx).supportsBatch()
+                && kernels.downProj(layerIdx).supportsBatch();
+    }
+
+    /**
+     * Batched fused QKV: {@code [M, hidden] → [M, qSize + 2*kvSize]}.
+     */
+    public void qkvFusedBatch(int layerIdx, float[] normedBatch, float[] qkvBatch, int M) {
+        kernels.qkvFused(layerIdx).matmulBatch(normedBatch, qkvBatch, M);
+    }
+
+    /**
+     * Batched o_proj: {@code [M, qSize] → [M, hidden]}.
+     */
+    public void oProjBatch(int layerIdx, float[] attnBatch, float[] outBatch, int M) {
+        kernels.oProj(layerIdx).matmulBatch(attnBatch, outBatch, M);
+    }
+
+    /**
+     * Batched fused gate+up: {@code [M, hidden] → [M, 2*intermediate]}.
+     */
+    public void gateUpFusedBatch(int layerIdx, float[] normedBatch, float[] gateUpBatch, int M) {
+        kernels.gateUpFused(layerIdx).matmulBatch(normedBatch, gateUpBatch, M);
+    }
+
+    /**
+     * Batched down_proj: {@code [M, intermediate] → [M, hidden]}.
+     */
+    public void downProjBatch(int layerIdx, float[] mlpActBatch, float[] downBatch, int M) {
+        kernels.downProj(layerIdx).matmulBatch(mlpActBatch, downBatch, M);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // MLP Batch: 6 GPU ops, 1 submission (V2.0)
     // ═══════════════════════════════════════════════════════════════════════════

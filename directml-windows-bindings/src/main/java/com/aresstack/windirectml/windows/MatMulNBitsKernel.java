@@ -106,6 +106,26 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private long[] int4UavAddrs;           // pre-cached GPU VAs: [X, QW, Scales, ZP, Y]
     private int[] int4Constants;           // pre-cached constants: [N, K, blockSize]
 
+    // ── Batched matmul (Opt-A: prefill) — lazily allocated on first matmulBatch call ─────
+    private GpuComputeKernel int4BatchShader;
+    private MemorySegment int4BatchInputBuf;        // GPU default [maxBatchM, K]
+    private MemorySegment int4BatchOutputBuf;       // GPU default [maxBatchM, N]
+    private MemorySegment int4BatchUploadBuf;       // upload heap [maxBatchM * K * 4 bytes]
+    private MemorySegment int4BatchReadbackBuf;     // readback heap [maxBatchM * N * 4 bytes]
+    private MemorySegment int4BatchMappedUpload;    // persistently mapped upload
+    private MemorySegment int4BatchMappedReadback;  // persistently mapped readback
+    private long[] int4BatchUavAddrs;               // [X_batch, QW, Scales, ZP, Y_batch]
+    private int batchCapacityM = 0;                 // currently-allocated capacity
+    private MemorySegment barrierBatchInputToUAV;
+    private MemorySegment barrierBatchOutputToCS;
+    private MemorySegment barrierBatchInputToCommon;
+    private MemorySegment barrierBatchOutputToCommon;
+
+    /**
+     * Hard upper bound on batched M to keep VRAM bounded (~tens of MB per kernel).
+     */
+    private static final int MAX_BATCH_M = 1024;
+
     // ── HLSL shader source for INT4 block-quantised matrix-vector product ────
     // Registers: u0=X (FP32 input), u1=QW (packed INT4 weights),
     //            u2=Scales (FP32), u3=ZP (packed INT4), u4=Y (FP32 output)
@@ -170,6 +190,67 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 }
             
                 Y.Store(n * 4, asuint(sum));
+            }
+            """;
+
+    // ── HLSL shader source for INT4 batched matmul (M rows at once) ─────────
+    // Identical to INT4_MATVEC_HLSL but with an additional batch dimension M.
+    // Each thread handles ONE output cell (m, n) of the [M, N] output.
+    // Input is interpreted as [M, K] row-major, output as [M, N] row-major.
+    // Single dispatch over M*N threads replaces M dispatches of N threads each.
+    private static final String INT4_MATMUL_BATCH_HLSL = """
+            RWByteAddressBuffer X      : register(u0);
+            RWByteAddressBuffer QW     : register(u1);
+            RWByteAddressBuffer Scales : register(u2);
+            RWByteAddressBuffer ZP     : register(u3);
+            RWByteAddressBuffer Y      : register(u4);
+            cbuffer CB : register(b0) { uint N; uint K; uint blockSz; uint M; };
+            
+            [numthreads(64, 1, 1)]
+            void CSMain(uint3 tid : SV_DispatchThreadID) {
+                uint flat = tid.x;
+                uint total = M * N;
+                if (flat >= total) return;
+                uint m = flat / N;
+                uint n = flat - m * N;
+            
+                uint blocksPerRow = K / blockSz;
+                uint xRowBase = m * K;
+                float sum = 0.0;
+            
+                for (uint blk = 0; blk < blocksPerRow; blk++) {
+                    uint scIdx = n * blocksPerRow + blk;
+            
+                    float scale = asfloat(Scales.Load(scIdx * 4));
+            
+                    uint zpByteIdx  = scIdx / 2;
+                    uint zpDword    = ZP.Load((zpByteIdx / 4) * 4);
+                    uint zpByte     = (zpDword >> ((zpByteIdx % 4) * 8)) & 0xFF;
+                    float zpVal = (scIdx % 2u == 0u) ? float(zpByte & 0xFu)
+                                                     : float(zpByte >> 4u);
+            
+                    uint qByteBase = n * blocksPerRow * (blockSz / 2) + blk * (blockSz / 2);
+                    uint kBase = blk * blockSz;
+            
+                    for (uint j = 0; j < blockSz / 2; j += 4) {
+                        uint dword = QW.Load(qByteBase + j);
+                        uint b0 = dword & 0xFF;
+                        uint b1 = (dword >> 8)  & 0xFF;
+                        uint b2 = (dword >> 16) & 0xFF;
+                        uint b3 =  dword >> 24;
+                        uint kOff = xRowBase + kBase + j * 2;
+                        sum += (float(b0 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+0)*4));
+                        sum += (float(b0 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+1)*4));
+                        sum += (float(b1 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+2)*4));
+                        sum += (float(b1 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+3)*4));
+                        sum += (float(b2 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+4)*4));
+                        sum += (float(b2 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+5)*4));
+                        sum += (float(b3 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+6)*4));
+                        sum += (float(b3 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+7)*4));
+                    }
+                }
+            
+                Y.Store((m * N + n) * 4, asuint(sum));
             }
             """;
 
@@ -941,6 +1022,179 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // Batched matmul (Opt-A — prefill submission reduction)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Whether this kernel supports the batched {@link #matmulBatch} path.
+     * Currently only the INT4-GPU path supports batching; legacy DML/FP32 falls
+     * back to per-row dispatches (callers should still use {@link #matvec}).
+     */
+    public boolean supportsBatch() {
+        return useInt4Gpu;
+    }
+
+    /**
+     * Compute {@code Y = X @ W^T} for a batch of {@code M} input rows in ONE GPU
+     * submission. Mathematically equivalent to {@code M} consecutive
+     * {@link #matvec} calls but with a single fence-wait instead of {@code M}.
+     *
+     * <p>Batched scratch buffers are allocated lazily on first call and grown
+     * (re-allocated) when {@code M} exceeds the previously-seen maximum.
+     * Capacity is capped at {@link #MAX_BATCH_M} to keep VRAM bounded.
+     *
+     * @param xBatch   input rows packed row-major, length {@code >= M * K}
+     * @param outBatch output rows packed row-major, length {@code >= M * N}
+     * @param M        number of rows in this batch (must be {@code 1..MAX_BATCH_M})
+     */
+    public void matmulBatch(float[] xBatch, float[] outBatch, int M) {
+        if (!prepared) throw new IllegalStateException("Kernel not prepared");
+        if (!useInt4Gpu) throw new UnsupportedOperationException(
+                "matmulBatch only supported in INT4-GPU mode");
+        if (M < 1 || M > MAX_BATCH_M) throw new IllegalArgumentException(
+                "M out of range [1, " + MAX_BATCH_M + "]: " + M);
+        if (xBatch.length < (long) M * K) throw new IllegalArgumentException(
+                "xBatch too short: " + xBatch.length + " < " + ((long) M * K));
+        if (outBatch.length < (long) M * N) throw new IllegalArgumentException(
+                "outBatch too short: " + outBatch.length + " < " + ((long) M * N));
+
+        try {
+            ensureBatchCapacity(M);
+        } catch (WindowsNativeException e) {
+            throw new RuntimeException("MatMulNBitsKernel.matmulBatch: failed to alloc batch scratch", e);
+        }
+
+        long inputBytes = (long) M * K * Float.BYTES;
+        long outputBytes = (long) M * N * Float.BYTES;
+        int[] batchConstants = new int[]{N, K, int4BlockSize, M};
+
+        try {
+            // 1. Upload xBatch to persistently-mapped upload buffer.
+            MemorySegment.copy(xBatch, 0, int4BatchMappedUpload,
+                    ValueLayout.JAVA_FLOAT, 0, M * K);
+
+            // 2. Reset allocator + command list.
+            int hr = (int) mhResetAllocator.invokeExact(execAllocator);
+            HResult.check(hr, "CommandAllocator::Reset");
+            hr = (int) mhResetCmdList.invokeExact(execCmdList, execAllocator, MemorySegment.NULL);
+            HResult.check(hr, "CommandList::Reset");
+
+            // 3. Record: upload → barrier → dispatch → barrier → readback.
+            mhCopyBufferRegion.invokeExact(execCmdList,
+                    int4BatchInputBuf, 0L, int4BatchUploadBuf, 0L, inputBytes);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchInputToUAV);
+            int4BatchShader.recordDispatch(execCmdList, int4BatchUavAddrs, batchConstants, M * N);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchOutputToCS);
+            mhCopyBufferRegion.invokeExact(execCmdList,
+                    int4BatchReadbackBuf, 0L, int4BatchOutputBuf, 0L, outputBytes);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchInputToCommon);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchOutputToCommon);
+
+            // 4. Close + execute + fence signal.
+            hr = (int) mhCloseCmdList.invokeExact(execCmdList);
+            HResult.check(hr, "CommandList::Close");
+            mhExecuteCmdLists.invokeExact(wb.getCommandQueue(), 1, cmdListArrayPtr);
+
+            fenceValue++;
+            hr = (int) mhQueueSignal.invokeExact(wb.getCommandQueue(), execFence, fenceValue);
+            HResult.check(hr, "Queue::Signal");
+
+            // 5. Spin-wait for GPU completion.
+            long deadline = System.currentTimeMillis() + 30_000;
+            while ((long) mhFenceGetCompleted.invokeExact(execFence) < fenceValue) {
+                if (System.currentTimeMillis() > deadline) {
+                    throw new WindowsNativeException(
+                            "GPU fence timeout after 30000 ms in matmulBatch(M=" + M + ")");
+                }
+                Thread.onSpinWait();
+            }
+
+            // 6. Read result.
+            MemorySegment.copy(int4BatchMappedReadback, ValueLayout.JAVA_FLOAT, 0,
+                    outBatch, 0, M * N);
+
+        } catch (WindowsNativeException e) {
+            throw new RuntimeException("MatMulNBitsKernel.matmulBatch failed", e);
+        } catch (Throwable t) {
+            throw new RuntimeException("MatMulNBitsKernel.matmulBatch failed", t);
+        }
+    }
+
+    /**
+     * Allocate or grow the batched scratch buffers + barriers to hold at least
+     * {@code requiredM} rows. Idempotent: calls with {@code requiredM <= batchCapacityM}
+     * return immediately.
+     *
+     * <p>On first call also compiles the batched HLSL shader.
+     */
+    private void ensureBatchCapacity(int requiredM) throws WindowsNativeException {
+        if (requiredM <= batchCapacityM) return;
+        if (requiredM > MAX_BATCH_M) {
+            throw new IllegalArgumentException(
+                    "requiredM=" + requiredM + " exceeds MAX_BATCH_M=" + MAX_BATCH_M);
+        }
+        var dev = wb.getD3d12Device();
+
+        // Release previous (smaller) buffers if any; the Arena owns the metadata so
+        // we only need to release the GPU resources themselves.
+        if (int4BatchInputBuf != null) {
+            D3D12Bindings.unmapResource(int4BatchUploadBuf);
+            D3D12Bindings.unmapResource(int4BatchReadbackBuf);
+            DxgiBindings.release(int4BatchInputBuf);
+            DxgiBindings.release(int4BatchOutputBuf);
+            DxgiBindings.release(int4BatchUploadBuf);
+            DxgiBindings.release(int4BatchReadbackBuf);
+        }
+
+        long inputBytes = (long) requiredM * K * Float.BYTES;
+        long outputBytes = (long) requiredM * N * Float.BYTES;
+
+        int4BatchInputBuf = D3D12Bindings.createDefaultBuffer(dev, inputBytes, arena);
+        int4BatchOutputBuf = D3D12Bindings.createDefaultBuffer(dev, outputBytes, arena);
+        int4BatchUploadBuf = D3D12Bindings.createUploadBuffer(dev, inputBytes, arena);
+        int4BatchReadbackBuf = D3D12Bindings.createReadbackBuffer(dev, outputBytes, arena);
+        int4BatchMappedUpload = D3D12Bindings.mapResource(int4BatchUploadBuf, arena);
+        int4BatchMappedReadback = D3D12Bindings.mapResource(int4BatchReadbackBuf, arena);
+
+        // Compile the batched shader on first call (5 UAVs, 4 constants).
+        if (int4BatchShader == null) {
+            int4BatchShader = new GpuComputeKernel(wb, execCmdList,
+                    INT4_MATMUL_BATCH_HLSL, "int4_matmul_batch",
+                    5,   // UAVs: X, QW, Scales, ZP, Y
+                    4,   // constants: N, K, blockSize, M
+                    64); // 64 threads per group
+        }
+
+        // Re-cache UAV addresses (the batch buffers just changed identity).
+        int4BatchUavAddrs = new long[]{
+                D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4WeightBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4ScalesBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4ZpBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4BatchOutputBuf)
+        };
+
+        // Re-allocate barriers against the new resources.
+        barrierBatchInputToUAV = allocTransitionBarrier(int4BatchInputBuf,
+                D3D12Bindings.D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        barrierBatchOutputToCS = allocTransitionBarrier(int4BatchOutputBuf,
+                D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE);
+        barrierBatchInputToCommon = allocTransitionBarrier(int4BatchInputBuf,
+                D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
+        barrierBatchOutputToCommon = allocTransitionBarrier(int4BatchOutputBuf,
+                D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE,
+                D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
+
+        batchCapacityM = requiredM;
+        long totalKb = (inputBytes + outputBytes) * 2 / 1024;
+        log.info("MatMulNBitsKernel[N={}, K={}]: batch capacity grown to M={} ({} KB scratch)",
+                N, K, requiredM, totalKb);
+    }
+
     // ── GPU buffer accessors (for pipeline-batched operations) ─────────
 
     /** GPU output buffer (default heap, UAV). Result is written here by DML dispatch. */
@@ -1051,9 +1305,17 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         // Release INT4 GPU mode resources (if active)
         if (int4Shader != null) int4Shader.close();
+        if (int4BatchShader != null) int4BatchShader.close();
         if (int4WeightBuf != null) DxgiBindings.release(int4WeightBuf);
         if (int4ScalesBuf != null) DxgiBindings.release(int4ScalesBuf);
         if (int4ZpBuf != null) DxgiBindings.release(int4ZpBuf);
+        // Release batched scratch buffers (lazily allocated; may be null)
+        if (int4BatchUploadBuf != null) D3D12Bindings.unmapResource(int4BatchUploadBuf);
+        if (int4BatchReadbackBuf != null) D3D12Bindings.unmapResource(int4BatchReadbackBuf);
+        if (int4BatchInputBuf != null) DxgiBindings.release(int4BatchInputBuf);
+        if (int4BatchOutputBuf != null) DxgiBindings.release(int4BatchOutputBuf);
+        if (int4BatchUploadBuf != null) DxgiBindings.release(int4BatchUploadBuf);
+        if (int4BatchReadbackBuf != null) DxgiBindings.release(int4BatchReadbackBuf);
 
         // Release pre-allocated execution infrastructure (reverse creation order)
         if (execBindingTable != null) DxgiBindings.release(execBindingTable);

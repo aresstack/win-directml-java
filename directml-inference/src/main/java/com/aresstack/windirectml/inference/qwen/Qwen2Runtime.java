@@ -687,8 +687,19 @@ public final class Qwen2Runtime {
         float[] q = new float[seqLen * qSize];
         float[] k = new float[seqLen * kvSize];
         float[] v = new float[seqLen * kvSize];
-        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
-            // Per-token GPU dispatch: fused QKV, one call per position in the sequence
+        if (gpuPipeline != null && gpuPipeline.hasLayer(layerIdx) && gpuPipeline.supportsBatch(layerIdx)) {
+            // Opt-A: ONE batched GPU dispatch over the whole sequence (was seqLen dispatches).
+            int stride = gpuKernels.qkvFusedN;
+            float[] qkvBatch = new float[seqLen * stride];
+            gpuPipeline.qkvFusedBatch(layerIdx, normed, qkvBatch, seqLen);
+            for (int s = 0; s < seqLen; s++) {
+                int base = s * stride;
+                System.arraycopy(qkvBatch, base, q, s * qSize, qSize);
+                System.arraycopy(qkvBatch, base + qSize, k, s * kvSize, kvSize);
+                System.arraycopy(qkvBatch, base + qSize + kvSize, v, s * kvSize, kvSize);
+            }
+        } else if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+            // V1 / non-batched fallback: per-token GPU dispatch.
             float[] row = new float[hidden];
             float[] qkvRow = new float[gpuKernels.qkvFusedN];
             for (int s = 0; s < seqLen; s++) {
@@ -769,7 +780,10 @@ public final class Qwen2Runtime {
 
         // ── O projection ─────────────────────────────────────────────
         float[] oProjOut = new float[seqLen * hidden];
-        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+        if (gpuPipeline != null && gpuPipeline.hasLayer(layerIdx) && gpuPipeline.supportsBatch(layerIdx)) {
+            // Opt-A: batched o_proj over the whole sequence (was seqLen dispatches).
+            gpuPipeline.oProjBatch(layerIdx, attnOut, oProjOut, seqLen);
+        } else if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
             float[] row = new float[qSize];
             float[] tmpOut = new float[hidden];
             for (int s = 0; s < seqLen; s++) {
@@ -803,7 +817,17 @@ public final class Qwen2Runtime {
         int intermediate = config.intermediateSize();
         float[] gate = new float[seqLen * intermediate];
         float[] up = new float[seqLen * intermediate];
-        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+        if (gpuPipeline != null && gpuPipeline.hasLayer(layerIdx) && gpuPipeline.supportsBatch(layerIdx)) {
+            // Opt-A: batched gate+up over the whole sequence (was seqLen dispatches).
+            int stride = gpuKernels.gateUpFusedN; // 2 * intermediate
+            float[] guBatch = new float[seqLen * stride];
+            gpuPipeline.gateUpFusedBatch(layerIdx, postNormed, guBatch, seqLen);
+            for (int s = 0; s < seqLen; s++) {
+                int base = s * stride;
+                System.arraycopy(guBatch, base, gate, s * intermediate, intermediate);
+                System.arraycopy(guBatch, base + intermediate, up, s * intermediate, intermediate);
+            }
+        } else if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
             float[] row = new float[hidden];
             float[] guRow = new float[gpuKernels.gateUpFusedN]; // [2 * intermediate]
             for (int s = 0; s < seqLen; s++) {
@@ -833,7 +857,10 @@ public final class Qwen2Runtime {
 
         // down_proj
         float[] downOut = new float[seqLen * hidden];
-        if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
+        if (gpuPipeline != null && gpuPipeline.hasLayer(layerIdx) && gpuPipeline.supportsBatch(layerIdx)) {
+            // Opt-A: batched down_proj over the whole sequence (was seqLen dispatches).
+            gpuPipeline.downProjBatch(layerIdx, mlpActivation, downOut, seqLen);
+        } else if (gpuKernels != null && gpuKernels.hasLayer(layerIdx)) {
             float[] row = new float[intermediate];
             float[] tmpOut = new float[hidden];
             for (int s = 0; s < seqLen; s++) {
