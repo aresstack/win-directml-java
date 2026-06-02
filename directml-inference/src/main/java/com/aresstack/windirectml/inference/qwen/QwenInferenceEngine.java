@@ -80,6 +80,7 @@ public class QwenInferenceEngine implements InferenceEngine {
     private final Path modelDir;
     private final int defaultMaxTokens;
     private final String backend;   // "directml" | "cpu" | "auto" | "hybrid"
+    private final String modelFileName;
 
     private Qwen2Config config;
     private QwenTokenizer tokenizer;
@@ -111,17 +112,30 @@ public class QwenInferenceEngine implements InferenceEngine {
      * @param backend          "directml", "auto", or "cpu"
      */
     public QwenInferenceEngine(Path modelDir, int defaultMaxTokens, String backend) {
+        this(modelDir, defaultMaxTokens, backend, QwenModelDirValidator.DEFAULT_MODEL_FILE);
+    }
+
+    /**
+     * Create a new Qwen inference engine with an explicit ONNX filename.
+     *
+     * @param modelDir         path to the model directory
+     * @param defaultMaxTokens default maximum tokens if not specified in request
+     * @param backend          "directml", "auto", "hybrid", or "cpu"
+     * @param modelFileName    ONNX filename inside modelDir
+     */
+    public QwenInferenceEngine(Path modelDir, int defaultMaxTokens, String backend, String modelFileName) {
         this.modelDir = modelDir;
         this.defaultMaxTokens = defaultMaxTokens > 0 ? defaultMaxTokens : 256;
         this.backend = backend != null ? backend : "cpu";
+        this.modelFileName = QwenModelDirValidator.normalizeModelFileName(modelFileName);
     }
 
     @Override
     public void initialize() throws InferenceException {
-        log.info("QwenInferenceEngine initializing from {}", modelDir);
+        log.info("QwenInferenceEngine initializing from {} using {}", modelDir, modelFileName);
 
         // Validate model directory
-        String missing = QwenModelDirValidator.describeMissingModelFile(modelDir);
+        String missing = QwenModelDirValidator.describeMissingModelFile(modelDir, modelFileName);
         if (missing != null) {
             throw new InferenceException("Cannot initialize Qwen engine: " + missing);
         }
@@ -143,8 +157,7 @@ public class QwenInferenceEngine implements InferenceEngine {
             log.info("Tokenizer loaded: vocabSize={}", tokenizer.vocabSize());
 
             // Load weights
-            log.info("Selected Qwen ONNX file: {}", QwenModelDirValidator.selectedOnnxFilename(modelDir));
-            weights = Qwen2Weights.load(modelDir, config);
+            weights = Qwen2Weights.load(modelDir, config, modelFileName);
 
             // ── GPU acceleration ──────────────────────────────────────
             if (!"cpu".equalsIgnoreCase(backend) && WindowsBindings.isSupported()) {

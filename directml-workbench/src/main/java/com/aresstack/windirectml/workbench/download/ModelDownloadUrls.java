@@ -28,7 +28,7 @@ public final class ModelDownloadUrls {
         List<String> optionalFiles = List.of(
                 "vocab.txt", "special_tokens_map.json", "tokenizer_config.json"
         );
-        var descriptors = new ArrayList<ModelFileDescriptor>();
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
         for (String file : requiredFiles) {
             String url = buildUrl(repo, file);
             descriptors.add(new ModelFileDescriptor(file, true, url, url, file));
@@ -47,7 +47,7 @@ public final class ModelDownloadUrls {
         String repo = "microsoft/Phi-3-mini-4k-instruct-onnx";
         String subdir = ModelDownloader.PHI3_SUBDIR;
         String folder = "phi-3-mini-4k-instruct-onnx";
-        var descriptors = new ArrayList<ModelFileDescriptor>();
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
         for (String file : ModelDownloader.PHI3_REQUIRED_FILES) {
             String url = buildUrl(repo, subdir + "/" + file);
             descriptors.add(new ModelFileDescriptor(file, true, url, url, file));
@@ -56,55 +56,35 @@ public final class ModelDownloadUrls {
     }
 
     /**
-     * Creates a download manifest for a Qwen model given its configuration.
+     * Creates a complete download manifest for the selected Qwen ONNX variant.
      */
     public static ModelDownloadManifest manifestForQwen(QwenModelDownloadConfig config) {
-        var descriptors = new ArrayList<ModelFileDescriptor>();
-        addQwenDescriptor(descriptors, config.modelFile(), true,
-                config.onnxSubdir() + "/" + config.modelFile(), config.localModelFile(), config.repo());
-        if (config.externalDataFile() != null && !config.externalDataFile().trim().isEmpty()) {
-            addQwenDescriptor(descriptors, config.externalDataFile(), true,
-                    config.onnxSubdir() + "/" + config.externalDataFile(), config.localDataFile(), config.repo());
-        }
-        addQwenSupportFiles(descriptors, config.repo(), config.rootFiles(), config.optionalFiles());
-        return new ModelDownloadManifest(config.localDirName(), config.localDirName(),
-                List.copyOf(descriptors));
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        addQwenModelDescriptors(descriptors, config);
+        addQwenRootDescriptors(descriptors, config);
+        return new ModelDownloadManifest(config.localDirName(), config.localDirName(), List.copyOf(descriptors));
     }
 
     /**
-     * Creates a Qwen manifest for exactly one Hugging Face ONNX filename.
+     * Creates a small manifest containing only the selected Qwen ONNX model URL.
      */
-    public static ModelDownloadManifest manifestForQwenVariant(QwenOnnxModelVariant variant) {
-        var descriptors = new ArrayList<ModelFileDescriptor>();
-        addQwenVariantDescriptor(descriptors, variant);
-        addQwenSupportFiles(descriptors, QwenOnnxModelVariant.REPO,
-                QwenModelDownloadConfig.DEFAULT.rootFiles(),
-                QwenModelDownloadConfig.DEFAULT.optionalFiles());
-        return new ModelDownloadManifest(QwenOnnxModelVariant.LOCAL_DIR_NAME,
-                QwenOnnxModelVariant.LOCAL_DIR_NAME, List.copyOf(descriptors));
+    public static ModelDownloadManifest modelFileManifestForQwen(QwenModelDownloadConfig config) {
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        addQwenModelDescriptors(descriptors, config);
+        return new ModelDownloadManifest(config.localDirName(), config.localDirName(), List.copyOf(descriptors));
     }
 
     /**
-     * Creates a Qwen manifest for all known Hugging Face ONNX filenames.
+     * Creates a manifest that downloads every known Qwen ONNX file variant.
      */
     public static ModelDownloadManifest manifestForAllQwenVariants() {
-        var descriptors = new ArrayList<ModelFileDescriptor>();
-        for (QwenOnnxModelVariant variant : QwenOnnxModelVariant.orderedValues()) {
-            addQwenVariantDescriptor(descriptors, variant);
+        QwenModelDownloadConfig base = QwenModelDownloadConfig.DEFAULT_QUANTIZED;
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        for (QwenOnnxModelVariant variant : QwenOnnxModelVariant.values()) {
+            addQwenModelDescriptors(descriptors, QwenModelDownloadConfig.forVariant(variant));
         }
-        addQwenSupportFiles(descriptors, QwenOnnxModelVariant.REPO,
-                QwenModelDownloadConfig.DEFAULT.rootFiles(),
-                QwenModelDownloadConfig.DEFAULT.optionalFiles());
-        return new ModelDownloadManifest(QwenOnnxModelVariant.LOCAL_DIR_NAME,
-                QwenOnnxModelVariant.LOCAL_DIR_NAME, List.copyOf(descriptors));
-    }
-
-    /**
-     * Returns the download URL for exactly one Qwen ONNX variant.
-     */
-    public static String qwenVariantUrl(QwenOnnxModelVariant variant) {
-        return buildUrl(QwenOnnxModelVariant.REPO,
-                QwenOnnxModelVariant.ONNX_SUBDIR + "/" + variant.fileName());
+        addQwenRootDescriptors(descriptors, base);
+        return new ModelDownloadManifest(base.localDirName(), base.localDirName(), List.copyOf(descriptors));
     }
 
     /**
@@ -120,7 +100,7 @@ public final class ModelDownloadUrls {
         List<String> optionalFiles = List.of(
                 "vocab.txt", "special_tokens_map.json", "tokenizer_config.json"
         );
-        var urls = new ArrayList<String>();
+        ArrayList<String> urls = new ArrayList<String>();
         for (String file : requiredFiles) {
             urls.add(buildUrl(repo, file));
         }
@@ -132,13 +112,11 @@ public final class ModelDownloadUrls {
 
     /**
      * Returns download URLs for the Phi-3 ONNX/GenAI model.
-     *
-     * @return list of fully-qualified download URLs
      */
     public static List<String> forPhi3() {
         String repo = "microsoft/Phi-3-mini-4k-instruct-onnx";
         String subdir = ModelDownloader.PHI3_SUBDIR;
-        var urls = new ArrayList<String>();
+        ArrayList<String> urls = new ArrayList<String>();
         for (String file : ModelDownloader.PHI3_REQUIRED_FILES) {
             urls.add(buildUrl(repo, subdir + "/" + file));
         }
@@ -147,9 +125,6 @@ public final class ModelDownloadUrls {
 
     /**
      * Returns download URLs for a Qwen model given its configuration.
-     *
-     * @param config the Qwen download configuration
-     * @return list of fully-qualified download URLs
      */
     public static List<String> forQwen(QwenModelDownloadConfig config) {
         return manifestForQwen(config).files().stream()
@@ -157,25 +132,30 @@ public final class ModelDownloadUrls {
                 .toList();
     }
 
-    private static void addQwenSupportFiles(List<ModelFileDescriptor> descriptors, String repo,
-                                            List<String> requiredFiles, List<String> optionalFiles) {
-        for (String file : requiredFiles) {
-            addQwenDescriptor(descriptors, file, true, file, file, repo);
-        }
-        for (String file : optionalFiles) {
-            addQwenDescriptor(descriptors, file, false, file, file, repo);
+    /**
+     * Returns only the selected Qwen ONNX file URL.
+     */
+    public static String selectedQwenModelUrl(QwenModelDownloadConfig config) {
+        return buildUrl(config.repo(), config.remoteModelPath());
+    }
+
+    private static void addQwenModelDescriptors(List<ModelFileDescriptor> descriptors,
+                                                QwenModelDownloadConfig config) {
+        addQwenDescriptor(descriptors, config.modelFile(), true,
+                config.remoteModelPath(), config.localModelFile(), config.repo());
+        if (config.hasExternalDataFile()) {
+            addQwenDescriptor(descriptors, config.externalDataFile(), true,
+                    config.remoteDataPath(), config.localDataFile(), config.repo());
         }
     }
 
-    private static void addQwenVariantDescriptor(List<ModelFileDescriptor> descriptors,
-                                                 QwenOnnxModelVariant variant) {
-        addQwenDescriptor(descriptors, variant.fileName(), true,
-                QwenOnnxModelVariant.ONNX_SUBDIR + "/" + variant.fileName(),
-                variant.fileName(), QwenOnnxModelVariant.REPO);
-        if (variant.requiresExternalData()) {
-            addQwenDescriptor(descriptors, QwenOnnxModelVariant.EXTERNAL_DATA_FILE, true,
-                    QwenOnnxModelVariant.ONNX_SUBDIR + "/" + QwenOnnxModelVariant.EXTERNAL_DATA_FILE,
-                    QwenOnnxModelVariant.EXTERNAL_DATA_FILE, QwenOnnxModelVariant.REPO);
+    private static void addQwenRootDescriptors(List<ModelFileDescriptor> descriptors,
+                                               QwenModelDownloadConfig config) {
+        for (String file : config.rootFiles()) {
+            addQwenDescriptor(descriptors, file, true, file, file, config.repo());
+        }
+        for (String file : config.optionalFiles()) {
+            addQwenDescriptor(descriptors, file, false, file, file, config.repo());
         }
     }
 

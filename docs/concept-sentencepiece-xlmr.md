@@ -132,11 +132,17 @@ Vorgeschlagene Punkte im bestehenden Encoder-Modul (analog zum
 ```java
 public interface EncoderArchitecture {
     String name();                  // "bert", "xlm-roberta"
+
     int positionIdsOffset();        // 0 für BERT, 2 für XLM-R
+
     boolean usesTokenTypeIds();     // true für BERT, false für XLM-R
+
     int padTokenId();
+
     int clsTokenId();               // <s> bei XLM-R
+
     int sepTokenId();               // </s> bei XLM-R
+
     String pairSeparatorScheme();   // "single-sep" | "double-sep"
 }
 ```

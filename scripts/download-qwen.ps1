@@ -1,19 +1,20 @@
-# Downloads Qwen2.5-Coder 0.5B Instruct ONNX files from Hugging Face
-# into model/qwen2.5-coder-0.5b-directml-int4 for use with the Workbench.
+# Downloads Qwen2.5-Coder 0.5B Instruct ONNX files for the Workbench.
 #
-# The script keeps the original Hugging Face filenames. Runtime selection is
-# stored in qwen-selected-onnx.txt, the same selection file used by the Workbench.
+# The selected ONNX file keeps its original Hugging Face filename, e.g.
+#   onnx/model_q4f16.onnx -> model_q4f16.onnx
 #
 # Usage:
 #   pwsh scripts/download-qwen.ps1
-#   pwsh scripts/download-qwen.ps1 -Variant model_q4f16.onnx -Force -Validate
-#   pwsh scripts/download-qwen.ps1 -AllVariants -Variant model_q4f16.onnx
+#   pwsh scripts/download-qwen.ps1 -OnnxFile model_q4f16.onnx -Force -Validate
+#   pwsh scripts/download-qwen.ps1 -AllOnnxVariants
 [CmdletBinding()]
 param(
     [string]$ModelRoot = (Join-Path $PSScriptRoot '..\model'),
-    [ValidateSet('model_q4f16.onnx','model_q4.onnx','model_bnb4.onnx','model_int8.onnx','model_uint8.onnx','model_quantized.onnx','model_fp16.onnx','model.onnx')]
-    [string]$Variant = 'model_q4f16.onnx',
-    [switch]$AllVariants,
+
+    [ValidateSet('model.onnx', 'model_fp16.onnx', 'model_int8.onnx', 'model_uint8.onnx', 'model_quantized.onnx', 'model_q4.onnx', 'model_q4f16.onnx', 'model_bnb4.onnx')]
+    [string]$OnnxFile = 'model_q4f16.onnx',
+
+    [switch]$AllOnnxVariants,
     [switch]$Force,
     [switch]$Validate
 )
@@ -22,25 +23,23 @@ $ErrorActionPreference = 'Stop'
 $Repo = 'onnx-community/Qwen2.5-Coder-0.5B-Instruct'
 $OnnxSubdir = 'onnx'
 $targetDir = Join-Path $ModelRoot 'qwen2.5-coder-0.5b-directml-int4'
-$selectionFile = 'qwen-selected-onnx.txt'
-
 $knownOnnxFiles = @(
-    'model_q4f16.onnx',
-    'model_q4.onnx',
-    'model_bnb4.onnx',
+    'model.onnx',
+    'model_fp16.onnx',
     'model_int8.onnx',
     'model_uint8.onnx',
     'model_quantized.onnx',
-    'model_fp16.onnx',
-    'model.onnx'
+    'model_q4.onnx',
+    'model_q4f16.onnx',
+    'model_bnb4.onnx'
 )
 
 Write-Host 'Downloading Qwen2.5-Coder 0.5B Instruct'
-Write-Host "  Source repo:     $Repo"
-Write-Host "  ONNX subdir:     $OnnxSubdir"
-Write-Host "  Selected ONNX:   $Variant"
-Write-Host "  Download scope:  $(if ($AllVariants) { 'all ONNX files' } else { 'selected ONNX file only' })"
-Write-Host "  Target:          $targetDir"
+Write-Host "  Source repo:   $Repo"
+Write-Host "  ONNX subdir:   $OnnxSubdir"
+Write-Host "  Target:        $targetDir"
+Write-Host "  Selected ONNX: $OnnxFile"
+Write-Host "  Download all:  $AllOnnxVariants"
 Write-Host ''
 
 if (-not (Test-Path $targetDir)) {
@@ -50,60 +49,71 @@ $targetDir = (Resolve-Path -LiteralPath $targetDir).Path
 
 $hfBase = "https://huggingface.co/$Repo/resolve/main"
 $onnxBase = "$hfBase/$OnnxSubdir"
-$onnxFilesToDownload = if ($AllVariants) { $knownOnnxFiles } else { @($Variant) }
+$selectedModelUrl = "$onnxBase/$OnnxFile"
 
-function Download-File {
+Write-Host "Selected model URL: $selectedModelUrl"
+Write-Host ''
+
+function Download-RequiredFile {
     param(
-        [Parameter(Mandatory=$true)][string]$Url,
-        [Parameter(Mandatory=$true)][string]$LocalName,
-        [Parameter(Mandatory=$true)][bool]$Required
+        [string]$Url,
+        [string]$LocalName
     )
-
     $dst = Join-Path $targetDir $LocalName
     if ((Test-Path $dst) -and -not $Force) {
         Write-Host "  skip $LocalName (exists, use -Force to re-download)"
         return
     }
-
     Write-Host "  downloading $LocalName ..."
     try {
         Invoke-WebRequest -Uri $Url -OutFile $dst -UseBasicParsing
     } catch {
-        if ($Required) {
-            throw "Failed to download required file '$LocalName' from $Url : $($_.Exception.Message)"
-        }
+        throw "Failed to download required file '$LocalName' from $Url : $($_.Exception.Message)"
+    }
+}
+
+function Download-OptionalFile {
+    param(
+        [string]$Url,
+        [string]$LocalName
+    )
+    $dst = Join-Path $targetDir $LocalName
+    if ((Test-Path $dst) -and -not $Force) {
+        Write-Host "  skip $LocalName (exists)"
+        return
+    }
+    Write-Host "  downloading (optional) $LocalName ..."
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $dst -UseBasicParsing
+    } catch {
         Write-Host "  optional file not found (skipped): $LocalName"
     }
 }
 
-foreach ($f in $onnxFilesToDownload) {
-    Download-File -Url "$onnxBase/$f" -LocalName $f -Required $true
-}
-
-if ($AllVariants -or $Variant -eq 'model.onnx') {
-    Download-File -Url "$onnxBase/model.onnx_data" -LocalName 'model.onnx_data' -Required $true
+$onnxFilesToDownload = if ($AllOnnxVariants) { $knownOnnxFiles } else { @($OnnxFile) }
+foreach ($file in $onnxFilesToDownload) {
+    Download-RequiredFile -Url "$onnxBase/$file" -LocalName $file
+    if ($file -eq 'model.onnx') {
+        Download-RequiredFile -Url "$onnxBase/model.onnx_data" -LocalName 'model.onnx_data'
+    }
 }
 
 $rootRequired = @('tokenizer.json', 'config.json', 'tokenizer_config.json', 'special_tokens_map.json')
 $rootOptional = @('added_tokens.json', 'generation_config.json')
 
 foreach ($f in $rootRequired) {
-    Download-File -Url "$hfBase/$f" -LocalName $f -Required $true
+    Download-RequiredFile -Url "$hfBase/$f" -LocalName $f
 }
 
 foreach ($f in $rootOptional) {
-    Download-File -Url "$hfBase/$f" -LocalName $f -Required $false
+    Download-OptionalFile -Url "$hfBase/$f" -LocalName $f
 }
-
-Set-Content -LiteralPath (Join-Path $targetDir $selectionFile) -Value $Variant -Encoding UTF8
-Write-Host "  active ONNX selection: $Variant"
-Write-Host "  selected URL: $onnxBase/$Variant"
 
 if ($Validate) {
     Write-Host ''
     Write-Host '  File validation:'
-    $allRequired = @($Variant) + $rootRequired
-    if ($Variant -eq 'model.onnx') {
+    $allRequired = @($onnxFilesToDownload) + $rootRequired
+    if ($onnxFilesToDownload -contains 'model.onnx') {
         $allRequired += 'model.onnx_data'
     }
     $missing = @()
@@ -126,5 +136,5 @@ if ($Validate) {
 }
 
 Write-Host ''
-Write-Host "Qwen2.5-Coder 0.5B model ready at: $targetDir"
-Write-Host "Runtime will use: $Variant"
+Write-Host "Qwen2.5-Coder 0.5B files ready at: $targetDir"
+Write-Host "Selected ONNX file for Workbench runtime: $OnnxFile"
