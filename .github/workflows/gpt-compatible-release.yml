@@ -1,0 +1,109 @@
+name: Build GPT-compatible ZIP
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gpt-compatible-release
+  cancel-in-progress: true
+
+jobs:
+  build-release-zip:
+    name: Build and publish GPT-compatible ZIP
+    runs-on: ubuntu-latest
+
+    env:
+      RELEASE_TAG: gpt-compatible
+      RELEASE_TITLE: GPT-compatible ZIP
+      ASSET_NAME: win-directml-java-gpt-compatible.zip
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install packaging and display dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y rsync zip unzip xvfb
+
+      - name: Fill Gradle cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          export GRADLE_USER_HOME="$PWD/.chatgpt/gradle-home"
+          xvfb-run -a bash ./gradlew --no-daemon --refresh-dependencies clean build
+          find "$GRADLE_USER_HOME" -name "*.lock" -delete
+          find "$GRADLE_USER_HOME" -name "*.lck" -delete
+          find "$GRADLE_USER_HOME" -name "gc.properties" -delete
+          rm -rf "$GRADLE_USER_HOME/daemon" "$GRADLE_USER_HOME/workers" "$GRADLE_USER_HOME/native"
+
+      - name: Package repository with prepared cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_parent="$(mktemp -d)"
+          package_root="$package_parent/win-directml-java"
+          archive_path="$PWD/build/$ASSET_NAME"
+
+          rm -rf "$archive_path"
+          mkdir -p "$package_root" "$(dirname "$archive_path")"
+
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.gradle/' \
+            --exclude='.idea/' \
+            --exclude='build/' \
+            ./ "$package_root/"
+
+          cd "$package_parent"
+          zip -rq "$archive_path" win-directml-java
+
+      - name: Verify packaged ZIP from fresh extraction
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify_dir="$(mktemp -d)"
+          unzip -q "build/$ASSET_NAME" -d "$verify_dir"
+          cd "$verify_dir/win-directml-java"
+          chmod -x gradlew || true
+          bash chatgpt-build.sh
+
+      - name: Publish fixed release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive_path="build/$ASSET_NAME"
+          release_notes="Automatically updated from main commit $GITHUB_SHA. This ZIP contains a prepared .chatgpt/gradle-home cache for offline Gradle execution in GPT-like environments."
+
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --title "$RELEASE_TITLE" \
+              --notes "$release_notes" \
+              --prerelease
+          else
+            gh release edit "$RELEASE_TAG" \
+              --title "$RELEASE_TITLE" \
+              --notes "$release_notes"
+          fi
+
+          gh release delete-asset "$RELEASE_TAG" "$ASSET_NAME" --yes >/dev/null 2>&1 || true
+          gh release upload "$RELEASE_TAG" "$archive_path" --clobber

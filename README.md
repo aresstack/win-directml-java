@@ -237,6 +237,19 @@ The default model location in examples is
 
 ## Build
 
+### GPT-compatible release ZIP
+
+For GPT or other constrained execution environments, use the rolling `gpt-compatible` GitHub release. It contains the
+repository plus a prepared `.chatgpt/gradle-home` cache so Gradle can run offline after extraction.
+
+From the extracted release ZIP, run:
+
+```bash
+bash chatgpt-build.sh
+```
+
+Details are documented in [`CHATGPT_BUILD.md`](CHATGPT_BUILD.md).
+
 PowerShell:
 
 ```powershell
