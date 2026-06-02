@@ -49,8 +49,8 @@ class ModelDownloadUrlsTest {
         assertFalse(urls.isEmpty());
         // Model and data files via onnx subdir
         assertTrue(urls.stream().anyMatch(u ->
-                u.contains("/onnx/model.onnx") && !u.contains("model.onnx_data")));
-        assertTrue(urls.stream().anyMatch(u -> u.contains("/onnx/model.onnx_data")));
+                u.contains("/onnx/model_q4f16.onnx") && !u.contains("model.onnx_data")));
+        assertTrue(urls.stream().anyMatch(u -> u.contains("/onnx/model_q4f16.onnx")));
         // Root files (tokenizer, config)
         assertTrue(urls.stream().anyMatch(u ->
                 u.endsWith("/tokenizer.json")));
@@ -119,8 +119,8 @@ class ModelDownloadUrlsTest {
         );
         var urls = ModelDownloadUrls.forQwen(configNoOptional);
         // All required files are still present
-        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model.onnx")));
-        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model.onnx_data")));
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model_q4f16.onnx")));
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model_q4f16.onnx")));
         assertTrue(urls.stream().anyMatch(u -> u.endsWith("/tokenizer.json")));
         assertTrue(urls.stream().anyMatch(u -> u.endsWith("/config.json")));
         assertTrue(urls.stream().anyMatch(u -> u.endsWith("/tokenizer_config.json")));

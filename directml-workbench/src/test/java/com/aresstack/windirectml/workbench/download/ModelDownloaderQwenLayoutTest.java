@@ -40,8 +40,8 @@ class ModelDownloaderQwenLayoutTest {
     @Test
     void remotePathsAreCorrect() {
         var config = QwenModelDownloadConfig.DEFAULT;
-        assertEquals("onnx/model.onnx", config.remoteModelPath());
-        assertEquals("onnx/model.onnx_data", config.remoteDataPath());
+        assertEquals("onnx/model_q4f16.onnx", config.remoteModelPath());
+        assertEquals("onnx/model_q4f16.onnx", config.remoteDataPath());
     }
 
     @Test

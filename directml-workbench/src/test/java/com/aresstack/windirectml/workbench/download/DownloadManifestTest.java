@@ -51,7 +51,7 @@ class DownloadManifestTest {
                 f.localFilename().equals("model.onnx_data") && f.required()));
         assertTrue(manifest.files().stream().anyMatch(f ->
                 f.localFilename().equals("model.onnx_data")
-                        && f.defaultUrl().endsWith("/onnx/model.onnx_data")
+                        && f.defaultUrl().endsWith("/onnx/model_q4f16.onnx")
                         && f.required()));
         assertTrue(manifest.files().stream().anyMatch(f ->
                 f.localFilename().equals("added_tokens.json") && !f.required()));

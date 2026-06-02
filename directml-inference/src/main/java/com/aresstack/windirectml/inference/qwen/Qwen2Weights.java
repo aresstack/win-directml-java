@@ -46,6 +46,8 @@ import java.util.stream.IntStream;
  */
 public final class Qwen2Weights implements AutoCloseable {
 
+
+    private final java.util.Map<String, TensorProto> inlineInitializers = new java.util.HashMap<String, TensorProto>();
     private static final Logger log = LoggerFactory.getLogger(Qwen2Weights.class);
 
     // ── Public types ─────────────────────────────────────────────────────
@@ -107,7 +109,9 @@ public final class Qwen2Weights implements AutoCloseable {
             });
         }
 
-        /** Batch matvec: Y += X @ W^T for seqLen rows — parallel over (s, n). */
+        /**
+         * Batch matvec: Y += X @ W^T for seqLen rows — parallel over (s, n).
+         */
         public void matmul(float[] x, float[] y, int seqLen) {
             final int nLocal = N;
             final int kLocal = K;
@@ -160,7 +164,9 @@ public final class Qwen2Weights implements AutoCloseable {
             });
         }
 
-        /** Batch matvec — parallelized over (seq, outRow) flattened index. */
+        /**
+         * Batch matvec — parallelized over (seq, outRow) flattened index.
+         */
         public void matmul(float[] x, float[] y, int seqLen) {
             final int nLocal = N;
             final int kLocal = K;
@@ -179,23 +185,56 @@ public final class Qwen2Weights implements AutoCloseable {
      */
     public sealed interface WeightMatrix permits QuantizedWeightMatrix, DenseWeightMatrix {
         void matvec(float[] x, float[] y);
+
         void matmul(float[] x, float[] y, int seqLen);
+
         int N();
+
         int K();
     }
 
     public record QuantizedWeightMatrix(QuantizedWeight inner) implements WeightMatrix {
-        @Override public void matvec(float[] x, float[] y) { inner.matvec(x, y); }
-        @Override public void matmul(float[] x, float[] y, int seqLen) { inner.matmul(x, y, seqLen); }
-        @Override public int N() { return inner.N; }
-        @Override public int K() { return inner.K; }
+        @Override
+        public void matvec(float[] x, float[] y) {
+            inner.matvec(x, y);
+        }
+
+        @Override
+        public void matmul(float[] x, float[] y, int seqLen) {
+            inner.matmul(x, y, seqLen);
+        }
+
+        @Override
+        public int N() {
+            return inner.N;
+        }
+
+        @Override
+        public int K() {
+            return inner.K;
+        }
     }
 
     public record DenseWeightMatrix(DenseWeight inner) implements WeightMatrix {
-        @Override public void matvec(float[] x, float[] y) { inner.matvec(x, y); }
-        @Override public void matmul(float[] x, float[] y, int seqLen) { inner.matmul(x, y, seqLen); }
-        @Override public int N() { return inner.N; }
-        @Override public int K() { return inner.K; }
+        @Override
+        public void matvec(float[] x, float[] y) {
+            inner.matvec(x, y);
+        }
+
+        @Override
+        public void matmul(float[] x, float[] y, int seqLen) {
+            inner.matmul(x, y, seqLen);
+        }
+
+        @Override
+        public int N() {
+            return inner.N;
+        }
+
+        @Override
+        public int K() {
+            return inner.K;
+        }
     }
 
     /**
@@ -215,7 +254,9 @@ public final class Qwen2Weights implements AutoCloseable {
             float[] kBias,              // [kvSize] or null
             float[] vBias               // [kvSize] or null
     ) {
-        /** Constructor without biases for backward compatibility. */
+        /**
+         * Constructor without biases for backward compatibility.
+         */
         public LayerWeights(float[] inputNormWeight, WeightMatrix qProj, WeightMatrix kProj,
                             WeightMatrix vProj, WeightMatrix oProj, float[] postNormWeight,
                             WeightMatrix gateProj, WeightMatrix upProj, WeightMatrix downProj) {
@@ -231,22 +272,31 @@ public final class Qwen2Weights implements AutoCloseable {
     private final FileChannel channel;
     private final MappedByteBuffer externalData;
 
-    /** Token embedding: float32 [vocabSize, hiddenSize], converted from fp16. */
+    /**
+     * Token embedding: float32 [vocabSize, hiddenSize], converted from fp16.
+     */
     public final float[] embedTokens;
 
-    /** Per-layer weights, indexed 0..numHiddenLayers-1. */
+    /**
+     * Per-layer weights, indexed 0..numHiddenLayers-1.
+     */
     public final LayerWeights[] layers;
 
-    /** Final RMSNorm weight: float32 [hiddenSize]. */
+    /**
+     * Final RMSNorm weight: float32 [hiddenSize].
+     */
     public final float[] finalNormWeight;
 
-    /** LM head projection. */
+    /**
+     * LM head projection.
+     */
     public final WeightMatrix lmHead;
 
     // ── External-data tensor metadata ────────────────────────────────────
 
     private record ExternalTensorRef(String name, int dataType, long[] dims,
-                                     long offset, long length) {}
+                                     long offset, long length) {
+    }
 
     // ── Constructor ──────────────────────────────────────────────────────
 
@@ -366,9 +416,9 @@ public final class Qwen2Weights implements AutoCloseable {
     // ── Embedding loading ────────────────────────────────────────────────
 
     private static float[] loadEmbedding(Qwen2Config config,
-                                          Map<String, ExternalTensorRef> externalRefs,
-                                          Map<String, OnnxTensor> inlineTensors,
-                                          MappedByteBuffer extData) throws IOException {
+                                         Map<String, ExternalTensorRef> externalRefs,
+                                         Map<String, OnnxTensor> inlineTensors,
+                                         MappedByteBuffer extData) throws IOException {
         // Try common Qwen embedding weight names
         float[] data = loadOptionalTensorWithAlternatives(
                 List.of("model.embed_tokens.weight", "embed_tokens.weight"),
@@ -724,8 +774,11 @@ public final class Qwen2Weights implements AutoCloseable {
         }
     }
 
-    /** Tensor payload and shape resolved from either external data refs or inline initializers. */
-    private record TensorData(float[] data, long[] dims) {}
+    /**
+     * Tensor payload and shape resolved from either external data refs or inline initializers.
+     */
+    private record TensorData(float[] data, long[] dims) {
+    }
 
     private static TensorData resolveFirstFloatTensor(List<String> names,
                                                       Map<String, ExternalTensorRef> externalRefs,
@@ -886,7 +939,9 @@ public final class Qwen2Weights implements AutoCloseable {
         return result;
     }
 
-    /** Convert IEEE 754 half-precision (fp16) to single-precision (fp32). */
+    /**
+     * Convert IEEE 754 half-precision (fp16) to single-precision (fp32).
+     */
     static float fp16ToFp32(short bits) {
         int s = (bits >>> 15) & 1;
         int e = (bits >>> 10) & 0x1F;
@@ -929,7 +984,7 @@ public final class Qwen2Weights implements AutoCloseable {
     }
 
     private static void parseGraphForExternalRefs(ByteBuffer buf, int end,
-                                                   Map<String, ExternalTensorRef> refs) {
+                                                  Map<String, ExternalTensorRef> refs) {
         while (buf.position() < end) {
             int loopStart = buf.position();
             int tag = readVarint32(buf);
@@ -1078,14 +1133,18 @@ public final class Qwen2Weights implements AutoCloseable {
 
     private static void skipField(ByteBuffer buf, int wireType) {
         switch (wireType) {
-            case 0 -> { while (buf.hasRemaining() && (buf.get() & 0x80) != 0) {} }
+            case 0 -> {
+                while (buf.hasRemaining() && (buf.get() & 0x80) != 0) {
+                }
+            }
             case 1 -> buf.position(Math.min(buf.position() + 8, buf.limit()));
             case 2 -> {
                 int len = readVarint32(buf);
                 buf.position(Math.min(buf.position() + len, buf.limit()));
             }
             case 5 -> buf.position(Math.min(buf.position() + 4, buf.limit()));
-            default -> {}
+            default -> {
+            }
         }
     }
 
@@ -1187,4 +1246,101 @@ public final class Qwen2Weights implements AutoCloseable {
         if (channel != null && channel.isOpen()) channel.close();
         if (raf != null) raf.close();
     }
+
+    private boolean hasInlineInitializerRawData(String tensorName) {
+        TensorProto tensor = inlineInitializers.get(tensorName);
+        if (tensor == null) {
+            return false;
+        }
+
+        if (tensor.hasRawData() && tensor.getRawData().size() > 0) {
+            return true;
+        }
+
+        return tensor.getFloatDataCount() > 0
+                || tensor.getInt32DataCount() > 0
+                || tensor.getInt64DataCount() > 0
+                || tensor.getDoubleDataCount() > 0;
+    }
+
+    private byte[] readInlineOrExternalInitializerBytes(String tensorName) throws java.io.IOException {
+        TensorProto tensor = inlineInitializers.get(tensorName);
+        if (tensor != null) {
+            if (tensor.hasRawData() && tensor.getRawData().size() > 0) {
+                return tensor.getRawData().toByteArray();
+            }
+
+            if (tensor.getFloatDataCount() > 0) {
+                return floatInitializerDataToLittleEndianBytes(tensor);
+            }
+
+            if (tensor.getInt32DataCount() > 0) {
+                return int32InitializerDataToLittleEndianBytes(tensor);
+            }
+
+            if (tensor.getInt64DataCount() > 0) {
+                return int64InitializerDataToLittleEndianBytes(tensor);
+            }
+
+            if (tensor.getDoubleDataCount() > 0) {
+                return doubleInitializerDataToLittleEndianBytes(tensor);
+            }
+        }
+
+        Object externalRef = externalRefs.get(tensorName);
+        if (externalRef != null) {
+            throw new java.io.IOException("External initializer exists but no external byte reader was detected for tensor: " + tensorName);
+        }
+
+        throw new java.io.IOException("Missing initializer data for tensor: " + tensorName);
+    }
+
+    private byte[] floatInitializerDataToLittleEndianBytes(TensorProto tensor) {
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer
+                .allocate(tensor.getFloatDataCount() * Float.BYTES)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+
+        for (Float value : tensor.getFloatDataList()) {
+            buffer.putFloat(value.floatValue());
+        }
+
+        return buffer.array();
+    }
+
+    private byte[] int32InitializerDataToLittleEndianBytes(TensorProto tensor) {
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer
+                .allocate(tensor.getInt32DataCount() * Integer.BYTES)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+
+        for (Integer value : tensor.getInt32DataList()) {
+            buffer.putInt(value.intValue());
+        }
+
+        return buffer.array();
+    }
+
+    private byte[] int64InitializerDataToLittleEndianBytes(TensorProto tensor) {
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer
+                .allocate(tensor.getInt64DataCount() * Long.BYTES)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+
+        for (Long value : tensor.getInt64DataList()) {
+            buffer.putLong(value.longValue());
+        }
+
+        return buffer.array();
+    }
+
+    private byte[] doubleInitializerDataToLittleEndianBytes(TensorProto tensor) {
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer
+                .allocate(tensor.getDoubleDataCount() * Double.BYTES)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+
+        for (Double value : tensor.getDoubleDataList()) {
+            buffer.putDouble(value.doubleValue());
+        }
+
+        return buffer.array();
+    }
+
 }
