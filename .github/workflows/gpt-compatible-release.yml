@@ -85,6 +85,15 @@ jobs:
           chmod -x gradlew || true
           bash chatgpt-build.sh
 
+      - name: Move release tag to current commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git tag -f "$RELEASE_TAG" "$GITHUB_SHA"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$RELEASE_TAG" --force
+
       - name: Publish fixed release asset
         shell: bash
         env:
