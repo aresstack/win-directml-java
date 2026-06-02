@@ -141,6 +141,13 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      */
     private static final int MAX_BATCH_M = 1024;
 
+    /**
+     * Whether this kernel's batch scratch buffers were successfully allocated.
+     * Set to {@code false} by {@link #ensureBatchCapacity} on OOM; callers
+     * should check {@link #supportsBatch()} and fall back to per-row dispatch.
+     */
+    private boolean batchEnabled = true;
+
     // ── HLSL shader source for INT4 block-quantised matrix-vector product ────
     // Registers: u0=X (FP32 input), u1=QW (packed INT4 weights),
     //            u2=Scales (FP32), u3=ZP (packed INT4), u4=Y (FP32 output)
@@ -1161,7 +1168,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      * back to per-row dispatches (callers should still use {@link #matvec}).
      */
     public boolean supportsBatch() {
-        return prepared;   // both INT4 and FP32 paths support matmulBatch now
+        return prepared && batchEnabled;   // false if batch scratch alloc failed on this kernel
     }
 
     /**
@@ -1186,10 +1193,34 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         if (outBatch.length < (long) M * N) throw new IllegalArgumentException(
                 "outBatch too short: " + outBatch.length + " < " + ((long) M * N));
 
+        // If batch scratch allocation previously failed, fall back to per-row matvec.
+        // This avoids GPU OOM on tight-VRAM Intel iGPUs while keeping the INT4 path
+        // for decode (single-row matvec) and for layers where the batch alloc succeeded.
+        if (!batchEnabled) {
+            float[] row = new float[K];
+            float[] rowOut = new float[N];
+            for (int i = 0; i < M; i++) {
+                System.arraycopy(xBatch, i * K, row, 0, K);
+                matvec(row, rowOut);
+                System.arraycopy(rowOut, 0, outBatch, i * N, N);
+            }
+            return;
+        }
+
         try {
             ensureBatchCapacity(M);
         } catch (WindowsNativeException e) {
-            throw new RuntimeException("MatMulNBitsKernel.matmulBatch: failed to alloc batch scratch", e);
+            log.warn("matmulBatch: failed to alloc batch scratch for [{},{}] M={} — disabling batching, falling back to per-row matvec ({})",
+                    N, K, M, e.getMessage());
+            batchEnabled = false;
+            float[] row = new float[K];
+            float[] rowOut = new float[N];
+            for (int i = 0; i < M; i++) {
+                System.arraycopy(xBatch, i * K, row, 0, K);
+                matvec(row, rowOut);
+                System.arraycopy(rowOut, 0, outBatch, i * N, N);
+            }
+            return;
         }
 
         long inputBytes = (long) M * K * Float.BYTES;
