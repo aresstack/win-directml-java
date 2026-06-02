@@ -208,69 +208,106 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             }
             """;
 
-    // ── HLSL shader source for INT4 batched matmul (M rows at once) ─────────
-    // Identical to INT4_MATVEC_HLSL but with an additional batch dimension M.
-    // Each thread handles ONE output cell (m, n) of the [M, N] output.
-    // Input is interpreted as [M, K] row-major, output as [M, N] row-major.
-    // Single dispatch over M*N threads replaces M dispatches of N threads each.
-    private static final String INT4_MATMUL_BATCH_HLSL = """
+    // ── HLSL shader source for INT4 batched matmul with groupshared X tiling ──
+    // Each thread group computes a [TILE, TILE] = [16, 16] output sub-tile.
+    // 256 threads cooperatively load a [TILE, TILE_K] = [16, 16] X-sub-tile into
+    // groupshared per K-iteration, then each thread accumulates its output cell
+    // by dequantizing one INT4 weight row on-the-fly from the compressed buffers.
+    //
+    // KEY OPTIMISATION: X is loaded cooperatively into groupshared, reducing
+    // VRAM traffic for X from M×N reads (naive) to M×(N/16) reads (tiled).
+    // For Qwen qkvFused (N=1152, K=896, M=256): X traffic drops from ~264M
+    // to ~16.5M fp32 loads — a 16× reduction. Weights stay compressed INT4
+    // on the GPU (8× less bandwidth than FP32), and dequantization is done
+    // inline per thread with no intermediate FP32 weight storage.
+    //
+    // Dispatch: 1D, one thread group per output tile. Caller passes
+    // elementCount = mTiles * nTiles * 256, groupSize=256.
+    // 5 constants: N, K, blockSz, M, nTiles (N-direction tile count).
+    private static final String INT4_MATMUL_BATCH_TILED_HLSL = """
             RWByteAddressBuffer X      : register(u0);
             RWByteAddressBuffer QW     : register(u1);
             RWByteAddressBuffer Scales : register(u2);
             RWByteAddressBuffer ZP     : register(u3);
             RWByteAddressBuffer Y      : register(u4);
-            cbuffer CB : register(b0) { uint N; uint K; uint blockSz; uint M; };
+            cbuffer CB : register(b0) { uint N; uint K; uint blockSz; uint M; uint nTiles; };
             
-            [numthreads(64, 1, 1)]
-            void CSMain(uint3 tid : SV_DispatchThreadID) {
-                uint flat = tid.x;
-                uint total = M * N;
-                if (flat >= total) return;
-                uint m = flat / N;
-                uint n = flat - m * N;
+            #define TILE 16
+            #define TILE_K 16
+            groupshared float xTile[TILE * TILE_K];
+            
+            [numthreads(256, 1, 1)]
+            void CSMain(uint3 gid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
+                uint groupId = gid.x;
+                uint gx = groupId % nTiles;
+                uint gy = groupId / nTiles;
+                uint t  = ltid.x;
+                uint tx = t % TILE;
+                uint ty = t / TILE;
+                uint m  = gy * TILE + ty;
+                uint n  = gx * TILE + tx;
             
                 uint blocksPerRow = K / blockSz;
-                uint xRowBase = m * K;
-                float sum = 0.0;
+                float acc = 0.0;
             
-                for (uint blk = 0; blk < blocksPerRow; blk++) {
-                    uint scIdx = n * blocksPerRow + blk;
+                for (uint kk = 0; kk < K; kk += TILE_K) {
+                    // Cooperative load X [TILE, TILE_K] sub-tile into groupshared.
+                    // 256 threads collectively load 16×16 = 256 X elements.
+                    uint loadRow = gy * TILE + (t / TILE_K);
+                    uint loadCol = kk + (t % TILE_K);
+                    float xv = (loadRow < M && loadCol < K)
+                            ? asfloat(X.Load((loadRow * K + loadCol) * 4)) : 0.0;
+                    xTile[(t / TILE_K) * TILE_K + (t % TILE_K)] = xv;
+                    GroupMemoryBarrierWithGroupSync();
             
-                    float scale = asfloat(Scales.Load(scIdx * 4));
+                    // Each thread accumulates ONE output cell (m, n) from groupshared ×
+                    // dequantized INT4 weight. 16 multiply-adds per K-iteration.
+                    if (m < M && n < N) {
+                        [unroll]
+                        for (uint ki = 0; ki < TILE_K; ki++) {
+                            uint kAbs = kk + ki;
+                            uint blk = kAbs / blockSz;
+                            uint kInBlk = kAbs - blk * blockSz;
             
-                    uint zpByteIdx  = scIdx / 2;
-                    uint zpDword    = ZP.Load((zpByteIdx / 4) * 4);
-                    uint zpByte     = (zpDword >> ((zpByteIdx % 4) * 8)) & 0xFF;
-                    float zpVal = (scIdx % 2u == 0u) ? float(zpByte & 0xFu)
-                                                     : float(zpByte >> 4u);
+                            // FP32 scale for this block (4-byte aligned load)
+                            uint scIdx = n * blocksPerRow + blk;
+                            float scale = asfloat(Scales.Load(scIdx * 4));
             
-                    uint qByteBase = n * blocksPerRow * (blockSz / 2) + blk * (blockSz / 2);
-                    uint kBase = blk * blockSz;
+                            // Packed uint4 zero-point nibble (2 per byte, low nibble first)
+                            uint zpByteIdx = scIdx / 2;
+                            uint zpDword = ZP.Load((zpByteIdx / 4) * 4);
+                            uint byteInDword = zpByteIdx % 4;
+                            uint zpByte = (zpDword >> (byteInDword * 8)) & 0xFF;
+                            float zpVal = (scIdx % 2u == 0u)
+                                    ? float(zpByte & 0xFu)
+                                    : float(zpByte >> 4u);
             
-                    for (uint j = 0; j < blockSz / 2; j += 4) {
-                        uint dword = QW.Load(qByteBase + j);
-                        uint b0 = dword & 0xFF;
-                        uint b1 = (dword >> 8)  & 0xFF;
-                        uint b2 = (dword >> 16) & 0xFF;
-                        uint b3 =  dword >> 24;
-                        uint kOff = xRowBase + kBase + j * 2;
-                        sum += (float(b0 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+0)*4));
-                        sum += (float(b0 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+1)*4));
-                        sum += (float(b1 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+2)*4));
-                        sum += (float(b1 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+3)*4));
-                        sum += (float(b2 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+4)*4));
-                        sum += (float(b2 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+5)*4));
-                        sum += (float(b3 & 0xF) - zpVal) * scale * asfloat(X.Load((kOff+6)*4));
-                        sum += (float(b3 >> 4)  - zpVal) * scale * asfloat(X.Load((kOff+7)*4));
+                            // Packed INT4 nibble for weight[n][kAbs] in QW buffer.
+                            // QW layout: row-major nibbles = [N][K/2] bytes.
+                            uint qByteAddr = n * (K / 2) + blk * (blockSz / 2) + kInBlk / 2;
+                            uint qDword = QW.Load((qByteAddr / 4) * 4);
+                            uint qByteInDword = qByteAddr % 4;
+                            uint qByte = (qDword >> (qByteInDword * 8)) & 0xFF;
+                            float wVal = (kInBlk % 2u == 0u)
+                                    ? float(qByte & 0xFu) - zpVal
+                                    : float(qByte >> 4u) - zpVal;
+                            wVal *= scale;
+            
+                            acc += wVal * xTile[ty * TILE_K + ki];
+                        }
                     }
+            
+                    GroupMemoryBarrierWithGroupSync();
                 }
             
-                Y.Store((m * N + n) * 4, asuint(sum));
+                if (m < M && n < N) {
+                    Y.Store((m * N + n) * 4, asuint(acc));
+                }
             }
             """;
 
     // FP32 batched matmul shader for pre-dequantized weights (qkvFused, gateUpFused).
-    // Same M-row batching contract as INT4_MATMUL_BATCH_HLSL; weight buffer is
+    // Same M-row batching contract as INT4_MATMUL_BATCH_TILED_HLSL; weight buffer is
     // [N, K] row-major FP32 (held in weightBuf for legacy/FP32 mode kernels).
     //
     // Opt-A-2 (2026-05-29): tiled with groupshared memory. Each thread group
@@ -1157,19 +1194,18 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         long inputBytes = (long) M * K * Float.BYTES;
         long outputBytes = (long) M * N * Float.BYTES;
-        // INT4 mode: {N, K, blockSize, M}; FP32 mode (tiled): {N, K, M, nTiles}
+        // INT4 mode: {N, K, blockSize, M, nTiles}; FP32 mode (tiled): {N, K, M, nTiles}
         int nTilesFp32 = (N + 15) / 16;
         int mTilesFp32 = (M + 15) / 16;
+        int nTiles = useInt4Gpu ? (N + 15) / 16 : nTilesFp32;
         int[] batchConstants = useInt4Gpu
-                ? new int[]{N, K, int4BlockSize, M}
+                ? new int[]{N, K, int4BlockSize, M, nTiles}
                 : new int[]{N, K, M, nTilesFp32};
         long[] batchUavs = useInt4Gpu ? int4BatchUavAddrs : fp32BatchUavAddrs;
         GpuComputeKernel batchShader = useInt4Gpu ? sharedInt4BatchShader : sharedFp32BatchShader;
-        // INT4: 1 thread/output cell (groupSize=64). FP32 tiled: 1 thread group
-        // per [16,16] output tile (groupSize=256) → elementCount = nTiles*mTiles*256.
-        int dispatchElements = useInt4Gpu
-                ? M * N
-                : nTilesFp32 * mTilesFp32 * 256;
+        // Tiled mode (both INT4 and FP32): 1 thread group per [16,16] output tile
+        // (groupSize=256). elementCount = mTiles*nTiles*256 threads total.
+        int dispatchElements = mTilesFp32 * nTiles * 256;
 
         try {
             // 1. Upload xBatch to persistently-mapped upload buffer.
@@ -1268,10 +1304,10 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 synchronized (batchShaderLock) {
                     if (sharedInt4BatchShader == null) {
                         sharedInt4BatchShader = new GpuComputeKernel(wb, execCmdList,
-                                INT4_MATMUL_BATCH_HLSL, "int4_matmul_batch",
+                                INT4_MATMUL_BATCH_TILED_HLSL, "int4_matmul_batch_tiled",
                                 5,   // UAVs: X, QW, Scales, ZP, Y
-                                4,   // constants: N, K, blockSize, M
-                                64);
+                                5,   // constants: N, K, blockSize, M, nTiles
+                                256);
                     }
                 }
             }
