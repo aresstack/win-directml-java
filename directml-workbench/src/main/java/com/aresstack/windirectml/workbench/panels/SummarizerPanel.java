@@ -206,6 +206,7 @@ public final class SummarizerPanel extends JPanel {
     private void runQwenGeneration(Path modelDir, String text, int maxTokens, String selectedModel)
             throws InferenceException {
         validateQwenModelFiles(modelDir);
+        appendResult("  Qwen ONNX file: " + QwenModelDirValidator.selectedOnnxFilename(modelDir));
         long start = System.nanoTime();
         String backend = model.getBackend().name().toLowerCase();
         QwenInferenceEngine engine = new QwenInferenceEngine(modelDir, maxTokens, backend);

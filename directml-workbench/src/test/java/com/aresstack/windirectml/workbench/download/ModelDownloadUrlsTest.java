@@ -47,9 +47,10 @@ class ModelDownloadUrlsTest {
         var config = QwenModelDownloadConfig.DEFAULT;
         var urls = ModelDownloadUrls.forQwen(config);
         assertFalse(urls.isEmpty());
-        // q4f16 model file via onnx subdir, stored locally as model.onnx by the manifest.
-        assertTrue(urls.stream().anyMatch(u -> u.contains("/onnx/model_q4f16.onnx")));
-        assertFalse(urls.stream().anyMatch(u -> u.contains("/onnx/model.onnx_data")));
+        // Model and data files via onnx subdir
+        assertTrue(urls.stream().anyMatch(u ->
+                u.contains("/onnx/model.onnx") && !u.contains("model.onnx_data")));
+        assertTrue(urls.stream().anyMatch(u -> u.contains("/onnx/model.onnx_data")));
         // Root files (tokenizer, config)
         assertTrue(urls.stream().anyMatch(u ->
                 u.endsWith("/tokenizer.json")));
@@ -85,19 +86,19 @@ class ModelDownloadUrlsTest {
     }
 
     /**
-     * Regression: the q4f16 artifact must not add a dense external-data URL.
+     * Regression: the external data file URL must use the expected underscore filename.
      */
     @Test
-    void qwenQ4F16UrlUsesSingleFileArtifact() {
+    void qwenExternalDataUrlUsesRemoteUnderscoreName() {
         var config = QwenModelDownloadConfig.DEFAULT;
         var urls = ModelDownloadUrls.forQwen(config);
-        String expectedModelUrl = "https://huggingface.co/"
+        String expectedDataUrl = "https://huggingface.co/"
                 + config.repo() + "/resolve/main/"
-                + config.onnxSubdir() + "/model_q4f16.onnx";
-        assertTrue(urls.contains(expectedModelUrl),
-                "Expected URL " + expectedModelUrl + " not found in: " + urls);
-        assertFalse(urls.stream().anyMatch(u -> u.contains("model.onnx_data")),
-                "q4f16 default must not require model.onnx_data");
+                + config.onnxSubdir() + "/" + config.externalDataFile();
+        assertTrue(urls.contains(expectedDataUrl),
+                "Expected URL " + expectedDataUrl + " not found in: " + urls);
+        assertTrue(urls.stream().anyMatch(u -> u.contains("model.onnx_data")),
+                "URLs must contain remote model.onnx_data path");
     }
 
     /**
@@ -108,18 +109,18 @@ class ModelDownloadUrlsTest {
         var configNoOptional = new QwenModelDownloadConfig(
                 "onnx-community/Qwen2.5-Coder-0.5B-Instruct",
                 "onnx",
-                "model_q4f16.onnx",
-                "",
                 "model.onnx",
-                "",
+                "model.onnx_data",
+                "model.onnx",
+                "model.onnx_data",
                 java.util.List.of("tokenizer.json", "config.json", "tokenizer_config.json", "special_tokens_map.json"),
                 java.util.List.of(),  // no optional files
                 "qwen2.5-coder-0.5b-directml-int4"
         );
         var urls = ModelDownloadUrls.forQwen(configNoOptional);
         // All required files are still present
-        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model_q4f16.onnx")));
-        assertFalse(urls.stream().anyMatch(u -> u.endsWith("/onnx/model.onnx_data")));
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model.onnx")));
+        assertTrue(urls.stream().anyMatch(u -> u.endsWith("/onnx/model.onnx_data")));
         assertTrue(urls.stream().anyMatch(u -> u.endsWith("/tokenizer.json")));
         assertTrue(urls.stream().anyMatch(u -> u.endsWith("/config.json")));
         assertTrue(urls.stream().anyMatch(u -> u.endsWith("/tokenizer_config.json")));

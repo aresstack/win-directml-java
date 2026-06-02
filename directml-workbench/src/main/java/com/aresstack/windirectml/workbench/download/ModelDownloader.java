@@ -141,26 +141,7 @@ public final class ModelDownloader {
     public static void downloadQwen(QwenModelDownloadConfig config, Path targetDir,
                                     boolean force, Consumer<String> logger)
             throws IOException, InterruptedException {
-        boolean removedStaleSidecar = false;
-        if (!config.hasExternalDataFile()) {
-            removedStaleSidecar = removeStaleQwenExternalDataFiles(targetDir, logger);
-        }
-        boolean effectiveForce = force || removedStaleSidecar;
-        downloadFromManifest(ModelDownloadUrls.manifestForQwen(config), targetDir, effectiveForce, logger);
-    }
-
-    private static boolean removeStaleQwenExternalDataFiles(Path targetDir, Consumer<String> logger) throws IOException {
-        boolean removed = false;
-        String[] staleFiles = {"model.onnx_data", "model.onnx.data"};
-        for (String staleFile : staleFiles) {
-            Path stalePath = targetDir.resolve(staleFile);
-            if (Files.exists(stalePath)) {
-                Files.delete(stalePath);
-                logger.accept("  Removed stale dense sidecar: " + staleFile);
-                removed = true;
-            }
-        }
-        return removed;
+        downloadFromManifest(ModelDownloadUrls.manifestForQwen(config), targetDir, force, logger);
     }
 
     /**

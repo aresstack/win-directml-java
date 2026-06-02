@@ -62,18 +62,49 @@ public final class ModelDownloadUrls {
         var descriptors = new ArrayList<ModelFileDescriptor>();
         addQwenDescriptor(descriptors, config.modelFile(), true,
                 config.onnxSubdir() + "/" + config.modelFile(), config.localModelFile(), config.repo());
-        if (config.hasExternalDataFile()) {
+        if (config.externalDataFile() != null && !config.externalDataFile().trim().isEmpty()) {
             addQwenDescriptor(descriptors, config.externalDataFile(), true,
                     config.onnxSubdir() + "/" + config.externalDataFile(), config.localDataFile(), config.repo());
         }
-        for (String file : config.rootFiles()) {
-            addQwenDescriptor(descriptors, file, true, file, file, config.repo());
-        }
-        for (String file : config.optionalFiles()) {
-            addQwenDescriptor(descriptors, file, false, file, file, config.repo());
-        }
+        addQwenSupportFiles(descriptors, config.repo(), config.rootFiles(), config.optionalFiles());
         return new ModelDownloadManifest(config.localDirName(), config.localDirName(),
                 List.copyOf(descriptors));
+    }
+
+    /**
+     * Creates a Qwen manifest for exactly one Hugging Face ONNX filename.
+     */
+    public static ModelDownloadManifest manifestForQwenVariant(QwenOnnxModelVariant variant) {
+        var descriptors = new ArrayList<ModelFileDescriptor>();
+        addQwenVariantDescriptor(descriptors, variant);
+        addQwenSupportFiles(descriptors, QwenOnnxModelVariant.REPO,
+                QwenModelDownloadConfig.DEFAULT.rootFiles(),
+                QwenModelDownloadConfig.DEFAULT.optionalFiles());
+        return new ModelDownloadManifest(QwenOnnxModelVariant.LOCAL_DIR_NAME,
+                QwenOnnxModelVariant.LOCAL_DIR_NAME, List.copyOf(descriptors));
+    }
+
+    /**
+     * Creates a Qwen manifest for all known Hugging Face ONNX filenames.
+     */
+    public static ModelDownloadManifest manifestForAllQwenVariants() {
+        var descriptors = new ArrayList<ModelFileDescriptor>();
+        for (QwenOnnxModelVariant variant : QwenOnnxModelVariant.orderedValues()) {
+            addQwenVariantDescriptor(descriptors, variant);
+        }
+        addQwenSupportFiles(descriptors, QwenOnnxModelVariant.REPO,
+                QwenModelDownloadConfig.DEFAULT.rootFiles(),
+                QwenModelDownloadConfig.DEFAULT.optionalFiles());
+        return new ModelDownloadManifest(QwenOnnxModelVariant.LOCAL_DIR_NAME,
+                QwenOnnxModelVariant.LOCAL_DIR_NAME, List.copyOf(descriptors));
+    }
+
+    /**
+     * Returns the download URL for exactly one Qwen ONNX variant.
+     */
+    public static String qwenVariantUrl(QwenOnnxModelVariant variant) {
+        return buildUrl(QwenOnnxModelVariant.REPO,
+                QwenOnnxModelVariant.ONNX_SUBDIR + "/" + variant.fileName());
     }
 
     /**
@@ -124,6 +155,28 @@ public final class ModelDownloadUrls {
         return manifestForQwen(config).files().stream()
                 .map(ModelFileDescriptor::defaultUrl)
                 .toList();
+    }
+
+    private static void addQwenSupportFiles(List<ModelFileDescriptor> descriptors, String repo,
+                                            List<String> requiredFiles, List<String> optionalFiles) {
+        for (String file : requiredFiles) {
+            addQwenDescriptor(descriptors, file, true, file, file, repo);
+        }
+        for (String file : optionalFiles) {
+            addQwenDescriptor(descriptors, file, false, file, file, repo);
+        }
+    }
+
+    private static void addQwenVariantDescriptor(List<ModelFileDescriptor> descriptors,
+                                                 QwenOnnxModelVariant variant) {
+        addQwenDescriptor(descriptors, variant.fileName(), true,
+                QwenOnnxModelVariant.ONNX_SUBDIR + "/" + variant.fileName(),
+                variant.fileName(), QwenOnnxModelVariant.REPO);
+        if (variant.requiresExternalData()) {
+            addQwenDescriptor(descriptors, QwenOnnxModelVariant.EXTERNAL_DATA_FILE, true,
+                    QwenOnnxModelVariant.ONNX_SUBDIR + "/" + QwenOnnxModelVariant.EXTERNAL_DATA_FILE,
+                    QwenOnnxModelVariant.EXTERNAL_DATA_FILE, QwenOnnxModelVariant.REPO);
+        }
     }
 
     private static void addQwenDescriptor(List<ModelFileDescriptor> descriptors, String displayName,

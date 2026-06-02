@@ -88,7 +88,7 @@ class QwenModelDirValidatorTest {
     }
 
     @Test
-    void singleFileOnnxWithoutSidecarIsPassedToFormatValidation(@TempDir Path tmp) throws Exception {
+    void missingModelOnnxDataIsNamed(@TempDir Path tmp) throws Exception {
         Files.writeString(tmp.resolve("config.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
@@ -96,16 +96,17 @@ class QwenModelDirValidatorTest {
         Files.writeString(tmp.resolve("model.onnx"), "");
         String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
         assertNotNull(msg);
-        assertTrue(msg.contains("Unsupported Qwen ONNX format"), msg);
+        assertTrue(msg.contains("model.onnx_data"), msg);
     }
 
     @Test
-    void completeSingleFileDirectoryWithUnparseableOnnxReportsUnsupportedFormat(@TempDir Path tmp) throws Exception {
+    void completeDirectoryWithUnparseableOnnxReportsUnsupportedFormat(@TempDir Path tmp) throws Exception {
         Files.writeString(tmp.resolve("config.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
         Files.writeString(tmp.resolve("special_tokens_map.json"), "{}");
         Files.writeString(tmp.resolve("model.onnx"), "");
+        Files.writeString(tmp.resolve("model.onnx_data"), "");
         String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
         assertNotNull(msg);
         assertTrue(msg.contains("Unsupported Qwen ONNX format"), msg);

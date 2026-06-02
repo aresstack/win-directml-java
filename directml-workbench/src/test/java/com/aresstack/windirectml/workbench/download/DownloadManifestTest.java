@@ -47,11 +47,11 @@ class DownloadManifestTest {
         assertEquals("qwen2.5-coder-0.5b-directml-int4", manifest.modelId());
         assertTrue(manifest.files().stream().anyMatch(f ->
                 f.localFilename().equals("model.onnx") && f.required()));
-        assertFalse(manifest.files().stream().anyMatch(f ->
-                f.localFilename().equals("model.onnx_data")));
         assertTrue(manifest.files().stream().anyMatch(f ->
-                f.localFilename().equals("model.onnx")
-                        && f.defaultUrl().endsWith("/onnx/model_q4f16.onnx")
+                f.localFilename().equals("model.onnx_data") && f.required()));
+        assertTrue(manifest.files().stream().anyMatch(f ->
+                f.localFilename().equals("model.onnx_data")
+                        && f.defaultUrl().endsWith("/onnx/model.onnx_data")
                         && f.required()));
         assertTrue(manifest.files().stream().anyMatch(f ->
                 f.localFilename().equals("added_tokens.json") && !f.required()));

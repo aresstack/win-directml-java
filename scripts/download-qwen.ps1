@@ -1,141 +1,123 @@
-# Downloads the Qwen2.5-Coder 0.5B Instruct q4f16 ONNX model
+# Downloads Qwen2.5-Coder 0.5B Instruct ONNX files from Hugging Face
 # into model/qwen2.5-coder-0.5b-directml-int4 for use with the Workbench.
 #
-# Source: onnx-community/Qwen2.5-Coder-0.5B-Instruct
-# Layout:
-#   onnx/model_q4f16.onnx → model.onnx          (single-file quantized ONNX)
-#   tokenizer.json        → tokenizer.json       (from repo root)
-#   config.json           → config.json          (from repo root)
-#   tokenizer_config.json → tokenizer_config.json(from repo root)
-#   special_tokens_map.json → special_tokens_map.json (from repo root)
-#   added_tokens.json     → added_tokens.json    (optional, from repo root)
+# The script keeps the original Hugging Face filenames. Runtime selection is
+# stored in qwen-selected-onnx.txt, the same selection file used by the Workbench.
 #
 # Usage:
 #   pwsh scripts/download-qwen.ps1
-#   pwsh scripts/download-qwen.ps1 -Force -Validate
+#   pwsh scripts/download-qwen.ps1 -Variant model_q4f16.onnx -Force -Validate
+#   pwsh scripts/download-qwen.ps1 -AllVariants -Variant model_q4f16.onnx
 [CmdletBinding()]
 param(
     [string]$ModelRoot = (Join-Path $PSScriptRoot '..\model'),
+    [ValidateSet('model_q4f16.onnx','model_q4.onnx','model_bnb4.onnx','model_int8.onnx','model_uint8.onnx','model_quantized.onnx','model_fp16.onnx','model.onnx')]
+    [string]$Variant = 'model_q4f16.onnx',
+    [switch]$AllVariants,
     [switch]$Force,
     [switch]$Validate
 )
 $ErrorActionPreference = 'Stop'
 
 $Repo = 'onnx-community/Qwen2.5-Coder-0.5B-Instruct'
-$TargetDir = Join-Path $ModelRoot 'qwen2.5-coder-0.5b-directml-int4'
-$HfBase = "https://huggingface.co/$Repo/resolve/main"
-$ExpectedArtifact = 'onnx/model_q4f16.onnx'
+$OnnxSubdir = 'onnx'
+$targetDir = Join-Path $ModelRoot 'qwen2.5-coder-0.5b-directml-int4'
+$selectionFile = 'qwen-selected-onnx.txt'
 
-Write-Host "Downloading Qwen2.5-Coder 0.5B Instruct q4f16"
-Write-Host "  Source repo:   $Repo"
-Write-Host "  Artifact:      $ExpectedArtifact"
-Write-Host "  Target:        $TargetDir"
-Write-Host ""
+$knownOnnxFiles = @(
+    'model_q4f16.onnx',
+    'model_q4.onnx',
+    'model_bnb4.onnx',
+    'model_int8.onnx',
+    'model_uint8.onnx',
+    'model_quantized.onnx',
+    'model_fp16.onnx',
+    'model.onnx'
+)
 
-if (-not (Test-Path $TargetDir)) {
-    New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+Write-Host 'Downloading Qwen2.5-Coder 0.5B Instruct'
+Write-Host "  Source repo:     $Repo"
+Write-Host "  ONNX subdir:     $OnnxSubdir"
+Write-Host "  Selected ONNX:   $Variant"
+Write-Host "  Download scope:  $(if ($AllVariants) { 'all ONNX files' } else { 'selected ONNX file only' })"
+Write-Host "  Target:          $targetDir"
+Write-Host ''
+
+if (-not (Test-Path $targetDir)) {
+    New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
 }
-$TargetDir = (Resolve-Path -LiteralPath $TargetDir).Path
+$targetDir = (Resolve-Path -LiteralPath $targetDir).Path
 
-function Get-ExistingArtifactName {
-    param([string]$Directory)
-    $manifest = Join-Path $Directory 'model-source.properties'
-    if (-not (Test-Path $manifest)) {
-        return $null
-    }
-    foreach ($line in Get-Content -LiteralPath $manifest) {
-        if ($line -match '^artifact=(.*)$') {
-            return $Matches[1].Trim()
-        }
-    }
-    return $null
-}
+$hfBase = "https://huggingface.co/$Repo/resolve/main"
+$onnxBase = "$hfBase/$OnnxSubdir"
+$onnxFilesToDownload = if ($AllVariants) { $knownOnnxFiles } else { @($Variant) }
 
 function Download-File {
     param(
-        [string]$RemotePath,
-        [string]$LocalName,
-        [bool]$Required,
-        [bool]$ForceDownload
+        [Parameter(Mandatory=$true)][string]$Url,
+        [Parameter(Mandatory=$true)][string]$LocalName,
+        [Parameter(Mandatory=$true)][bool]$Required
     )
 
-    $destination = Join-Path $TargetDir $LocalName
-    if ((Test-Path $destination) -and -not $ForceDownload) {
+    $dst = Join-Path $targetDir $LocalName
+    if ((Test-Path $dst) -and -not $Force) {
         Write-Host "  skip $LocalName (exists, use -Force to re-download)"
         return
     }
 
-    $temporary = "$destination.tmp"
-    if (Test-Path $temporary) {
-        Remove-Item -LiteralPath $temporary -Force
-    }
-
-    $url = "$HfBase/$RemotePath"
     Write-Host "  downloading $LocalName ..."
     try {
-        Invoke-WebRequest -Uri $url -OutFile $temporary -UseBasicParsing
-        Move-Item -LiteralPath $temporary -Destination $destination -Force
+        Invoke-WebRequest -Uri $Url -OutFile $dst -UseBasicParsing
     } catch {
-        if (Test-Path $temporary) {
-            Remove-Item -LiteralPath $temporary -Force
-        }
         if ($Required) {
-            throw "Failed to download required file '$LocalName' from $url : $($_.Exception.Message)"
+            throw "Failed to download required file '$LocalName' from $Url : $($_.Exception.Message)"
         }
         Write-Host "  optional file not found (skipped): $LocalName"
     }
 }
 
-$removedStaleSidecar = $false
-foreach ($stale in @('model.onnx_data', 'model.onnx.data')) {
-    $stalePath = Join-Path $TargetDir $stale
-    if (Test-Path $stalePath) {
-        Write-Host "  removing stale dense sidecar $stale"
-        Remove-Item -LiteralPath $stalePath -Force
-        $removedStaleSidecar = $true
-    }
+foreach ($f in $onnxFilesToDownload) {
+    Download-File -Url "$onnxBase/$f" -LocalName $f -Required $true
 }
 
-$currentArtifact = Get-ExistingArtifactName -Directory $TargetDir
-$artifactChanged = $currentArtifact -ne $ExpectedArtifact
-$forceModelDownload = [bool]($Force -or $removedStaleSidecar -or $artifactChanged)
-
-Download-File -RemotePath $ExpectedArtifact -LocalName 'model.onnx' -Required $true -ForceDownload $forceModelDownload
-
-foreach ($file in @('tokenizer.json', 'config.json', 'tokenizer_config.json', 'special_tokens_map.json')) {
-    Download-File -RemotePath $file -LocalName $file -Required $true -ForceDownload ([bool]$Force)
+if ($AllVariants -or $Variant -eq 'model.onnx') {
+    Download-File -Url "$onnxBase/model.onnx_data" -LocalName 'model.onnx_data' -Required $true
 }
 
-foreach ($file in @('added_tokens.json', 'generation_config.json')) {
-    Download-File -RemotePath $file -LocalName $file -Required $false -ForceDownload ([bool]$Force)
+$rootRequired = @('tokenizer.json', 'config.json', 'tokenizer_config.json', 'special_tokens_map.json')
+$rootOptional = @('added_tokens.json', 'generation_config.json')
+
+foreach ($f in $rootRequired) {
+    Download-File -Url "$hfBase/$f" -LocalName $f -Required $true
 }
 
-$manifestPath = Join-Path $TargetDir 'model-source.properties'
-@"
-repository=$Repo
-revision=main
-artifact=$ExpectedArtifact
-localModelFile=model.onnx
-externalDataFile=
-format=q4f16-single-file-onnx
-"@ | Set-Content -Encoding UTF8 -LiteralPath $manifestPath
+foreach ($f in $rootOptional) {
+    Download-File -Url "$hfBase/$f" -LocalName $f -Required $false
+}
+
+Set-Content -LiteralPath (Join-Path $targetDir $selectionFile) -Value $Variant -Encoding UTF8
+Write-Host "  active ONNX selection: $Variant"
+Write-Host "  selected URL: $onnxBase/$Variant"
 
 if ($Validate) {
-    Write-Host ""
-    Write-Host "  File validation:"
-    $requiredFiles = @('model.onnx', 'tokenizer.json', 'config.json', 'tokenizer_config.json', 'special_tokens_map.json')
+    Write-Host ''
+    Write-Host '  File validation:'
+    $allRequired = @($Variant) + $rootRequired
+    if ($Variant -eq 'model.onnx') {
+        $allRequired += 'model.onnx_data'
+    }
     $missing = @()
-    foreach ($file in $requiredFiles) {
-        $path = Join-Path $TargetDir $file
-        if (Test-Path $path) {
-            $size = (Get-Item -LiteralPath $path).Length
-            $sizeStr = if ($size -gt 1MB) { "{0:N1} MB" -f ($size / 1MB) }
-                       elseif ($size -gt 1KB) { "{0:N1} KB" -f ($size / 1KB) }
+    foreach ($f in $allRequired) {
+        $dst = Join-Path $targetDir $f
+        if (Test-Path $dst) {
+            $size = (Get-Item $dst).Length
+            $sizeStr = if ($size -gt 1MB) { '{0:N1} MB' -f ($size / 1MB) }
+                       elseif ($size -gt 1KB) { '{0:N1} KB' -f ($size / 1KB) }
                        else { "$size B" }
-            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.Substring(0, 12)
-            Write-Host ("    {0,-30} {1,10}  sha256:{2}" -f $file, $sizeStr, $hash)
+            $hash = (Get-FileHash -Path $dst -Algorithm SHA256).Hash.Substring(0, 12)
+            Write-Host ('    {0,-30} {1,10}  sha256:{2}' -f $f, $sizeStr, $hash)
         } else {
-            $missing += $file
+            $missing += $f
         }
     }
     if ($missing.Count -gt 0) {
@@ -143,6 +125,6 @@ if ($Validate) {
     }
 }
 
-Write-Host ""
-Write-Host "Qwen2.5-Coder 0.5B q4f16 model ready at: $TargetDir"
-Write-Host "Expected loader log marker: Model format: INT4 quantized (MatMulNBits)"
+Write-Host ''
+Write-Host "Qwen2.5-Coder 0.5B model ready at: $targetDir"
+Write-Host "Runtime will use: $Variant"

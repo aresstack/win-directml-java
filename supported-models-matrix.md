@@ -32,13 +32,13 @@ Status bitte direkt per Checkbox pflegen.
 ### Embedding-Quellen
 
 - all-minilm
-  - Root: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
-  - ONNX: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/tree/main/onnx
-  - Alternative kompakte ONNX-Port-Quelle: https://huggingface.co/onnx-models/all-MiniLM-L6-v2-onnx
+    - Root: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+    - ONNX: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/tree/main/onnx
+    - Alternative kompakte ONNX-Port-Quelle: https://huggingface.co/onnx-models/all-MiniLM-L6-v2-onnx
 
 - nomic-embed-text
-  - Root: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
-  - ONNX: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/tree/main/onnx
+    - Root: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
+    - ONNX: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/tree/main/onnx
 
 ### Embedding-Implementierungscheckliste
 
@@ -79,25 +79,25 @@ Status bitte direkt per Checkbox pflegen.
 ### Rerank-Quellen
 
 - BAAI/bge-reranker-base
-  - Root: https://huggingface.co/BAAI/bge-reranker-base
-  - ONNX: https://huggingface.co/BAAI/bge-reranker-base/tree/main/onnx
+    - Root: https://huggingface.co/BAAI/bge-reranker-base
+    - ONNX: https://huggingface.co/BAAI/bge-reranker-base/tree/main/onnx
 
 - BAAI/bge-reranker-large
-  - Root: https://huggingface.co/BAAI/bge-reranker-large
-  - ONNX: https://huggingface.co/BAAI/bge-reranker-large/tree/main/onnx
+    - Root: https://huggingface.co/BAAI/bge-reranker-large
+    - ONNX: https://huggingface.co/BAAI/bge-reranker-large/tree/main/onnx
 
 - BAAI/bge-reranker-v2-m3
-  - Root: https://huggingface.co/BAAI/bge-reranker-v2-m3
-  - ONNX-Port: https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX
-  - ONNX-Dateien: https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/tree/main/onnx
+    - Root: https://huggingface.co/BAAI/bge-reranker-v2-m3
+    - ONNX-Port: https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX
+    - ONNX-Dateien: https://huggingface.co/onnx-community/bge-reranker-v2-m3-ONNX/tree/main/onnx
 
 - jinaai/jina-reranker-v2-base-multilingual
-  - Root: https://huggingface.co/jinaai/jina-reranker-v2-base-multilingual
-  - ONNX: https://huggingface.co/jinaai/jina-reranker-v2-base-multilingual/tree/main/onnx
+    - Root: https://huggingface.co/jinaai/jina-reranker-v2-base-multilingual
+    - ONNX: https://huggingface.co/jinaai/jina-reranker-v2-base-multilingual/tree/main/onnx
 
 - BAAI/bge-reranker-v2-gemma
-  - Root: https://huggingface.co/BAAI/bge-reranker-v2-gemma
-  - Hinweis: Nicht Teil von V1
+    - Root: https://huggingface.co/BAAI/bge-reranker-v2-gemma
+    - Hinweis: Nicht Teil von V1
 
 ### Rerank-Implementierungscheckliste
 

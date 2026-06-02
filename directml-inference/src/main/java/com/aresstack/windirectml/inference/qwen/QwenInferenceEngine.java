@@ -143,6 +143,7 @@ public class QwenInferenceEngine implements InferenceEngine {
             log.info("Tokenizer loaded: vocabSize={}", tokenizer.vocabSize());
 
             // Load weights
+            log.info("Selected Qwen ONNX file: {}", QwenModelDirValidator.selectedOnnxFilename(modelDir));
             weights = Qwen2Weights.load(modelDir, config);
 
             // ── GPU acceleration ──────────────────────────────────────
