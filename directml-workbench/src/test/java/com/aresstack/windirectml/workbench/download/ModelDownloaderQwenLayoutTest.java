@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Verifies that the Qwen download constants and layout are configured for the
- * onnx-community file structure (model files under {@code onnx/}, config at root).
+ * onnx-community q4f16 single-file ONNX artifact.
  */
 class ModelDownloaderQwenLayoutTest {
 
@@ -20,7 +20,7 @@ class ModelDownloaderQwenLayoutTest {
     void qwenRequiredFilesIncludesExpectedEntries() {
         var files = ModelDownloader.QWEN_REQUIRED_FILES;
         assertTrue(files.contains("model.onnx"));
-        assertTrue(files.contains("model.onnx_data"));
+        assertFalse(files.contains("model.onnx_data"));
         assertTrue(files.contains("tokenizer.json"));
         assertTrue(files.contains("config.json"));
         assertTrue(files.contains("tokenizer_config.json"));
@@ -28,20 +28,22 @@ class ModelDownloaderQwenLayoutTest {
     }
 
     @Test
-    void defaultConfigUsesOnnxCommunityRepo() {
+    void defaultConfigUsesOnnxCommunityQ4F16Artifact() {
         var config = QwenModelDownloadConfig.DEFAULT;
         assertEquals("onnx-community/Qwen2.5-Coder-0.5B-Instruct", config.repo());
         assertEquals("onnx", config.onnxSubdir());
-        assertEquals("model.onnx", config.modelFile());
-        assertEquals("model.onnx_data", config.externalDataFile());
-        assertEquals("model.onnx_data", config.localDataFile());
+        assertEquals("model_q4f16.onnx", config.modelFile());
+        assertEquals("", config.externalDataFile());
+        assertEquals("model.onnx", config.localModelFile());
+        assertEquals("", config.localDataFile());
+        assertFalse(config.hasExternalDataFile());
     }
 
     @Test
     void remotePathsAreCorrect() {
         var config = QwenModelDownloadConfig.DEFAULT;
         assertEquals("onnx/model_q4f16.onnx", config.remoteModelPath());
-        assertEquals("onnx/model_q4f16.onnx", config.remoteDataPath());
+        assertEquals("", config.remoteDataPath());
     }
 
     @Test
@@ -49,19 +51,30 @@ class ModelDownloaderQwenLayoutTest {
         var config = QwenModelDownloadConfig.DEFAULT;
         var required = config.requiredLocalFiles();
         assertTrue(required.contains("model.onnx"));
-        assertTrue(required.contains("model.onnx_data"));
+        assertFalse(required.contains("model.onnx_data"));
         assertTrue(required.contains("tokenizer.json"));
         assertTrue(required.contains("config.json"));
         assertTrue(required.contains("tokenizer_config.json"));
         assertTrue(required.contains("special_tokens_map.json"));
-        // added_tokens.json is optional, should not be in required
         assertFalse(required.contains("added_tokens.json"));
     }
 
     @Test
-    void defaultDownloadUsesPrimaryExternalDataName() {
-        var config = QwenModelDownloadConfig.DEFAULT;
-        assertEquals("model.onnx_data", config.localDataFile());
-        assertTrue(config.requiredLocalFiles().contains(config.localDataFile()));
+    void sidecarConfigStillSupportsExternalData() {
+        var config = new QwenModelDownloadConfig(
+                "repo/model",
+                "onnx",
+                "model.onnx",
+                "model.onnx_data",
+                "model.onnx",
+                "model.onnx_data",
+                java.util.List.of("tokenizer.json"),
+                java.util.List.of(),
+                "qwen-test"
+        );
+
+        assertTrue(config.hasExternalDataFile());
+        assertEquals("onnx/model.onnx_data", config.remoteDataPath());
+        assertTrue(config.requiredLocalFiles().contains("model.onnx_data"));
     }
 }

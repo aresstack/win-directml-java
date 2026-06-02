@@ -62,8 +62,10 @@ public final class ModelDownloadUrls {
         var descriptors = new ArrayList<ModelFileDescriptor>();
         addQwenDescriptor(descriptors, config.modelFile(), true,
                 config.onnxSubdir() + "/" + config.modelFile(), config.localModelFile(), config.repo());
-        addQwenDescriptor(descriptors, config.externalDataFile(), true,
-                config.onnxSubdir() + "/" + config.externalDataFile(), config.localDataFile(), config.repo());
+        if (config.hasExternalDataFile()) {
+            addQwenDescriptor(descriptors, config.externalDataFile(), true,
+                    config.onnxSubdir() + "/" + config.externalDataFile(), config.localDataFile(), config.repo());
+        }
         for (String file : config.rootFiles()) {
             addQwenDescriptor(descriptors, file, true, file, file, config.repo());
         }
