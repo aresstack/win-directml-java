@@ -37,8 +37,15 @@ public final class CpuBertEncoder implements EmbeddingModel, AutoCloseable {
         this.ready = true;
     }
 
-    @Override public boolean isReady() { return ready; }
-    @Override public int dimension()   { return cfg.outputDimension(); }
+    @Override
+    public boolean isReady() {
+        return ready;
+    }
+
+    @Override
+    public int dimension() {
+        return cfg.outputDimension();
+    }
 
     @Override
     public EmbeddingVector embed(EmbeddingRequest request) throws EmbeddingException {
@@ -228,6 +235,8 @@ public final class CpuBertEncoder implements EmbeddingModel, AutoCloseable {
     }
 
     @Override
-    public void close() { ready = false; }
+    public void close() {
+        ready = false;
+    }
 }
 

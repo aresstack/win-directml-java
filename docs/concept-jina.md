@@ -32,15 +32,15 @@ in PR #56 reklassifizierte `danielheinz/e5-base-sts-en-de` sind hingegen
 **XLM-R/SentencePiece** und stehen aktuell auf `planned`. In der folgenden
 Tabelle ist „E5-base“ exemplarisch für den WordPiece-Pfad gemeint.
 
-| Aspekt        | MiniLM-L6                 | E5-base (WordPiece) / E5-multilingual (XLM-R) | Jina v2 base-de                                    |
-|---------------|---------------------------|------------------------------------------------|----------------------------------------------------|
-| Architektur   | BERT, 6 Layer, 384-d      | BERT 12 Layer (intfloat-WP) / XLM-R 24 Layer   | **JinaBERT v2** (BERT-like, 12 Layer, 768-d)       |
-| Positional    | Learned absolute (max 512)| Learned absolute                               | **ALiBi** (Attention Linear Biases, kein Pos-Emb)  |
-| Tokenizer     | WordPiece (uncased)       | WordPiece (intfloat-v2) **oder** SentencePiece (multilingual / `e5-base-sts-en-de`) | WordPiece (Jina-custom Vocab, cased)               |
-| Pooling       | Mean + L2                 | Mean + L2                                       | Mean + L2 (identisch)                              |
-| Output-Dim    | 384                       | 768 (base) / 1024 (large)                       | 768                                                |
-| Max Seq-Len   | 512                       | 512                                             | **8 192** (durch ALiBi möglich)                    |
-| Input-Format  | Roh-Text                  | `"query: "`-Prefix    | Roh-Text (kein Prefix erforderlich)                |
+| Aspekt       | MiniLM-L6                  | E5-base (WordPiece) / E5-multilingual (XLM-R)                                       | Jina v2 base-de                                   |
+|--------------|----------------------------|-------------------------------------------------------------------------------------|---------------------------------------------------|
+| Architektur  | BERT, 6 Layer, 384-d       | BERT 12 Layer (intfloat-WP) / XLM-R 24 Layer                                        | **JinaBERT v2** (BERT-like, 12 Layer, 768-d)      |
+| Positional   | Learned absolute (max 512) | Learned absolute                                                                    | **ALiBi** (Attention Linear Biases, kein Pos-Emb) |
+| Tokenizer    | WordPiece (uncased)        | WordPiece (intfloat-v2) **oder** SentencePiece (multilingual / `e5-base-sts-en-de`) | WordPiece (Jina-custom Vocab, cased)              |
+| Pooling      | Mean + L2                  | Mean + L2                                                                           | Mean + L2 (identisch)                             |
+| Output-Dim   | 384                        | 768 (base) / 1024 (large)                                                           | 768                                               |
+| Max Seq-Len  | 512                        | 512                                                                                 | **8 192** (durch ALiBi möglich)                   |
+| Input-Format | Roh-Text                   | `"query: "`-Prefix                                                                  | Roh-Text (kein Prefix erforderlich)               |
 
 Die beiden wirklich relevanten Abweichungen sind **ALiBi** und die
 **lange Sequenz-Länge**. Tokenizer und Pooling sind kompatibel zur
@@ -112,15 +112,15 @@ beides außerhalb des aktuellen Phi-3/MiniLM-Aufwand.
 
 ## CPU-/DirectML-Aufwand (Schätzung)
 
-| Aufgabe                                                     | Aufwand        | Risiko |
-|-------------------------------------------------------------|----------------|--------|
-| `JinaWordPieceTokenizer`-Variante (Casing-Flag)             | ≤ 0.5 PT       | gering |
-| `JinaBertV2Architecture`-Deskriptor + Weight-Mapping        | 1 PT           | mittel |
-| ALiBi-Bias in `DirectMlBertEncoderLayerBlock` (CPU + DML)   | 2–3 PT         | mittel |
-| GeGLU-FFN-Variante (CPU + DML, Parity-Test)                 | 2 PT           | mittel |
-| ONNX-Export-Pipeline + `download-jina.ps1`                  | 1 PT           | gering |
-| Smoke- und Parity-Tests (CPU vs. DML, MiniLM-Stil)          | 1 PT           | gering |
-| **Summe**                                                   | **≈ 7–9 PT**   |        |
+| Aufgabe                                                   | Aufwand      | Risiko |
+|-----------------------------------------------------------|--------------|--------|
+| `JinaWordPieceTokenizer`-Variante (Casing-Flag)           | ≤ 0.5 PT     | gering |
+| `JinaBertV2Architecture`-Deskriptor + Weight-Mapping      | 1 PT         | mittel |
+| ALiBi-Bias in `DirectMlBertEncoderLayerBlock` (CPU + DML) | 2–3 PT       | mittel |
+| GeGLU-FFN-Variante (CPU + DML, Parity-Test)               | 2 PT         | mittel |
+| ONNX-Export-Pipeline + `download-jina.ps1`                | 1 PT         | gering |
+| Smoke- und Parity-Tests (CPU vs. DML, MiniLM-Stil)        | 1 PT         | gering |
+| **Summe**                                                 | **≈ 7–9 PT** |        |
 
 Das ist deutlich mehr als der WordPiece-E5-Pfad
 (`intfloat/e5-*-v2`, bereits im Runtime), bei dem Tokenizer und
@@ -187,12 +187,12 @@ Registry-Einträge angepasst, und es entsteht kein Build-Impact.
 - [x] Tokenizer geprüft (WordPiece, Casing-Flag, vorhandener Pfad reicht).
 - [x] Architektur geprüft (JinaBERT v2 = BERT + ALiBi + optional GeGLU).
 - [x] Sequence-Length- / Pooling-Regeln geprüft (Pooling unverändert;
-      Seq-Len-Default 512, Knopf bis 2048 sinnvoll).
+  Seq-Len-Default 512, Knopf bis 2048 sinnvoll).
 - [x] Gewichtslayout geprüft (HF-PyTorch, kein offizieller ONNX-Export,
-      ALiBi-Slopes laufzeitberechnet, GeGLU-Keys abweichend).
+  ALiBi-Slopes laufzeitberechnet, GeGLU-Keys abweichend).
 - [x] CPU-/DirectML-Aufwand geschätzt (≈ 7–9 PT, ALiBi + GeGLU dominant).
 - [x] Entscheidung dokumentiert: Implementierung **post-release**
-      (konsistent mit Registry-Status `PLANNED`).
+  (konsistent mit Registry-Status `PLANNED`).
 - [x] Kein Blocker für das Maven-Central-Release – die Klassifikation
-      ist bereits korrekt verdrahtet (`EmbeddingModelRegistry` →
-      `Status.PLANNED`, Sidecar liefert `not implemented`-Antwort).
+  ist bereits korrekt verdrahtet (`EmbeddingModelRegistry` →
+  `Status.PLANNED`, Sidecar liefert `not implemented`-Antwort).

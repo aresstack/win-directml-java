@@ -7,10 +7,10 @@ package com.aresstack.windirectml.workbench.download;
  * The {@code currentUrl} field is editable/overridable by the user
  * through the download configuration dialog.
  *
- * @param displayName  human-readable label for this file
- * @param required     whether this file is required for the model to function
- * @param defaultUrl   the original/generated download URL
- * @param currentUrl   the effective download URL (may differ from default after user edit)
+ * @param displayName   human-readable label for this file
+ * @param required      whether this file is required for the model to function
+ * @param defaultUrl    the original/generated download URL
+ * @param currentUrl    the effective download URL (may differ from default after user edit)
  * @param localFilename the local filename to save the downloaded content as
  */
 public record ModelFileDescriptor(

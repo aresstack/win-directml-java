@@ -85,7 +85,7 @@ public final class DirectMlSoftmaxKernel implements SoftmaxKernel, AutoCloseable
         this.arena = Arena.ofShared();
 
         try {
-            int[] shape = { 1, 1, numRows, rowLength };
+            int[] shape = {1, 1, numRows, rowLength};
             long totalBytes = (long) elementCount * Float.BYTES;
             MemorySegment xDesc = bufferTensorDesc(shape, null, totalBytes);
             MemorySegment yDesc = bufferTensorDesc(shape, null, totalBytes);
@@ -273,14 +273,29 @@ public final class DirectMlSoftmaxKernel implements SoftmaxKernel, AutoCloseable
     public void close() {
         if (closed) return;
         closed = true;
-        try { DxgiBindings.release(cmdRecorder); } catch (Exception ignored) {}
-        try { DxgiBindings.release(descriptorHeap); } catch (Exception ignored) {}
-        try { DxgiBindings.release(compiled); } catch (Exception ignored) {}
+        try {
+            DxgiBindings.release(cmdRecorder);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(descriptorHeap);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(compiled);
+        } catch (Exception ignored) {
+        }
         if (!persistBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(persistBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(persistBuffer);
+            } catch (Exception ignored) {
+            }
         }
         if (!tempBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(tempBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(tempBuffer);
+            } catch (Exception ignored) {
+            }
         }
         arena.close();
     }
@@ -333,7 +348,12 @@ public final class DirectMlSoftmaxKernel implements SoftmaxKernel, AutoCloseable
         array.set(ValueLayout.ADDRESS, off + 8, bb);
     }
 
-    public int numRows() { return numRows; }
-    public int rowLength() { return rowLength; }
+    public int numRows() {
+        return numRows;
+    }
+
+    public int rowLength() {
+        return rowLength;
+    }
 }
 

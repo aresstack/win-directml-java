@@ -77,11 +77,11 @@ examples/java8-client/build/install/java8-client/bin/java8-client.bat `
 
 The third argument selects the backend:
 
-| Value | Meaning |
-|---|---|
-| `auto` | Try DirectML first, then fall back to CPU and report the reason in health. |
-| `directml` | Force DirectML; startup fails visibly if DirectML or the model cannot load. |
-| `cpu` | Force the pure Java CPU path. Useful for CI, VMs and machines without a DirectML GPU. |
+| Value      | Meaning                                                                               |
+|------------|---------------------------------------------------------------------------------------|
+| `auto`     | Try DirectML first, then fall back to CPU and report the reason in health.            |
+| `directml` | Force DirectML; startup fails visibly if DirectML or the model cannot load.           |
+| `cpu`      | Force the pure Java CPU path. Useful for CI, VMs and machines without a DirectML GPU. |
 
 A fourth optional argument points to a reranker model directory:
 

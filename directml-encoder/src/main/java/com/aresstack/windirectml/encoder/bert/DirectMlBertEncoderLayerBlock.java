@@ -174,46 +174,70 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
             long hiddenBytes = (long) rows * hidden * Float.BYTES;
             long intermediateBytes = (long) rows * intermediate * Float.BYTES;
 
-            bq      = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bk      = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bv      = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bqH     = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bkH     = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bvH     = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            baH     = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bMerge  = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bOut    = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bRes1   = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bMid    = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bInter  = ctx.allocateBuffer(intermediateBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bq = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bk = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bv = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bqH = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bkH = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bvH = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            baH = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bMerge = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bOut = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bRes1 = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bMid = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bInter = ctx.allocateBuffer(intermediateBytes, GpuBuffer.BufferUsage.ACTIVATION);
             bMlpOut = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            bRes2   = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            bRes2 = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
 
-            this.qLinear = qL; this.kLinear = kL; this.vLinear = vL; this.attnOutLinear = oL;
-            this.mlpInterLinear = mlpI; this.mlpOutLinear = mlpO;
+            this.qLinear = qL;
+            this.kLinear = kL;
+            this.vLinear = vL;
+            this.attnOutLinear = oL;
+            this.mlpInterLinear = mlpI;
+            this.mlpOutLinear = mlpO;
             this.layoutSeqToHeadQ = lFwdQ;
             this.layoutSeqToHeadK = lFwdK;
             this.layoutSeqToHeadV = lFwdV;
             this.layoutHeadToSeq = lBwd;
             this.attention = att;
-            this.attnLayerNorm = ln1; this.outLayerNorm = ln2;
+            this.attnLayerNorm = ln1;
+            this.outLayerNorm = ln2;
             this.gelu = g;
             this.residualAdd1 = add1;
             this.residualAdd2 = add2;
 
-            this.qBuf = bq; this.kBuf = bk; this.vBuf = bv;
-            this.qH = bqH; this.kH = bkH; this.vH = bvH; this.attnH = baH;
-            this.attnMerged = bMerge; this.attnOutBuf = bOut;
-            this.residual1 = bRes1; this.xMid = bMid;
-            this.mlpInter = bInter; this.mlpOutBuf = bMlpOut; this.residual2 = bRes2;
+            this.qBuf = bq;
+            this.kBuf = bk;
+            this.vBuf = bv;
+            this.qH = bqH;
+            this.kH = bkH;
+            this.vH = bvH;
+            this.attnH = baH;
+            this.attnMerged = bMerge;
+            this.attnOutBuf = bOut;
+            this.residual1 = bRes1;
+            this.xMid = bMid;
+            this.mlpInter = bInter;
+            this.mlpOutBuf = bMlpOut;
+            this.residual2 = bRes2;
 
             log.info("DirectMlBertEncoderLayerBlock ready: batch={}, seq={}, hidden={} (H={} × D={}), inter={}, hasMask={}",
                     batch, seq, hidden, heads, headDim, intermediate, hasMask);
         } catch (DirectMlRuntimeException | RuntimeException e) {
-            closeQuiet(bRes2); closeQuiet(bMlpOut); closeQuiet(bInter);
-            closeQuiet(bMid); closeQuiet(bRes1); closeQuiet(bOut); closeQuiet(bMerge);
-            closeQuiet(baH); closeQuiet(bvH); closeQuiet(bkH); closeQuiet(bqH);
-            closeQuiet(bv); closeQuiet(bk); closeQuiet(bq);
+            closeQuiet(bRes2);
+            closeQuiet(bMlpOut);
+            closeQuiet(bInter);
+            closeQuiet(bMid);
+            closeQuiet(bRes1);
+            closeQuiet(bOut);
+            closeQuiet(bMerge);
+            closeQuiet(baH);
+            closeQuiet(bvH);
+            closeQuiet(bkH);
+            closeQuiet(bqH);
+            closeQuiet(bv);
+            closeQuiet(bk);
+            closeQuiet(bq);
             closeQuiet(add2);
             closeQuiet(add1);
             closeQuiet(g);
@@ -224,7 +248,12 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
             closeQuiet(lFwdV);
             closeQuiet(lFwdK);
             closeQuiet(lFwdQ);
-            closeQuiet(mlpO); closeQuiet(mlpI); closeQuiet(oL); closeQuiet(vL); closeQuiet(kL); closeQuiet(qL);
+            closeQuiet(mlpO);
+            closeQuiet(mlpI);
+            closeQuiet(oL);
+            closeQuiet(vL);
+            closeQuiet(kL);
+            closeQuiet(qL);
             throw (e instanceof DirectMlRuntimeException d) ? d
                     : new DirectMlRuntimeException("Failed to build DirectMlBertEncoderLayerBlock", e);
         }
@@ -405,38 +434,76 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
     public void close() {
         if (closed) return;
         closed = true;
-        closeQuiet(residual2); closeQuiet(mlpOutBuf); closeQuiet(mlpInter);
-        closeQuiet(xMid); closeQuiet(residual1); closeQuiet(attnOutBuf); closeQuiet(attnMerged);
-        closeQuiet(attnH); closeQuiet(vH); closeQuiet(kH); closeQuiet(qH);
-        closeQuiet(vBuf); closeQuiet(kBuf); closeQuiet(qBuf);
+        closeQuiet(residual2);
+        closeQuiet(mlpOutBuf);
+        closeQuiet(mlpInter);
+        closeQuiet(xMid);
+        closeQuiet(residual1);
+        closeQuiet(attnOutBuf);
+        closeQuiet(attnMerged);
+        closeQuiet(attnH);
+        closeQuiet(vH);
+        closeQuiet(kH);
+        closeQuiet(qH);
+        closeQuiet(vBuf);
+        closeQuiet(kBuf);
+        closeQuiet(qBuf);
         closeQuiet(residualAdd2);
         closeQuiet(residualAdd1);
         closeQuiet(gelu);
-        closeQuiet(outLayerNorm); closeQuiet(attnLayerNorm);
+        closeQuiet(outLayerNorm);
+        closeQuiet(attnLayerNorm);
         closeQuiet(attention);
         closeQuiet(layoutHeadToSeq);
         closeQuiet(layoutSeqToHeadV);
         closeQuiet(layoutSeqToHeadK);
         closeQuiet(layoutSeqToHeadQ);
-        closeQuiet(mlpOutLinear); closeQuiet(mlpInterLinear);
-        closeQuiet(attnOutLinear); closeQuiet(vLinear); closeQuiet(kLinear); closeQuiet(qLinear);
+        closeQuiet(mlpOutLinear);
+        closeQuiet(mlpInterLinear);
+        closeQuiet(attnOutLinear);
+        closeQuiet(vLinear);
+        closeQuiet(kLinear);
+        closeQuiet(qLinear);
     }
 
     private static void closeQuiet(AutoCloseable c) {
         if (c == null) return;
-        try { c.close(); } catch (Exception ignored) {}
+        try {
+            c.close();
+        } catch (Exception ignored) {
+        }
     }
 
-    public int seq()          { return seq; }
+    public int seq() {
+        return seq;
+    }
 
     public int batch() {
         return batch;
     }
-    public int hidden()       { return hidden; }
-    public int heads()        { return heads; }
-    public int headDim()      { return headDim; }
-    public int intermediate() { return intermediate; }
-    public float eps()        { return eps; }
-    public boolean hasMask()  { return hasMask; }
+
+    public int hidden() {
+        return hidden;
+    }
+
+    public int heads() {
+        return heads;
+    }
+
+    public int headDim() {
+        return headDim;
+    }
+
+    public int intermediate() {
+        return intermediate;
+    }
+
+    public float eps() {
+        return eps;
+    }
+
+    public boolean hasMask() {
+        return hasMask;
+    }
 }
 

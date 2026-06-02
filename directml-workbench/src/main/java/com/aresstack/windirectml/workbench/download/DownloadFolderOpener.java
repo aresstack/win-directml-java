@@ -15,7 +15,8 @@ import java.util.function.Consumer;
  */
 public final class DownloadFolderOpener {
 
-    private DownloadFolderOpener() {}
+    private DownloadFolderOpener() {
+    }
 
     /**
      * Opens the specified folder in the system file manager.

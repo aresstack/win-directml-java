@@ -48,8 +48,12 @@ class DirectMlHeadLayoutKernelTest {
         assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12");
         DirectMlContextImpl ctx = new DirectMlContextImpl("directml");
         try {
-            try { ctx.initialize(); }
-            catch (DirectMlRuntimeException e) { assumeTrue(false, "no DML: " + e.getMessage()); return; }
+            try {
+                ctx.initialize();
+            } catch (DirectMlRuntimeException e) {
+                assumeTrue(false, "no DML: " + e.getMessage());
+                return;
+            }
             assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(), "Skipping: no DirectML device");
 
             Random rng = new Random(0xACE1L);
@@ -59,7 +63,9 @@ class DirectMlHeadLayoutKernelTest {
 
             assertArrayEquals(expected, actual, 0.0f,
                     "SEQ_TO_HEAD must produce the exact [H,S,D] permutation");
-        } finally { ctx.close(); }
+        } finally {
+            ctx.close();
+        }
     }
 
     @Test
@@ -67,8 +73,12 @@ class DirectMlHeadLayoutKernelTest {
         assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12");
         DirectMlContextImpl ctx = new DirectMlContextImpl("directml");
         try {
-            try { ctx.initialize(); }
-            catch (DirectMlRuntimeException e) { assumeTrue(false, "no DML: " + e.getMessage()); return; }
+            try {
+                ctx.initialize();
+            } catch (DirectMlRuntimeException e) {
+                assumeTrue(false, "no DML: " + e.getMessage());
+                return;
+            }
             assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(), "Skipping: no DirectML device");
 
             Random rng = new Random(0xBEE5L);
@@ -78,7 +88,9 @@ class DirectMlHeadLayoutKernelTest {
 
             assertArrayEquals(expected, actual, 0.0f,
                     "HEAD_TO_SEQ must produce the exact [S,H,D] permutation");
-        } finally { ctx.close(); }
+        } finally {
+            ctx.close();
+        }
     }
 
     /**
@@ -93,8 +105,12 @@ class DirectMlHeadLayoutKernelTest {
         assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12");
         DirectMlContextImpl ctx = new DirectMlContextImpl("directml");
         try {
-            try { ctx.initialize(); }
-            catch (DirectMlRuntimeException e) { assumeTrue(false, "no DML: " + e.getMessage()); return; }
+            try {
+                ctx.initialize();
+            } catch (DirectMlRuntimeException e) {
+                assumeTrue(false, "no DML: " + e.getMessage());
+                return;
+            }
             assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(), "Skipping: no DirectML device");
 
             Random rng = new Random(0xC0FFEEL);
@@ -104,7 +120,9 @@ class DirectMlHeadLayoutKernelTest {
 
             assertArrayEquals(in, back, 0.0f,
                     "SEQ_TO_HEAD ∘ HEAD_TO_SEQ must be the identity on the data");
-        } finally { ctx.close(); }
+        } finally {
+            ctx.close();
+        }
     }
 
     // ── DirectML drivers ─────────────────────────────────────────────────
@@ -140,7 +158,9 @@ class DirectMlHeadLayoutKernelTest {
 
     // ── CPU reference permutations ──────────────────────────────────────
 
-    /** Physical [S,H,D] (input order s·H·D + h·D + d) → physical [H,S,D] (h·S·D + s·D + d). */
+    /**
+     * Physical [S,H,D] (input order s·H·D + h·D + d) → physical [H,S,D] (h·S·D + s·D + d).
+     */
     private static float[] permuteSeqToHead(float[] src) {
         float[] dst = new float[N];
         for (int s = 0; s < S; s++) {
@@ -155,7 +175,9 @@ class DirectMlHeadLayoutKernelTest {
         return dst;
     }
 
-    /** Physical [H,S,D] (input order h·S·D + s·D + d) → physical [S,H,D] (s·H·D + h·D + d). */
+    /**
+     * Physical [H,S,D] (input order h·S·D + s·D + d) → physical [S,H,D] (s·H·D + h·D + d).
+     */
     private static float[] permuteHeadToSeq(float[] src) {
         float[] dst = new float[N];
         for (int h = 0; h < H; h++) {

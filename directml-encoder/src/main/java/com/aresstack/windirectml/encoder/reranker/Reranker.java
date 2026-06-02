@@ -15,7 +15,9 @@ public interface Reranker extends AutoCloseable {
 
     boolean isReady();
 
-    /** Human-readable model identifier (e.g. the HuggingFace repo name). */
+    /**
+     * Human-readable model identifier (e.g. the HuggingFace repo name).
+     */
     String modelName();
 
     /**

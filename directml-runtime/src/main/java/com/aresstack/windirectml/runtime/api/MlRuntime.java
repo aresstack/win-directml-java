@@ -75,7 +75,8 @@ public final class MlRuntime {
     public static final class Builder {
         private Backend backend = Backend.AUTO;
 
-        private Builder() { }
+        private Builder() {
+        }
 
         public Builder backend(Backend backend) {
             this.backend = Objects.requireNonNull(backend, "backend");

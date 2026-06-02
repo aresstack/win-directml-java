@@ -13,8 +13,8 @@ import java.util.Objects;
  * Regeln werden in einer unveränderlichen Liste gehalten.
  */
 public record NuGetInstallConfig(Path appSettingsFolder,
-                                  NuGetPackageSpec packageSpec,
-                                  List<ExtractRule> extractRules) {
+                                 NuGetPackageSpec packageSpec,
+                                 List<ExtractRule> extractRules) {
 
     public NuGetInstallConfig {
         Objects.requireNonNull(appSettingsFolder, "appSettingsFolder");
@@ -27,14 +27,18 @@ public record NuGetInstallConfig(Path appSettingsFolder,
         extractRules = List.copyOf(extractRules);
     }
 
-    /** Cache-Verzeichnis für heruntergeladene {@code .nupkg}-Dateien. */
+    /**
+     * Cache-Verzeichnis für heruntergeladene {@code .nupkg}-Dateien.
+     */
     public Path nugetCacheFolder() {
         return appSettingsFolder.resolve("nuget-cache")
                 .resolve(packageSpec.packageId())
                 .resolve(packageSpec.version());
     }
 
-    /** Volle Cache-Pfad für die {@code .nupkg}-Datei dieses Pakets. */
+    /**
+     * Volle Cache-Pfad für die {@code .nupkg}-Datei dieses Pakets.
+     */
     public Path nupkgCacheFile() {
         return nugetCacheFolder().resolve(packageSpec.nupkgFileName());
     }

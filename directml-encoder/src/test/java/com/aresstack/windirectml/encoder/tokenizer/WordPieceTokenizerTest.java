@@ -12,7 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WordPieceTokenizerTest {
 
-    /** Minimaler BERT-uncased Tokenizer mit handpicked Vocab. */
+    /**
+     * Minimaler BERT-uncased Tokenizer mit handpicked Vocab.
+     */
     private static final String TOKENIZER_JSON = """
             {
               "version": "1.0",

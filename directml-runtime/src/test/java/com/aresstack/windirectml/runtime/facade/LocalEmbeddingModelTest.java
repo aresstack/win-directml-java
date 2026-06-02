@@ -16,12 +16,21 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class LocalEmbeddingModelTest {
 
-    /** Stub that returns a deterministic vector based on text length. */
+    /**
+     * Stub that returns a deterministic vector based on text length.
+     */
     private static final class StubEmbeddingModel implements EmbeddingModel, AutoCloseable {
         private boolean ready = true;
 
-        @Override public boolean isReady() { return ready; }
-        @Override public int dimension() { return 3; }
+        @Override
+        public boolean isReady() {
+            return ready;
+        }
+
+        @Override
+        public int dimension() {
+            return 3;
+        }
 
         @Override
         public EmbeddingVector embed(EmbeddingRequest request) throws EmbeddingException {
@@ -30,7 +39,10 @@ class LocalEmbeddingModelTest {
             return new EmbeddingVector(new float[]{len, len * 2, len * 3}, 3, "stub", true);
         }
 
-        @Override public void close() { ready = false; }
+        @Override
+        public void close() {
+            ready = false;
+        }
     }
 
     @Test

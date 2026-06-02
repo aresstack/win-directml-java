@@ -48,7 +48,8 @@ public final class EmbeddingConfig {
         private String prefix;
         private boolean prefixSet;
 
-        private Builder() { }
+        private Builder() {
+        }
 
         public Builder model(EmbeddingModelId model) {
             this.model = Objects.requireNonNull(model, "model");

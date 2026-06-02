@@ -82,12 +82,16 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
      */
     private static final int[] PAD_BUCKETS = {64, 128, 256, 512};
 
-    /** Defensive-copy accessor for the configured pad-buckets. */
+    /**
+     * Defensive-copy accessor for the configured pad-buckets.
+     */
     public static int[] buckets() {
         return PAD_BUCKETS.clone();
     }
 
-    /** Smallest bucket {@code b} such that {@code b >= seqLen}, else {@code seqLen}. */
+    /**
+     * Smallest bucket {@code b} such that {@code b >= seqLen}, else {@code seqLen}.
+     */
     public static int bucketFor(int seqLen) {
         for (int b : PAD_BUCKETS) {
             if (b >= seqLen) return b;
@@ -121,14 +125,36 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
                               GpuBuffer meanWeights,
                               GpuBuffer pooled,
                               DirectMlMeanPoolKernel meanPool) implements AutoCloseable {
-        @Override public void close() {
-            try { meanPool.close();   } catch (Exception ignored) {}
-            try { stack.close();      } catch (Exception ignored) {}
-            try { xIn.close();        } catch (Exception ignored) {}
-            try { xOut.close();       } catch (Exception ignored) {}
-            try { mask.close();       } catch (Exception ignored) {}
-            try { meanWeights.close();} catch (Exception ignored) {}
-            try { pooled.close();     } catch (Exception ignored) {}
+        @Override
+        public void close() {
+            try {
+                meanPool.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                stack.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                xIn.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                xOut.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                mask.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                meanWeights.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                pooled.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -159,10 +185,16 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
                     arch.config().maxPositionEmbeddings());
             return new DirectMlMiniLmEncoder(ctx, /* ownsCtx */ true, arch, w, t);
         } catch (EmbeddingException e) {
-            if (ctx != null) try { ctx.close(); } catch (Exception ignored) {}
+            if (ctx != null) try {
+                ctx.close();
+            } catch (Exception ignored) {
+            }
             throw e;
         } catch (Exception e) {
-            if (ctx != null) try { ctx.close(); } catch (Exception ignored) {}
+            if (ctx != null) try {
+                ctx.close();
+            } catch (Exception ignored) {
+            }
             throw new EmbeddingException("Failed to load DirectMlMiniLmEncoder from " + modelDir, e);
         }
     }
@@ -186,7 +218,7 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
 
             // ── Upload Embedding-LN parameters ──────────────────────────
             embLnGammaBuf = uploadVec(weights.embLnGamma, H);
-            embLnBetaBuf  = uploadVec(weights.embLnBeta,  H);
+            embLnBetaBuf = uploadVec(weights.embLnBeta, H);
 
             // ── Upload per-layer weights → generic BertGpuLayerWeights ──
             List<BertGpuLayerWeights> built = new ArrayList<>(weights.layers.size());
@@ -198,7 +230,7 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
                         uploadMat(l.attnOutWeight, H, H), uploadVec(l.attnOutBias, H),
                         uploadVec(l.attnLnGamma, H), uploadVec(l.attnLnBeta, H),
                         uploadMat(l.mlpInterWeight, I, H), uploadVec(l.mlpInterBias, I),
-                        uploadMat(l.mlpOutWeight, H, I),   uploadVec(l.mlpOutBias, H),
+                        uploadMat(l.mlpOutWeight, H, I), uploadVec(l.mlpOutBias, H),
                         uploadVec(l.outLnGamma, H), uploadVec(l.outLnBeta, H)));
             }
             this.gpuLayers = List.copyOf(built);
@@ -211,8 +243,14 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
                 builtNorm = ctx.allocateBuffer((long) H * Float.BYTES,
                         GpuBuffer.BufferUsage.ACTIVATION);
             } catch (DirectMlRuntimeException | RuntimeException e) {
-                if (builtL2 != null) try { builtL2.close(); } catch (Exception ignored) {}
-                if (builtNorm != null) try { builtNorm.close(); } catch (Exception ignored) {}
+                if (builtL2 != null) try {
+                    builtL2.close();
+                } catch (Exception ignored) {
+                }
+                if (builtNorm != null) try {
+                    builtNorm.close();
+                } catch (Exception ignored) {
+                }
                 throw e;
             }
             this.l2Kernel = builtL2;
@@ -233,8 +271,15 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
         }
     }
 
-    @Override public boolean isReady() { return ready; }
-    @Override public int dimension()   { return cfg.outputDimension(); }
+    @Override
+    public boolean isReady() {
+        return ready;
+    }
+
+    @Override
+    public int dimension() {
+        return cfg.outputDimension();
+    }
 
     @Override
     public EmbeddingVector embed(EmbeddingRequest request) throws EmbeddingException {
@@ -285,10 +330,10 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
             DirectMlTensor xInT = tensorOf(entry.xIn, B, H);
             DirectMlTensor xOutT = tensorOf(entry.xOut, B, H);
             DirectMlTensor maskT = tensorOf(entry.mask, B);
-            DirectMlTensor wT    = tensorOf(entry.meanWeights, B);
+            DirectMlTensor wT = tensorOf(entry.meanWeights, B);
             DirectMlTensor pooledT = tensorOf(entry.pooled, H);
-            DirectMlTensor embGT  = tensorOf(embLnGammaBuf, H);
-            DirectMlTensor embBT  = tensorOf(embLnBetaBuf,  H);
+            DirectMlTensor embGT = tensorOf(embLnGammaBuf, H);
+            DirectMlTensor embBT = tensorOf(embLnBetaBuf, H);
 
             entry.stack.dispatch(xInT, embGT, embBT, gpuLayers, maskT, xOutT);
             entry.meanPool.dispatch(xOutT, wT, pooledT);
@@ -330,9 +375,9 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
         DirectMlBertEncoderStack stack = null;
         DirectMlMeanPoolKernel meanPool = null;
         try {
-            xIn  = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            xIn = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
             xOut = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            mask = ctx.allocateBuffer(maskBytes,   GpuBuffer.BufferUsage.ACTIVATION);
+            mask = ctx.allocateBuffer(maskBytes, GpuBuffer.BufferUsage.ACTIVATION);
             meanWeights = ctx.allocateBuffer(maskBytes, GpuBuffer.BufferUsage.ACTIVATION);
             pooled = ctx.allocateBuffer(pooledBytes, GpuBuffer.BufferUsage.ACTIVATION);
             stack = new DirectMlBertEncoderStack(
@@ -347,13 +392,34 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
                     bucket, stackCache.size());
             return entry;
         } catch (DirectMlRuntimeException | RuntimeException e) {
-            if (meanPool != null) try { meanPool.close(); } catch (Exception ignored) {}
-            if (stack != null) try { stack.close(); } catch (Exception ignored) {}
-            if (pooled != null)      try { pooled.close();      } catch (Exception ignored) {}
-            if (meanWeights != null) try { meanWeights.close(); } catch (Exception ignored) {}
-            if (mask != null)  try { mask.close();  } catch (Exception ignored) {}
-            if (xOut != null)  try { xOut.close();  } catch (Exception ignored) {}
-            if (xIn != null)   try { xIn.close();   } catch (Exception ignored) {}
+            if (meanPool != null) try {
+                meanPool.close();
+            } catch (Exception ignored) {
+            }
+            if (stack != null) try {
+                stack.close();
+            } catch (Exception ignored) {
+            }
+            if (pooled != null) try {
+                pooled.close();
+            } catch (Exception ignored) {
+            }
+            if (meanWeights != null) try {
+                meanWeights.close();
+            } catch (Exception ignored) {
+            }
+            if (mask != null) try {
+                mask.close();
+            } catch (Exception ignored) {
+            }
+            if (xOut != null) try {
+                xOut.close();
+            } catch (Exception ignored) {
+            }
+            if (xIn != null) try {
+                xIn.close();
+            } catch (Exception ignored) {
+            }
             throw (e instanceof DirectMlRuntimeException d) ? d
                     : new DirectMlRuntimeException("Failed to allocate stack for bucket=" + bucket, e);
         }
@@ -400,22 +466,35 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
         for (StackEntry e : stackCache.values()) e.close();
         stackCache.clear();
         if (l2Kernel != null) {
-            try { l2Kernel.close(); } catch (Exception ignored) {}
+            try {
+                l2Kernel.close();
+            } catch (Exception ignored) {
+            }
         }
         closeOwnedQuietly();
         if (ownsCtx) {
-            try { ctx.close(); } catch (Exception ignored) {}
+            try {
+                ctx.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
     private void closeOwnedQuietly() {
         for (int i = ownedGpuBuffers.size() - 1; i >= 0; i--) {
-            try { ownedGpuBuffers.get(i).close(); } catch (Exception ignored) {}
+            try {
+                ownedGpuBuffers.get(i).close();
+            } catch (Exception ignored) {
+            }
         }
         ownedGpuBuffers.clear();
     }
 
-    /** Number of cached form-bound stacks (one per active pad bucket). */
-    public int cachedStackCount() { return stackCache.size(); }
+    /**
+     * Number of cached form-bound stacks (one per active pad bucket).
+     */
+    public int cachedStackCount() {
+        return stackCache.size();
+    }
 }
 

@@ -24,7 +24,7 @@ public interface EmbeddingModel {
 
     /**
      * @return the output dimensionality of the produced vectors (e.g. 384
-     *         for {@code all-MiniLM-L6-v2}, 768 for {@code e5-base}).
+     * for {@code all-MiniLM-L6-v2}, 768 for {@code e5-base}).
      */
     int dimension();
 
@@ -48,8 +48,8 @@ public interface EmbeddingModel {
      *                 (non-blank text, etc.).
      * @return one {@link EmbeddingVector} per input, in input order.
      * @throws EmbeddingException if any underlying call fails. The batch
-     *         is treated atomically – callers must not assume partial
-     *         success.
+     *                            is treated atomically – callers must not assume partial
+     *                            success.
      */
     default List<EmbeddingVector> embedBatch(List<EmbeddingRequest> requests) throws EmbeddingException {
         Objects.requireNonNull(requests, "requests");

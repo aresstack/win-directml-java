@@ -31,7 +31,7 @@ public final class EmbeddingsPanel extends JPanel {
     private static final String PREFIX_NONE = "none";
     private static final String PREFIX_QUERY = "query: ";
     private static final String PREFIX_PASSAGE = "passage: ";
-    private static final String[] PREFIX_CHOICES = { PREFIX_NONE, PREFIX_QUERY, PREFIX_PASSAGE };
+    private static final String[] PREFIX_CHOICES = {PREFIX_NONE, PREFIX_QUERY, PREFIX_PASSAGE};
 
     private final WorkbenchModel model;
 

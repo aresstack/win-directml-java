@@ -55,7 +55,9 @@ public record BertEncoderConfig(
         Objects.requireNonNull(poolingStrategy, "poolingStrategy");
     }
 
-    /** Derived: {@code hiddenSize / numHeads}. */
+    /**
+     * Derived: {@code hiddenSize / numHeads}.
+     */
     public int headDim() {
         return hiddenSize / numHeads;
     }

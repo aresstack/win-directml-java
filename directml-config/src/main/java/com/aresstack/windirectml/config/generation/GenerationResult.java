@@ -25,23 +25,47 @@ public final class GenerationResult {
         this.elapsedMs = elapsedMs;
     }
 
-    /** Generated text output. Never null. */
-    public String text() { return text; }
+    /**
+     * Generated text output. Never null.
+     */
+    public String text() {
+        return text;
+    }
 
-    /** Finish reason: {@code "end_turn"}, {@code "max_tokens"}, {@code "stop_string"}, etc. */
-    public String finishReason() { return finishReason; }
+    /**
+     * Finish reason: {@code "end_turn"}, {@code "max_tokens"}, {@code "stop_string"}, etc.
+     */
+    public String finishReason() {
+        return finishReason;
+    }
 
-    /** Number of tokens in the prompt. */
-    public int promptTokens() { return promptTokens; }
+    /**
+     * Number of tokens in the prompt.
+     */
+    public int promptTokens() {
+        return promptTokens;
+    }
 
-    /** Number of tokens generated. */
-    public int completionTokens() { return completionTokens; }
+    /**
+     * Number of tokens generated.
+     */
+    public int completionTokens() {
+        return completionTokens;
+    }
 
-    /** Total tokens (prompt + completion). */
-    public int totalTokens() { return promptTokens + completionTokens; }
+    /**
+     * Total tokens (prompt + completion).
+     */
+    public int totalTokens() {
+        return promptTokens + completionTokens;
+    }
 
-    /** Wall-clock time in milliseconds. */
-    public long elapsedMs() { return elapsedMs; }
+    /**
+     * Wall-clock time in milliseconds.
+     */
+    public long elapsedMs() {
+        return elapsedMs;
+    }
 
     @Override
     public String toString() {

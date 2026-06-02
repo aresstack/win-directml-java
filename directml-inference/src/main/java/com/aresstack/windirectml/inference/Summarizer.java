@@ -10,7 +10,7 @@ public interface Summarizer {
 
     /**
      * @return {@code true} once the underlying model is loaded and ready
-     *         to serve summarization requests.
+     * to serve summarization requests.
      */
     boolean isReady();
 

@@ -4,11 +4,17 @@ package com.aresstack.windirectml.runtime.api;
  * Public backend selection for local inference.
  */
 public enum Backend {
-    /** Try DirectML first and fall back to CPU when necessary. */
+    /**
+     * Try DirectML first and fall back to CPU when necessary.
+     */
     AUTO,
-    /** Force CPU execution. */
+    /**
+     * Force CPU execution.
+     */
     CPU,
-    /** Force Windows DirectML execution. */
+    /**
+     * Force Windows DirectML execution.
+     */
     DIRECTML;
 
     com.aresstack.windirectml.runtime.facade.Backend toFacade() {

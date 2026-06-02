@@ -15,5 +15,6 @@ public record Summary(
         int promptTokens,
         int outputTokens,
         long elapsedMs
-) {}
+) {
+}
 

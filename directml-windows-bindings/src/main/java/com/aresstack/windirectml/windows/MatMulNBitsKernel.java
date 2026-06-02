@@ -345,17 +345,17 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     /**
      * Create a MatMulNBits kernel for a specific weight matrix.
      *
-     * @param wb     initialized WindowsBindings (D3D12 + DirectML devices)
-     * @param N      output features (weight rows)
-     * @param K      input features (weight cols)
-     * @param qWeight   packed INT4 weights [N, K/blockSize, blockSize/2]
-     * @param scales    per-block FP32 scales [N * K/blockSize]
+     * @param wb         initialized WindowsBindings (D3D12 + DirectML devices)
+     * @param N          output features (weight rows)
+     * @param K          input features (weight cols)
+     * @param qWeight    packed INT4 weights [N, K/blockSize, blockSize/2]
+     * @param scales     per-block FP32 scales [N * K/blockSize]
      * @param zeroPoints packed uint4 zero points
      * @param blockSize  quantization block size (128)
      */
     public MatMulNBitsKernel(WindowsBindings wb, int N, int K,
-                              byte[] qWeight, float[] scales, byte[] zeroPoints,
-                              int blockSize) {
+                             byte[] qWeight, float[] scales, byte[] zeroPoints,
+                             int blockSize) {
         this.wb = wb;
         this.arena = Arena.ofShared();
         this.N = N;
@@ -391,12 +391,14 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      * @return ready-to-use kernel
      */
     public static MatMulNBitsKernel fromDequantizedWeights(WindowsBindings wb,
-                                                            int N, int K,
-                                                            float[] weights) {
+                                                           int N, int K,
+                                                           float[] weights) {
         return new MatMulNBitsKernel(wb, N, K, weights);
     }
 
-    /** Package-private constructor for pre-dequantized FP32 weights. */
+    /**
+     * Package-private constructor for pre-dequantized FP32 weights.
+     */
     private MatMulNBitsKernel(WindowsBindings wb, int N, int K, float[] fp32Weights) {
         this.wb = wb;
         this.arena = Arena.ofShared();
@@ -499,13 +501,13 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         // The weight matrix is [N, K] in row-major order.
         // Each weight = (nibble_value - zero_point) * scale
         long weightBytes = (long) N * K * Float.BYTES;
-        long inputBytes  = (long) K * Float.BYTES;        // M=1 for matvec
+        long inputBytes = (long) K * Float.BYTES;        // M=1 for matvec
         long outputBytes = (long) N * Float.BYTES;
-        long biasBytes   = (long) N * Float.BYTES;
+        long biasBytes = (long) N * Float.BYTES;
 
         weightBuf = D3D12Bindings.createDefaultBuffer(dev, weightBytes, arena);
-        biasBuf   = D3D12Bindings.createDefaultBuffer(dev, biasBytes, arena);
-        inputBuf  = D3D12Bindings.createDefaultBuffer(dev, inputBytes, arena);
+        biasBuf = D3D12Bindings.createDefaultBuffer(dev, biasBytes, arena);
+        inputBuf = D3D12Bindings.createDefaultBuffer(dev, inputBytes, arena);
         outputBuf = D3D12Bindings.createDefaultBuffer(dev, outputBytes, arena);
 
         // ── Step 2: Upload weight data to GPU ─────────────────────────
@@ -517,8 +519,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         // ── Step 3: Create and compile DirectML GEMM operator ─────────
         MemorySegment gemm = arena.allocate(56, 8);
-        gemm.set(ValueLayout.ADDRESS,  0, td(new int[]{1, 1, 1, K}));       // A: [1,1,1,K]
-        gemm.set(ValueLayout.ADDRESS,  8, td(new int[]{1, 1, N, K}));       // B: [1,1,N,K]
+        gemm.set(ValueLayout.ADDRESS, 0, td(new int[]{1, 1, 1, K}));       // A: [1,1,1,K]
+        gemm.set(ValueLayout.ADDRESS, 8, td(new int[]{1, 1, N, K}));       // B: [1,1,N,K]
         gemm.set(ValueLayout.ADDRESS, 16, td(new int[]{1, 1, 1, N}));       // C: [1,1,1,N]
         gemm.set(ValueLayout.ADDRESS, 24, td(new int[]{1, 1, 1, N}));       // Y: [1,1,1,N]
         gemm.set(ValueLayout.JAVA_INT, 32, DirectMlBindings.DML_MATRIX_TRANSFORM_NONE);       // transA
@@ -536,8 +538,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         // ── Step 4: Query binding properties ──────────────────────────
         long[] props = DirectMlBindings.getBindingProperties(compiledGemm, arena);
-        descCount   = Math.max((int) props[0], 1);
-        tempSize    = props[1];
+        descCount = Math.max((int) props[0], 1);
+        tempSize = props[1];
         persistSize = props[2];
         log.debug("GEMM binding: desc={}, temp={}, persist={}", descCount, tempSize, persistSize);
 
@@ -656,13 +658,13 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      * and MethodHandle cache.
      */
     private void prepareExecInfra(MemorySegment dev, MemorySegment dml,
-                                   long inputBytes, long outputBytes)
+                                  long inputBytes, long outputBytes)
             throws WindowsNativeException {
 
         // Staging buffers with persistent CPU mapping
-        uploadBuf   = D3D12Bindings.createUploadBuffer(dev, inputBytes, arena);
+        uploadBuf = D3D12Bindings.createUploadBuffer(dev, inputBytes, arena);
         readbackBuf = D3D12Bindings.createReadbackBuffer(dev, outputBytes, arena);
-        mappedUpload   = D3D12Bindings.mapResource(uploadBuf, arena);
+        mappedUpload = D3D12Bindings.mapResource(uploadBuf, arena);
         mappedReadback = D3D12Bindings.mapResource(readbackBuf, arena);
 
         // Reusable command allocator + command list
@@ -757,7 +759,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         // Bind inputs: A=input, B=weight, C=bias (static — only data in inputBuf changes)
         long weightBytes = (long) N * K * Float.BYTES;
-        long biasBytes   = (long) N * Float.BYTES;
+        long biasBytes = (long) N * Float.BYTES;
 
         MemorySegment inputs = arena.allocate(16L * 3, 8);
         setBufferBinding(inputs, 0, inputBuf, inputBytes);
@@ -785,11 +787,13 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         }
 
         log.debug("Execution infrastructure pre-allocated (upload={}, readback={}, " +
-                  "fence, cmdList, bindingTable, barriers, {} cached MethodHandles)",
+                        "fence, cmdList, bindingTable, barriers, {} cached MethodHandles)",
                 inputBytes, outputBytes, 10);
     }
 
-    /** Allocate a reusable transition barrier struct in the kernel's arena. */
+    /**
+     * Allocate a reusable transition barrier struct in the kernel's arena.
+     */
     private MemorySegment allocTransitionBarrier(MemorySegment resource, int before, int after) {
         MemorySegment b = arena.allocate(32, 8);
         b.set(ValueLayout.JAVA_INT, 0, D3D12Bindings.D3D12_RESOURCE_BARRIER_TYPE_TRANSITION);
@@ -802,7 +806,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     }
 
     private void initializeOperator(MemorySegment dev, MemorySegment queue,
-                                     MemorySegment dml) throws WindowsNativeException {
+                                    MemorySegment dml) throws WindowsNativeException {
         MemorySegment initializer = DirectMlBindings.createOperatorInitializer(
                 dml, new MemorySegment[]{compiledGemm}, arena);
 
@@ -888,7 +892,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         if (x.length != K) throw new IllegalArgumentException(
                 "Input length " + x.length + " != K=" + K);
 
-        long inputBytes  = (long) K * Float.BYTES;
+        long inputBytes = (long) K * Float.BYTES;
         long outputBytes = (long) N * Float.BYTES;
 
         try {
@@ -970,7 +974,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         if (x.length != K) throw new IllegalArgumentException(
                 "Input length " + x.length + " != K=" + K);
 
-        long inputBytes  = (long) K * Float.BYTES;
+        long inputBytes = (long) K * Float.BYTES;
         long outputBytes = (long) N * Float.BYTES;
 
         try {
@@ -1006,12 +1010,12 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     /**
      * Record this kernel's dispatch that reads input from a GPU-resident buffer.
      *
-     * @param pipeline       the shared GPU pipeline (recording state)
-     * @param gpuInputBuf    GPU default buffer containing the input [K] floats
-     * @param gpuInputBytes  byte size of the input data
+     * @param pipeline      the shared GPU pipeline (recording state)
+     * @param gpuInputBuf   GPU default buffer containing the input [K] floats
+     * @param gpuInputBytes byte size of the input data
      */
     public void recordIntoGpuResident(GpuPipeline pipeline, MemorySegment gpuInputBuf,
-                                       long gpuInputBytes) {
+                                      long gpuInputBytes) {
         if (!prepared) throw new IllegalStateException("Kernel not prepared");
 
         long outputBytes = (long) N * Float.BYTES;
@@ -1321,23 +1325,47 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
     // ── GPU buffer accessors (for pipeline-batched operations) ─────────
 
-    /** GPU output buffer (default heap, UAV). Result is written here by DML dispatch. */
-    public MemorySegment getOutputBuf() { return outputBuf; }
+    /**
+     * GPU output buffer (default heap, UAV). Result is written here by DML dispatch.
+     */
+    public MemorySegment getOutputBuf() {
+        return outputBuf;
+    }
 
-    /** GPU input buffer (default heap, UAV). */
-    public MemorySegment getInputBuf() { return inputBuf; }
+    /**
+     * GPU input buffer (default heap, UAV).
+     */
+    public MemorySegment getInputBuf() {
+        return inputBuf;
+    }
 
-    /** Readback buffer (readback heap, mapped). */
-    public MemorySegment getReadbackBuf() { return readbackBuf; }
+    /**
+     * Readback buffer (readback heap, mapped).
+     */
+    public MemorySegment getReadbackBuf() {
+        return readbackBuf;
+    }
 
-    /** Mapped readback pointer. */
-    public MemorySegment getMappedReadback() { return mappedReadback; }
+    /**
+     * Mapped readback pointer.
+     */
+    public MemorySegment getMappedReadback() {
+        return mappedReadback;
+    }
 
-    /** Mapped upload pointer. */
-    public MemorySegment getMappedUpload() { return mappedUpload; }
+    /**
+     * Mapped upload pointer.
+     */
+    public MemorySegment getMappedUpload() {
+        return mappedUpload;
+    }
 
-    /** Upload buffer. */
-    public MemorySegment getUploadBuf() { return uploadBuf; }
+    /**
+     * Upload buffer.
+     */
+    public MemorySegment getUploadBuf() {
+        return uploadBuf;
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     // INT4 dequantization (CPU, one-time)
@@ -1356,7 +1384,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      * @return float[N * K] row-major weight matrix
      */
     public static float[] dequantizeInt4(byte[] qWeight, float[] scales, byte[] zeroPoints,
-                                   int N, int K, int blockSize) {
+                                         int N, int K, int blockSize) {
         float[] result = new float[N * K];
         int blocksPerRow = K / blockSize;
 
@@ -1380,7 +1408,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                     int packed = qWeight[qBase + j] & 0xFF;
                     int w0 = (packed & 0xF) - zp;
                     int w1 = (packed >>> 4) - zp;
-                    result[rowBase + kBase + 2 * j]     = w0 * scale;
+                    result[rowBase + kBase + 2 * j] = w0 * scale;
                     result[rowBase + kBase + 2 * j + 1] = w1 * scale;
                 }
             }
@@ -1392,7 +1420,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     // Helpers
     // ══════════════════════════════════════════════════════════════════════
 
-    /** Build a DML_TENSOR_DESC for FP32 buffer tensor. */
+    /**
+     * Build a DML_TENSOR_DESC for FP32 buffer tensor.
+     */
     private MemorySegment td(int[] sizes) {
         int elems = 1;
         for (int s : sizes) elems *= s;
@@ -1407,7 +1437,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      * Each binding desc is 16 bytes: Type(4)+pad(4)+Desc*(8).
      */
     private void setBufferBinding(MemorySegment array, int index,
-                                   MemorySegment buffer, long sizeBytes) {
+                                  MemorySegment buffer, long sizeBytes) {
         long off = (long) index * 16;
         MemorySegment bb = DirectMlBindings.allocBufferBinding(arena, buffer, 0, sizeBytes);
         array.set(ValueLayout.JAVA_INT, off, DirectMlBindings.DML_BINDING_TYPE_BUFFER);
@@ -1467,10 +1497,18 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         log.debug("MatMulNBitsKernel closed [{}, {}]", N, K);
     }
 
-    /** Output features (rows of weight matrix). */
-    public int getN() { return N; }
+    /**
+     * Output features (rows of weight matrix).
+     */
+    public int getN() {
+        return N;
+    }
 
-    /** Input features (cols of weight matrix). */
-    public int getK() { return K; }
+    /**
+     * Input features (cols of weight matrix).
+     */
+    public int getK() {
+        return K;
+    }
 }
 

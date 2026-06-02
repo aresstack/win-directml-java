@@ -32,13 +32,24 @@ class EmbedBatchHandlerTest {
     private static final class StubEmbedder implements EmbeddingModel {
         final List<EmbeddingRequest> seen = new ArrayList<>();
         boolean batchOverrideCalled = false;
-        @Override public boolean isReady() { return true; }
-        @Override public int dimension() { return 4; }
-        @Override public EmbeddingVector embed(EmbeddingRequest request) {
+
+        @Override
+        public boolean isReady() {
+            return true;
+        }
+
+        @Override
+        public int dimension() {
+            return 4;
+        }
+
+        @Override
+        public EmbeddingVector embed(EmbeddingRequest request) {
             seen.add(request);
             float[] v = new float[]{request.text().length(), 0f, 0f, 0f};
             return new EmbeddingVector(v, 4, "stub/embed", request.normalize());
         }
+
         @Override
         public List<EmbeddingVector> embedBatch(List<EmbeddingRequest> requests) {
             batchOverrideCalled = true;

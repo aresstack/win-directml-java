@@ -28,10 +28,14 @@ import java.util.regex.Pattern;
  */
 public final class WorkbenchLauncher {
 
-    /** Minimum Java major version required by the Workbench. */
+    /**
+     * Minimum Java major version required by the Workbench.
+     */
     static final int MIN_JAVA_VERSION = 21;
 
-    /** Pattern matching the version string in {@code java -version} output. */
+    /**
+     * Pattern matching the version string in {@code java -version} output.
+     */
     static final Pattern VERSION_PATTERN = Pattern.compile("version \"([^\"]+)\"");
 
     private WorkbenchLauncher() {

@@ -35,7 +35,7 @@ public final class NuGetPackageInstaller {
 
     /**
      * @return die absoluten Pfade aller extrahierten Dateien (in Reihenfolge
-     *         der {@link NuGetInstallConfig#extractRules()})
+     * der {@link NuGetInstallConfig#extractRules()})
      */
     public List<Path> install(NuGetInstallConfig config) throws IOException {
         Files.createDirectories(config.appSettingsFolder());

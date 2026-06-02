@@ -13,18 +13,19 @@ eine Umsetzung im **ersten Maven-Central-Release ist nicht** vorgesehen.
 
 ## Kandidaten
 
-| Modell                                    | Use-Case   | Architektur           | Tokenizer             | Output-Dim |
-|-------------------------------------------|------------|-----------------------|-----------------------|------------|
-| `intfloat/multilingual-e5-base`           | Embedding  | XLM-RoBERTa-base      | SentencePiece (XLM-R) | 768        |
-| `intfloat/multilingual-e5-large`          | Embedding  | XLM-RoBERTa-large     | SentencePiece (XLM-R) | 1024       |
-| `intfloat/multilingual-e5-large-instruct` | Embedding  | XLM-RoBERTa-large     | SentencePiece (XLM-R) | 1024       |
-| `danielheinz/e5-base-sts-en-de`           | Embedding  | XLM-RoBERTa-base      | SentencePiece (XLM-R) | 768        |
-| `BAAI/bge-m3`                             | Embedding  | XLM-RoBERTa-large     | SentencePiece (XLM-R) | 1024       |
-| `BAAI/bge-reranker-v2-m3`                 | Reranker   | XLM-RoBERTa-large     | SentencePiece (XLM-R) | 1 (Score)  |
-| sonstige XLM-R-basierte Reranker          | Reranker   | XLM-RoBERTa-base/large| SentencePiece (XLM-R) | 1 (Score)  |
+| Modell                                    | Use-Case  | Architektur            | Tokenizer             | Output-Dim |
+|-------------------------------------------|-----------|------------------------|-----------------------|------------|
+| `intfloat/multilingual-e5-base`           | Embedding | XLM-RoBERTa-base       | SentencePiece (XLM-R) | 768        |
+| `intfloat/multilingual-e5-large`          | Embedding | XLM-RoBERTa-large      | SentencePiece (XLM-R) | 1024       |
+| `intfloat/multilingual-e5-large-instruct` | Embedding | XLM-RoBERTa-large      | SentencePiece (XLM-R) | 1024       |
+| `danielheinz/e5-base-sts-en-de`           | Embedding | XLM-RoBERTa-base       | SentencePiece (XLM-R) | 768        |
+| `BAAI/bge-m3`                             | Embedding | XLM-RoBERTa-large      | SentencePiece (XLM-R) | 1024       |
+| `BAAI/bge-reranker-v2-m3`                 | Reranker  | XLM-RoBERTa-large      | SentencePiece (XLM-R) | 1 (Score)  |
+| sonstige XLM-R-basierte Reranker          | Reranker  | XLM-RoBERTa-base/large | SentencePiece (XLM-R) | 1 (Score)  |
 
 `multilingual-e5-large-instruct` ist bereits als `Status.PLANNED` in
-[`EmbeddingModelRegistry`](../directml-config/src/main/java/com/aresstack/windirectml/config/models/EmbeddingModelRegistry.java)
+[
+`EmbeddingModelRegistry`](../directml-config/src/main/java/com/aresstack/windirectml/config/models/EmbeddingModelRegistry.java)
 hinterlegt und gilt als Leitmodell für diese Linie.
 
 `danielheinz/e5-base-sts-en-de` wurde mit PR #56 von `SHIPPED` (WordPiece)
@@ -41,17 +42,17 @@ SentencePiece-Unigram (siehe
 
 ## Unterschiede zu BERT/WordPiece (heutiger Encoder-Pfad)
 
-| Aspekt              | BERT (heute)                          | XLM-RoBERTa (neu)                                       |
-|---------------------|---------------------------------------|---------------------------------------------------------|
-| Tokenizer           | WordPiece (`##`-Suffix, oft uncased)  | SentencePiece-Unigram (`▁`-Wortgrenze, cased, NFKC)     |
-| Vocab               | ~30 k                                 | 250 002 (XLM-R `sentencepiece.bpe.model`)               |
-| Spezial-Tokens      | `[CLS]`, `[SEP]`, `[PAD]`, `[UNK]`    | `<s>`, `</s>`, `<pad>`, `<unk>`, `<mask>`               |
-| Token-IDs Spezial   | 101 / 102 / 0 / 100                   | 0 / 2 / 1 / 3 / 250001                                  |
-| Segment-Embeddings  | 2 (`token_type_ids` ∈ {0,1})          | 1 (kein NSP, `token_type_ids` werden ignoriert)         |
-| Positions-Embed     | absolut, `position_ids` ab 0          | absolut, **`position_ids` ab `padding_idx+1 = 2`**      |
-| Pair-Encoding       | `[CLS] A [SEP] B [SEP]`               | `<s> A </s></s> B </s>` (doppeltes `</s>` als Separator)|
-| Pooling             | Mean + L2 (E5) / `[CLS]` (BGE BERT)   | Mean + L2 (E5/BGE-m3) / `<s>`-Pooling (BGE-reranker)    |
-| Gewichtsnamen       | `bert.encoder.layer.{i}.…`            | `roberta.encoder.layer.{i}.…` bzw. `model.…` (HF)       |
+| Aspekt             | BERT (heute)                         | XLM-RoBERTa (neu)                                        |
+|--------------------|--------------------------------------|----------------------------------------------------------|
+| Tokenizer          | WordPiece (`##`-Suffix, oft uncased) | SentencePiece-Unigram (`▁`-Wortgrenze, cased, NFKC)      |
+| Vocab              | ~30 k                                | 250 002 (XLM-R `sentencepiece.bpe.model`)                |
+| Spezial-Tokens     | `[CLS]`, `[SEP]`, `[PAD]`, `[UNK]`   | `<s>`, `</s>`, `<pad>`, `<unk>`, `<mask>`                |
+| Token-IDs Spezial  | 101 / 102 / 0 / 100                  | 0 / 2 / 1 / 3 / 250001                                   |
+| Segment-Embeddings | 2 (`token_type_ids` ∈ {0,1})         | 1 (kein NSP, `token_type_ids` werden ignoriert)          |
+| Positions-Embed    | absolut, `position_ids` ab 0         | absolut, **`position_ids` ab `padding_idx+1 = 2`**       |
+| Pair-Encoding      | `[CLS] A [SEP] B [SEP]`              | `<s> A </s></s> B </s>` (doppeltes `</s>` als Separator) |
+| Pooling            | Mean + L2 (E5) / `[CLS]` (BGE BERT)  | Mean + L2 (E5/BGE-m3) / `<s>`-Pooling (BGE-reranker)     |
+| Gewichtsnamen      | `bert.encoder.layer.{i}.…`           | `roberta.encoder.layer.{i}.…` bzw. `model.…` (HF)        |
 
 Die GPU-Kernels (LayerNorm, GEMM, Self-Attention, Mean-Pool, L2)
 funktionieren **unverändert**: XLM-R ist architektonisch ein RoBERTa,
@@ -145,12 +146,12 @@ Embedding-Logik wird parametrisiert.
 
 ## Eigener Tokenizer vs. externer Java-Tokenizer
 
-| Option                                                   | Pro                                                                 | Kontra                                                              |
-|----------------------------------------------------------|---------------------------------------------------------------------|---------------------------------------------------------------------|
-| Eigene Java-Implementierung (Unigram + NFKC)             | keine neue Abhängigkeit, Java-8-kompatibel, byte-identisch testbar  | ~600 LoC + Tests, NFKC-Tabellen erforderlich                        |
-| `ai.djl.huggingface:tokenizers` (Rust JNI über DJL)      | unterstützt jedes HF-Format inkl. bge-m3 out-of-the-box             | Native Binaries für Windows-x64 zusätzlich shippen, Lizenz prüfen   |
-| `com.robrua.nlp.deeplearning4j:deeplearning4j-nlp-…`     | reines Java                                                          | uralt, kein Unigram-Decoder, nicht XLM-R-tauglich                   |
-| HF `tokenizer.json` per Mini-Reader (kein SP-Protobuf)   | reicht für E5-multilingual + BGE-Varianten mit `tokenizer.json`     | greift nicht für reine `sentencepiece.bpe.model`-Distributionen     |
+| Option                                                 | Pro                                                                | Kontra                                                            |
+|--------------------------------------------------------|--------------------------------------------------------------------|-------------------------------------------------------------------|
+| Eigene Java-Implementierung (Unigram + NFKC)           | keine neue Abhängigkeit, Java-8-kompatibel, byte-identisch testbar | ~600 LoC + Tests, NFKC-Tabellen erforderlich                      |
+| `ai.djl.huggingface:tokenizers` (Rust JNI über DJL)    | unterstützt jedes HF-Format inkl. bge-m3 out-of-the-box            | Native Binaries für Windows-x64 zusätzlich shippen, Lizenz prüfen |
+| `com.robrua.nlp.deeplearning4j:deeplearning4j-nlp-…`   | reines Java                                                        | uralt, kein Unigram-Decoder, nicht XLM-R-tauglich                 |
+| HF `tokenizer.json` per Mini-Reader (kein SP-Protobuf) | reicht für E5-multilingual + BGE-Varianten mit `tokenizer.json`    | greift nicht für reine `sentencepiece.bpe.model`-Distributionen   |
 
 **Empfehlung:** *Eigener Java-Tokenizer*, der `tokenizer.json` (HF-Format)
 parst. Begründung: Sidecar und Java-8-Client bleiben dependency-arm,
@@ -160,18 +161,18 @@ Pfad kann nachgereicht werden, ist aber nicht release-relevant.
 
 ## Aufwandsschätzung
 
-| Arbeitspaket                                              | Aufwand   |
-|-----------------------------------------------------------|-----------|
-| `EncoderArchitecture`-Abstraktion + BERT-Refactor         | 1 PT      |
-| `SentencePieceUnigramTokenizer` (inkl. NFKC, Viterbi)     | 2–3 PT    |
-| `tokenizer.json`-Reader (Unigram-Variante)                | 1 PT      |
-| XLM-R-Embedding-Schicht (`positionIdsOffset = 2`)         | 0.5 PT    |
-| Gewichts-Loader (`roberta.*` / `model.*` Präfixe)         | 0.5 PT    |
-| Reranker-Pair-Encoding `</s></s>`                         | 0.5 PT    |
-| Parity-Tests gegen HF (CPU-Referenz, je Modell)           | 1 PT      |
-| Integration in Sidecar + Registry + Workbench-Dropdown    | 1 PT      |
-| Dokumentation + Smoke-Run                                 | 0.5 PT    |
-| **Summe**                                                 | **~8–9 PT**|
+| Arbeitspaket                                           | Aufwand     |
+|--------------------------------------------------------|-------------|
+| `EncoderArchitecture`-Abstraktion + BERT-Refactor      | 1 PT        |
+| `SentencePieceUnigramTokenizer` (inkl. NFKC, Viterbi)  | 2–3 PT      |
+| `tokenizer.json`-Reader (Unigram-Variante)             | 1 PT        |
+| XLM-R-Embedding-Schicht (`positionIdsOffset = 2`)      | 0.5 PT      |
+| Gewichts-Loader (`roberta.*` / `model.*` Präfixe)      | 0.5 PT      |
+| Reranker-Pair-Encoding `</s></s>`                      | 0.5 PT      |
+| Parity-Tests gegen HF (CPU-Referenz, je Modell)        | 1 PT        |
+| Integration in Sidecar + Registry + Workbench-Dropdown | 1 PT        |
+| Dokumentation + Smoke-Run                              | 0.5 PT      |
+| **Summe**                                              | **~8–9 PT** |
 
 Skaliert bge-m3 (gleicher Stack) und bge-reranker-v2-m3 mit
 vernachlässigbarem Zusatzaufwand (nur Pooling-/Head-Wahl).

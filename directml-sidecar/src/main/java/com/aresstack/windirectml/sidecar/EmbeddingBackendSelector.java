@@ -145,11 +145,11 @@ public final class EmbeddingBackendSelector {
      * Select and load the embedding model using the public {@link LocalMlRuntime}
      * facade. This is the production path used by the sidecar entry point.
      *
-     * @param mode       backend mode (cpu/directml/auto)
-     * @param modelDir   model directory
-     * @param family     embedding family ("minilm" or "e5")
-     * @param e5Variant  E5 variant (required for e5 family, null otherwise)
-     * @param prefix     optional E5 prefix
+     * @param mode      backend mode (cpu/directml/auto)
+     * @param modelDir  model directory
+     * @param family    embedding family ("minilm" or "e5")
+     * @param e5Variant E5 variant (required for e5 family, null otherwise)
+     * @param prefix    optional E5 prefix
      * @return selection with loaded model, backend name, and fallback info
      */
     public static Selection selectViaRuntime(Mode mode, Path modelDir, String family,

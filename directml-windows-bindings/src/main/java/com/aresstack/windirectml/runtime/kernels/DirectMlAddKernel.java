@@ -273,14 +273,29 @@ public final class DirectMlAddKernel implements AutoCloseable {
     public void close() {
         if (closed) return;
         closed = true;
-        try { DxgiBindings.release(cmdRecorder); } catch (Exception ignored) {}
-        try { DxgiBindings.release(descriptorHeap); } catch (Exception ignored) {}
-        try { DxgiBindings.release(compiled); } catch (Exception ignored) {}
+        try {
+            DxgiBindings.release(cmdRecorder);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(descriptorHeap);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(compiled);
+        } catch (Exception ignored) {
+        }
         if (!persistBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(persistBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(persistBuffer);
+            } catch (Exception ignored) {
+            }
         }
         if (!tempBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(tempBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(tempBuffer);
+            } catch (Exception ignored) {
+            }
         }
         arena.close();
     }
@@ -331,6 +346,8 @@ public final class DirectMlAddKernel implements AutoCloseable {
         array.set(ValueLayout.ADDRESS, off + 8, bb);
     }
 
-    public int elementCount() { return elementCount; }
+    public int elementCount() {
+        return elementCount;
+    }
 }
 

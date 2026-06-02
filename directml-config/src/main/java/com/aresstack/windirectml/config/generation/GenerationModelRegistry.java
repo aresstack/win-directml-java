@@ -30,11 +30,17 @@ import java.util.Map;
  */
 public final class GenerationModelRegistry {
 
-    /** Architecture family of the generation model. */
+    /**
+     * Architecture family of the generation model.
+     */
     public enum Architecture {
-        /** Autoregressive decoder-only (Phi-3, Qwen, Llama, GPT). */
+        /**
+         * Autoregressive decoder-only (Phi-3, Qwen, Llama, GPT).
+         */
         CAUSAL_LM,
-        /** Encoder-decoder / sequence-to-sequence (T5, BART). */
+        /**
+         * Encoder-decoder / sequence-to-sequence (T5, BART).
+         */
         SEQ2SEQ;
 
         public String token() {
@@ -42,15 +48,25 @@ public final class GenerationModelRegistry {
         }
     }
 
-    /** Release-status of the runtime support for the model. */
+    /**
+     * Release-status of the runtime support for the model.
+     */
     public enum Status {
-        /** Fully supported and tested. */
+        /**
+         * Fully supported and tested.
+         */
         SHIPPED,
-        /** Partially working, may have limitations. */
+        /**
+         * Partially working, may have limitations.
+         */
         EXPERIMENTAL,
-        /** Metadata only; runtime not yet implemented. */
+        /**
+         * Metadata only; runtime not yet implemented.
+         */
         PLANNED,
-        /** Not supported by this project. */
+        /**
+         * Not supported by this project.
+         */
         UNSUPPORTED;
 
         public String token() {
@@ -104,21 +120,48 @@ public final class GenerationModelRegistry {
             this.notes = notes;
         }
 
-        public String modelId() { return modelId; }
-        public Architecture architecture() { return architecture; }
-        public String provider() { return provider; }
-        public String parameterSize() { return parameterSize; }
-        public ChatTemplate chatTemplate() { return chatTemplate; }
-        public Status status() { return status; }
-        public List<String> modelDirHints() { return modelDirHints; }
-        public String notes() { return notes; }
+        public String modelId() {
+            return modelId;
+        }
 
-        /** Whether the model is a causal (decoder-only) language model. */
+        public Architecture architecture() {
+            return architecture;
+        }
+
+        public String provider() {
+            return provider;
+        }
+
+        public String parameterSize() {
+            return parameterSize;
+        }
+
+        public ChatTemplate chatTemplate() {
+            return chatTemplate;
+        }
+
+        public Status status() {
+            return status;
+        }
+
+        public List<String> modelDirHints() {
+            return modelDirHints;
+        }
+
+        public String notes() {
+            return notes;
+        }
+
+        /**
+         * Whether the model is a causal (decoder-only) language model.
+         */
         public boolean isCausalLM() {
             return architecture == Architecture.CAUSAL_LM;
         }
 
-        /** Whether the model has an active runtime (shipped or experimental). */
+        /**
+         * Whether the model has an active runtime (shipped or experimental).
+         */
         public boolean isRunnable() {
             return status == Status.SHIPPED || status == Status.EXPERIMENTAL;
         }
@@ -211,7 +254,9 @@ public final class GenerationModelRegistry {
         // utility class
     }
 
-    /** All known generation model entries in declaration order. */
+    /**
+     * All known generation model entries in declaration order.
+     */
     public static List<Entry> entries() {
         return ENTRIES;
     }

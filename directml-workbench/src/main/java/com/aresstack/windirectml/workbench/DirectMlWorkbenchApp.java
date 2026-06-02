@@ -10,12 +10,14 @@ import javax.swing.*;
  */
 public final class DirectMlWorkbenchApp {
 
-    private DirectMlWorkbenchApp() {}
+    private DirectMlWorkbenchApp() {
+    }
 
     public static void main(String[] args) {
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         SwingUtilities.invokeLater(() -> {
             var frame = new WorkbenchFrame();

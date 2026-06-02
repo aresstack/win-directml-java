@@ -34,17 +34,45 @@ public final class ModelExpectation {
         this.notReadyReason = builder.notReadyReason;
     }
 
-    public String getLabel() { return label; }
-    public List<String> getRequiredFiles() { return requiredFiles; }
-    public List<List<String>> getEitherOfFiles() { return eitherOfFiles; }
-    public Integer getHiddenSize() { return hiddenSize; }
-    public Integer getLayers() { return layers; }
-    public Integer getHeads() { return heads; }
-    public String getTokenizerType() { return tokenizerType; }
-    public boolean isReady() { return ready; }
-    public String getNotReadyReason() { return notReadyReason; }
+    public String getLabel() {
+        return label;
+    }
 
-    public static Builder builder(String label) { return new Builder(label); }
+    public List<String> getRequiredFiles() {
+        return requiredFiles;
+    }
+
+    public List<List<String>> getEitherOfFiles() {
+        return eitherOfFiles;
+    }
+
+    public Integer getHiddenSize() {
+        return hiddenSize;
+    }
+
+    public Integer getLayers() {
+        return layers;
+    }
+
+    public Integer getHeads() {
+        return heads;
+    }
+
+    public String getTokenizerType() {
+        return tokenizerType;
+    }
+
+    public boolean isReady() {
+        return ready;
+    }
+
+    public String getNotReadyReason() {
+        return notReadyReason;
+    }
+
+    public static Builder builder(String label) {
+        return new Builder(label);
+    }
 
     public static final class Builder {
         private final String label;
@@ -57,7 +85,9 @@ public final class ModelExpectation {
         private boolean ready = true;
         private String notReadyReason;
 
-        private Builder(String label) { this.label = label == null ? "model" : label; }
+        private Builder(String label) {
+            this.label = label == null ? "model" : label;
+        }
 
         public Builder require(String... files) {
             requiredFiles.addAll(Arrays.asList(files));
@@ -87,6 +117,8 @@ public final class ModelExpectation {
             return this;
         }
 
-        public ModelExpectation build() { return new ModelExpectation(this); }
+        public ModelExpectation build() {
+            return new ModelExpectation(this);
+        }
     }
 }

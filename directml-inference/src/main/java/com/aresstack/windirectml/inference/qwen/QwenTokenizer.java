@@ -86,13 +86,19 @@ public final class QwenTokenizer {
 
     // ── Special token IDs (Qwen2.5-Coder-Instruct) ───────────────────────
 
-    /** End-of-text token ID. */
+    /**
+     * End-of-text token ID.
+     */
     public static final int ENDOFTEXT_ID = 151643;
 
-    /** ChatML start marker: {@code <|im_start|>}. */
+    /**
+     * ChatML start marker: {@code <|im_start|>}.
+     */
     public static final int IM_START_ID = 151644;
 
-    /** ChatML end marker: {@code <|im_end|>}. */
+    /**
+     * ChatML end marker: {@code <|im_end|>}.
+     */
     public static final int IM_END_ID = 151645;
 
     // ── Internal state ───────────────────────────────────────────────────
@@ -342,7 +348,7 @@ public final class QwenTokenizer {
     /**
      * Decode token IDs back to text.
      *
-     * @param ids array of token IDs
+     * @param ids               array of token IDs
      * @param skipSpecialTokens if true, special tokens such as
      *                          {@code <|im_start|>/<|im_end|>} are omitted
      * @return decoded text string
@@ -385,10 +391,16 @@ public final class QwenTokenizer {
 
     // ── Utility ──────────────────────────────────────────────────────────
 
-    /** Returns the vocabulary size. */
-    public int vocabSize() { return vocabSize; }
+    /**
+     * Returns the vocabulary size.
+     */
+    public int vocabSize() {
+        return vocabSize;
+    }
 
-    /** Returns an unmodifiable view of the special tokens map (for debugging). */
+    /**
+     * Returns an unmodifiable view of the special tokens map (for debugging).
+     */
     public Map<String, Integer> specialTokensMap() {
         return Collections.unmodifiableMap(specialTokens);
     }

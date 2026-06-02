@@ -27,7 +27,9 @@ import java.util.Objects;
  */
 public final class BertCpuEncoderWeights {
 
-    /** Order of prefix candidates probed when resolving tensor names. */
+    /**
+     * Order of prefix candidates probed when resolving tensor names.
+     */
     public static final String[] PREFIX_CANDIDATES = {
             "",
             "0.auto_model.",
@@ -59,9 +61,13 @@ public final class BertCpuEncoderWeights {
         this.layers = List.copyOf(layers);
     }
 
-    public BertEncoderConfig config() { return config; }
+    public BertEncoderConfig config() {
+        return config;
+    }
 
-    /** Test-only factory accepting synthetic weights. */
+    /**
+     * Test-only factory accepting synthetic weights.
+     */
     public static BertCpuEncoderWeights forTesting(BertEncoderConfig cfg,
                                                    float[] we, float[] pe, float[] tte,
                                                    float[] elng, float[] elnb,
@@ -91,8 +97,8 @@ public final class BertCpuEncoderWeights {
         cfg.validate();
         String prefix = detectPrefix(reader, "embeddings.word_embeddings.weight");
 
-        float[] we  = readFloats(reader, prefix + "embeddings.word_embeddings.weight");
-        float[] pe  = readFloats(reader, prefix + "embeddings.position_embeddings.weight");
+        float[] we = readFloats(reader, prefix + "embeddings.word_embeddings.weight");
+        float[] pe = readFloats(reader, prefix + "embeddings.position_embeddings.weight");
         float[] tte = readFloats(reader, prefix + "embeddings.token_type_embeddings.weight");
         float[] elng = readFloats(reader, prefix + "embeddings.LayerNorm.weight");
         float[] elnb = readFloats(reader, prefix + "embeddings.LayerNorm.bias");

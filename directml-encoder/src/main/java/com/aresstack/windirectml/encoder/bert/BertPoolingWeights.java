@@ -17,7 +17,8 @@ import com.aresstack.windirectml.encoder.PoolingStrategy;
  */
 public final class BertPoolingWeights {
 
-    private BertPoolingWeights() {}
+    private BertPoolingWeights() {
+    }
 
     /**
      * Build the pooling weight vector for {@link PoolingStrategy#MEAN}.

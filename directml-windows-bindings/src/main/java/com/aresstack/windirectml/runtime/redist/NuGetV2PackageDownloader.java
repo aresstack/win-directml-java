@@ -1,4 +1,4 @@
- package com.aresstack.windirectml.runtime.redist;
+package com.aresstack.windirectml.runtime.redist;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,7 +38,9 @@ public final class NuGetV2PackageDownloader implements NuGetPackageDownloader {
                 .build());
     }
 
-    /** Test seam: lets tests inject a stub {@link HttpClient}. */
+    /**
+     * Test seam: lets tests inject a stub {@link HttpClient}.
+     */
     public NuGetV2PackageDownloader(HttpClient httpClient) {
         this.httpClient = httpClient;
     }

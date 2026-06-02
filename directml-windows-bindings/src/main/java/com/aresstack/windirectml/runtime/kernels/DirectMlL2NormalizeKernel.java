@@ -164,9 +164,18 @@ public final class DirectMlL2NormalizeKernel implements L2NormalizeKernel, AutoC
             if (divMini != null) closeMiniOp(divMini);
             if (sqrtMini != null) closeMiniOp(sqrtMini);
             if (gemmOp != null) closeMiniOp(gemmOp);
-            if (!n.equals(MemorySegment.NULL)) try { DxgiBindings.release(n); } catch (Exception ignored) {}
-            if (!s.equals(MemorySegment.NULL)) try { DxgiBindings.release(s); } catch (Exception ignored) {}
-            if (!recorder.equals(MemorySegment.NULL)) try { DxgiBindings.release(recorder); } catch (Exception ignored) {}
+            if (!n.equals(MemorySegment.NULL)) try {
+                DxgiBindings.release(n);
+            } catch (Exception ignored) {
+            }
+            if (!s.equals(MemorySegment.NULL)) try {
+                DxgiBindings.release(s);
+            } catch (Exception ignored) {
+            }
+            if (!recorder.equals(MemorySegment.NULL)) try {
+                DxgiBindings.release(recorder);
+            } catch (Exception ignored) {
+            }
             arena.close();
             throw new DirectMlRuntimeException("Failed to build DirectMlL2NormalizeKernel" + dbg, e);
         }
@@ -539,24 +548,45 @@ public final class DirectMlL2NormalizeKernel implements L2NormalizeKernel, AutoC
     public void close() {
         if (closed) return;
         closed = true;
-        try { DxgiBindings.release(cmdRecorder); } catch (Exception ignored) {}
+        try {
+            DxgiBindings.release(cmdRecorder);
+        } catch (Exception ignored) {
+        }
         closeMiniOp(divideOp);
         closeMiniOp(sqrtOp);
         closeMiniOp(sumSqOp);
-        if (!nBuf.equals(MemorySegment.NULL)) try { DxgiBindings.release(nBuf); } catch (Exception ignored) {}
-        if (!sBuf.equals(MemorySegment.NULL)) try { DxgiBindings.release(sBuf); } catch (Exception ignored) {}
+        if (!nBuf.equals(MemorySegment.NULL)) try {
+            DxgiBindings.release(nBuf);
+        } catch (Exception ignored) {
+        }
+        if (!sBuf.equals(MemorySegment.NULL)) try {
+            DxgiBindings.release(sBuf);
+        } catch (Exception ignored) {
+        }
         arena.close();
     }
 
     private static void closeMiniOp(MiniOp m) {
         if (m == null) return;
-        try { DxgiBindings.release(m.descriptorHeap); } catch (Exception ignored) {}
-        try { DxgiBindings.release(m.compiled); }      catch (Exception ignored) {}
+        try {
+            DxgiBindings.release(m.descriptorHeap);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(m.compiled);
+        } catch (Exception ignored) {
+        }
         if (!m.persistBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(m.persistBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(m.persistBuffer);
+            } catch (Exception ignored) {
+            }
         }
         if (!m.tempBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(m.tempBuffer); }    catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(m.tempBuffer);
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -628,8 +658,12 @@ public final class DirectMlL2NormalizeKernel implements L2NormalizeKernel, AutoC
         array.set(ValueLayout.ADDRESS, off + 8, bb);
     }
 
-    public int elementCount() { return N; }
+    public int elementCount() {
+        return N;
+    }
 
-    public float epsilon() { return epsilon; }
+    public float epsilon() {
+        return epsilon;
+    }
 }
 

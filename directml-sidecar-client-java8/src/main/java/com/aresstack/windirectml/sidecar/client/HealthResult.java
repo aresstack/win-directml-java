@@ -133,9 +133,17 @@ public final class HealthResult {
         return lastError;
     }
 
-    public String getRerankerBackend() { return rerankerBackend; }
-    public boolean isRerankerReady() { return rerankerReady; }
-    public String getRerankerModel() { return rerankerModel; }
+    public String getRerankerBackend() {
+        return rerankerBackend;
+    }
+
+    public boolean isRerankerReady() {
+        return rerankerReady;
+    }
+
+    public String getRerankerModel() {
+        return rerankerModel;
+    }
 
     /**
      * {@code true} when the embedding backend was selected via {@code auto}
@@ -144,16 +152,36 @@ public final class HealthResult {
      * for the human-readable reason. Always {@code false} for forced modes
      * ({@code cpu}/{@code directml}) – those fail hard instead.
      */
-    public boolean isEmbeddingFallback() { return embeddingFallback; }
-    public String getEmbeddingFallbackReason() { return embeddingFallbackReason; }
+    public boolean isEmbeddingFallback() {
+        return embeddingFallback;
+    }
 
-    /** See {@link #isEmbeddingFallback()}; same semantics for the reranker. */
-    public boolean isRerankerFallback() { return rerankerFallback; }
-    public String getRerankerFallbackReason() { return rerankerFallbackReason; }
+    public String getEmbeddingFallbackReason() {
+        return embeddingFallbackReason;
+    }
 
-    public boolean isSummarizerReady() { return summarizerReady; }
-    public String getSummarizerBackend() { return summarizerBackend; }
-    public String getSummarizerModel() { return summarizerModel; }
+    /**
+     * See {@link #isEmbeddingFallback()}; same semantics for the reranker.
+     */
+    public boolean isRerankerFallback() {
+        return rerankerFallback;
+    }
+
+    public String getRerankerFallbackReason() {
+        return rerankerFallbackReason;
+    }
+
+    public boolean isSummarizerReady() {
+        return summarizerReady;
+    }
+
+    public String getSummarizerBackend() {
+        return summarizerBackend;
+    }
+
+    public String getSummarizerModel() {
+        return summarizerModel;
+    }
 
     public String getRaw() {
         return raw;

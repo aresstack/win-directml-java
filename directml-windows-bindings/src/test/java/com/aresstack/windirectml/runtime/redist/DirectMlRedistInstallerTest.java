@@ -36,7 +36,7 @@ class DirectMlRedistInstallerTest {
                 zip.write(dllPayload);
                 zip.closeEntry();
                 zip.putNextEntry(new ZipEntry("bin/arm64-win/DirectML.dll"));
-                zip.write(new byte[]{ 0, 1, 2 });
+                zip.write(new byte[]{0, 1, 2});
                 zip.closeEntry();
                 zip.putNextEntry(new ZipEntry("include/DirectML.h"));
                 zip.write("// header".getBytes(StandardCharsets.UTF_8));

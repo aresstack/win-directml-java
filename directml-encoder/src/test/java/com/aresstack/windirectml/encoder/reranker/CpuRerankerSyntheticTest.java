@@ -23,31 +23,66 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CpuRerankerSyntheticTest {
 
     private static final class TinyPairTokenizer implements EncoderTokenizer {
-        @Override public Encoded encode(String text) { return encodePair(text, ""); }
+        @Override
+        public Encoded encode(String text) {
+            return encodePair(text, "");
+        }
+
         @Override
         public Encoded encodePair(String a, String b) {
             int[] aIds = idsFor(a);
             int[] bIds = idsFor(b);
             int n = 1 + aIds.length + 1 + bIds.length + 1;
-            int[] ids = new int[n]; int[] mask = new int[n]; int[] seg = new int[n];
-            int p = 0; ids[p++] = 2;
-            for (int x : aIds) { ids[p] = x; seg[p] = 0; p++; }
-            ids[p] = 3; seg[p] = 0; p++;
-            for (int x : bIds) { ids[p] = x; seg[p] = 1; p++; }
-            ids[p] = 3; seg[p] = 1;
+            int[] ids = new int[n];
+            int[] mask = new int[n];
+            int[] seg = new int[n];
+            int p = 0;
+            ids[p++] = 2;
+            for (int x : aIds) {
+                ids[p] = x;
+                seg[p] = 0;
+                p++;
+            }
+            ids[p] = 3;
+            seg[p] = 0;
+            p++;
+            for (int x : bIds) {
+                ids[p] = x;
+                seg[p] = 1;
+                p++;
+            }
+            ids[p] = 3;
+            seg[p] = 1;
             for (int i = 0; i < n; i++) mask[i] = 1;
             return new Encoded(ids, mask, seg);
         }
+
         private int[] idsFor(String t) {
             int n = Math.min(t.length(), 5);
             int[] out = new int[n];
             for (int i = 0; i < n; i++) out[i] = 4 + (t.charAt(i) % 20);
             return out;
         }
-        @Override public int padTokenId() { return 0; }
-        @Override public int clsTokenId() { return 2; }
-        @Override public int sepTokenId() { return 3; }
-        @Override public int vocabSize()  { return 32; }
+
+        @Override
+        public int padTokenId() {
+            return 0;
+        }
+
+        @Override
+        public int clsTokenId() {
+            return 2;
+        }
+
+        @Override
+        public int sepTokenId() {
+            return 3;
+        }
+
+        @Override
+        public int vocabSize() {
+            return 32;
+        }
     }
 
     private static BertEncoderConfig cfg() {
@@ -77,7 +112,7 @@ class CpuRerankerSyntheticTest {
         BertCpuEncoderWeights bert = BertCpuEncoderWeights.forTesting(c, we, pe, tte,
                 ones(H), zeros(H), layers);
         return new RerankerCpuWeights(bert, rand(r, H, 0.1f),
-                new float[]{ (float) (r.nextGaussian() * 0.01) }, 1);
+                new float[]{(float) (r.nextGaussian() * 0.01)}, 1);
     }
 
     @Test
@@ -126,7 +161,15 @@ class CpuRerankerSyntheticTest {
         for (int i = 0; i < n; i++) a[i] = (float) (r.nextGaussian() * s);
         return a;
     }
-    private static float[] ones(int n) { float[] a = new float[n]; Arrays.fill(a, 1f); return a; }
-    private static float[] zeros(int n) { return new float[n]; }
+
+    private static float[] ones(int n) {
+        float[] a = new float[n];
+        Arrays.fill(a, 1f);
+        return a;
+    }
+
+    private static float[] zeros(int n) {
+        return new float[n];
+    }
 }
 

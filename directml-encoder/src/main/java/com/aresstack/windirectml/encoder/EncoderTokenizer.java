@@ -43,7 +43,9 @@ public interface EncoderTokenizer {
      * @param tokenTypeIds  segment ids; {@code null} for single-segment models.
      */
     record Encoded(int[] inputIds, int[] attentionMask, int[] tokenTypeIds) {
-        public int length() { return inputIds.length; }
+        public int length() {
+            return inputIds.length;
+        }
     }
 }
 

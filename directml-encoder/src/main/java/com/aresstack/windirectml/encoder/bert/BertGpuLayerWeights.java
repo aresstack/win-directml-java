@@ -24,22 +24,22 @@ public record BertGpuLayerWeights(
         GpuBuffer outLnGamma, GpuBuffer outLnBeta
 ) {
     public BertGpuLayerWeights {
-        Objects.requireNonNull(qWeight,        "qWeight");
-        Objects.requireNonNull(qBias,          "qBias");
-        Objects.requireNonNull(kWeight,        "kWeight");
-        Objects.requireNonNull(kBias,          "kBias");
-        Objects.requireNonNull(vWeight,        "vWeight");
-        Objects.requireNonNull(vBias,          "vBias");
-        Objects.requireNonNull(attnOutWeight,  "attnOutWeight");
-        Objects.requireNonNull(attnOutBias,    "attnOutBias");
-        Objects.requireNonNull(attnLnGamma,    "attnLnGamma");
-        Objects.requireNonNull(attnLnBeta,     "attnLnBeta");
+        Objects.requireNonNull(qWeight, "qWeight");
+        Objects.requireNonNull(qBias, "qBias");
+        Objects.requireNonNull(kWeight, "kWeight");
+        Objects.requireNonNull(kBias, "kBias");
+        Objects.requireNonNull(vWeight, "vWeight");
+        Objects.requireNonNull(vBias, "vBias");
+        Objects.requireNonNull(attnOutWeight, "attnOutWeight");
+        Objects.requireNonNull(attnOutBias, "attnOutBias");
+        Objects.requireNonNull(attnLnGamma, "attnLnGamma");
+        Objects.requireNonNull(attnLnBeta, "attnLnBeta");
         Objects.requireNonNull(mlpInterWeight, "mlpInterWeight");
-        Objects.requireNonNull(mlpInterBias,   "mlpInterBias");
-        Objects.requireNonNull(mlpOutWeight,   "mlpOutWeight");
-        Objects.requireNonNull(mlpOutBias,     "mlpOutBias");
-        Objects.requireNonNull(outLnGamma,     "outLnGamma");
-        Objects.requireNonNull(outLnBeta,      "outLnBeta");
+        Objects.requireNonNull(mlpInterBias, "mlpInterBias");
+        Objects.requireNonNull(mlpOutWeight, "mlpOutWeight");
+        Objects.requireNonNull(mlpOutBias, "mlpOutBias");
+        Objects.requireNonNull(outLnGamma, "outLnGamma");
+        Objects.requireNonNull(outLnBeta, "outLnBeta");
     }
 }
 

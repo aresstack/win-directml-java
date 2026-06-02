@@ -105,8 +105,14 @@ public class MnistDirectMlEngine implements InferenceEngine {
     @Override
     public void shutdown() {
         ready = false;
-        if (pipeline != null) { pipeline.close(); pipeline = null; }
-        if (bindings != null) { bindings.close(); bindings = null; }
+        if (pipeline != null) {
+            pipeline.close();
+            pipeline = null;
+        }
+        if (bindings != null) {
+            bindings.close();
+            bindings = null;
+        }
         log.info("MnistDirectMlEngine shut down");
     }
 

@@ -16,9 +16,12 @@ public final class Phi3ComputeShaders {
 
     private static final Logger log = LoggerFactory.getLogger(Phi3ComputeShaders.class);
 
-    private Phi3ComputeShaders() {}
+    private Phi3ComputeShaders() {
+    }
 
-    /** Thread group size for all element-wise shaders. */
+    /**
+     * Thread group size for all element-wise shaders.
+     */
     public static final int GROUP_SIZE = 256;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -60,7 +63,7 @@ public final class Phi3ComputeShaders {
             [numthreads(256, 1, 1)]
             void CSMain(uint3 dtid : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
                 float eps = asfloat(eps_bits);
-                
+            
                 // Phase 1: Compute partial sum of squares
                 float partial = 0.0;
                 for (uint i = gi; i < dim; i += 256) {
@@ -69,7 +72,7 @@ public final class Phi3ComputeShaders {
                 }
                 gs_sum[gi] = partial;
                 GroupMemoryBarrierWithGroupSync();
-                
+            
                 // Phase 2: Tree reduction
                 for (uint stride = 128; stride > 0; stride >>= 1) {
                     if (gi < stride) {
@@ -77,10 +80,10 @@ public final class Phi3ComputeShaders {
                     }
                     GroupMemoryBarrierWithGroupSync();
                 }
-                
+            
                 // Phase 3: Normalize — rms_inv = rsqrt(sum_sq / dim + eps)
                 float rms_inv = rsqrt(gs_sum[0] / (float)dim + eps);
-                
+            
                 // Phase 4: Apply normalization + weight
                 for (uint i = gi; i < dim; i += 256) {
                     float v = asfloat(Input.Load(i * 4));
@@ -138,7 +141,9 @@ public final class Phi3ComputeShaders {
     // Factory
     // ═══════════════════════════════════════════════════════════════════
 
-    /** Create all compute kernels needed for the Phi-3 V2.0 GPU pipeline. */
+    /**
+     * Create all compute kernels needed for the Phi-3 V2.0 GPU pipeline.
+     */
     public static ComputeKernelSet createAll(WindowsBindings wb, java.lang.foreign.MemorySegment cmdList)
             throws WindowsNativeException {
         long t0 = System.currentTimeMillis();

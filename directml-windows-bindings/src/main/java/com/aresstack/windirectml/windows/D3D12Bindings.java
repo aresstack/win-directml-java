@@ -15,7 +15,8 @@ public final class D3D12Bindings {
 
     private static final Logger log = LoggerFactory.getLogger(D3D12Bindings.class);
 
-    private D3D12Bindings() {}
+    private D3D12Bindings() {
+    }
 
     // ── D3D_FEATURE_LEVEL constants ──────────────────────────────────────
     public static final int D3D_FEATURE_LEVEL_11_0 = 0xb000;
@@ -24,35 +25,35 @@ public final class D3D12Bindings {
     public static final int D3D_FEATURE_LEVEL_12_1 = 0xc100;
 
     // ── D3D12 constants ──────────────────────────────────────────────────
-    public static final int D3D12_HEAP_TYPE_DEFAULT  = 1;
-    public static final int D3D12_HEAP_TYPE_UPLOAD   = 2;
+    public static final int D3D12_HEAP_TYPE_DEFAULT = 1;
+    public static final int D3D12_HEAP_TYPE_UPLOAD = 2;
     public static final int D3D12_HEAP_TYPE_READBACK = 3;
 
     public static final int D3D12_HEAP_FLAG_NONE = 0;
 
     public static final int D3D12_RESOURCE_DIMENSION_BUFFER = 1;
 
-    public static final int D3D12_RESOURCE_STATE_COMMON             = 0;
-    public static final int D3D12_RESOURCE_STATE_UNORDERED_ACCESS   = 0x8;
-    public static final int D3D12_RESOURCE_STATE_COPY_DEST          = 0x400;
-    public static final int D3D12_RESOURCE_STATE_COPY_SOURCE        = 0x800;
-    public static final int D3D12_RESOURCE_STATE_GENERIC_READ       = 0x1 | 0x2 | 0x40 | 0x80 | 0x200 | 0x800;
+    public static final int D3D12_RESOURCE_STATE_COMMON = 0;
+    public static final int D3D12_RESOURCE_STATE_UNORDERED_ACCESS = 0x8;
+    public static final int D3D12_RESOURCE_STATE_COPY_DEST = 0x400;
+    public static final int D3D12_RESOURCE_STATE_COPY_SOURCE = 0x800;
+    public static final int D3D12_RESOURCE_STATE_GENERIC_READ = 0x1 | 0x2 | 0x40 | 0x80 | 0x200 | 0x800;
 
-    public static final int D3D12_RESOURCE_FLAG_NONE                = 0;
+    public static final int D3D12_RESOURCE_FLAG_NONE = 0;
     public static final int D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS = 0x4;
 
-    public static final int D3D12_COMMAND_LIST_TYPE_DIRECT  = 0;
+    public static final int D3D12_COMMAND_LIST_TYPE_DIRECT = 0;
     public static final int D3D12_COMMAND_LIST_TYPE_COMPUTE = 2;
 
     public static final int D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV = 0;
-    public static final int D3D12_DESCRIPTOR_HEAP_FLAG_NONE          = 0;
+    public static final int D3D12_DESCRIPTOR_HEAP_FLAG_NONE = 0;
     public static final int D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE = 1;
 
     public static final int D3D12_FENCE_FLAG_NONE = 0;
 
     public static final int D3D12_RESOURCE_BARRIER_TYPE_TRANSITION = 0;
-    public static final int D3D12_RESOURCE_BARRIER_TYPE_UAV        = 2;
-    public static final int D3D12_RESOURCE_BARRIER_FLAG_NONE       = 0;
+    public static final int D3D12_RESOURCE_BARRIER_TYPE_UAV = 2;
+    public static final int D3D12_RESOURCE_BARRIER_FLAG_NONE = 0;
     public static final int D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES = 0xFFFFFFFF;
 
     public static final int DXGI_FORMAT_UNKNOWN = 0;
@@ -61,13 +62,13 @@ public final class D3D12Bindings {
 
     // ── ID3D12Device vtable slot indices ─────────────────────────────────
     // IUnknown: 0-2, ID3D12Object: 3-6, ID3D12Device starts at 7
-    static final int DEV_CREATE_COMMAND_QUEUE    = 8;
+    static final int DEV_CREATE_COMMAND_QUEUE = 8;
     static final int DEV_CREATE_COMMAND_ALLOCATOR = 9;
-    static final int DEV_CREATE_COMMAND_LIST     = 12;
-    static final int DEV_CREATE_DESCRIPTOR_HEAP  = 14;
+    static final int DEV_CREATE_COMMAND_LIST = 12;
+    static final int DEV_CREATE_DESCRIPTOR_HEAP = 14;
     static final int DEV_GET_DESCRIPTOR_INCREMENT = 15;
     static final int DEV_CREATE_COMMITTED_RESOURCE = 27;
-    static final int DEV_CREATE_FENCE            = 36;
+    static final int DEV_CREATE_FENCE = 36;
 
     // ── Function descriptor for D3D12CreateDevice ────────────────────────
     private static final FunctionDescriptor D3D12_CREATE_DEVICE_DESC =
@@ -111,8 +112,11 @@ public final class D3D12Bindings {
             MemorySegment device = ppDevice.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
             log.info("ID3D12Device created: {} (featureLevel=0x{})", device, Integer.toHexString(featureLevel));
             return device;
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("D3D12CreateDevice invocation failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("D3D12CreateDevice invocation failed", t);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -279,8 +283,11 @@ public final class D3D12Bindings {
             MemorySegment queue = ppQueue.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
             log.info("ID3D12CommandQueue created: {}", queue);
             return queue;
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateCommandQueue invocation failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateCommandQueue invocation failed", t);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -298,19 +305,27 @@ public final class D3D12Bindings {
             int hr = (int) mh.invokeExact(device, type, riid, pp);
             HResult.check(hr, "ID3D12Device::CreateCommandAllocator");
             return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateCommandAllocator failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateCommandAllocator failed", t);
+        }
     }
 
-    /** ID3D12CommandAllocator::Reset (vtable slot 8 on ID3D12CommandAllocator). */
+    /**
+     * ID3D12CommandAllocator::Reset (vtable slot 8 on ID3D12CommandAllocator).
+     */
     public static void resetCommandAllocator(MemorySegment allocator) throws WindowsNativeException {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(allocator, 8,
                     FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
             int hr = (int) mh.invokeExact(allocator);
             HResult.check(hr, "ID3D12CommandAllocator::Reset");
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CommandAllocator::Reset failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CommandAllocator::Reset failed", t);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -322,7 +337,7 @@ public final class D3D12Bindings {
      * The command list is created in the recording state.
      */
     public static MemorySegment createCommandList(MemorySegment device, int type,
-                                                   MemorySegment allocator, Arena arena)
+                                                  MemorySegment allocator, Arena arena)
             throws WindowsNativeException {
         try {
             MemorySegment riid = ComIID.allocateGuid(arena, ComIID.IID_ID3D12GraphicsCommandList_BYTES);
@@ -336,22 +351,32 @@ public final class D3D12Bindings {
                     MemorySegment.NULL, riid, pp);
             HResult.check(hr, "ID3D12Device::CreateCommandList");
             return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateCommandList failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateCommandList failed", t);
+        }
     }
 
-    /** ID3D12GraphicsCommandList::Close (vtable slot 9). */
+    /**
+     * ID3D12GraphicsCommandList::Close (vtable slot 9).
+     */
     public static void closeCommandList(MemorySegment cmdList) throws WindowsNativeException {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(cmdList, 9,
                     FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
             int hr = (int) mh.invokeExact(cmdList);
             HResult.check(hr, "ID3D12GraphicsCommandList::Close");
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CommandList::Close failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CommandList::Close failed", t);
+        }
     }
 
-    /** ID3D12GraphicsCommandList::Reset (vtable slot 10). */
+    /**
+     * ID3D12GraphicsCommandList::Reset (vtable slot 10).
+     */
     public static void resetCommandList(MemorySegment cmdList, MemorySegment allocator)
             throws WindowsNativeException {
         try {
@@ -360,13 +385,18 @@ public final class D3D12Bindings {
                             ValueLayout.ADDRESS, ValueLayout.ADDRESS));
             int hr = (int) mh.invokeExact(cmdList, allocator, MemorySegment.NULL);
             HResult.check(hr, "ID3D12GraphicsCommandList::Reset");
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CommandList::Reset failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CommandList::Reset failed", t);
+        }
     }
 
-    /** ID3D12GraphicsCommandList::CopyBufferRegion (vtable slot 15). */
+    /**
+     * ID3D12GraphicsCommandList::CopyBufferRegion (vtable slot 15).
+     */
     public static void copyBufferRegion(MemorySegment cmdList, MemorySegment dst, long dstOffset,
-                                         MemorySegment src, long srcOffset, long numBytes) {
+                                        MemorySegment src, long srcOffset, long numBytes) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(cmdList, 15,
                     FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS,
@@ -401,7 +431,7 @@ public final class D3D12Bindings {
      * Record a transition barrier on a resource.
      */
     public static void transitionBarrier(MemorySegment cmdList, MemorySegment resource,
-                                          int stateBefore, int stateAfter, Arena arena) {
+                                         int stateBefore, int stateAfter, Arena arena) {
         try {
             MemorySegment barrier = arena.allocate(32, 8);
             barrier.set(ValueLayout.JAVA_INT, 0, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION);
@@ -418,7 +448,9 @@ public final class D3D12Bindings {
         }
     }
 
-    /** ID3D12GraphicsCommandList::SetDescriptorHeaps (vtable slot 28). */
+    /**
+     * ID3D12GraphicsCommandList::SetDescriptorHeaps (vtable slot 28).
+     */
     public static void setDescriptorHeaps(MemorySegment cmdList, MemorySegment heap, Arena arena) {
         try {
             MemorySegment heapArray = arena.allocate(ValueLayout.ADDRESS);
@@ -447,8 +479,8 @@ public final class D3D12Bindings {
      * @return ID3D12Resource COM pointer
      */
     public static MemorySegment createBuffer(MemorySegment device, int heapType,
-                                              long sizeBytes, int resFlags, int initState,
-                                              Arena arena) throws WindowsNativeException {
+                                             long sizeBytes, int resFlags, int initState,
+                                             Arena arena) throws WindowsNativeException {
         try {
             // D3D12 needs minimum buffer size; DML commonly requires >= 4 bytes
             sizeBytes = Math.max(sizeBytes, 4);
@@ -484,11 +516,16 @@ public final class D3D12Bindings {
                     resDesc, initState, MemorySegment.NULL, riid, pp);
             HResult.check(hr, "ID3D12Device::CreateCommittedResource");
             return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateCommittedResource failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateCommittedResource failed", t);
+        }
     }
 
-    /** Create a default-heap buffer with UAV access (for DML tensor buffers). */
+    /**
+     * Create a default-heap buffer with UAV access (for DML tensor buffers).
+     */
     public static MemorySegment createDefaultBuffer(MemorySegment device, long size, Arena arena)
             throws WindowsNativeException {
         return createBuffer(device, D3D12_HEAP_TYPE_DEFAULT, size,
@@ -496,14 +533,18 @@ public final class D3D12Bindings {
                 D3D12_RESOURCE_STATE_COMMON, arena);
     }
 
-    /** Create an upload-heap buffer (CPU-writable, for uploading data to GPU). */
+    /**
+     * Create an upload-heap buffer (CPU-writable, for uploading data to GPU).
+     */
     public static MemorySegment createUploadBuffer(MemorySegment device, long size, Arena arena)
             throws WindowsNativeException {
         return createBuffer(device, D3D12_HEAP_TYPE_UPLOAD, size,
                 D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, arena);
     }
 
-    /** Create a readback-heap buffer (CPU-readable, for downloading results from GPU). */
+    /**
+     * Create a readback-heap buffer (CPU-readable, for downloading results from GPU).
+     */
     public static MemorySegment createReadbackBuffer(MemorySegment device, long size, Arena arena)
             throws WindowsNativeException {
         return createBuffer(device, D3D12_HEAP_TYPE_READBACK, size,
@@ -514,7 +555,9 @@ public final class D3D12Bindings {
     // Resource mapping (CPU read/write of upload/readback buffers)
     // ══════════════════════════════════════════════════════════════════════
 
-    /** ID3D12Resource::Map (vtable slot 8). Returns CPU-accessible pointer. */
+    /**
+     * ID3D12Resource::Map (vtable slot 8). Returns CPU-accessible pointer.
+     */
     public static MemorySegment mapResource(MemorySegment resource, Arena arena)
             throws WindowsNativeException {
         try {
@@ -525,11 +568,16 @@ public final class D3D12Bindings {
             int hr = (int) mh.invokeExact(resource, 0, MemorySegment.NULL, ppData);
             HResult.check(hr, "ID3D12Resource::Map");
             return ppData.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("Resource::Map failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("Resource::Map failed", t);
+        }
     }
 
-    /** ID3D12Resource::Unmap (vtable slot 9). */
+    /**
+     * ID3D12Resource::Unmap (vtable slot 9).
+     */
     public static void unmapResource(MemorySegment resource) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(resource, 9,
@@ -541,7 +589,9 @@ public final class D3D12Bindings {
         }
     }
 
-    /** ID3D12Resource::GetGPUVirtualAddress (vtable slot 11). Returns UINT64. */
+    /**
+     * ID3D12Resource::GetGPUVirtualAddress (vtable slot 11). Returns UINT64.
+     */
     public static long getGpuVirtualAddress(MemorySegment resource) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(resource, 11,
@@ -560,7 +610,7 @@ public final class D3D12Bindings {
      * Create a CBV/SRV/UAV descriptor heap (shader visible).
      */
     public static MemorySegment createDescriptorHeap(MemorySegment device, int numDescriptors,
-                                                      Arena arena) throws WindowsNativeException {
+                                                     Arena arena) throws WindowsNativeException {
         try {
             // D3D12_DESCRIPTOR_HEAP_DESC: {Type(4), NumDescriptors(4), Flags(4), NodeMask(4)} = 16 bytes
             MemorySegment desc = arena.allocate(16, 4);
@@ -577,11 +627,16 @@ public final class D3D12Bindings {
             int hr = (int) mh.invokeExact(device, desc, riid, pp);
             HResult.check(hr, "ID3D12Device::CreateDescriptorHeap");
             return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateDescriptorHeap failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateDescriptorHeap failed", t);
+        }
     }
 
-    /** ID3D12Device::GetDescriptorHandleIncrementSize (vtable slot 15). */
+    /**
+     * ID3D12Device::GetDescriptorHandleIncrementSize (vtable slot 15).
+     */
     public static int getDescriptorIncrementSize(MemorySegment device) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(device, DEV_GET_DESCRIPTOR_INCREMENT,
@@ -648,11 +703,16 @@ public final class D3D12Bindings {
             int hr = (int) mh.invokeExact(device, initialValue, D3D12_FENCE_FLAG_NONE, riid, pp);
             HResult.check(hr, "ID3D12Device::CreateFence");
             return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateFence failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateFence failed", t);
+        }
     }
 
-    /** ID3D12Fence::GetCompletedValue (vtable slot 8). */
+    /**
+     * ID3D12Fence::GetCompletedValue (vtable slot 8).
+     */
     public static long fenceGetCompletedValue(MemorySegment fence) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(fence, 8,
@@ -667,7 +727,9 @@ public final class D3D12Bindings {
     // Command queue operations
     // ══════════════════════════════════════════════════════════════════════
 
-    /** ID3D12CommandQueue::ExecuteCommandLists (vtable slot 10). */
+    /**
+     * ID3D12CommandQueue::ExecuteCommandLists (vtable slot 10).
+     */
     public static void executeCommandLists(MemorySegment queue, MemorySegment cmdList, Arena arena) {
         try {
             MemorySegment cmdLists = arena.allocate(ValueLayout.ADDRESS);
@@ -680,7 +742,9 @@ public final class D3D12Bindings {
         }
     }
 
-    /** ID3D12CommandQueue::Signal (vtable slot 14). */
+    /**
+     * ID3D12CommandQueue::Signal (vtable slot 14).
+     */
     public static void queueSignal(MemorySegment queue, MemorySegment fence, long value)
             throws WindowsNativeException {
         try {
@@ -689,8 +753,11 @@ public final class D3D12Bindings {
                             ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
             int hr = (int) mh.invokeExact(queue, fence, value);
             HResult.check(hr, "ID3D12CommandQueue::Signal");
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("Queue::Signal failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("Queue::Signal failed", t);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -707,7 +774,7 @@ public final class D3D12Bindings {
      * @throws WindowsNativeException if closing/executing fails or the fence times out
      */
     public static void executeAndWait(MemorySegment device, MemorySegment queue,
-                                       MemorySegment cmdList, Arena arena)
+                                      MemorySegment cmdList, Arena arena)
             throws WindowsNativeException {
         closeCommandList(cmdList);
         executeCommandLists(queue, cmdList, arena);
@@ -772,8 +839,8 @@ public final class D3D12Bindings {
      * which makes the resource-state transitions explicit.
      */
     public static void uploadFloats(MemorySegment device, MemorySegment queue,
-                                     MemorySegment dstResource, float[] data,
-                                     Arena arena) throws WindowsNativeException {
+                                    MemorySegment dstResource, float[] data,
+                                    Arena arena) throws WindowsNativeException {
         uploadFloatsInternal(device, queue, dstResource, data,
                 /*stateBefore*/ -1, /*stateAfter*/ -1, arena);
     }
@@ -874,8 +941,8 @@ public final class D3D12Bindings {
      * New code should use {@link #readbackFloatsExplicit}.
      */
     public static float[] readbackFloats(MemorySegment device, MemorySegment queue,
-                                          MemorySegment srcResource, int numFloats,
-                                          Arena arena) throws WindowsNativeException {
+                                         MemorySegment srcResource, int numFloats,
+                                         Arena arena) throws WindowsNativeException {
         return readbackFloatsInternal(device, queue, srcResource, numFloats,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS, arena);

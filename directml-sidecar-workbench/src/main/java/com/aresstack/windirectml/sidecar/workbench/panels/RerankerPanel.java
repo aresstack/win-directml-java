@@ -47,7 +47,11 @@ public final class RerankerPanel extends JPanel {
     private final DefaultTableModel resultModel = new DefaultTableModel(
             new Object[]{"rank", "score", "original index", "document"}, 0) {
         private static final long serialVersionUID = 1L;
-        @Override public boolean isCellEditable(int row, int col) { return false; }
+
+        @Override
+        public boolean isCellEditable(int row, int col) {
+            return false;
+        }
     };
     private final JTable resultTable = new JTable(resultModel);
 

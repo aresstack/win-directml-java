@@ -1,6 +1,7 @@
 # Model validation
 
-The model validator is a CPU-only pre-flight check for local model directories. It does not load weights into DirectML and does not require a GPU.
+The model validator is a CPU-only pre-flight check for local model directories. It does not load weights into DirectML
+and does not require a GPU.
 
 It checks:
 
@@ -46,14 +47,15 @@ java --enable-preview --enable-native-access=ALL-UNNAMED `
 
 Exit codes:
 
-| Code | Meaning |
-|---:|---|
-| `0` | All validation reports are OK. |
-| `4` | At least one validation report has an error. |
+| Code | Meaning                                      |
+|-----:|----------------------------------------------|
+|  `0` | All validation reports are OK.               |
+|  `4` | At least one validation report has an error. |
 
 ## Workbench
 
-The Config & Control tab has a **Validate Models** button. It runs the same Java-8 validator directly in the Workbench process, so it works without starting the sidecar and without DirectML.
+The Config & Control tab has a **Validate Models** button. It runs the same Java-8 validator directly in the Workbench
+process, so it works without starting the sidecar and without DirectML.
 
 ## E5 status
 
@@ -63,7 +65,9 @@ The WordPiece E5 variants currently validated as runnable are:
 - `base-v2`
 - `large-v2`
 
-`base-sts-en-de` is intentionally reported as not ready. The upstream checkpoint is XLM-R/SentencePiece-shaped, while the current runtime supports WordPiece E5 variants. The validator treats this as an error so users do not accidentally mount an incompatible model and debug it as a DirectML problem.
+`base-sts-en-de` is intentionally reported as not ready. The upstream checkpoint is XLM-R/SentencePiece-shaped, while
+the current runtime supports WordPiece E5 variants. The validator treats this as an error so users do not accidentally
+mount an incompatible model and debug it as a DirectML problem.
 
 ## Example output
 

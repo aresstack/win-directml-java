@@ -19,14 +19,22 @@ public record BertCpuLayerWeights(
         float[] outLnGamma, float[] outLnBeta
 ) {
     public BertCpuLayerWeights {
-        Objects.requireNonNull(qWeight);        Objects.requireNonNull(qBias);
-        Objects.requireNonNull(kWeight);        Objects.requireNonNull(kBias);
-        Objects.requireNonNull(vWeight);        Objects.requireNonNull(vBias);
-        Objects.requireNonNull(attnOutWeight);  Objects.requireNonNull(attnOutBias);
-        Objects.requireNonNull(attnLnGamma);    Objects.requireNonNull(attnLnBeta);
-        Objects.requireNonNull(mlpInterWeight); Objects.requireNonNull(mlpInterBias);
-        Objects.requireNonNull(mlpOutWeight);   Objects.requireNonNull(mlpOutBias);
-        Objects.requireNonNull(outLnGamma);     Objects.requireNonNull(outLnBeta);
+        Objects.requireNonNull(qWeight);
+        Objects.requireNonNull(qBias);
+        Objects.requireNonNull(kWeight);
+        Objects.requireNonNull(kBias);
+        Objects.requireNonNull(vWeight);
+        Objects.requireNonNull(vBias);
+        Objects.requireNonNull(attnOutWeight);
+        Objects.requireNonNull(attnOutBias);
+        Objects.requireNonNull(attnLnGamma);
+        Objects.requireNonNull(attnLnBeta);
+        Objects.requireNonNull(mlpInterWeight);
+        Objects.requireNonNull(mlpInterBias);
+        Objects.requireNonNull(mlpOutWeight);
+        Objects.requireNonNull(mlpOutBias);
+        Objects.requireNonNull(outLnGamma);
+        Objects.requireNonNull(outLnBeta);
     }
 }
 

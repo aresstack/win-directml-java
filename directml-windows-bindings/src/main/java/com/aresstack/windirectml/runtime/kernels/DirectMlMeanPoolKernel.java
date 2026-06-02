@@ -212,7 +212,7 @@ public final class DirectMlMeanPoolKernel implements MeanPoolingKernel, AutoClos
 
         MemorySegment dml = wb.getDmlDevice();
         MemorySegment dev = wb.getD3d12Device();
-        MemorySegment q   = wb.getCommandQueue();
+        MemorySegment q = wb.getCommandQueue();
 
         try (Arena scratch = Arena.ofConfined()) {
             long cpuStart = D3D12Bindings.getCpuDescriptorHandleForHeapStart(descriptorHeap, scratch);
@@ -276,14 +276,29 @@ public final class DirectMlMeanPoolKernel implements MeanPoolingKernel, AutoClos
     public void close() {
         if (closed) return;
         closed = true;
-        try { DxgiBindings.release(cmdRecorder); }    catch (Exception ignored) {}
-        try { DxgiBindings.release(descriptorHeap); } catch (Exception ignored) {}
-        try { DxgiBindings.release(compiled); }       catch (Exception ignored) {}
+        try {
+            DxgiBindings.release(cmdRecorder);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(descriptorHeap);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(compiled);
+        } catch (Exception ignored) {
+        }
         if (!persistBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(persistBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(persistBuffer);
+            } catch (Exception ignored) {
+            }
         }
         if (!tempBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(tempBuffer); }    catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(tempBuffer);
+            } catch (Exception ignored) {
+            }
         }
         arena.close();
     }
@@ -352,7 +367,12 @@ public final class DirectMlMeanPoolKernel implements MeanPoolingKernel, AutoClos
         array.set(ValueLayout.ADDRESS, off + 8, bb);
     }
 
-    public int seq()    { return S; }
-    public int hidden() { return H; }
+    public int seq() {
+        return S;
+    }
+
+    public int hidden() {
+        return H;
+    }
 }
 

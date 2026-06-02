@@ -23,19 +23,30 @@ public class InferenceResult {
         this.usage = usage;
     }
 
-    /** Convenience constructor without usage. */
+    /**
+     * Convenience constructor without usage.
+     */
     public InferenceResult(String text, String finishReason) {
         this(text, finishReason, null);
     }
 
-    public String getText() { return text; }
-    public String getFinishReason() { return finishReason; }
-    public Usage getUsage() { return usage; }
+    public String getText() {
+        return text;
+    }
+
+    public String getFinishReason() {
+        return finishReason;
+    }
+
+    public Usage getUsage() {
+        return usage;
+    }
 
     /**
      * Token usage statistics.
      */
-    public record Usage(int promptTokens, int completionTokens, int totalTokens) {}
+    public record Usage(int promptTokens, int completionTokens, int totalTokens) {
+    }
 
     @Override
     public String toString() {

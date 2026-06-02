@@ -9,7 +9,8 @@ package com.aresstack.windirectml.encoder.pooling;
  */
 public final class MeanPooling {
 
-    private MeanPooling() {}
+    private MeanPooling() {
+    }
 
     /**
      * Mean Pooling über die Sequenz-Dimension.

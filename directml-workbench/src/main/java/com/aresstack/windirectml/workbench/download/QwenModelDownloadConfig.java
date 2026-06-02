@@ -9,15 +9,15 @@ import java.util.List;
  * remote paths or filenames. Users can override via the Workbench settings submenu
  * or construct a custom config for testing alternative repos.</p>
  *
- * @param repo            Hugging Face repository identifier (e.g. "onnx-community/Qwen2.5-Coder-0.5B-Instruct")
- * @param onnxSubdir      subdirectory in the repo containing model.onnx and external data (e.g. "onnx")
- * @param modelFile       ONNX graph filename in the remote subdir (e.g. "model.onnx")
+ * @param repo             Hugging Face repository identifier (e.g. "onnx-community/Qwen2.5-Coder-0.5B-Instruct")
+ * @param onnxSubdir       subdirectory in the repo containing model.onnx and external data (e.g. "onnx")
+ * @param modelFile        ONNX graph filename in the remote subdir (e.g. "model.onnx")
  * @param externalDataFile external data filename in the remote subdir (e.g. "model.onnx_data")
- * @param localModelFile  local filename for the ONNX graph (e.g. "model.onnx")
- * @param localDataFile   local filename for the external data (e.g. "model.onnx_data")
- * @param rootFiles       config/tokenizer files at the repo root that are required
- * @param optionalFiles   optional files at the repo root (download is best-effort)
- * @param localDirName    local directory name under the model root
+ * @param localModelFile   local filename for the ONNX graph (e.g. "model.onnx")
+ * @param localDataFile    local filename for the external data (e.g. "model.onnx_data")
+ * @param rootFiles        config/tokenizer files at the repo root that are required
+ * @param optionalFiles    optional files at the repo root (download is best-effort)
+ * @param localDirName     local directory name under the model root
  */
 public record QwenModelDownloadConfig(
         String repo,
@@ -31,7 +31,9 @@ public record QwenModelDownloadConfig(
         String localDirName
 ) {
 
-    /** Default config for onnx-community/Qwen2.5-Coder-0.5B-Instruct (normal ONNX pair). */
+    /**
+     * Default config for onnx-community/Qwen2.5-Coder-0.5B-Instruct (normal ONNX pair).
+     */
     public static final QwenModelDownloadConfig DEFAULT = new QwenModelDownloadConfig(
             "onnx-community/Qwen2.5-Coder-0.5B-Instruct",
             "onnx",

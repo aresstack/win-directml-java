@@ -6,13 +6,13 @@ the existing embedding and reranking pipelines.
 
 ## Model Taxonomy
 
-| Category                      | Registry                   | Interface                  | Description                                                  |
-|-------------------------------|----------------------------|----------------------------|--------------------------------------------------------------|
-| **Embeddings**                | `EmbeddingModelRegistry`   | `EmbeddingModel`           | Encoder models mapping text → fixed-size vectors (MiniLM, E5, Jina). |
-| **Rerankers**                 | `EmbeddingModelRegistry`   | (cross-encoder)            | Cross-encoder models scoring query–document relevance.        |
-| **Decoder-only (Causal LM)** | `GenerationModelRegistry`  | `CausalLanguageModel`      | Autoregressive models generating text token-by-token (Phi-3, Qwen). |
-| **Seq2Seq generation**        | `GenerationModelRegistry`  | `TextGenerationModel`      | Encoder-decoder models (T5, BART). Future; issue #95.         |
-| **Summarizer**                | *(use-case adapter)*       | `Summarizer`               | Application-layer wrapper around a generation model with a fixed prompt. |
+| Category                     | Registry                  | Interface             | Description                                                              |
+|------------------------------|---------------------------|-----------------------|--------------------------------------------------------------------------|
+| **Embeddings**               | `EmbeddingModelRegistry`  | `EmbeddingModel`      | Encoder models mapping text → fixed-size vectors (MiniLM, E5, Jina).     |
+| **Rerankers**                | `EmbeddingModelRegistry`  | (cross-encoder)       | Cross-encoder models scoring query–document relevance.                   |
+| **Decoder-only (Causal LM)** | `GenerationModelRegistry` | `CausalLanguageModel` | Autoregressive models generating text token-by-token (Phi-3, Qwen).      |
+| **Seq2Seq generation**       | `GenerationModelRegistry` | `TextGenerationModel` | Encoder-decoder models (T5, BART). Future; issue #95.                    |
+| **Summarizer**               | *(use-case adapter)*      | `Summarizer`          | Application-layer wrapper around a generation model with a fixed prompt. |
 
 ## Key Design Decisions
 
@@ -73,13 +73,13 @@ GenerationModelRegistry      – static registry of known generation checkpoints
 
 ## Current Model States
 
-| Model                                    | Architecture | Status       | Notes                              |
-|------------------------------------------|--------------|--------------|------------------------------------|
-| microsoft/Phi-3-mini-4k-instruct-onnx    | CAUSAL_LM    | experimental | Active summarizer/generation backend |
-| microsoft/Phi-3.5-mini-instruct-onnx     | CAUSAL_LM    | planned      | Successor to Phi-3 Mini             |
-| Qwen/Qwen2.5-Coder-0.5B-Instruct        | CAUSAL_LM    | planned      | Workbench-visible CPU test path; not shipped |
-| Qwen/Qwen2.5-Coder-1.5B-Instruct        | CAUSAL_LM    | planned      | Scale-up candidate                  |
-| Qwen/Qwen2.5-Coder-3B-Instruct          | CAUSAL_LM    | planned      | Largest planned local deployment    |
+| Model                                 | Architecture | Status       | Notes                                        |
+|---------------------------------------|--------------|--------------|----------------------------------------------|
+| microsoft/Phi-3-mini-4k-instruct-onnx | CAUSAL_LM    | experimental | Active summarizer/generation backend         |
+| microsoft/Phi-3.5-mini-instruct-onnx  | CAUSAL_LM    | planned      | Successor to Phi-3 Mini                      |
+| Qwen/Qwen2.5-Coder-0.5B-Instruct      | CAUSAL_LM    | planned      | Workbench-visible CPU test path; not shipped |
+| Qwen/Qwen2.5-Coder-1.5B-Instruct      | CAUSAL_LM    | planned      | Scale-up candidate                           |
+| Qwen/Qwen2.5-Coder-3B-Instruct        | CAUSAL_LM    | planned      | Largest planned local deployment             |
 
 ## Workbench Integration
 

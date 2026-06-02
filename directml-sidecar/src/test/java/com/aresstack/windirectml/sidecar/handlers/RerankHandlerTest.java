@@ -25,11 +25,22 @@ class RerankHandlerTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** Stub reranker that just echoes a constant ranking. */
+    /**
+     * Stub reranker that just echoes a constant ranking.
+     */
     private static final class StubReranker implements Reranker {
         private final List<RerankRequest> seen = new ArrayList<>();
-        @Override public boolean isReady() { return true; }
-        @Override public String modelName() { return "stub/reranker"; }
+
+        @Override
+        public boolean isReady() {
+            return true;
+        }
+
+        @Override
+        public String modelName() {
+            return "stub/reranker";
+        }
+
         @Override
         public List<RerankResult> rerank(RerankRequest request) {
             seen.add(request);
@@ -42,7 +53,10 @@ class RerankHandlerTest {
             int top = request.effectiveTopN();
             return top >= out.size() ? out : out.subList(0, top);
         }
-        @Override public void close() {}
+
+        @Override
+        public void close() {
+        }
     }
 
     @Test

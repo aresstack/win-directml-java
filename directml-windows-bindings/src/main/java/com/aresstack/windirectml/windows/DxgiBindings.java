@@ -28,7 +28,8 @@ public final class DxgiBindings {
 
     private static final Logger log = LoggerFactory.getLogger(DxgiBindings.class);
 
-    private DxgiBindings() {}
+    private DxgiBindings() {
+    }
 
     // ── Function descriptors ─────────────────────────────────────────────
 
@@ -206,7 +207,7 @@ public final class DxgiBindings {
                 .reinterpret(Long.MAX_VALUE);
         // vtable[slotIndex] → function pointer
         MemorySegment fnPtr = vtablePtr.get(ValueLayout.ADDRESS,
-                (long) slotIndex * ValueLayout.ADDRESS.byteSize())
+                        (long) slotIndex * ValueLayout.ADDRESS.byteSize())
                 .reinterpret(Long.MAX_VALUE);
         long key = fnPtr.address();
         return vtableCache.computeIfAbsent(key,

@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+
 /**
  * Inference engine for Qwen2.5-Coder-Instruct models (CPU-only).
  *
@@ -95,7 +96,7 @@ public class QwenInferenceEngine implements InferenceEngine {
     /**
      * Create a new Qwen inference engine (CPU-only).
      *
-     * @param modelDir        path to the model directory
+     * @param modelDir         path to the model directory
      * @param defaultMaxTokens default maximum tokens if not specified in request
      */
     public QwenInferenceEngine(Path modelDir, int defaultMaxTokens) {
@@ -381,12 +382,16 @@ public class QwenInferenceEngine implements InferenceEngine {
         return ready;
     }
 
-    /** Returns the underlying runtime (for testing/profiling). */
+    /**
+     * Returns the underlying runtime (for testing/profiling).
+     */
     public Qwen2Runtime getRuntime() {
         return runtime;
     }
 
-    /** Returns the loaded config (for testing/diagnostics). */
+    /**
+     * Returns the loaded config (for testing/diagnostics).
+     */
     public Qwen2Config getConfig() {
         return config;
     }

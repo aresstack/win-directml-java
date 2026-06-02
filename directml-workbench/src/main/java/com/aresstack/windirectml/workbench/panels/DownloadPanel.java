@@ -19,7 +19,9 @@ public final class DownloadPanel extends JPanel {
     private final JCheckBox forceCheckbox;
     private final DownloadOverrideStore overrideStore;
 
-    /** In-memory manifests keyed by model id, updated when user presses OK in config dialog. */
+    /**
+     * In-memory manifests keyed by model id, updated when user presses OK in config dialog.
+     */
     private final Map<String, ModelDownloadManifest> manifests = new HashMap<>();
 
     public DownloadPanel(WorkbenchModel model) {

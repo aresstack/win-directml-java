@@ -33,7 +33,7 @@ import java.util.function.Supplier;
  *   "prefix":    "passage: "         // optional, applied to all (e.g. E5)
  * }
  * </pre>
- *
+ * <p>
  * The reply preserves input order: {@code vectors[i]} corresponds to
  * {@code texts[i]}.
  *

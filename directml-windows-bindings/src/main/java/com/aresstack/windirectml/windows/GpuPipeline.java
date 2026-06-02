@@ -164,10 +164,10 @@ public final class GpuPipeline implements AutoCloseable {
      * Upload float data from a Java array into the shared upload buffer,
      * then record a copy from upload buffer → target GPU default buffer.
      *
-     * @param data        source CPU array
-     * @param offset      offset in source array (elements)
-     * @param length      number of floats to upload
-     * @param targetBuf   GPU default buffer (destination)
+     * @param data         source CPU array
+     * @param offset       offset in source array (elements)
+     * @param length       number of floats to upload
+     * @param targetBuf    GPU default buffer (destination)
      * @param targetOffset byte offset in target buffer
      */
     public void recordUpload(float[] data, int offset, int length,
@@ -218,13 +218,13 @@ public final class GpuPipeline implements AutoCloseable {
     /**
      * Record a DML dispatch (GEMM or other operator).
      *
-     * @param cmdRecorder   IDMLCommandRecorder
-     * @param compiledOp    IDMLCompiledOperator
-     * @param bindingTable  IDMLBindingTable
+     * @param cmdRecorder      IDMLCommandRecorder
+     * @param compiledOp       IDMLCompiledOperator
+     * @param bindingTable     IDMLBindingTable
      * @param mhRecordDispatch pre-cached MethodHandle for RecordDispatch
      */
     public void recordDmlDispatch(MemorySegment cmdRecorder, MemorySegment compiledOp,
-                                   MemorySegment bindingTable, MethodHandle mhRecordDispatch) {
+                                  MemorySegment bindingTable, MethodHandle mhRecordDispatch) {
         checkRecording();
         try {
             mhRecordDispatch.invokeExact(cmdRecorder, cmdList, compiledOp, bindingTable);
@@ -346,14 +346,26 @@ public final class GpuPipeline implements AutoCloseable {
     // Accessors
     // ═══════════════════════════════════════════════════════════════════
 
-    /** The shared command list (for kernels that need to record into it). */
-    public MemorySegment getCommandList() { return cmdList; }
+    /**
+     * The shared command list (for kernels that need to record into it).
+     */
+    public MemorySegment getCommandList() {
+        return cmdList;
+    }
 
-    /** The pipeline's arena (for allocating GPU resources that live as long as the pipeline). */
-    public Arena getArena() { return arena; }
+    /**
+     * The pipeline's arena (for allocating GPU resources that live as long as the pipeline).
+     */
+    public Arena getArena() {
+        return arena;
+    }
 
-    /** Whether the pipeline is currently recording. */
-    public boolean isRecording() { return recording; }
+    /**
+     * Whether the pipeline is currently recording.
+     */
+    public boolean isRecording() {
+        return recording;
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     // AutoCloseable

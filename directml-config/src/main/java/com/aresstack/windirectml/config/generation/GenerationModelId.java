@@ -29,7 +29,9 @@ public final class GenerationModelId {
         return new GenerationModelId(value.trim());
     }
 
-    /** The raw model-id string (e.g. {@code "microsoft/Phi-3-mini-4k-instruct-onnx"}). */
+    /**
+     * The raw model-id string (e.g. {@code "microsoft/Phi-3-mini-4k-instruct-onnx"}).
+     */
     public String value() {
         return value;
     }

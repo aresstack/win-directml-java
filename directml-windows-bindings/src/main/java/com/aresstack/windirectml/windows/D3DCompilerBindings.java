@@ -16,7 +16,8 @@ public final class D3DCompilerBindings {
 
     private static final Logger log = LoggerFactory.getLogger(D3DCompilerBindings.class);
 
-    private D3DCompilerBindings() {}
+    private D3DCompilerBindings() {
+    }
 
     // D3DCompile function from d3dcompiler_47.dll
     private static volatile MethodHandle d3dCompileHandle;
@@ -88,7 +89,7 @@ public final class D3DCompilerBindings {
      * @return ID3DBlob containing compiled bytecode (caller must release)
      */
     public static MemorySegment compileShader(String hlslSource, String entryPoint,
-                                               String target, Arena arena)
+                                              String target, Arena arena)
             throws WindowsNativeException {
         try {
             byte[] srcBytes = hlslSource.getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -118,8 +119,11 @@ public final class D3DCompilerBindings {
             }
 
             return ppCode.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("D3DCompile invocation failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("D3DCompile invocation failed", t);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -131,13 +135,13 @@ public final class D3DCompilerBindings {
      * <p>
      * Creates a root signature with N root UAV descriptors + M root 32-bit constants.
      *
-     * @param numUavs       number of UAV root descriptors (u0, u1, ...)
+     * @param numUavs        number of UAV root descriptors (u0, u1, ...)
      * @param num32BitConsts number of 32-bit constants in the root constant buffer (b0)
-     * @param arena         arena
+     * @param arena          arena
      * @return ID3DBlob with serialized root signature
      */
     public static MemorySegment serializeRootSignature(int numUavs, int num32BitConsts,
-                                                        Arena arena)
+                                                       Arena arena)
             throws WindowsNativeException {
         try {
             // D3D12_ROOT_PARAMETER layout (x64): 32 bytes
@@ -192,34 +196,47 @@ public final class D3DCompilerBindings {
             }
 
             return ppBlob.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("SerializeRootSignature failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("SerializeRootSignature failed", t);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
     // ID3DBlob helpers
     // ═══════════════════════════════════════════════════════════════════
 
-    /** ID3DBlob::GetBufferPointer (vtable slot 3). */
+    /**
+     * ID3DBlob::GetBufferPointer (vtable slot 3).
+     */
     public static MemorySegment blobGetBufferPointer(MemorySegment blob) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(blob, 3,
                     FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
             MemorySegment ptr = (MemorySegment) mh.invokeExact(blob);
             return ptr.reinterpret(Long.MAX_VALUE);
-        } catch (Throwable t) { throw new RuntimeException("Blob::GetBufferPointer failed", t); }
+        } catch (Throwable t) {
+            throw new RuntimeException("Blob::GetBufferPointer failed", t);
+        }
     }
 
-    /** ID3DBlob::GetBufferSize (vtable slot 4). */
+    /**
+     * ID3DBlob::GetBufferSize (vtable slot 4).
+     */
     public static long blobGetBufferSize(MemorySegment blob) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(blob, 4,
                     FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
             return (long) mh.invokeExact(blob);
-        } catch (Throwable t) { throw new RuntimeException("Blob::GetBufferSize failed", t); }
+        } catch (Throwable t) {
+            throw new RuntimeException("Blob::GetBufferSize failed", t);
+        }
     }
 
-    /** Read a blob's content as a UTF-8 string (for error messages). */
+    /**
+     * Read a blob's content as a UTF-8 string (for error messages).
+     */
     private static String readBlobString(MemorySegment blob) {
         MemorySegment ptr = blobGetBufferPointer(blob);
         long size = blobGetBufferSize(blob);

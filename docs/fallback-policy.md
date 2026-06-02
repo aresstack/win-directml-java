@@ -11,10 +11,10 @@ CPU is **not** a test-only path: it is a fully supported local fallback.
 Each backend (`embed`, `rerank`) accepts the same three values via its
 respective system property:
 
-| Property            | Default | Accepted values        |
-|---------------------|---------|------------------------|
-| `-Dembed.backend`   | `auto`  | `cpu`, `directml`, `auto` |
-| `-Drerank.backend`  | `auto`  | `cpu`, `directml`, `auto` |
+| Property           | Default | Accepted values           |
+|--------------------|---------|---------------------------|
+| `-Dembed.backend`  | `auto`  | `cpu`, `directml`, `auto` |
+| `-Drerank.backend` | `auto`  | `cpu`, `directml`, `auto` |
 
 Unknown values cause the sidecar to exit immediately with exit code `2`
 (configuration error).
@@ -67,17 +67,17 @@ reserved for hard failures.
 The `health` method always reports the active backend and the
 fallback signal for both subsystems:
 
-| Field                      | Type    | Meaning                                                                   |
-|----------------------------|---------|---------------------------------------------------------------------------|
-| `embeddingBackend`         | string  | `"cpu"`, `"directml"`, `"none"`, `"error"`                                |
-| `embeddingReady`           | boolean | encoder is loaded and can serve `embed` calls                             |
-| `embeddingFallback`        | boolean | `true` when `auto` ended up on CPU after DirectML failed; else `false`    |
-| `embeddingFallbackReason`  | string  | human-readable reason when `embeddingFallback=true`; absent otherwise     |
-| `rerankerBackend`          | string  | same value set as for embeddings                                          |
-| `rerankerReady`            | boolean | reranker is loaded                                                        |
-| `rerankerFallback`         | boolean | same semantics as `embeddingFallback`                                     |
-| `rerankerFallbackReason`   | string  | human-readable reason when `rerankerFallback=true`                        |
-| `lastError`                | string  | last hard error from any subsystem; absent when there was none            |
+| Field                     | Type    | Meaning                                                                |
+|---------------------------|---------|------------------------------------------------------------------------|
+| `embeddingBackend`        | string  | `"cpu"`, `"directml"`, `"none"`, `"error"`                             |
+| `embeddingReady`          | boolean | encoder is loaded and can serve `embed` calls                          |
+| `embeddingFallback`       | boolean | `true` when `auto` ended up on CPU after DirectML failed; else `false` |
+| `embeddingFallbackReason` | string  | human-readable reason when `embeddingFallback=true`; absent otherwise  |
+| `rerankerBackend`         | string  | same value set as for embeddings                                       |
+| `rerankerReady`           | boolean | reranker is loaded                                                     |
+| `rerankerFallback`        | boolean | same semantics as `embeddingFallback`                                  |
+| `rerankerFallbackReason`  | string  | human-readable reason when `rerankerFallback=true`                     |
+| `lastError`               | string  | last hard error from any subsystem; absent when there was none         |
 
 Clients should treat `embeddingFallback` / `rerankerFallback` as
 **informational** (display, telemetry) and `lastError` as
@@ -115,11 +115,11 @@ Required model directories (the sidecar probes these in order; you
 can also point at a specific directory with the corresponding
 `-D…modelDir` property):
 
-| Family          | System property           | Default location                                  |
-|-----------------|---------------------------|---------------------------------------------------|
-| MiniLM (embed)  | `-Dminilm.modelDir`       | `model/all-MiniLM-L6-v2/`                         |
-| E5 (embed)      | `-De5.modelDir`           | `model/<variant>/` (see `-De5.model`)             |
-| Reranker        | `-Drerank.modelDir`       | `model/cross-encoder-ms-marco-MiniLM-L-6-v2/`     |
+| Family         | System property     | Default location                              |
+|----------------|---------------------|-----------------------------------------------|
+| MiniLM (embed) | `-Dminilm.modelDir` | `model/all-MiniLM-L6-v2/`                     |
+| E5 (embed)     | `-De5.modelDir`     | `model/<variant>/` (see `-De5.model`)         |
+| Reranker       | `-Drerank.modelDir` | `model/cross-encoder-ms-marco-MiniLM-L-6-v2/` |
 
 Optional: skip the reranker entirely by not providing
 `-Drerank.modelDir` and leaving `-Drerank.backend` unset (default

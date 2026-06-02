@@ -34,15 +34,15 @@ Build the Java-8 modules and run the workbench:
 
 The window opens with seven tabs:
 
-| Tab                | Purpose                                                                                                                                                                                 |
-|--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Tab                | Purpose                                                                                                                                                                                                                                                                                            |
+|--------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Config & Control   | Java exe, sidecar jar, model dir, `embed.backend`, DLL override, extra JVM args, timeout. Buttons: `Start / Stop / Restart Sidecar`, `Health`, `Validate Models`, `Clear Logs`. Live command-line preview. `Validate Models` runs the CPU-only model directory check without starting the sidecar. |
-| Health             | `sidecarRunning`, `embeddingReady`, `embeddingBackend`, `modelLoaded`, `mode`, `lastError` + raw JSON.                                                                                  |
-| Embeddings         | Two text fields (A/B), `Embed A`, `Embed B`, `Cosine Similarity`, dimension/timing/backend readout.                                                                                     |
-| Summarize          | Input text, `maxTokens` spinner, summary output, raw response. Shows JSON-RPC errors clearly when no summarizer is loaded.                                                              |
-| JSON-RPC Inspector | Last raw request and last raw response, refreshed every 500 ms.                                                                                                                         |
-| stderr Log         | Live tail of the sidecar's stderr (separate from stdout).                                                                                                                               |
-| Integration Help   | Java-8 sample code that uses the same client library.                                                                                                                                   |
+| Health             | `sidecarRunning`, `embeddingReady`, `embeddingBackend`, `modelLoaded`, `mode`, `lastError` + raw JSON.                                                                                                                                                                                             |
+| Embeddings         | Two text fields (A/B), `Embed A`, `Embed B`, `Cosine Similarity`, dimension/timing/backend readout.                                                                                                                                                                                                |
+| Summarize          | Input text, `maxTokens` spinner, summary output, raw response. Shows JSON-RPC errors clearly when no summarizer is loaded.                                                                                                                                                                         |
+| JSON-RPC Inspector | Last raw request and last raw response, refreshed every 500 ms.                                                                                                                                                                                                                                    |
+| stderr Log         | Live tail of the sidecar's stderr (separate from stdout).                                                                                                                                                                                                                                          |
+| Integration Help   | Java-8 sample code that uses the same client library.                                                                                                                                                                                                                                              |
 
 ## Architecture
 

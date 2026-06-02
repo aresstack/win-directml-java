@@ -204,7 +204,9 @@ public final class SidecarClient {
         return BatchEmbeddingResult.from(resp.getResult(), elapsed, resp.getRaw());
     }
 
-    /** Convenience overload: {@code normalize=true}, no prefix. */
+    /**
+     * Convenience overload: {@code normalize=true}, no prefix.
+     */
     public BatchEmbeddingResult embedBatch(List<String> texts) throws SidecarException {
         return embedBatch(texts, true, null);
     }

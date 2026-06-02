@@ -282,7 +282,8 @@ public final class ConfigPanel extends JPanel {
         try {
             int mt = Integer.parseInt(phi3MaxTokensField.getText().trim());
             cfg.setPhi3MaxTokens(mt > 0 ? mt : 0);
-        } catch (NumberFormatException ignored) { }
+        } catch (NumberFormatException ignored) {
+        }
         cfg.setDirectmlDebug(debugBox.isSelected());
         cfg.setDirectmlDllOverride(dllOverrideField.getText().trim());
         cfg.setExtraJvmArgs(extraJvmField.getText().trim());

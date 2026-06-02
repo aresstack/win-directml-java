@@ -24,13 +24,19 @@ import java.nio.file.Path;
  */
 public final class QwenModelDirValidator {
 
-    /** Primary external data filename (matches onnx-community export). */
+    /**
+     * Primary external data filename (matches onnx-community export).
+     */
     public static final String DATA_FILE_PRIMARY = "model.onnx_data";
 
-    /** Alternative external data filename (dot-separated convention). */
+    /**
+     * Alternative external data filename (dot-separated convention).
+     */
     public static final String DATA_FILE_ALT = "model.onnx.data";
 
-    /** Required files in download/setup order (aligned with #100 contract). */
+    /**
+     * Required files in download/setup order (aligned with #100 contract).
+     */
     private static final String[] REQUIRED_FILES = {
             "config.json",
             "tokenizer.json",
@@ -39,7 +45,8 @@ public final class QwenModelDirValidator {
             "model.onnx",
     };
 
-    private QwenModelDirValidator() {}
+    private QwenModelDirValidator() {
+    }
 
     /**
      * Check whether a directory contains a valid Qwen2.5-Coder model.

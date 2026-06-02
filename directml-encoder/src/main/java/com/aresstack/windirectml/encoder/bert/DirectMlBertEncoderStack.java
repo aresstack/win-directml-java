@@ -238,20 +238,46 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
 
     private static void closeQuiet(AutoCloseable c) {
         if (c == null) return;
-        try { c.close(); } catch (Exception ignored) {}
+        try {
+            c.close();
+        } catch (Exception ignored) {
+        }
     }
 
-    public int seq()          { return seq; }
+    public int seq() {
+        return seq;
+    }
 
     public int batch() {
         return batch;
     }
-    public int hidden()       { return hidden; }
-    public int heads()        { return heads; }
-    public int headDim()      { return headDim; }
-    public int intermediate() { return intermediate; }
-    public int numLayers()    { return numLayers; }
-    public float eps()        { return eps; }
-    public boolean hasMask()  { return hasMask; }
+
+    public int hidden() {
+        return hidden;
+    }
+
+    public int heads() {
+        return heads;
+    }
+
+    public int headDim() {
+        return headDim;
+    }
+
+    public int intermediate() {
+        return intermediate;
+    }
+
+    public int numLayers() {
+        return numLayers;
+    }
+
+    public float eps() {
+        return eps;
+    }
+
+    public boolean hasMask() {
+        return hasMask;
+    }
 }
 

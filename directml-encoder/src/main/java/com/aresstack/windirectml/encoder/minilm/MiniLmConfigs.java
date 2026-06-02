@@ -12,7 +12,8 @@ import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
  */
 final class MiniLmConfigs {
 
-    private MiniLmConfigs() {}
+    private MiniLmConfigs() {
+    }
 
     static BertEncoderConfig toBertConfig(MiniLmConfig c) {
         return new BertEncoderConfig(

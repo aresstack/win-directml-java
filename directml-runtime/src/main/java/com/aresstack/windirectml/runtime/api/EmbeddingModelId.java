@@ -23,7 +23,9 @@ public enum EmbeddingModelId {
         this.defaultPrefix = defaultPrefix;
     }
 
-    /** Default model directory name used by the workbench/download scripts. */
+    /**
+     * Default model directory name used by the workbench/download scripts.
+     */
     public String directoryName() {
         return directoryName;
     }

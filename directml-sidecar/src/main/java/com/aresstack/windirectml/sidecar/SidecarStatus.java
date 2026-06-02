@@ -40,7 +40,9 @@ public final class SidecarStatus {
     private volatile String rerankerBackend;
     private volatile boolean rerankerReady = false;
     private volatile String rerankerModel;
-    /** See {@link #embeddingFallback}; same semantics for the reranker. */
+    /**
+     * See {@link #embeddingFallback}; same semantics for the reranker.
+     */
     private volatile boolean rerankerFallback = false;
     private volatile String rerankerFallbackReason;
 
@@ -122,29 +124,83 @@ public final class SidecarStatus {
         this.embeddingReady = embeddingReady;
     }
 
-    public String getRerankerBackend() { return rerankerBackend; }
-    public void setRerankerBackend(String rerankerBackend) { this.rerankerBackend = rerankerBackend; }
-    public boolean isRerankerReady() { return rerankerReady; }
-    public void setRerankerReady(boolean rerankerReady) { this.rerankerReady = rerankerReady; }
-    public String getRerankerModel() { return rerankerModel; }
-    public void setRerankerModel(String rerankerModel) { this.rerankerModel = rerankerModel; }
+    public String getRerankerBackend() {
+        return rerankerBackend;
+    }
 
-    public boolean isEmbeddingFallback() { return embeddingFallback; }
-    public void setEmbeddingFallback(boolean embeddingFallback) { this.embeddingFallback = embeddingFallback; }
-    public String getEmbeddingFallbackReason() { return embeddingFallbackReason; }
-    public void setEmbeddingFallbackReason(String reason) { this.embeddingFallbackReason = reason; }
+    public void setRerankerBackend(String rerankerBackend) {
+        this.rerankerBackend = rerankerBackend;
+    }
 
-    public boolean isRerankerFallback() { return rerankerFallback; }
-    public void setRerankerFallback(boolean rerankerFallback) { this.rerankerFallback = rerankerFallback; }
-    public String getRerankerFallbackReason() { return rerankerFallbackReason; }
-    public void setRerankerFallbackReason(String reason) { this.rerankerFallbackReason = reason; }
+    public boolean isRerankerReady() {
+        return rerankerReady;
+    }
 
-    public boolean isSummarizerReady() { return summarizerReady; }
-    public void setSummarizerReady(boolean v) { this.summarizerReady = v; }
+    public void setRerankerReady(boolean rerankerReady) {
+        this.rerankerReady = rerankerReady;
+    }
 
-    public String getSummarizerBackend() { return summarizerBackend; }
-    public void setSummarizerBackend(String v) { this.summarizerBackend = v; }
+    public String getRerankerModel() {
+        return rerankerModel;
+    }
 
-    public String getSummarizerModel() { return summarizerModel; }
-    public void setSummarizerModel(String v) { this.summarizerModel = v; }
+    public void setRerankerModel(String rerankerModel) {
+        this.rerankerModel = rerankerModel;
+    }
+
+    public boolean isEmbeddingFallback() {
+        return embeddingFallback;
+    }
+
+    public void setEmbeddingFallback(boolean embeddingFallback) {
+        this.embeddingFallback = embeddingFallback;
+    }
+
+    public String getEmbeddingFallbackReason() {
+        return embeddingFallbackReason;
+    }
+
+    public void setEmbeddingFallbackReason(String reason) {
+        this.embeddingFallbackReason = reason;
+    }
+
+    public boolean isRerankerFallback() {
+        return rerankerFallback;
+    }
+
+    public void setRerankerFallback(boolean rerankerFallback) {
+        this.rerankerFallback = rerankerFallback;
+    }
+
+    public String getRerankerFallbackReason() {
+        return rerankerFallbackReason;
+    }
+
+    public void setRerankerFallbackReason(String reason) {
+        this.rerankerFallbackReason = reason;
+    }
+
+    public boolean isSummarizerReady() {
+        return summarizerReady;
+    }
+
+    public void setSummarizerReady(boolean v) {
+        this.summarizerReady = v;
+    }
+
+    public String getSummarizerBackend() {
+        return summarizerBackend;
+    }
+
+    public void setSummarizerBackend(String v) {
+        this.summarizerBackend = v;
+    }
+
+    public String getSummarizerModel() {
+        return summarizerModel;
+    }
+
+    public void setSummarizerModel(String v) {
+        this.summarizerModel = v;
+    }
 }

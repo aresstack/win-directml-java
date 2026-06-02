@@ -8,7 +8,8 @@ package com.aresstack.windirectml.encoder.pooling;
  */
 public final class L2Normalize {
 
-    private L2Normalize() {}
+    private L2Normalize() {
+    }
 
     public static void inPlace(float[] vector, float epsilon) {
         double sum = 0.0;

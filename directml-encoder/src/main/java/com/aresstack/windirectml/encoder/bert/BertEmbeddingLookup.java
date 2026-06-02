@@ -29,7 +29,8 @@ import java.util.Objects;
  */
 public final class BertEmbeddingLookup {
 
-    private BertEmbeddingLookup() {}
+    private BertEmbeddingLookup() {
+    }
 
     /**
      * Allocates a {@code [seqBucket * H]} float array and fills the
@@ -44,7 +45,7 @@ public final class BertEmbeddingLookup {
      * @param seqBucket           padded sequence length the GPU stack expects
      *                            ({@code >= encoded.length()}).
      * @return new {@code float[seqBucket * H]} with rows
-     *         {@code [encoded.length(), seqBucket)} left as zero.
+     * {@code [encoded.length(), seqBucket)} left as zero.
      */
     public static float[] lookup(BertEncoderConfig cfg,
                                  float[] wordEmbeddings,
@@ -71,11 +72,11 @@ public final class BertEmbeddingLookup {
         int[] ids = encoded.inputIds();
         int[] tts = encoded.tokenTypeIds();
         for (int t = 0; t < seqLen; t++) {
-            int id  = ids[t];
-            int tt  = tts[t];
+            int id = ids[t];
+            int tt = tts[t];
             int dst = t * H;
-            int ws  = id * H;
-            int ps  = t  * H;
+            int ws = id * H;
+            int ps = t * H;
             int tos = tt * H;
             for (int h = 0; h < H; h++) {
                 x[dst + h] = wordEmbeddings[ws + h]

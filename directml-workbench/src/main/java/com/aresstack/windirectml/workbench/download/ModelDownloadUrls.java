@@ -13,7 +13,8 @@ public final class ModelDownloadUrls {
 
     private static final String HF_BASE_URL = "https://huggingface.co";
 
-    private ModelDownloadUrls() {}
+    private ModelDownloadUrls() {
+    }
 
     // ---- Manifest builders ----
 

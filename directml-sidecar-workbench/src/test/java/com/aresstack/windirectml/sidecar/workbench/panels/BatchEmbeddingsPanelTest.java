@@ -18,10 +18,10 @@ class BatchEmbeddingsPanelTest {
         List<String> got = BatchEmbeddingsPanel.parseTexts(
                 "one\n  two  \n\n   \nthree\r\nfour");
         assertEquals(4, got.size());
-        assertEquals("one",   got.get(0));
-        assertEquals("two",   got.get(1));
+        assertEquals("one", got.get(0));
+        assertEquals("two", got.get(1));
         assertEquals("three", got.get(2));
-        assertEquals("four",  got.get(3));
+        assertEquals("four", got.get(3));
     }
 
     @Test

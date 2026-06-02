@@ -16,14 +16,14 @@ werden muss.
 
 ## Voraussetzungen
 
-| Anforderung | Details |
-|---|---|
-| OS | Windows 11 (22H2 oder neuer empfohlen) |
-| GPU | DirectX-12-fähige GPU (NVIDIA, AMD, Intel Arc oder integriert) |
-| DirectML | in-box `DirectML.dll` (1.8.0 / FL 5.0 reicht; kein Sidecar-DLL nötig) |
-| Java | JDK 21 mit `--enable-preview` (FFM API) |
-| Gradle | Wrapper im Repo (`./gradlew`) |
-| Modell MiniLM | `model/all-MiniLM-L6-v2/` (via `scripts/download-minilm.ps1`) |
+| Anforderung     | Details                                                                             |
+|-----------------|-------------------------------------------------------------------------------------|
+| OS              | Windows 11 (22H2 oder neuer empfohlen)                                              |
+| GPU             | DirectX-12-fähige GPU (NVIDIA, AMD, Intel Arc oder integriert)                      |
+| DirectML        | in-box `DirectML.dll` (1.8.0 / FL 5.0 reicht; kein Sidecar-DLL nötig)               |
+| Java            | JDK 21 mit `--enable-preview` (FFM API)                                             |
+| Gradle          | Wrapper im Repo (`./gradlew`)                                                       |
+| Modell MiniLM   | `model/all-MiniLM-L6-v2/` (via `scripts/download-minilm.ps1`)                       |
 | Modell Reranker | `model/cross-encoder-ms-marco-MiniLM-L-6-v2/` (via `scripts/download-reranker.ps1`) |
 
 Modelle laden (PowerShell, einmalig):
@@ -90,13 +90,13 @@ Alle Kommandos vom **Repo-Root** ausführen.
 
 > **✅ Smoke-Run durchgeführt am 2026-05-19 — alle Gates bestanden.**
 
-| Feld | Wert |
-|---|---|
-| Datum | 2026-05-19 |
-| OS | Microsoft Windows 11 Pro N, Build 22631 (23H2) |
-| Maschine / GPU | NVIDIA GeForce RTX 5080, Treiber 32.0.15.9621 |
-| DirectML-Version | 1.8.0 (in-box `DirectML.dll`, `1.8.0+220126-2359.1.dml-1.8.89dd732`) |
-| Java-Version | OpenJDK 21.0.5 — Zulu21.38+21-CA LTS (`JAVA_HOME=C:\Program Files\Zulu\zulu-21`) |
+| Feld             | Wert                                                                             |
+|------------------|----------------------------------------------------------------------------------|
+| Datum            | 2026-05-19                                                                       |
+| OS               | Microsoft Windows 11 Pro N, Build 22631 (23H2)                                   |
+| Maschine / GPU   | NVIDIA GeForce RTX 5080, Treiber 32.0.15.9621                                    |
+| DirectML-Version | 1.8.0 (in-box `DirectML.dll`, `1.8.0+220126-2359.1.dml-1.8.89dd732`)             |
+| Java-Version     | OpenJDK 21.0.5 — Zulu21.38+21-CA LTS (`JAVA_HOME=C:\Program Files\Zulu\zulu-21`) |
 
 ### Lauf 1 — `:directml-encoder:test -Dwindirectml.debug=true`
 

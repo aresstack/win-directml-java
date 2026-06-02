@@ -53,9 +53,13 @@ public final class JsonRpcMessageReader implements AutoCloseable {
         reader.close();
     }
 
-    /** Either a successfully parsed {@link JsonRpcRequest} or a parse error. */
+    /**
+     * Either a successfully parsed {@link JsonRpcRequest} or a parse error.
+     */
     public record RawLine(String raw, JsonRpcRequest request, Throwable parseError) {
-        public boolean hasError() { return parseError != null; }
+        public boolean hasError() {
+            return parseError != null;
+        }
     }
 }
 

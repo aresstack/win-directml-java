@@ -14,7 +14,9 @@ public enum RerankerModelId {
         this.directoryName = directoryName;
     }
 
-    /** Default model directory name used by the workbench/download scripts. */
+    /**
+     * Default model directory name used by the workbench/download scripts.
+     */
     public String directoryName() {
         return directoryName;
     }
