@@ -55,10 +55,10 @@ import java.util.Set;
  * {@link UnsupportedModelException}.
  *
  * @deprecated Prefer the higher-level
- *             {@link com.aresstack.windirectml.runtime.api.MlRuntime} entry
- *             point, which provides strongly-typed model identifiers and a
- *             simpler configuration surface. This class remains fully
- *             functional and will not be removed without a major version bump.
+ * {@link com.aresstack.windirectml.runtime.api.MlRuntime} entry
+ * point, which provides strongly-typed model identifiers and a
+ * simpler configuration surface. This class remains fully
+ * functional and will not be removed without a major version bump.
  */
 @Deprecated
 public final class LocalMlRuntime {
@@ -95,7 +95,7 @@ public final class LocalMlRuntime {
      *
      * @param config model configuration (directory, family, optional prefix).
      * @return a ready-to-use embedding model handle.
-     * @throws EmbeddingException if loading fails (missing files, bad weights, etc.).
+     * @throws EmbeddingException        if loading fails (missing files, bad weights, etc.).
      * @throws UnsupportedModelException if the model family is not supported.
      */
     public LocalEmbeddingModel loadEmbeddingModel(EmbeddingModelConfig config)
@@ -145,7 +145,9 @@ public final class LocalMlRuntime {
         return new LocalRerankerModel(reranker);
     }
 
-    /** The configured backend for this runtime. */
+    /**
+     * The configured backend for this runtime.
+     */
     public Backend backend() {
         return backend;
     }

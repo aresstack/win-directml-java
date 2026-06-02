@@ -245,22 +245,30 @@ public class Phi3InferenceEngine implements InferenceEngine {
         log.info("Phi3InferenceEngine shut down");
     }
 
-    /** Clean up GPU resources (idempotent). */
+    /**
+     * Clean up GPU resources (idempotent).
+     */
     private void cleanupGpu() {
         if (gpuPipeline != null) {
-            try { gpuPipeline.close(); } catch (Exception e) {
+            try {
+                gpuPipeline.close();
+            } catch (Exception e) {
                 log.warn("Error closing GPU pipeline: {}", e.getMessage());
             }
             gpuPipeline = null;
         }
         if (gpuKernels != null) {
-            try { gpuKernels.close(); } catch (Exception e) {
+            try {
+                gpuKernels.close();
+            } catch (Exception e) {
                 log.warn("Error closing GPU kernels: {}", e.getMessage());
             }
             gpuKernels = null;
         }
         if (wb != null) {
-            try { wb.close(); } catch (Exception e) {
+            try {
+                wb.close();
+            } catch (Exception e) {
                 log.warn("Error closing WindowsBindings: {}", e.getMessage());
             }
             wb = null;

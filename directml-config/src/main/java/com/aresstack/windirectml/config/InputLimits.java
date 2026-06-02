@@ -17,7 +17,8 @@ package com.aresstack.windirectml.config;
  */
 public final class InputLimits {
 
-    private InputLimits() {}
+    private InputLimits() {
+    }
 
     // ── Text length ─────────────────────────────────────────────────────
 
@@ -28,7 +29,9 @@ public final class InputLimits {
      */
     public static final int MAX_TEXT_LENGTH = 32_768;
 
-    /** System property to override {@link #MAX_TEXT_LENGTH}. */
+    /**
+     * System property to override {@link #MAX_TEXT_LENGTH}.
+     */
     public static final String PROP_MAX_TEXT_LENGTH = "windirectml.limits.maxTextLength";
 
     // ── embedBatch ──────────────────────────────────────────────────────
@@ -39,7 +42,9 @@ public final class InputLimits {
      */
     public static final int MAX_EMBED_BATCH_SIZE = 256;
 
-    /** System property to override {@link #MAX_EMBED_BATCH_SIZE}. */
+    /**
+     * System property to override {@link #MAX_EMBED_BATCH_SIZE}.
+     */
     public static final String PROP_MAX_EMBED_BATCH_SIZE = "windirectml.limits.maxEmbedBatchSize";
 
     // ── rerank ──────────────────────────────────────────────────────────
@@ -51,7 +56,9 @@ public final class InputLimits {
      */
     public static final int MAX_RERANK_DOCUMENTS = 256;
 
-    /** System property to override {@link #MAX_RERANK_DOCUMENTS}. */
+    /**
+     * System property to override {@link #MAX_RERANK_DOCUMENTS}.
+     */
     public static final String PROP_MAX_RERANK_DOCUMENTS = "windirectml.limits.maxRerankDocuments";
 
     /**
@@ -60,7 +67,9 @@ public final class InputLimits {
      */
     public static final int MAX_RERANK_DOCUMENT_LENGTH = 32_768;
 
-    /** System property to override {@link #MAX_RERANK_DOCUMENT_LENGTH}. */
+    /**
+     * System property to override {@link #MAX_RERANK_DOCUMENT_LENGTH}.
+     */
     public static final String PROP_MAX_RERANK_DOCUMENT_LENGTH = "windirectml.limits.maxRerankDocumentLength";
 
     // ── Resolved values (honour system-property overrides) ──────────────
@@ -73,17 +82,23 @@ public final class InputLimits {
         return resolveInt(PROP_MAX_TEXT_LENGTH, MAX_TEXT_LENGTH);
     }
 
-    /** Returns the effective max embed-batch size. */
+    /**
+     * Returns the effective max embed-batch size.
+     */
     public static int maxEmbedBatchSize() {
         return resolveInt(PROP_MAX_EMBED_BATCH_SIZE, MAX_EMBED_BATCH_SIZE);
     }
 
-    /** Returns the effective max rerank document count. */
+    /**
+     * Returns the effective max rerank document count.
+     */
     public static int maxRerankDocuments() {
         return resolveInt(PROP_MAX_RERANK_DOCUMENTS, MAX_RERANK_DOCUMENTS);
     }
 
-    /** Returns the effective max rerank document length. */
+    /**
+     * Returns the effective max rerank document length.
+     */
     public static int maxRerankDocumentLength() {
         return resolveInt(PROP_MAX_RERANK_DOCUMENT_LENGTH, MAX_RERANK_DOCUMENT_LENGTH);
     }

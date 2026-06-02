@@ -99,12 +99,12 @@ class Qwen2WeightsOnnxCommunityTest {
     /**
      * Verify that a transposed matrix (from ONNX [K,N] layout to [N,K])
      * produces the same matvec result.
-     *
+     * <p>
      * If ONNX stores weight as [K=2, N=2]:
-     *   rawData = [[1, 3], [2, 4]]  (i.e. [K][N] layout)
-     *
+     * rawData = [[1, 3], [2, 4]]  (i.e. [K][N] layout)
+     * <p>
      * After transpose to [N=2, K=2]:
-     *   transposed = [[1, 2], [3, 4]]  (same as above test)
+     * transposed = [[1, 2], [3, 4]]  (same as above test)
      */
     @Test
     void transposedLayoutProducesSameResult() {

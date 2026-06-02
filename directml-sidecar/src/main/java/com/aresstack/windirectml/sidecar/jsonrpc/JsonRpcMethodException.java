@@ -23,8 +23,13 @@ public class JsonRpcMethodException extends RuntimeException {
         this.data = data;
     }
 
-    public int code() { return code; }
-    public Object data() { return data; }
+    public int code() {
+        return code;
+    }
+
+    public Object data() {
+        return data;
+    }
 
     public JsonRpcError toError() {
         return new JsonRpcError(code, getMessage(), data);

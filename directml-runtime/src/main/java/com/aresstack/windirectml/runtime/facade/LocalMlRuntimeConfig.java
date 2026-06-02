@@ -21,12 +21,16 @@ public final class LocalMlRuntimeConfig {
         this.backend = builder.backend;
     }
 
-    /** The hardware backend selection. */
+    /**
+     * The hardware backend selection.
+     */
     public Backend backend() {
         return backend;
     }
 
-    /** Create a new builder with defaults ({@link Backend#AUTO}). */
+    /**
+     * Create a new builder with defaults ({@link Backend#AUTO}).
+     */
     public static Builder builder() {
         return new Builder();
     }
@@ -34,9 +38,12 @@ public final class LocalMlRuntimeConfig {
     public static final class Builder {
         private Backend backend = Backend.AUTO;
 
-        private Builder() {}
+        private Builder() {
+        }
 
-        /** Set the hardware backend. */
+        /**
+         * Set the hardware backend.
+         */
         public Builder backend(Backend backend) {
             this.backend = Objects.requireNonNull(backend, "backend");
             return this;

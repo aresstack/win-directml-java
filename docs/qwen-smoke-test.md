@@ -4,7 +4,7 @@ This document covers the repeatable smoke-test procedures and benchmark
 protocol for **Qwen2.5-Coder-0.5B-Instruct** running on CPU via the
 `directml-inference` module and the DirectML Workbench test path.
 
-> **Status:** 🚧 Planned / runtime bring-up.  The Workbench exposes Qwen for
+> **Status:** 🚧 Planned / runtime bring-up. The Workbench exposes Qwen for
 > local manual testing, but the model is not promoted to shipped/experimental
 > until the ONNX source/layout and end-to-end generation run are verified.
 
@@ -12,13 +12,13 @@ protocol for **Qwen2.5-Coder-0.5B-Instruct** running on CPU via the
 
 ## 1. Test Classification
 
-| Category               | Requires real weights? | Runs in CI? | Location                                            |
-|------------------------|------------------------|-------------|-----------------------------------------------------|
-| Missing-file diagnostics (unit) | ❌ No         | ✅ Yes       | `QwenModelDirValidatorTest`                         |
-| CPU smoke test (manual)          | ✅ Yes        | ❌ No        | `QwenCpuSmokeTest` (`@EnabledIf("modelPresent")`)  |
-| Workbench local test             | ✅ Yes        | ❌ Manual    | Download tab + Generation/Summarizer tab            |
-| Tokenizer/template unit tests    | ❌ No         | ✅ Yes       | `QwenTokenizerTest`, `QwenChatTemplateTest`         |
-| Performance notes                | ✅ Yes        | ❌ Manual    | This document, §4                                   |
+| Category                        | Requires real weights? | Runs in CI? | Location                                          |
+|---------------------------------|------------------------|-------------|---------------------------------------------------|
+| Missing-file diagnostics (unit) | ❌ No                   | ✅ Yes       | `QwenModelDirValidatorTest`                       |
+| CPU smoke test (manual)         | ✅ Yes                  | ❌ No        | `QwenCpuSmokeTest` (`@EnabledIf("modelPresent")`) |
+| Workbench local test            | ✅ Yes                  | ❌ Manual    | Download tab + Generation/Summarizer tab          |
+| Tokenizer/template unit tests   | ❌ No                   | ✅ Yes       | `QwenTokenizerTest`, `QwenChatTemplateTest`       |
+| Performance notes               | ✅ Yes                  | ❌ Manual    | This document, §4                                 |
 
 ---
 
@@ -50,6 +50,7 @@ protocol for **Qwen2.5-Coder-0.5B-Instruct** running on CPU via the
 ```
 
 The JUnit smoke test is gated by **two conditions**:
+
 1. `@EnabledIf("modelPresent")` — skipped when the model directory is absent or
    incomplete.
 2. `-Dqwen.enable.experimental.runtime=true` — explicit opt-in required because
@@ -105,29 +106,29 @@ the release jar locally once the model files are present.
 
 ## 4. Benchmark Notes Template
 
-Fill in after running the smoke test on a local machine.  Do **not**
+Fill in after running the smoke test on a local machine. Do **not**
 fabricate numbers — leave rows empty until measured.
 
 ### 4.1 Environment
 
-| Field              | Value                                |
-|--------------------|--------------------------------------|
-| Machine / CPU      | _(e.g. AMD Ryzen 9 7950X, 16C/32T)_ |
-| RAM                | _(e.g. 64 GB DDR5-5600)_             |
-| OS                 | _(e.g. Windows 11 23H2)_            |
-| Java               | _(e.g. Zulu 21.0.3+9)_              |
-| Model              | Qwen2.5-Coder-0.5B-Instruct         |
-| Model artifact size | _(e.g. ~1.0 GB ONNX + data)_       |
-| Backend            | CPU                                  |
+| Field               | Value                               |
+|---------------------|-------------------------------------|
+| Machine / CPU       | _(e.g. AMD Ryzen 9 7950X, 16C/32T)_ |
+| RAM                 | _(e.g. 64 GB DDR5-5600)_            |
+| OS                  | _(e.g. Windows 11 23H2)_            |
+| Java                | _(e.g. Zulu 21.0.3+9)_              |
+| Model               | Qwen2.5-Coder-0.5B-Instruct         |
+| Model artifact size | _(e.g. ~1.0 GB ONNX + data)_        |
+| Backend             | CPU                                 |
 
 ### 4.2 Results
 
-| Prompt                | Prompt length (chars) | Max tokens | Generated tokens | Elapsed (ms) | Tokens/sec | Memory (RSS) |
-|-----------------------|----------------------:|------------|------------------:|-------------:|-----------:|-------------:|
-| English summary       |                       | 32         |                  |              |            |              |
-| German summary        |                       | 32         |                  |              |            |              |
-| ADABAS code explain   |                       | 64         |                  |              |            |              |
-| Short generation      |                    6  | 32         |                  |              |            |              |
+| Prompt              | Prompt length (chars) | Max tokens | Generated tokens | Elapsed (ms) | Tokens/sec | Memory (RSS) |
+|---------------------|----------------------:|------------|-----------------:|-------------:|-----------:|-------------:|
+| English summary     |                       | 32         |                  |              |            |              |
+| German summary      |                       | 32         |                  |              |            |              |
+| ADABAS code explain |                       | 64         |                  |              |            |              |
+| Short generation    |                     6 | 32         |                  |              |            |              |
 
 ### 4.3 Observations
 
@@ -144,7 +145,7 @@ fabricate numbers — leave rows empty until measured.
 - [x] CPU runtime smoke test verifies non-empty generated output (`QwenCpuSmokeTest`).
 - [x] Workbench exposes Qwen as a local manual test path.
 - [x] Benchmark notes include: machine/CPU, model size, prompt length,
-      generated token count, tokens/sec, elapsed time, memory (§4).
+  generated token count, tokens/sec, elapsed time, memory (§4).
 - [x] German and English summary prompts included (§3.1, §3.2).
 - [x] Natural/ADABAS/code explanation prompt included (§3.3).
 
@@ -161,9 +162,9 @@ fabricate numbers — leave rows empty until measured.
 
 ## 7. Related Issues
 
-| Issue | Title                              | Dependency |
-|-------|------------------------------------|------------|
-| #94   | Qwen CausalLM epic                | parent     |
-| #98   | Qwen tokenizer / ChatML template  | reused     |
-| #99   | Qwen CPU runtime                  | validates  |
-| #100  | Qwen download layout              | validates  |
+| Issue | Title                            | Dependency |
+|-------|----------------------------------|------------|
+| #94   | Qwen CausalLM epic               | parent     |
+| #98   | Qwen tokenizer / ChatML template | reused     |
+| #99   | Qwen CPU runtime                 | validates  |
+| #100  | Qwen download layout             | validates  |

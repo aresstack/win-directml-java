@@ -11,10 +11,10 @@ Plus 1× LM-Head am Ende.
 
 ## Submission-Vergleich
 
-| Version | Submissions/Token | Fence-Waits | CPU↔GPU Transfers |
-|---------|-------------------|-------------|-------------------|
-| V1.x | 129 | 129 | 258 (upload+readback) |
-| **V2.0** | **65** | **65** | **~100** |
+| Version  | Submissions/Token | Fence-Waits | CPU↔GPU Transfers     |
+|----------|-------------------|-------------|-----------------------|
+| V1.x     | 129               | 129         | 258 (upload+readback) |
+| **V2.0** | **65**            | **65**      | **~100**              |
 
 ---
 
@@ -38,12 +38,12 @@ pipeline.submitAndWait()
 
 ### HLSL Compute Shader (V2.0)
 
-| Shader | UAVs | Constants | Funktion |
-|--------|------|-----------|----------|
-| `element_add` | 3 (A, B, C) | count | Elementweise Addition |
-| `rms_norm` | 3 (In, Weight, Out) | dim, eps | RMSNorm mit Group-Shared Reduction |
-| `swiglu` | 3 (GateUp, Scale, Out) | intermediate | SwiGLU + Scale fused |
-| `scale` | 3 (X, Scale, Out) | count | Elementweises Multiply |
+| Shader        | UAVs                   | Constants    | Funktion                           |
+|---------------|------------------------|--------------|------------------------------------|
+| `element_add` | 3 (A, B, C)            | count        | Elementweise Addition              |
+| `rms_norm`    | 3 (In, Weight, Out)    | dim, eps     | RMSNorm mit Group-Shared Reduction |
+| `swiglu`      | 3 (GateUp, Scale, Out) | intermediate | SwiGLU + Scale fused               |
+| `scale`       | 3 (X, Scale, Out)      | count        | Elementweises Multiply             |
 
 ---
 

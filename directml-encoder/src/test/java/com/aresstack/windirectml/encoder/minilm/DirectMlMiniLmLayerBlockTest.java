@@ -57,8 +57,12 @@ class DirectMlMiniLmLayerBlockTest {
 
         DirectMlContextImpl ctx = new DirectMlContextImpl("directml");
         try {
-            try { ctx.initialize(); }
-            catch (DirectMlRuntimeException e) { assumeTrue(false, "no DML: " + e.getMessage()); return; }
+            try {
+                ctx.initialize();
+            } catch (DirectMlRuntimeException e) {
+                assumeTrue(false, "no DML: " + e.getMessage());
+                return;
+            }
             assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
                     "Skipping: no DirectML device on this adapter");
             // GeluKernel.create(...) auto-selects native fused GELU on FL>=5.1
@@ -108,28 +112,28 @@ class DirectMlMiniLmLayerBlockTest {
             float[] maskF = zeros(SEQ);
 
             CpuTensor xInitCpu = CpuTensor.float32(TensorShape.of(SEQ, HIDDEN), xInit);
-            CpuTensor maskCpu  = CpuTensor.float32(TensorShape.of(SEQ), maskF);
+            CpuTensor maskCpu = CpuTensor.float32(TensorShape.of(SEQ), maskF);
 
             // GPU weight buffers (caller-owned).
-            try (GpuBuffer xInBuf  = ctx.allocateBufferFor(xInitCpu, GpuBuffer.BufferUsage.ACTIVATION);
-                 GpuBuffer mskBuf  = ctx.allocateBufferFor(maskCpu,  GpuBuffer.BufferUsage.ACTIVATION);
+            try (GpuBuffer xInBuf = ctx.allocateBufferFor(xInitCpu, GpuBuffer.BufferUsage.ACTIVATION);
+                 GpuBuffer mskBuf = ctx.allocateBufferFor(maskCpu, GpuBuffer.BufferUsage.ACTIVATION);
                  GpuBuffer xOutBuf = ctx.allocateBuffer((long) SEQ * HIDDEN * Float.BYTES,
                          GpuBuffer.BufferUsage.ACTIVATION);
-                 GpuBuffer qwB  = weight(ctx, qw, HIDDEN, HIDDEN);
-                 GpuBuffer qbB  = vec(ctx, qb, HIDDEN);
-                 GpuBuffer kwB  = weight(ctx, kw, HIDDEN, HIDDEN);
-                 GpuBuffer kbB  = vec(ctx, kb, HIDDEN);
-                 GpuBuffer vwB  = weight(ctx, vw, HIDDEN, HIDDEN);
-                 GpuBuffer vbB  = vec(ctx, vb, HIDDEN);
-                 GpuBuffer owB  = weight(ctx, ow, HIDDEN, HIDDEN);
-                 GpuBuffer obB  = vec(ctx, ob, HIDDEN);
-                 GpuBuffer agB  = vec(ctx, ag, HIDDEN);
-                 GpuBuffer abB  = vec(ctx, ab, HIDDEN);
-                 GpuBuffer iwB  = weight(ctx, iw, INTER, HIDDEN);
-                 GpuBuffer ibB  = vec(ctx, ib, INTER);
-                 GpuBuffer mwB  = weight(ctx, mw, HIDDEN, INTER);
-                 GpuBuffer mbB  = vec(ctx, mb, HIDDEN);
-                 GpuBuffer ogB  = vec(ctx, og, HIDDEN);
+                 GpuBuffer qwB = weight(ctx, qw, HIDDEN, HIDDEN);
+                 GpuBuffer qbB = vec(ctx, qb, HIDDEN);
+                 GpuBuffer kwB = weight(ctx, kw, HIDDEN, HIDDEN);
+                 GpuBuffer kbB = vec(ctx, kb, HIDDEN);
+                 GpuBuffer vwB = weight(ctx, vw, HIDDEN, HIDDEN);
+                 GpuBuffer vbB = vec(ctx, vb, HIDDEN);
+                 GpuBuffer owB = weight(ctx, ow, HIDDEN, HIDDEN);
+                 GpuBuffer obB = vec(ctx, ob, HIDDEN);
+                 GpuBuffer agB = vec(ctx, ag, HIDDEN);
+                 GpuBuffer abB = vec(ctx, ab, HIDDEN);
+                 GpuBuffer iwB = weight(ctx, iw, INTER, HIDDEN);
+                 GpuBuffer ibB = vec(ctx, ib, INTER);
+                 GpuBuffer mwB = weight(ctx, mw, HIDDEN, INTER);
+                 GpuBuffer mbB = vec(ctx, mb, HIDDEN);
+                 GpuBuffer ogB = vec(ctx, og, HIDDEN);
                  GpuBuffer ob2B = vec(ctx, ob2, HIDDEN);
                  DirectMlMiniLmLayerBlock block = new DirectMlMiniLmLayerBlock(
                          ctx, SEQ, HIDDEN, HEADS, HEAD_DIM, INTER, EPS, /* hasMask */ true)) {
@@ -141,7 +145,7 @@ class DirectMlMiniLmLayerBlockTest {
                         qwB, qbB, kwB, kbB, vwB, vbB, owB, obB, agB, abB,
                         iwB, ibB, mwB, mbB, ogB, ob2B);
 
-                DirectMlTensor xT    = tensor(xInBuf,  SEQ, HIDDEN);
+                DirectMlTensor xT = tensor(xInBuf, SEQ, HIDDEN);
                 DirectMlTensor maskT = tensor(mskBuf, SEQ);
                 DirectMlTensor xOutT = tensor(xOutBuf, SEQ, HIDDEN);
 
@@ -202,7 +206,9 @@ class DirectMlMiniLmLayerBlockTest {
         return a;
     }
 
-    private static float[] zeros(int n) { return new float[n]; }
+    private static float[] zeros(int n) {
+        return new float[n];
+    }
 
     private static float[] ones(int n) {
         float[] a = new float[n];

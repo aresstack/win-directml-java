@@ -33,8 +33,10 @@ public final class MnistPipeline implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(MnistPipeline.class);
 
-    /** Detected model architecture. */
-    enum ModelArch { MNIST, EMNIST_BLANK }
+    /**
+     * Detected model architecture.
+     */
+    enum ModelArch {MNIST, EMNIST_BLANK}
 
     private final WindowsBindings wb;
     private Arena arena;
@@ -91,11 +93,19 @@ public final class MnistPipeline implements AutoCloseable {
         this.arena = Arena.ofConfined();
     }
 
-    /** Returns the number of output logits (10 for MNIST, 11 for EMNIST). */
-    public int getOutputSize() { return outputSize; }
+    /**
+     * Returns the number of output logits (10 for MNIST, 11 for EMNIST).
+     */
+    public int getOutputSize() {
+        return outputSize;
+    }
 
-    /** Returns the detected model architecture. */
-    public ModelArch getArch() { return arch; }
+    /**
+     * Returns the detected model architecture.
+     */
+    public ModelArch getArch() {
+        return arch;
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     //  Load model
@@ -103,7 +113,8 @@ public final class MnistPipeline implements AutoCloseable {
 
     public void loadModel(Path onnxFile) throws WindowsNativeException, IOException {
         if (closed) throw new IllegalStateException("MnistPipeline already closed");
-        if (loaded) throw new IllegalStateException("MnistPipeline already loaded – close and create a new instance to load a different model");
+        if (loaded)
+            throw new IllegalStateException("MnistPipeline already loaded – close and create a new instance to load a different model");
         log.info("MnistPipeline.loadModel({})", onnxFile);
         OnnxModelReader.OnnxGraph graph = OnnxModelReader.parse(onnxFile);
 
@@ -193,7 +204,10 @@ public final class MnistPipeline implements AutoCloseable {
                         var addNode = nodes.get(i + 1);
                         for (String in : addNode.inputs()) {
                             OnnxModelReader.OnnxTensor t = resolveInitializer(in, inits, reshapeMap);
-                            if (t != null) { bias = t.data(); break; }
+                            if (t != null) {
+                                bias = t.data();
+                                break;
+                            }
                         }
                     }
                     convBiases.add(bias != null ? bias : new float[0]);
@@ -206,7 +220,10 @@ public final class MnistPipeline implements AutoCloseable {
                     if (matMulWeight != null && addBias == null) {
                         for (String in : node.inputs()) {
                             OnnxModelReader.OnnxTensor t = resolveInitializer(in, inits, reshapeMap);
-                            if (t != null) { addBias = t.data(); break; }
+                            if (t != null) {
+                                addBias = t.data();
+                                break;
+                            }
                         }
                     }
                 }
@@ -214,11 +231,11 @@ public final class MnistPipeline implements AutoCloseable {
         }
 
         conv1Filter = convFilters.size() > 0 ? convFilters.get(0) : new float[200];
-        conv1Bias   = convBiases.size() > 0 ? convBiases.get(0)  : new float[8];
+        conv1Bias = convBiases.size() > 0 ? convBiases.get(0) : new float[8];
         conv2Filter = convFilters.size() > 1 ? convFilters.get(1) : new float[3200];
-        conv2Bias   = convBiases.size() > 1 ? convBiases.get(1)  : new float[16];
-        fcWeight    = matMulWeight != null ? matMulWeight : new float[2560];
-        fcBias      = addBias != null ? addBias : new float[10];
+        conv2Bias = convBiases.size() > 1 ? convBiases.get(1) : new float[16];
+        fcWeight = matMulWeight != null ? matMulWeight : new float[2560];
+        fcBias = addBias != null ? addBias : new float[10];
 
         log.info("MNIST weights: conv1F={}, conv2F={}, fcW={}", conv1Filter.length, conv2Filter.length, fcWeight.length);
     }
@@ -229,7 +246,7 @@ public final class MnistPipeline implements AutoCloseable {
      * Extract weights for the EMNIST_BLANK architecture.
      * <p>
      * Graph: Conv(+bias) → Relu → Conv(+bias) → Relu → MaxPool → Conv(+bias) → Relu → MaxPool
-     *        → Flatten → Gemm(6272→128) → BatchNorm(128) → Relu → Gemm(128→11)
+     * → Flatten → Gemm(6272→128) → BatchNorm(128) → Relu → Gemm(128→11)
      * <p>
      * Conv nodes have bias as third input (PyTorch export style).
      * Gemm nodes have weight as second input, bias as third.
@@ -289,17 +306,17 @@ public final class MnistPipeline implements AutoCloseable {
 
         // 3 Conv layers
         conv1Filter = convFilters.size() > 0 ? convFilters.get(0) : new float[288];
-        conv1Bias   = convBiases.size() > 0 ? convBiases.get(0)  : new float[32];
+        conv1Bias = convBiases.size() > 0 ? convBiases.get(0) : new float[32];
         conv2Filter = convFilters.size() > 1 ? convFilters.get(1) : new float[18432];
-        conv2Bias   = convBiases.size() > 1 ? convBiases.get(1)  : new float[64];
+        conv2Bias = convBiases.size() > 1 ? convBiases.get(1) : new float[64];
         conv3Filter = convFilters.size() > 2 ? convFilters.get(2) : new float[73728];
-        conv3Bias   = convBiases.size() > 2 ? convBiases.get(2)  : new float[128];
+        conv3Bias = convBiases.size() > 2 ? convBiases.get(2) : new float[128];
 
         // 2 Gemm layers: first = 6272→128, second = 128→11
         fc1Weight = gemmWeights.size() > 0 ? gemmWeights.get(0) : new float[802816];
-        fc1Bias   = gemmBiases.size() > 0 ? gemmBiases.get(0)  : new float[128];
-        fcWeight  = gemmWeights.size() > 1 ? gemmWeights.get(1) : new float[1408];
-        fcBias    = gemmBiases.size() > 1 ? gemmBiases.get(1)  : new float[11];
+        fc1Bias = gemmBiases.size() > 0 ? gemmBiases.get(0) : new float[128];
+        fcWeight = gemmWeights.size() > 1 ? gemmWeights.get(1) : new float[1408];
+        fcBias = gemmBiases.size() > 1 ? gemmBiases.get(1) : new float[11];
 
         // BN defaults set above in the loop, provide fallback
         if (bnWeight == null) bnWeight = new float[128];
@@ -350,7 +367,7 @@ public final class MnistPipeline implements AutoCloseable {
                 var inputs = node.inputs();
                 var wQuant = inits.get(inputs.get(3));
                 var wScale = inits.get(inputs.get(4));
-                var wZp    = inits.get(inputs.get(5));
+                var wZp = inits.get(inputs.get(5));
 
                 convFilters.add(dequantizePerChannel(wQuant, wScale, wZp));
 
@@ -370,7 +387,7 @@ public final class MnistPipeline implements AutoCloseable {
                 var inputs = node.inputs();
                 var bQuant = inits.get(inputs.get(3));
                 var bScale = inits.get(inputs.get(4));
-                var bZp    = inits.get(inputs.get(5));
+                var bZp = inits.get(inputs.get(5));
                 matMulWeight = dequantizePerChannel(bQuant, bScale, bZp);
                 break;
             }
@@ -382,25 +399,25 @@ public final class MnistPipeline implements AutoCloseable {
                 var inputs = node.inputs();
                 var bQuant = inits.get(inputs.get(3));
                 var bScale = inits.get(inputs.get(4));
-                var bZp    = inits.get(inputs.get(5));
+                var bZp = inits.get(inputs.get(5));
                 fcBiasResult = dequantizeFlat(bQuant, bScale, bZp);
                 break;
             }
         }
 
         conv1Filter = convFilters.size() > 0 ? convFilters.get(0) : new float[200];
-        conv1Bias   = convBiases.size() > 0 ? convBiases.get(0)  : new float[8];
+        conv1Bias = convBiases.size() > 0 ? convBiases.get(0) : new float[8];
         conv2Filter = convFilters.size() > 1 ? convFilters.get(1) : new float[3200];
-        conv2Bias   = convBiases.size() > 1 ? convBiases.get(1)  : new float[16];
-        fcWeight    = matMulWeight != null ? matMulWeight : new float[2560];
-        fcBias      = fcBiasResult != null ? fcBiasResult : new float[10];
+        conv2Bias = convBiases.size() > 1 ? convBiases.get(1) : new float[16];
+        fcWeight = matMulWeight != null ? matMulWeight : new float[2560];
+        fcBias = fcBiasResult != null ? fcBiasResult : new float[10];
 
         log.info("Int8 MNIST weights: conv1F={}, conv2F={}, fcW={}", conv1Filter.length, conv2Filter.length, fcWeight.length);
     }
 
     private static float[] dequantizePerChannel(OnnxModelReader.OnnxTensor quant,
-                                                 OnnxModelReader.OnnxTensor scale,
-                                                 OnnxModelReader.OnnxTensor zp) {
+                                                OnnxModelReader.OnnxTensor scale,
+                                                OnnxModelReader.OnnxTensor zp) {
         if (quant == null || scale == null) return new float[0];
         int totalElements = quant.elementCount();
         int numChannels = scale.data().length;
@@ -420,8 +437,8 @@ public final class MnistPipeline implements AutoCloseable {
     }
 
     private static float[] dequantizeFlat(OnnxModelReader.OnnxTensor quant,
-                                           OnnxModelReader.OnnxTensor scale,
-                                           OnnxModelReader.OnnxTensor zp) {
+                                          OnnxModelReader.OnnxTensor scale,
+                                          OnnxModelReader.OnnxTensor zp) {
         if (quant == null || scale == null) return new float[0];
         int totalElements = quant.elementCount();
         float s = scale.getFloat(0);
@@ -437,8 +454,8 @@ public final class MnistPipeline implements AutoCloseable {
     }
 
     private static float[] dequantizeBias(OnnxModelReader.OnnxTensor biasQuant,
-                                           OnnxModelReader.OnnxTensor xScale,
-                                           OnnxModelReader.OnnxTensor wScale) {
+                                          OnnxModelReader.OnnxTensor xScale,
+                                          OnnxModelReader.OnnxTensor wScale) {
         if (biasQuant == null || xScale == null || wScale == null) return new float[0];
         float xS = xScale.getFloat(0);
         int count = biasQuant.elementCount();
@@ -457,17 +474,17 @@ public final class MnistPipeline implements AutoCloseable {
 
     private void createGpuBuffers() throws WindowsNativeException {
         var dev = wb.getD3d12Device();
-        inputBuf  = D3D12Bindings.createDefaultBuffer(dev, fb(784), arena);
+        inputBuf = D3D12Bindings.createDefaultBuffer(dev, fb(784), arena);
         conv1FBuf = D3D12Bindings.createDefaultBuffer(dev, fb(conv1Filter.length), arena);
         conv1BBuf = D3D12Bindings.createDefaultBuffer(dev, fb(conv1Bias.length), arena);
-        conv1Out  = D3D12Bindings.createDefaultBuffer(dev, fb(6272), arena);
-        pool1Out  = D3D12Bindings.createDefaultBuffer(dev, fb(1568), arena);
+        conv1Out = D3D12Bindings.createDefaultBuffer(dev, fb(6272), arena);
+        pool1Out = D3D12Bindings.createDefaultBuffer(dev, fb(1568), arena);
         conv2FBuf = D3D12Bindings.createDefaultBuffer(dev, fb(conv2Filter.length), arena);
         conv2BBuf = D3D12Bindings.createDefaultBuffer(dev, fb(conv2Bias.length), arena);
-        conv2Out  = D3D12Bindings.createDefaultBuffer(dev, fb(3136), arena);
-        pool2Out  = D3D12Bindings.createDefaultBuffer(dev, fb(256), arena);
-        fcWBuf    = D3D12Bindings.createDefaultBuffer(dev, fb(fcWeight.length), arena);
-        fcBBuf    = D3D12Bindings.createDefaultBuffer(dev, fb(fcBias.length), arena);
+        conv2Out = D3D12Bindings.createDefaultBuffer(dev, fb(3136), arena);
+        pool2Out = D3D12Bindings.createDefaultBuffer(dev, fb(256), arena);
+        fcWBuf = D3D12Bindings.createDefaultBuffer(dev, fb(fcWeight.length), arena);
+        fcBBuf = D3D12Bindings.createDefaultBuffer(dev, fb(fcBias.length), arena);
         outputBuf = D3D12Bindings.createDefaultBuffer(dev, fb(10), arena);
         log.debug("MNIST GPU buffers created (12 buffers)");
     }
@@ -529,38 +546,38 @@ public final class MnistPipeline implements AutoCloseable {
      */
     private void createGpuBuffersEmnist() throws WindowsNativeException {
         var dev = wb.getD3d12Device();
-        inputBuf  = D3D12Bindings.createDefaultBuffer(dev, fb(784), arena);
+        inputBuf = D3D12Bindings.createDefaultBuffer(dev, fb(784), arena);
 
         // Conv1: (32,1,3,3) filter, 32 bias
         conv1FBuf = D3D12Bindings.createDefaultBuffer(dev, fb(conv1Filter.length), arena);
         conv1BBuf = D3D12Bindings.createDefaultBuffer(dev, fb(conv1Bias.length), arena);
-        conv1Out  = D3D12Bindings.createDefaultBuffer(dev, fb(25088), arena); // (1,32,28,28)
+        conv1Out = D3D12Bindings.createDefaultBuffer(dev, fb(25088), arena); // (1,32,28,28)
 
         // Conv2: (64,32,3,3) filter, 64 bias
         conv2FBuf = D3D12Bindings.createDefaultBuffer(dev, fb(conv2Filter.length), arena);
         conv2BBuf = D3D12Bindings.createDefaultBuffer(dev, fb(conv2Bias.length), arena);
-        conv2Out  = D3D12Bindings.createDefaultBuffer(dev, fb(50176), arena); // (1,64,28,28)
+        conv2Out = D3D12Bindings.createDefaultBuffer(dev, fb(50176), arena); // (1,64,28,28)
 
         // Pool1: (1,64,14,14)
-        pool1Out  = D3D12Bindings.createDefaultBuffer(dev, fb(12544), arena);
+        pool1Out = D3D12Bindings.createDefaultBuffer(dev, fb(12544), arena);
 
         // Conv3: (128,64,3,3) filter, 128 bias
         conv3FBuf = D3D12Bindings.createDefaultBuffer(dev, fb(conv3Filter.length), arena);
         conv3BBuf = D3D12Bindings.createDefaultBuffer(dev, fb(conv3Bias.length), arena);
-        conv3Out  = D3D12Bindings.createDefaultBuffer(dev, fb(25088), arena); // (1,128,14,14)
+        conv3Out = D3D12Bindings.createDefaultBuffer(dev, fb(25088), arena); // (1,128,14,14)
 
         // Pool2: (1,128,7,7)
-        pool2Out  = D3D12Bindings.createDefaultBuffer(dev, fb(6272), arena);
+        pool2Out = D3D12Bindings.createDefaultBuffer(dev, fb(6272), arena);
 
         // Gemm1: 6272→128 (with folded BN)
         fc1WBuf = D3D12Bindings.createDefaultBuffer(dev, fb(fc1Weight.length), arena);
         fc1BBuf = D3D12Bindings.createDefaultBuffer(dev, fb(fc1Bias.length), arena);
-        fc1Out  = D3D12Bindings.createDefaultBuffer(dev, fb(128), arena);
+        fc1Out = D3D12Bindings.createDefaultBuffer(dev, fb(128), arena);
 
 
         // Gemm2: 128→11
-        fcWBuf    = D3D12Bindings.createDefaultBuffer(dev, fb(fcWeight.length), arena);
-        fcBBuf    = D3D12Bindings.createDefaultBuffer(dev, fb(fcBias.length), arena);
+        fcWBuf = D3D12Bindings.createDefaultBuffer(dev, fb(fcWeight.length), arena);
+        fcBBuf = D3D12Bindings.createDefaultBuffer(dev, fb(fcBias.length), arena);
         outputBuf = D3D12Bindings.createDefaultBuffer(dev, fb(11), arena);
 
         log.debug("EMNIST GPU buffers created");
@@ -683,7 +700,11 @@ public final class MnistPipeline implements AutoCloseable {
 
     private void initializeOperators() throws WindowsNativeException {
         boolean anyPersist = false;
-        for (long ps : persistSizes) if (ps > 0) { anyPersist = true; break; }
+        for (long ps : persistSizes)
+            if (ps > 0) {
+                anyPersist = true;
+                break;
+            }
         if (!anyPersist) {
             log.info("No persistent resources needed – skipping operator initialization");
             return;
@@ -921,7 +942,9 @@ public final class MnistPipeline implements AutoCloseable {
         return result;
     }
 
-    /** Functional interface for binding a single operator's inputs/outputs. */
+    /**
+     * Functional interface for binding a single operator's inputs/outputs.
+     */
     @FunctionalInterface
     private interface BindingAction {
         void bind(MemorySegment bindingTable);
@@ -932,9 +955,9 @@ public final class MnistPipeline implements AutoCloseable {
      * This per-op execution strategy isolates GPU faults to the exact failing operator.
      */
     private int dispatchSingleOp(MemorySegment dev, MemorySegment q, MemorySegment dml,
-                                  MemorySegment compiled, int opIdx,
-                                  long cpuBase, long gpuBase, int descOff,
-                                  BindingAction bindAction) throws WindowsNativeException {
+                                 MemorySegment compiled, int opIdx,
+                                 long cpuBase, long gpuBase, int descOff,
+                                 BindingAction bindAction) throws WindowsNativeException {
         int descCount = Math.max(descCounts[opIdx], 1);
 
         MemorySegment btDesc = DirectMlBindings.allocBindingTableDesc(arena, compiled,
@@ -961,7 +984,9 @@ public final class MnistPipeline implements AutoCloseable {
         return descOff + descCount;
     }
 
-    /** Compute argmax of output logits. */
+    /**
+     * Compute argmax of output logits.
+     */
     public static int argmax(float[] arr) {
         int idx = 0;
         for (int i = 1; i < arr.length; i++) {
@@ -975,13 +1000,13 @@ public final class MnistPipeline implements AutoCloseable {
     // ══════════════════════════════════════════════════════════════════════
 
     private int dispatchConv(MemorySegment dml, MemorySegment cmdList,
-                              MemorySegment compiled, int opIdx,
-                              MemorySegment inBuf, long inSize,
-                              MemorySegment filterBuf, long filterSize,
-                              MemorySegment biasBuf, long biasSize,
-                              MemorySegment outBuf, long outSize,
-                              boolean hasBias,
-                              long cpuBase, long gpuBase, int descOff)
+                             MemorySegment compiled, int opIdx,
+                             MemorySegment inBuf, long inSize,
+                             MemorySegment filterBuf, long filterSize,
+                             MemorySegment biasBuf, long biasSize,
+                             MemorySegment outBuf, long outSize,
+                             boolean hasBias,
+                             long cpuBase, long gpuBase, int descOff)
             throws WindowsNativeException {
         int descCount = Math.max(descCounts[opIdx], 1);
 
@@ -1014,10 +1039,10 @@ public final class MnistPipeline implements AutoCloseable {
     }
 
     private int dispatchPool(MemorySegment dml, MemorySegment cmdList,
-                              MemorySegment compiled, int opIdx,
-                              MemorySegment inBuf, long inSize,
-                              MemorySegment outBuf, long outSize,
-                              long cpuBase, long gpuBase, int descOff)
+                             MemorySegment compiled, int opIdx,
+                             MemorySegment inBuf, long inSize,
+                             MemorySegment outBuf, long outSize,
+                             long cpuBase, long gpuBase, int descOff)
             throws WindowsNativeException {
         int descCount = Math.max(descCounts[opIdx], 1);
 
@@ -1041,12 +1066,12 @@ public final class MnistPipeline implements AutoCloseable {
     }
 
     private int dispatchGemm(MemorySegment dml, MemorySegment cmdList,
-                              MemorySegment compiled, int opIdx,
-                              MemorySegment aBuf, long aSize,
-                              MemorySegment bBuf, long bSize,
-                              MemorySegment cBuf, long cSize,
-                              MemorySegment outBuf, long outSize,
-                              long cpuBase, long gpuBase, int descOff)
+                             MemorySegment compiled, int opIdx,
+                             MemorySegment aBuf, long aSize,
+                             MemorySegment bBuf, long bSize,
+                             MemorySegment cBuf, long cSize,
+                             MemorySegment outBuf, long outSize,
+                             long cpuBase, long gpuBase, int descOff)
             throws WindowsNativeException {
         int descCount = Math.max(descCounts[opIdx], 1);
 
@@ -1090,8 +1115,8 @@ public final class MnistPipeline implements AutoCloseable {
     // ══════════════════════════════════════════════════════════════════════
 
     private MemorySegment createAndCompileConv(int[] inShape, int[] filterShape, int[] biasShape,
-                                                int[] outShape, int[] strides, int[] padStart,
-                                                int[] padEnd, boolean fuseRelu, boolean hasBias)
+                                               int[] outShape, int[] strides, int[] padStart,
+                                               int[] padEnd, boolean fuseRelu, boolean hasBias)
             throws WindowsNativeException {
         var dml = wb.getDmlDevice();
         var inTD = td(inShape);
@@ -1136,7 +1161,7 @@ public final class MnistPipeline implements AutoCloseable {
     }
 
     private MemorySegment createAndCompilePool(int[] inShape, int[] outShape,
-                                                int[] windowSize, int[] strides)
+                                               int[] windowSize, int[] strides)
             throws WindowsNativeException {
         var dml = wb.getDmlDevice();
         var inTD = td(inShape);
@@ -1161,14 +1186,15 @@ public final class MnistPipeline implements AutoCloseable {
 
     /**
      * Create and compile a DML Gemm operator.
-     * @param transA DML_MATRIX_TRANSFORM for A
-     * @param transB DML_MATRIX_TRANSFORM for B
+     *
+     * @param transA          DML_MATRIX_TRANSFORM for A
+     * @param transB          DML_MATRIX_TRANSFORM for B
      * @param fusedActivation optional fused activation (null = none)
      */
     private MemorySegment createAndCompileGemm(int[] aShape, int[] bShape,
-                                                int[] cShape, int[] outShape,
-                                                int transA, int transB,
-                                                MemorySegment fusedActivation)
+                                               int[] cShape, int[] outShape,
+                                               int transA, int transB,
+                                               MemorySegment fusedActivation)
             throws WindowsNativeException {
         var dml = wb.getDmlDevice();
 

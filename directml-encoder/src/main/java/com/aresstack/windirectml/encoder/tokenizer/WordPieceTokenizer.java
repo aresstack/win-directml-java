@@ -76,7 +76,7 @@ public final class WordPieceTokenizer implements EncoderTokenizer {
         boolean stripAccents = true;
         JsonNode normalizer = root.get("normalizer");
         if (normalizer != null && !normalizer.isNull()) {
-            if (normalizer.hasNonNull("lowercase"))    lowercase    = normalizer.get("lowercase").asBoolean();
+            if (normalizer.hasNonNull("lowercase")) lowercase = normalizer.get("lowercase").asBoolean();
             if (normalizer.hasNonNull("strip_accents")) stripAccents = normalizer.get("strip_accents").asBoolean();
         }
 
@@ -178,19 +178,48 @@ public final class WordPieceTokenizer implements EncoderTokenizer {
         int[] mask = new int[n];
         int[] segments = new int[n];
         int p = 0;
-        inputIds[p] = clsId; segments[p] = 0; p++;
-        for (int id : a) { inputIds[p] = id; segments[p] = 0; p++; }
-        inputIds[p] = sepId; segments[p] = 0; p++;
-        for (int id : b) { inputIds[p] = id; segments[p] = 1; p++; }
-        inputIds[p] = sepId; segments[p] = 1; p++;
+        inputIds[p] = clsId;
+        segments[p] = 0;
+        p++;
+        for (int id : a) {
+            inputIds[p] = id;
+            segments[p] = 0;
+            p++;
+        }
+        inputIds[p] = sepId;
+        segments[p] = 0;
+        p++;
+        for (int id : b) {
+            inputIds[p] = id;
+            segments[p] = 1;
+            p++;
+        }
+        inputIds[p] = sepId;
+        segments[p] = 1;
+        p++;
         for (int i = 0; i < n; i++) mask[i] = 1;
         return new Encoded(inputIds, mask, segments);
     }
 
-    @Override public int padTokenId() { return padId; }
-    @Override public int clsTokenId() { return clsId; }
-    @Override public int sepTokenId() { return sepId; }
-    @Override public int vocabSize() { return vocab.size(); }
+    @Override
+    public int padTokenId() {
+        return padId;
+    }
+
+    @Override
+    public int clsTokenId() {
+        return clsId;
+    }
+
+    @Override
+    public int sepTokenId() {
+        return sepId;
+    }
+
+    @Override
+    public int vocabSize() {
+        return vocab.size();
+    }
 
     // ── Internals ────────────────────────────────────────────────────────
 
@@ -261,7 +290,10 @@ public final class WordPieceTokenizer implements EncoderTokenizer {
                 String piece = word.substring(start, end);
                 if (start > 0) piece = continuingPrefix + piece;
                 Integer id = vocab.get(piece);
-                if (id != null) { match = id; break; }
+                if (id != null) {
+                    match = id;
+                    break;
+                }
                 end--;
             }
             if (match == null) {

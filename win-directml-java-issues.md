@@ -970,7 +970,8 @@ wird aktuell nicht genutzt).
 
 ---
 
-## Gelöst (Sprint `feat(runtime)/gelu-kernel`): DirectMlGeluKernel via nativer `DML_OPERATOR_ACTIVATION_GELU` + DLL-Pfad-Override
+## Gelöst (Sprint `feat(runtime)/gelu-kernel`): DirectMlGeluKernel via nativer
+`DML_OPERATOR_ACTIVATION_GELU` + DLL-Pfad-Override
 
 **Status:** ERLEDIGT. `DirectMlGeluKernelTest.geluMatchesCpuReference`
 ist grün, wenn der Prozess gegen eine `DirectML.dll` ≥ 1.10 (FL 5.1,
@@ -1035,6 +1036,7 @@ quantisierte Decoder-Pfade).
 ---
 
 ## Gelöst (Sprint `feat(runtime)/composite-gelu-fallback`):
+
 `DirectMlCompositeGeluKernel` – FL-2.0-Composite-GELU für In-Box-DLL
 
 **Status:** ERLEDIGT. Der vollständige `DirectMlMiniLmEncoder` läuft nun

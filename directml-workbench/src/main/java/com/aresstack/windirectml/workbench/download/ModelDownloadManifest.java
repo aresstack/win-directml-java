@@ -9,9 +9,9 @@ import java.util.List;
  * and the downloader. The UI displays each file descriptor as an editable row,
  * and the downloader consumes the same list for actual downloads.
  *
- * @param modelId       unique identifier for this model (used as persistence key)
- * @param localDirName  local directory name under the model root
- * @param files         list of file descriptors for this model
+ * @param modelId      unique identifier for this model (used as persistence key)
+ * @param localDirName local directory name under the model root
+ * @param files        list of file descriptors for this model
  */
 public record ModelDownloadManifest(
         String modelId,

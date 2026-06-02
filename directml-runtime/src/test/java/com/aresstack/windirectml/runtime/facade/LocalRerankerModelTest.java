@@ -18,12 +18,21 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class LocalRerankerModelTest {
 
-    /** Stub that scores documents by inverse string length. */
+    /**
+     * Stub that scores documents by inverse string length.
+     */
     private static final class StubReranker implements Reranker {
         private boolean ready = true;
 
-        @Override public boolean isReady() { return ready; }
-        @Override public String modelName() { return "stub-reranker"; }
+        @Override
+        public boolean isReady() {
+            return ready;
+        }
+
+        @Override
+        public String modelName() {
+            return "stub-reranker";
+        }
 
         @Override
         public List<RerankResult> rerank(RerankRequest request) throws RerankException {
@@ -38,7 +47,10 @@ class LocalRerankerModelTest {
             return top >= results.size() ? results : results.subList(0, top);
         }
 
-        @Override public void close() { ready = false; }
+        @Override
+        public void close() {
+            ready = false;
+        }
     }
 
     @Test

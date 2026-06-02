@@ -38,7 +38,8 @@ import java.nio.file.Path;
  */
 public final class E5Encoders {
 
-    private E5Encoders() {}
+    private E5Encoders() {
+    }
 
     /**
      * CPU loader for a specific {@link E5Variant}.
@@ -72,7 +73,9 @@ public final class E5Encoders {
         }
     }
 
-    /** DirectML loader for a raw {@link BertEncoderConfig}. */
+    /**
+     * DirectML loader for a raw {@link BertEncoderConfig}.
+     */
     public static DirectMlBertEncoder loadDirectMl(Path modelDir, BertEncoderConfig cfg)
             throws EmbeddingException {
         verifyDir(modelDir);
@@ -88,10 +91,16 @@ public final class E5Encoders {
                     cfg.maxPositionEmbeddings());
             return DirectMlBertEncoder.build(ctx, /* ownsCtx */ true, cfg, w, t);
         } catch (EmbeddingException e) {
-            if (ctx != null) try { ctx.close(); } catch (Exception ignored) {}
+            if (ctx != null) try {
+                ctx.close();
+            } catch (Exception ignored) {
+            }
             throw e;
         } catch (Exception e) {
-            if (ctx != null) try { ctx.close(); } catch (Exception ignored) {}
+            if (ctx != null) try {
+                ctx.close();
+            } catch (Exception ignored) {
+            }
             throw new EmbeddingException("Failed to load DirectMlBertEncoder(E5) from " + modelDir, e);
         }
     }
@@ -103,7 +112,9 @@ public final class E5Encoders {
         return loadDirectMl(modelDir, E5Variant.BASE_STS_EN_DE);
     }
 
-    /** CPU equivalent of {@link #loadDirectMl(Path)}. */
+    /**
+     * CPU equivalent of {@link #loadDirectMl(Path)}.
+     */
     public static CpuBertEncoder loadCpu(Path modelDir) throws EmbeddingException {
         return loadCpu(modelDir, E5Variant.BASE_STS_EN_DE);
     }

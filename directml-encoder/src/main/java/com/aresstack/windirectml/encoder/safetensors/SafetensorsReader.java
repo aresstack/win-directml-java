@@ -91,7 +91,10 @@ public final class SafetensorsReader implements AutoCloseable {
             throw new SafetensorsException("failed to open " + file, e);
         } finally {
             if (channel != null) {
-                try { channel.close(); } catch (IOException ignored) {}
+                try {
+                    channel.close();
+                } catch (IOException ignored) {
+                }
             }
         }
     }
@@ -143,13 +146,13 @@ public final class SafetensorsReader implements AutoCloseable {
 
     private static TensorDataType mapDataType(String dtype, String tensorName) throws SafetensorsException {
         return switch (dtype) {
-            case "F32"  -> TensorDataType.FLOAT32;
-            case "F16"  -> TensorDataType.FLOAT16;
+            case "F32" -> TensorDataType.FLOAT32;
+            case "F16" -> TensorDataType.FLOAT16;
             case "BF16" -> TensorDataType.BFLOAT16;
             case "I64" -> TensorDataType.INT64;
-            case "I32"  -> TensorDataType.INT32;
-            case "I8"   -> TensorDataType.INT8;
-            case "U8"   -> TensorDataType.UINT8;
+            case "I32" -> TensorDataType.INT32;
+            case "I8" -> TensorDataType.INT8;
+            case "U8" -> TensorDataType.UINT8;
             default -> null; // unsupported – caller skips the entry
         };
     }
@@ -178,7 +181,9 @@ public final class SafetensorsReader implements AutoCloseable {
         return slice;
     }
 
-    /** Lade einen FLOAT32-Tensor vollständig in ein Java-Array (Kopie). */
+    /**
+     * Lade einen FLOAT32-Tensor vollständig in ein Java-Array (Kopie).
+     */
     public float[] readFloat32(String name) throws SafetensorsException {
         SafetensorsEntry e = entry(name);
         if (e.dataType() != TensorDataType.FLOAT32) {

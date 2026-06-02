@@ -19,7 +19,8 @@ import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
  */
 public final class E5EncoderConfig {
 
-    private E5EncoderConfig() {}
+    private E5EncoderConfig() {
+    }
 
     /**
      * {@code intfloat/e5-small-v2} (English) – 12 layers, hidden 384,

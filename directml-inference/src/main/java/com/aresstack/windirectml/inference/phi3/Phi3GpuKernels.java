@@ -35,10 +35,10 @@ public final class Phi3GpuKernels implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(Phi3GpuKernels.class);
 
     // Projection indices within layerKernels[l]
-    static final int QKV_FUSED   = 0;
-    static final int O_PROJ      = 1;
+    static final int QKV_FUSED = 0;
+    static final int O_PROJ = 1;
     static final int GATE_UP_PROJ = 2;
-    static final int DOWN_PROJ   = 3;
+    static final int DOWN_PROJ = 3;
     static final int PROJECTIONS_PER_LAYER = 4;
 
     private final int gpuLayers;
@@ -61,8 +61,8 @@ public final class Phi3GpuKernels implements AutoCloseable {
      * and optionally the lm_head projection.
      */
     public static Phi3GpuKernels create(WindowsBindings wb, Phi3Weights weights,
-                                         Phi3Config config, int gpuLayers,
-                                         boolean gpuLmHead) {
+                                        Phi3Config config, int gpuLayers,
+                                        boolean gpuLmHead) {
         int layers = Math.min(Math.max(gpuLayers, 0), config.numHiddenLayers());
         log.info("Creating GPU kernels: {} / {} layers (QKV fused), lmHead={}",
                 layers, config.numHiddenLayers(), gpuLmHead);
@@ -79,9 +79,9 @@ public final class Phi3GpuKernels implements AutoCloseable {
             k[QKV_FUSED] = createFusedQKV(wb, lw, hidden, l);
 
             // ── Remaining projections ──
-            k[O_PROJ]       = createKernel(wb, lw.oProj(),      "layer." + l + ".o_proj");
+            k[O_PROJ] = createKernel(wb, lw.oProj(), "layer." + l + ".o_proj");
             k[GATE_UP_PROJ] = createKernel(wb, lw.gateUpProj(), "layer." + l + ".gate_up");
-            k[DOWN_PROJ]    = createKernel(wb, lw.downProj(),   "layer." + l + ".down");
+            k[DOWN_PROJ] = createKernel(wb, lw.downProj(), "layer." + l + ".down");
             kernels[l] = k;
 
             if ((l + 1) % 4 == 0 || l == layers - 1) {
@@ -112,8 +112,8 @@ public final class Phi3GpuKernels implements AutoCloseable {
      * Reduces 3 GPU submissions → 1 per layer (saves 2 fence waits).
      */
     private static MatMulNBitsKernel createFusedQKV(WindowsBindings wb,
-                                                     LayerWeights lw,
-                                                     int hidden, int layerIdx) {
+                                                    LayerWeights lw,
+                                                    int hidden, int layerIdx) {
         QuantizedWeight qw = lw.qProj();
         QuantizedWeight kw = lw.kProj();
         QuantizedWeight vw = lw.vProj();
@@ -128,8 +128,8 @@ public final class Phi3GpuKernels implements AutoCloseable {
         // Concatenate: [Q; K; V] → [3*hidden, hidden] row-major
         int fusedN = 3 * hidden;
         float[] fused = new float[fusedN * hidden];
-        System.arraycopy(qDeq, 0, fused, 0,              hidden * hidden);
-        System.arraycopy(kDeq, 0, fused, hidden * hidden,     hidden * hidden);
+        System.arraycopy(qDeq, 0, fused, 0, hidden * hidden);
+        System.arraycopy(kDeq, 0, fused, hidden * hidden, hidden * hidden);
         System.arraycopy(vDeq, 0, fused, 2 * hidden * hidden, hidden * hidden);
 
         log.debug("Creating fused QKV kernel layer.{}: [{}, {}]", layerIdx, fusedN, hidden);
@@ -137,8 +137,8 @@ public final class Phi3GpuKernels implements AutoCloseable {
     }
 
     private static MatMulNBitsKernel createKernel(WindowsBindings wb,
-                                                   QuantizedWeight qw,
-                                                   String name) {
+                                                  QuantizedWeight qw,
+                                                  String name) {
         log.debug("Creating GPU kernel: {} [{}, {}]", name, qw.N(), qw.K());
         return new MatMulNBitsKernel(wb, qw.N(), qw.K(),
                 qw.qWeight(), qw.scales(), qw.zeroPoints(), qw.blockSize());
@@ -146,23 +146,49 @@ public final class Phi3GpuKernels implements AutoCloseable {
 
     // ── Accessors ────────────────────────────────────────────────────────
 
-    /** Whether layer {@code layerIdx} has GPU kernels. */
+    /**
+     * Whether layer {@code layerIdx} has GPU kernels.
+     */
     public boolean hasLayer(int layerIdx) {
         return layerIdx >= 0 && layerIdx < gpuLayers;
     }
 
-    /** Whether lm_head has a GPU kernel. */
-    public boolean hasLmHead() { return lmHeadKernel != null; }
+    /**
+     * Whether lm_head has a GPU kernel.
+     */
+    public boolean hasLmHead() {
+        return lmHeadKernel != null;
+    }
 
-    /** Number of decoder layers on GPU. */
-    public int getGpuLayers() { return gpuLayers; }
+    /**
+     * Number of decoder layers on GPU.
+     */
+    public int getGpuLayers() {
+        return gpuLayers;
+    }
 
-    /** Fused Q+K+V kernel: output is [3×hidden], split into Q[0..h), K[h..2h), V[2h..3h). */
-    public MatMulNBitsKernel qkvFused(int layer) { return layerKernels[layer][QKV_FUSED]; }
-    public MatMulNBitsKernel oProj(int layer)      { return layerKernels[layer][O_PROJ]; }
-    public MatMulNBitsKernel gateUpProj(int layer) { return layerKernels[layer][GATE_UP_PROJ]; }
-    public MatMulNBitsKernel downProj(int layer)   { return layerKernels[layer][DOWN_PROJ]; }
-    public MatMulNBitsKernel lmHead()              { return lmHeadKernel; }
+    /**
+     * Fused Q+K+V kernel: output is [3×hidden], split into Q[0..h), K[h..2h), V[2h..3h).
+     */
+    public MatMulNBitsKernel qkvFused(int layer) {
+        return layerKernels[layer][QKV_FUSED];
+    }
+
+    public MatMulNBitsKernel oProj(int layer) {
+        return layerKernels[layer][O_PROJ];
+    }
+
+    public MatMulNBitsKernel gateUpProj(int layer) {
+        return layerKernels[layer][GATE_UP_PROJ];
+    }
+
+    public MatMulNBitsKernel downProj(int layer) {
+        return layerKernels[layer][DOWN_PROJ];
+    }
+
+    public MatMulNBitsKernel lmHead() {
+        return lmHeadKernel;
+    }
 
     // ── AutoCloseable ────────────────────────────────────────────────────
 
@@ -175,10 +201,16 @@ public final class Phi3GpuKernels implements AutoCloseable {
         for (MatMulNBitsKernel[] layer : layerKernels) {
             if (layer == null) continue;
             for (MatMulNBitsKernel k : layer) {
-                if (k != null) { k.close(); count++; }
+                if (k != null) {
+                    k.close();
+                    count++;
+                }
             }
         }
-        if (lmHeadKernel != null) { lmHeadKernel.close(); count++; }
+        if (lmHeadKernel != null) {
+            lmHeadKernel.close();
+            count++;
+        }
 
         log.info("Phi3GpuKernels closed ({} kernels, {} layers)", count, gpuLayers);
     }

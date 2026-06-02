@@ -44,7 +44,9 @@ import java.util.Map;
  */
 public final class EmbeddingModelRegistry {
 
-    /** Intended consumer of the model in this project. */
+    /**
+     * Intended consumer of the model in this project.
+     */
     public enum UseCase {
         EMBEDDING,
         RERANKER,
@@ -57,7 +59,9 @@ public final class EmbeddingModelRegistry {
         }
     }
 
-    /** Release-status of the runtime support for the model. */
+    /**
+     * Release-status of the runtime support for the model.
+     */
     public enum Status {
         SHIPPED,
         EXPERIMENTAL,
@@ -128,18 +132,53 @@ public final class EmbeddingModelRegistry {
             this.embedFamily = embedFamily;
         }
 
-        public String modelId() { return modelId; }
-        public UseCase useCase() { return useCase; }
-        public String provider() { return provider; }
-        public String architecture() { return architecture; }
-        public String tokenizerType() { return tokenizerType; }
-        public String backendSupport() { return backendSupport; }
-        public Status status() { return status; }
-        public List<String> modelDirHints() { return modelDirHints; }
-        public String downloadScriptSupport() { return downloadScriptSupport; }
-        public String realModelTestStatus() { return realModelTestStatus; }
-        public String notes() { return notes; }
-        public String embedFamily() { return embedFamily; }
+        public String modelId() {
+            return modelId;
+        }
+
+        public UseCase useCase() {
+            return useCase;
+        }
+
+        public String provider() {
+            return provider;
+        }
+
+        public String architecture() {
+            return architecture;
+        }
+
+        public String tokenizerType() {
+            return tokenizerType;
+        }
+
+        public String backendSupport() {
+            return backendSupport;
+        }
+
+        public Status status() {
+            return status;
+        }
+
+        public List<String> modelDirHints() {
+            return modelDirHints;
+        }
+
+        public String downloadScriptSupport() {
+            return downloadScriptSupport;
+        }
+
+        public String realModelTestStatus() {
+            return realModelTestStatus;
+        }
+
+        public String notes() {
+            return notes;
+        }
+
+        public String embedFamily() {
+            return embedFamily;
+        }
 
         public boolean isEmbedding() {
             return useCase == UseCase.EMBEDDING;
@@ -382,7 +421,9 @@ public final class EmbeddingModelRegistry {
         // utility class
     }
 
-    /** All known entries in declaration order. */
+    /**
+     * All known entries in declaration order.
+     */
     public static List<Entry> entries() {
         return ENTRIES;
     }

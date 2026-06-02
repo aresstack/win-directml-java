@@ -35,7 +35,9 @@ public final class Phi3Tokenizer {
 
     private static final Logger log = LoggerFactory.getLogger(Phi3Tokenizer.class);
 
-    /** SentencePiece space marker. */
+    /**
+     * SentencePiece space marker.
+     */
     private static final char SP = '\u2581';
 
     // ── Special token IDs ────────────────────────────────────────────────
@@ -49,7 +51,9 @@ public final class Phi3Tokenizer {
     public static final int END_ID = 32007;       // <|end|>
     public static final int USER_ID = 32010;      // <|user|>
 
-    /** EOS token IDs that terminate generation. */
+    /**
+     * EOS token IDs that terminate generation.
+     */
     public static final int[] EOS_IDS = {ENDOFTEXT_ID, ASSISTANT_ID, END_ID};
 
     // ── Internal state ───────────────────────────────────────────────────
@@ -317,8 +321,13 @@ public final class Phi3Tokenizer {
      * @param content the message text
      */
     public record ChatMessage(String role, String content) {
-        public static ChatMessage user(String content) { return new ChatMessage("user", content); }
-        public static ChatMessage assistant(String content) { return new ChatMessage("assistant", content); }
+        public static ChatMessage user(String content) {
+            return new ChatMessage("user", content);
+        }
+
+        public static ChatMessage assistant(String content) {
+            return new ChatMessage("assistant", content);
+        }
     }
 
     /**
@@ -375,9 +384,13 @@ public final class Phi3Tokenizer {
 
     // ── Utility ──────────────────────────────────────────────────────────
 
-    public int vocabSize() { return vocabSize; }
+    public int vocabSize() {
+        return vocabSize;
+    }
 
-    /** Returns an unmodifiable view of the special tokens map (for debugging). */
+    /**
+     * Returns an unmodifiable view of the special tokens map (for debugging).
+     */
     public Map<String, Integer> specialTokensMap() {
         return Collections.unmodifiableMap(specialTokens);
     }

@@ -17,16 +17,16 @@ Status legend:
 
 ## 1. Embedding models
 
-| Variant                                  | Default | DirectML | CPU reference | Tokenizer               | Pooling                                                 | Status          | Module                                                           |
-|------------------------------------------|---------|----------|---------------|-------------------------|---------------------------------------------------------|-----------------|------------------------------------------------------------------|
-| `sentence-transformers/all-MiniLM-L6-v2` | yes     | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + optional L2                                      | ✅ shipped       | `directml-encoder` (`DirectMlMiniLmEncoder`, `CpuMiniLmEncoder`) |
-| `intfloat/e5-small-v2`                   | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | ✅ shipped       | `directml-encoder` (`E5Encoders.SMALL_V2`)                       |
-| `intfloat/e5-base-v2`                    | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | ✅ shipped       | `directml-encoder` (`E5Encoders.BASE_V2`)                        |
-| `danielheinz/e5-base-sts-en-de`          | no      | ❌        | ❌             | SentencePiece (XLM-R)   | mean + L2 (E5 prefixes when supported)                  | 🚧 planned      | – (XLM-R/SentencePiece pending; see §1.0.1)                       |
-| `intfloat/e5-large-v2`                   | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | 🧪 experimental | `directml-encoder` (`E5Encoders.LARGE_V2`)                       |
-| `intfloat/multilingual-e5-large-instruct`| no      | ❌        | ❌             | SentencePiece (XLM-R)   | mean + L2 + `Instruct: …\nQuery: …` prefix              | 🚧 planned      | – (needs SentencePiece + XLM-RoBERTa core)                       |
-| `jinaai/jina-embeddings-v2-base-de`      | no      | ❌        | ❌             | WordPiece (Jina-custom) | mean + L2; ALiBi positional bias, max 8192 tokens       | 🚧 planned      | – (needs custom Jina v2 attention path; see §1.1.2)              |
-| `nomic-ai/nomic-embed-text-v1.5`         | no      | ❌        | ❌             | WordPiece               | mean + L2 + `search_query:` / `search_document:` prefix | 🚧 planned      | –                                                                |
+| Variant                                   | Default | DirectML | CPU reference | Tokenizer               | Pooling                                                 | Status          | Module                                                           |
+|-------------------------------------------|---------|----------|---------------|-------------------------|---------------------------------------------------------|-----------------|------------------------------------------------------------------|
+| `sentence-transformers/all-MiniLM-L6-v2`  | yes     | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + optional L2                                      | ✅ shipped       | `directml-encoder` (`DirectMlMiniLmEncoder`, `CpuMiniLmEncoder`) |
+| `intfloat/e5-small-v2`                    | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | ✅ shipped       | `directml-encoder` (`E5Encoders.SMALL_V2`)                       |
+| `intfloat/e5-base-v2`                     | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | ✅ shipped       | `directml-encoder` (`E5Encoders.BASE_V2`)                        |
+| `danielheinz/e5-base-sts-en-de`           | no      | ❌        | ❌             | SentencePiece (XLM-R)   | mean + L2 (E5 prefixes when supported)                  | 🚧 planned      | – (XLM-R/SentencePiece pending; see §1.0.1)                      |
+| `intfloat/e5-large-v2`                    | no      | ✅        | ✅             | WordPiece (`vocab.txt`) | mean + L2 + `query: `/`passage: ` prefix                | 🧪 experimental | `directml-encoder` (`E5Encoders.LARGE_V2`)                       |
+| `intfloat/multilingual-e5-large-instruct` | no      | ❌        | ❌             | SentencePiece (XLM-R)   | mean + L2 + `Instruct: …\nQuery: …` prefix              | 🚧 planned      | – (needs SentencePiece + XLM-RoBERTa core)                       |
+| `jinaai/jina-embeddings-v2-base-de`       | no      | ❌        | ❌             | WordPiece (Jina-custom) | mean + L2; ALiBi positional bias, max 8192 tokens       | 🚧 planned      | – (needs custom Jina v2 attention path; see §1.1.2)              |
+| `nomic-ai/nomic-embed-text-v1.5`          | no      | ❌        | ❌             | WordPiece               | mean + L2 + `search_query:` / `search_document:` prefix | 🚧 planned      | –                                                                |
 
 All shipped embedding models go through the same
 `com.aresstack.windirectml.encoder.EmbeddingModel` interface and the
@@ -42,31 +42,31 @@ and the derived backend / model recommendations, see
 ### 1.0.1 MiniLM / E5 runtime selection and validation
 
 - **MiniLM (`sentence-transformers/all-MiniLM-L6-v2`)**
-  - Registry status: `shipped` (`embedFamily=minilm`, CPU + DirectML).
-  - `-Dembed.model` accepts both alias `minilm` and full model ID
-    `sentence-transformers/all-MiniLM-L6-v2`.
-  - Works through both `embed` and `embedBatch`.
+    - Registry status: `shipped` (`embedFamily=minilm`, CPU + DirectML).
+    - `-Dembed.model` accepts both alias `minilm` and full model ID
+      `sentence-transformers/all-MiniLM-L6-v2`.
+    - Works through both `embed` and `embedBatch`.
 - **E5 (`danielheinz/e5-base-sts-en-de`)**
-  - Registry status: `planned` (no `embedFamily` while the runtime is
-    WordPiece-only).
-  - The upstream checkpoint at
-    https://huggingface.co/danielheinz/e5-base-sts-en-de hosts an
-    `XLMRobertaModel` (`vocab_size=250002`, `type_vocab_size=1`,
-    SentencePiece tokenizer, ~1.06 GB `model.safetensors`), i.e. a
-    multilingual-E5 derivative – not the WordPiece BERT-base profile
-    the current E5 runtime supports.
-  - `-Dembed.model=danielheinz/e5-base-sts-en-de` is rejected by the
-    `embed` gate with the standard
-    `… classified as an embedding model but has no runtime support in
-    this build (status=planned).` message until SentencePiece + XLM-R
-    support lands (tracked with multilingual-E5).
-  - The variant constant `E5Encoders.BASE_STS_EN_DE` and the
-    `download-e5.ps1 -Variant base-sts-en-de` helper are kept in the
-    tree but are not exercised end-to-end against the current upstream
-    checkpoint.
+    - Registry status: `planned` (no `embedFamily` while the runtime is
+      WordPiece-only).
+    - The upstream checkpoint at
+      https://huggingface.co/danielheinz/e5-base-sts-en-de hosts an
+      `XLMRobertaModel` (`vocab_size=250002`, `type_vocab_size=1`,
+      SentencePiece tokenizer, ~1.06 GB `model.safetensors`), i.e. a
+      multilingual-E5 derivative – not the WordPiece BERT-base profile
+      the current E5 runtime supports.
+    - `-Dembed.model=danielheinz/e5-base-sts-en-de` is rejected by the
+      `embed` gate with the standard
+      `… classified as an embedding model but has no runtime support in
+      this build (status=planned).` message until SentencePiece + XLM-R
+      support lands (tracked with multilingual-E5).
+    - The variant constant `E5Encoders.BASE_STS_EN_DE` and the
+      `download-e5.ps1 -Variant base-sts-en-de` helper are kept in the
+      tree but are not exercised end-to-end against the current upstream
+      checkpoint.
 - **Workbench**
-  - The `embed.model` dropdown always includes aliases `minilm`, `e5`
-    first and then all registry entries with `useCase=embedding`.
+    - The `embed.model` dropdown always includes aliases `minilm`, `e5`
+      first and then all registry entries with `useCase=embedding`.
 
 ### 1.1 In-house model list classification
 
@@ -90,17 +90,17 @@ status / embedFamily` classification without duplicating metadata.
   are filtered out at the UI layer in addition to being rejected by
   the sidecar gate.
 
-| `modelId`                                   | `useCase`  | `status`        | Backend support   | Notes                                                                                                                |
-|---------------------------------------------|------------|-----------------|-------------------|----------------------------------------------------------------------------------------------------------------------|
-| `sentence-transformers/all-MiniLM-L6-v2`    | embedding  | ✅ shipped       | CPU + DirectML    | Default fast embedding model (WordPiece, BERT-style).                                                                |
-| `danielheinz/e5-base-sts-en-de`             | embedding  | 🚧 planned      | – (planned)       | Upstream checkpoint is an XLMRobertaModel (vocab=250002, type_vocab=1); needs SentencePiece + XLM-R, tracked with multilingual-E5.       |
-| `intfloat/multilingual-e5-large-instruct`   | embedding  | 🚧 planned      | – (planned)       | NOT compatible with the current WordPiece-only E5 path. Requires SentencePiece + XLM-RoBERTa core.                   |
-| `jinaai/jina-embeddings-v2-base-de`         | embedding  | 🚧 planned      | – (planned)       | Jina BERT v2 uses ALiBi positional bias + GLU-style MLP; not a drop-in for the current BERT/MiniLM/E5 core. Stays planned, see §1.1.2.|
-| `openai/gpt-oss-120b`                       | decoder    | ⛔ unsupported  | – (not for embed) | Decoder-only LLM. Rejected by the `embed` endpoint.                                                                  |
-| `casperhansen/llama-3.3-70b-instruct-awq`   | decoder    | ⛔ unsupported  | – (not for embed) | Llama 3.3 70B AWQ-quantised decoder-only LLM. Rejected by the `embed` endpoint.                                      |
-| `ellamind/summarizer-v6-llama-v2`           | summarizer | ⛔ unsupported  | – (not for embed) | Llama-v2 summarizer fine-tune. Belongs to a future text-generation/summarize ticket, not the embed endpoint.         |
-| `microsoft/Phi-3-mini-4k-instruct-onnx`    | summarizer | 🧪 experimental | CPU + DirectML    | First supported decoder/summarizer backend. Workbench-selectable and downloadable.                                   |
-| `microsoft/Phi-3.5-mini-instruct-onnx`     | summarizer | 🚧 planned      | – (planned)       | Phi-3 successor; runtime support pending ONNX graph availability.                                                    |
+| `modelId`                                 | `useCase`  | `status`        | Backend support   | Notes                                                                                                                                  |
+|-------------------------------------------|------------|-----------------|-------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| `sentence-transformers/all-MiniLM-L6-v2`  | embedding  | ✅ shipped       | CPU + DirectML    | Default fast embedding model (WordPiece, BERT-style).                                                                                  |
+| `danielheinz/e5-base-sts-en-de`           | embedding  | 🚧 planned      | – (planned)       | Upstream checkpoint is an XLMRobertaModel (vocab=250002, type_vocab=1); needs SentencePiece + XLM-R, tracked with multilingual-E5.     |
+| `intfloat/multilingual-e5-large-instruct` | embedding  | 🚧 planned      | – (planned)       | NOT compatible with the current WordPiece-only E5 path. Requires SentencePiece + XLM-RoBERTa core.                                     |
+| `jinaai/jina-embeddings-v2-base-de`       | embedding  | 🚧 planned      | – (planned)       | Jina BERT v2 uses ALiBi positional bias + GLU-style MLP; not a drop-in for the current BERT/MiniLM/E5 core. Stays planned, see §1.1.2. |
+| `openai/gpt-oss-120b`                     | decoder    | ⛔ unsupported   | – (not for embed) | Decoder-only LLM. Rejected by the `embed` endpoint.                                                                                    |
+| `casperhansen/llama-3.3-70b-instruct-awq` | decoder    | ⛔ unsupported   | – (not for embed) | Llama 3.3 70B AWQ-quantised decoder-only LLM. Rejected by the `embed` endpoint.                                                        |
+| `ellamind/summarizer-v6-llama-v2`         | summarizer | ⛔ unsupported   | – (not for embed) | Llama-v2 summarizer fine-tune. Belongs to a future text-generation/summarize ticket, not the embed endpoint.                           |
+| `microsoft/Phi-3-mini-4k-instruct-onnx`   | summarizer | 🧪 experimental | CPU + DirectML    | First supported decoder/summarizer backend. Workbench-selectable and downloadable.                                                     |
+| `microsoft/Phi-3.5-mini-instruct-onnx`    | summarizer | 🚧 planned      | – (planned)       | Phi-3 successor; runtime support pending ONNX graph availability.                                                                      |
 
 Passing a decoder / summarizer ID to `-Dembed.model` fails with the
 following exact message (matched by both the registry test suite and any
@@ -222,18 +222,18 @@ and `config.json` of
 (JinaBERT v2 architecture, custom modelling code released under
 `trust_remote_code=True`).
 
-| Property                  | Value                                                                                                |
-|---------------------------|------------------------------------------------------------------------------------------------------|
-| Architecture family       | JinaBERT v2 (BERT-base sized encoder; 12 layers / 768 hidden / 12 attention heads)                   |
-| Tokenizer                 | WordPiece (`tokenizer.json`, Jina-custom bilingual de/en vocab; not byte-identical to standard BERT) |
-| Max sequence length       | 8192 tokens (enabled by ALiBi extrapolation)                                                         |
-| Positional encoding       | **ALiBi** — Attention with Linear Biases; no learned `position_embeddings` weight in the checkpoint  |
-| Feed-forward block        | **GLU-style** MLP (gated linear unit) — differs from the single-projection + GELU used by BERT/MiniLM/E5 |
-| Pooling                   | Mean pooling over `last_hidden_state` with attention-mask weighting                                  |
-| Normalisation             | L2-normalised output embeddings (cosine similarity is the supported metric)                          |
-| Output dimension          | 768                                                                                                  |
-| Custom modeling code      | Yes (`trust_remote_code=True`; the checkpoint ships its own `modeling_bert.py`)                       |
-| Weight naming             | BERT-prefixed (`bert.encoder.layer.*`) but **without** `bert.embeddings.position_embeddings.weight`, **with** per-layer ALiBi slope tensors and **with** an extra MLP projection for the GLU gate |
+| Property             | Value                                                                                                                                                                                             |
+|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Architecture family  | JinaBERT v2 (BERT-base sized encoder; 12 layers / 768 hidden / 12 attention heads)                                                                                                                |
+| Tokenizer            | WordPiece (`tokenizer.json`, Jina-custom bilingual de/en vocab; not byte-identical to standard BERT)                                                                                              |
+| Max sequence length  | 8192 tokens (enabled by ALiBi extrapolation)                                                                                                                                                      |
+| Positional encoding  | **ALiBi** — Attention with Linear Biases; no learned `position_embeddings` weight in the checkpoint                                                                                               |
+| Feed-forward block   | **GLU-style** MLP (gated linear unit) — differs from the single-projection + GELU used by BERT/MiniLM/E5                                                                                          |
+| Pooling              | Mean pooling over `last_hidden_state` with attention-mask weighting                                                                                                                               |
+| Normalisation        | L2-normalised output embeddings (cosine similarity is the supported metric)                                                                                                                       |
+| Output dimension     | 768                                                                                                                                                                                               |
+| Custom modeling code | Yes (`trust_remote_code=True`; the checkpoint ships its own `modeling_bert.py`)                                                                                                                   |
+| Weight naming        | BERT-prefixed (`bert.encoder.layer.*`) but **without** `bert.embeddings.position_embeddings.weight`, **with** per-layer ALiBi slope tensors and **with** an extra MLP projection for the GLU gate |
 
 **Compatibility with the current BERT / MiniLM / E5 core**
 
@@ -259,11 +259,11 @@ drop-in for the existing BERT core, neither for MiniLM nor for E5.
 
 - Status: **`planned`** (no runtime support in this build).
 - Adding Jina v2 requires either
-  - a Jina-specific attention path (ALiBi bias addition) **and**
-    a GLU feed-forward block on top of the existing
-    `DirectMlBertEncoderLayerBlock`, **or**
-  - a CPU-only starter path (Java reference implementation) before any
-    DirectML work, gated behind a real-model test.
+    - a Jina-specific attention path (ALiBi bias addition) **and**
+      a GLU feed-forward block on top of the existing
+      `DirectMlBertEncoderLayerBlock`, **or**
+    - a CPU-only starter path (Java reference implementation) before any
+      DirectML work, gated behind a real-model test.
 - Until at least the CPU-only path exists with a real-model reference
   test, the status must not be promoted to `experimental`. Promotion
   to `shipped` requires CPU + DirectML parity, matching the contract
@@ -312,7 +312,6 @@ Missing-file errors must point at the specific artefact (mirroring
 the wording the Phi-3 loader uses: *"Jina v2 model directory is
 missing tokenizer.json"*) once the loader exists.
 
-
 ## 2. Reranker models
 
 | Variant                                | Default | DirectML | CPU reference | Tokenizer | Architecture                                | Status    | Module                                                 |
@@ -329,9 +328,9 @@ including the per-layer command-list coalescing (see
 |---------------------------------------------------------------|-----------------|----------|---------------|----------|-----------------|----------------------|
 | `microsoft/Phi-3-mini-4k-instruct-onnx` (DirectML INT4 build) | INT4 GroupQuant | ✅        | ✅             | paged    | 🧪 experimental | `directml-inference` |
 | `microsoft/Phi-3.5-mini-instruct-onnx`                        | TBD             | –        | –             | –        | 🚧 planned      | –                    |
-| `Qwen2.5-Coder-0.5B-Instruct` (ONNX source TBD/research)     | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
-| `Qwen2.5-Coder-1.5B-Instruct` (ONNX source TBD/research)     | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
-| `Qwen2.5-Coder-3B-Instruct` (ONNX source TBD/research)       | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
+| `Qwen2.5-Coder-0.5B-Instruct` (ONNX source TBD/research)      | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
+| `Qwen2.5-Coder-1.5B-Instruct` (ONNX source TBD/research)      | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
+| `Qwen2.5-Coder-3B-Instruct` (ONNX source TBD/research)        | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
 
 The Phi-3 pipeline runs prefill and decode in a single DirectML graph
 per layer; speculative decoding, batched generation and beam search are
@@ -352,14 +351,14 @@ for text generation. The summarizer model selector is populated from
 `EmbeddingModelRegistry.entriesByUseCase(SUMMARIZER)` and is
 **independent** of the embedding model selector.
 
-| `modelId`                                    | `useCase`  | `status`          | Workbench support | Notes                                                                        |
-|----------------------------------------------|------------|-------------------|-------------------|------------------------------------------------------------------------------|
-| `microsoft/Phi-3-mini-4k-instruct-onnx`     | summarizer | 🧪 experimental   | ✅ downloadable    | First supported summarizer backend. CPU + DirectML. ~2.3 GB INT4 ONNX graph. |
-| `microsoft/Phi-3.5-mini-instruct-onnx`      | summarizer | 🚧 planned        | ❌ not yet         | Successor; expected same ONNX GenAI path once graph is published.            |
-| `Qwen/Qwen2.5-Coder-0.5B-Instruct`         | causal-lm  | 🚧 planned        | ❌ not yet         | Qwen2.5-Coder 0.5B, CPU-first. ChatML template. See [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md). |
-| `Qwen/Qwen2.5-Coder-1.5B-Instruct`         | causal-lm  | 🚧 planned        | ❌ not yet         | Scale-up candidate (~1 GB INT4). Blocked on 0.5B runtime verification.       |
-| `Qwen/Qwen2.5-Coder-3B-Instruct`           | causal-lm  | 🚧 planned        | ❌ not yet         | Scale-up candidate (~2 GB INT4). Blocked on 0.5B runtime verification.       |
-| `ellamind/summarizer-v6-llama-v2`           | summarizer | ⛔ unsupported    | ❌                 | Llama-v2 fine-tune; no local runtime path in this project.                   |
+| `modelId`                               | `useCase`  | `status`        | Workbench support | Notes                                                                                                     |
+|-----------------------------------------|------------|-----------------|-------------------|-----------------------------------------------------------------------------------------------------------|
+| `microsoft/Phi-3-mini-4k-instruct-onnx` | summarizer | 🧪 experimental | ✅ downloadable    | First supported summarizer backend. CPU + DirectML. ~2.3 GB INT4 ONNX graph.                              |
+| `microsoft/Phi-3.5-mini-instruct-onnx`  | summarizer | 🚧 planned      | ❌ not yet         | Successor; expected same ONNX GenAI path once graph is published.                                         |
+| `Qwen/Qwen2.5-Coder-0.5B-Instruct`      | causal-lm  | 🚧 planned      | ❌ not yet         | Qwen2.5-Coder 0.5B, CPU-first. ChatML template. See [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md). |
+| `Qwen/Qwen2.5-Coder-1.5B-Instruct`      | causal-lm  | 🚧 planned      | ❌ not yet         | Scale-up candidate (~1 GB INT4). Blocked on 0.5B runtime verification.                                    |
+| `Qwen/Qwen2.5-Coder-3B-Instruct`        | causal-lm  | 🚧 planned      | ❌ not yet         | Scale-up candidate (~2 GB INT4). Blocked on 0.5B runtime verification.                                    |
+| `ellamind/summarizer-v6-llama-v2`       | summarizer | ⛔ unsupported   | ❌                 | Llama-v2 fine-tune; no local runtime path in this project.                                                |
 
 > **Summarization is experimental.** The `summarize` JSON-RPC method is
 > backed exclusively by the Phi-3 runtime above and is **not part of the
@@ -409,10 +408,10 @@ for text generation. The summarizer model selector is populated from
        -Dqwen.enable.experimental.runtime=true
    ```
 3. Verify all four prompt scenarios produce non-empty output:
-   - English summarization
-   - German summarization
-   - Natural/ADABAS code explanation
-   - Short max-token generation (≤32 tokens)
+    - English summarization
+    - German summarization
+    - Natural/ADABAS code explanation
+    - Short max-token generation (≤32 tokens)
 4. Missing-file diagnostics are covered by CI-safe unit tests:
    ```bash
    ./gradlew :directml-inference:test --tests "*.qwen.QwenModelDirValidatorTest"
@@ -430,14 +429,14 @@ wire format.
 
 ## 5. Hardware requirements
 
-| Requirement                        | Why                                                                                                       |
-|------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Requirement                        | Why                                                                                                                                                                                  |
+|------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Windows 10 21H1+ / Windows 11      | DirectML in-box (1.8+); side-by-side `DirectML.dll` is also supported via `-Dwindirectml.directml.dll=…`. Some optional fast paths use newer DirectML feature levels when available. |
-| A DirectX-12-capable GPU           | every shipped backend dispatches via D3D12 + DirectML                                                     |
-| Feature level ≥ DirectML 1.0 / 2.0 | all encoder kernels stay on the FL 1.0 / 2.0 baseline (composite GELU fallback for FL < 5.1)              |
-| ≥ 2 GB free GPU memory             | comfortable headroom for E5-base + bucketed batch padding                                                 |
-| Java 21 (host)                     | code uses the FFM API                                                                                     |
-| Java 8 (sidecar client only)       | the sidecar client artifact is compiled with `-release 8`                                                 |
+| A DirectX-12-capable GPU           | every shipped backend dispatches via D3D12 + DirectML                                                                                                                                |
+| Feature level ≥ DirectML 1.0 / 2.0 | all encoder kernels stay on the FL 1.0 / 2.0 baseline (composite GELU fallback for FL < 5.1)                                                                                         |
+| ≥ 2 GB free GPU memory             | comfortable headroom for E5-base + bucketed batch padding                                                                                                                            |
+| Java 21 (host)                     | code uses the FFM API                                                                                                                                                                |
+| Java 8 (sidecar client only)       | the sidecar client artifact is compiled with `-release 8`                                                                                                                            |
 
 CPU backends are supported as a local fallback and for smaller local
 workloads — every embedding and reranker ships with a `CpuXxxEncoder`

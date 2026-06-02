@@ -95,7 +95,9 @@ public final class Phi3GpuPipeline implements AutoCloseable {
     // Single-GEMM dispatch using shared pipeline
     // ═══════════════════════════════════════════════════════════════════
 
-    /** Execute a single GEMM via the shared pipeline. */
+    /**
+     * Execute a single GEMM via the shared pipeline.
+     */
     public void matvec(MatMulNBitsKernel kernel, float[] input, float[] output) {
         pipeline.begin();
         kernel.recordInto(pipeline, input);
@@ -127,8 +129,12 @@ public final class Phi3GpuPipeline implements AutoCloseable {
     // MLP Batch: 7 GPU ops, 1 submission (V2.0)
     // ═══════════════════════════════════════════════════════════════════
 
-    /** Whether MLP batching is available (compute shaders compiled + weights uploaded). */
-    public boolean isMlpBatchEnabled() { return mlpBatchEnabled && weightsUploaded; }
+    /**
+     * Whether MLP batching is available (compute shaders compiled + weights uploaded).
+     */
+    public boolean isMlpBatchEnabled() {
+        return mlpBatchEnabled && weightsUploaded;
+    }
 
     /**
      * Upload per-layer weights to GPU (for MLP batch).
@@ -168,7 +174,7 @@ public final class Phi3GpuPipeline implements AutoCloseable {
      * SwiGLU+Scale → Down GEMM → residual-add → readback.
      */
     public void batchMlp(float[] attnOutput, float[] hiddenInput, float[] hiddenOut,
-                          int layerIdx) {
+                         int layerIdx) {
         if (!isMlpBatchEnabled()) {
             throw new IllegalStateException("MLP batch not enabled");
         }
@@ -193,7 +199,7 @@ public final class Phi3GpuPipeline implements AutoCloseable {
                         D3D12Bindings.getGpuVirtualAddress(residualBuf),
                         D3D12Bindings.getGpuVirtualAddress(residualBuf)
                 },
-                new int[]{ hidden },
+                new int[]{hidden},
                 hidden);
 
         pipeline.recordUavBarrier(uavBarrier);
@@ -205,7 +211,7 @@ public final class Phi3GpuPipeline implements AutoCloseable {
                         D3D12Bindings.getGpuVirtualAddress(postNormWeightBufs[layerIdx]),
                         D3D12Bindings.getGpuVirtualAddress(guK.getInputBuf())
                 },
-                new int[]{ hidden, epsBits },
+                new int[]{hidden, epsBits},
                 1);
 
         pipeline.recordUavBarrier(uavBarrier);
@@ -218,7 +224,7 @@ public final class Phi3GpuPipeline implements AutoCloseable {
                         D3D12Bindings.getGpuVirtualAddress(mlpOutScaleBufs[layerIdx]),
                         D3D12Bindings.getGpuVirtualAddress(downK.getInputBuf())
                 },
-                new int[]{ intermediate },
+                new int[]{intermediate},
                 intermediate);
 
         pipeline.recordUavBarrier(uavBarrier);
@@ -231,7 +237,7 @@ public final class Phi3GpuPipeline implements AutoCloseable {
                         D3D12Bindings.getGpuVirtualAddress(downK.getOutputBuf()),
                         D3D12Bindings.getGpuVirtualAddress(residualBuf)
                 },
-                new int[]{ hidden },
+                new int[]{hidden},
                 hidden);
 
         pipeline.recordBarrier(barrierResidualUavToCopySource);
@@ -244,9 +250,17 @@ public final class Phi3GpuPipeline implements AutoCloseable {
     // Accessors
     // ═══════════════════════════════════════════════════════════════════
 
-    public boolean hasLayer(int layerIdx) { return kernels.hasLayer(layerIdx); }
-    public boolean hasLmHead() { return kernels.hasLmHead(); }
-    public GpuPipeline getPipeline() { return pipeline; }
+    public boolean hasLayer(int layerIdx) {
+        return kernels.hasLayer(layerIdx);
+    }
+
+    public boolean hasLmHead() {
+        return kernels.hasLmHead();
+    }
+
+    public GpuPipeline getPipeline() {
+        return pipeline;
+    }
 
     @Override
     public void close() {

@@ -100,12 +100,12 @@ unakzeptable Latenz zu verhindern. Überschreitungen werden mit
 Grenzen lokal und wirft eine `SidecarException`, bevor der Request
 abgeschickt wird.
 
-| Limit | Default | System Property | Betrifft |
-|-------|---------|-----------------|----------|
-| Max Text Length | 32 768 Zeichen | `windirectml.limits.maxTextLength` | `embed`, `embedBatch` (pro Text), `rerank` (Query) |
-| Max Batch Size (embedBatch) | 256 | `windirectml.limits.maxEmbedBatchSize` | `embedBatch` |
-| Max Rerank Documents | 256 | `windirectml.limits.maxRerankDocuments` | `rerank` |
-| Max Rerank Document Length | 32 768 Zeichen | `windirectml.limits.maxRerankDocumentLength` | `rerank` (pro Dokument) |
+| Limit                       | Default        | System Property                              | Betrifft                                           |
+|-----------------------------|----------------|----------------------------------------------|----------------------------------------------------|
+| Max Text Length             | 32 768 Zeichen | `windirectml.limits.maxTextLength`           | `embed`, `embedBatch` (pro Text), `rerank` (Query) |
+| Max Batch Size (embedBatch) | 256            | `windirectml.limits.maxEmbedBatchSize`       | `embedBatch`                                       |
+| Max Rerank Documents        | 256            | `windirectml.limits.maxRerankDocuments`      | `rerank`                                           |
+| Max Rerank Document Length  | 32 768 Zeichen | `windirectml.limits.maxRerankDocumentLength` | `rerank` (pro Dokument)                            |
 
 Alle Limits sind über System Properties konfigurierbar (positive Integer-Werte).
 Ungültige oder nicht-positive Werte werden ignoriert und der Default gilt.
@@ -166,11 +166,11 @@ kein gültiger Modellpfad konfiguriert ist. `summarizerBackend` und
 
 ### Phi-3-Summarizer-Konfiguration
 
-| Property | Werte | Default | Wirkung |
-|---|---|---|---|
-| `-Dphi3.modelDir` | Pfad | auto-discovery | Überschreibt den Standard-Suchpfad `model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128`. Muss `model.onnx`, `model.onnx.data`, `tokenizer.json` und `config.json` enthalten. |
-| `-Dphi3.backend` | `auto`, `directml`, `cpu` | `auto` | Backend für die Phi-3-Inferenz. `auto` wählt DirectML wenn verfügbar, fällt sonst auf CPU zurück. |
-| `-Dphi3.maxTokens` | int | `512` | Maximale Anzahl generierter Tokens je Zusammenfassung. |
+| Property           | Werte                     | Default        | Wirkung                                                                                                                                                                                      |
+|--------------------|---------------------------|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-Dphi3.modelDir`  | Pfad                      | auto-discovery | Überschreibt den Standard-Suchpfad `model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128`. Muss `model.onnx`, `model.onnx.data`, `tokenizer.json` und `config.json` enthalten. |
+| `-Dphi3.backend`   | `auto`, `directml`, `cpu` | `auto`         | Backend für die Phi-3-Inferenz. `auto` wählt DirectML wenn verfügbar, fällt sonst auf CPU zurück.                                                                                            |
+| `-Dphi3.maxTokens` | int                       | `512`          | Maximale Anzahl generierter Tokens je Zusammenfassung.                                                                                                                                       |
 
 Fehlt das Modellverzeichnis, antwortet `summarize` mit `-32005 Not
 implemented` (kein Crash). Fehlt nur eine Datei, sendet der Sidecar die
@@ -234,13 +234,13 @@ Der Sidecar unterstützt zwei BERT-style Encoder-Familien hinter demselben
 JSON-RPC-Endpunkt. Welche Familie geladen wird, steuert das Systemproperty
 `-Dembed.model`:
 
-| Property                        | Werte                                                          | Default          | Wirkung                                                                                                                                                                                       |
-|---------------------------------|----------------------------------------------------------------|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `-Dembed.model`                 | `minilm`, `e5` (+ Full-IDs aus der Registry)                  | `minilm`         | Wählt die Encoder-Familie. Unterstützt auch Full-IDs wie `sentence-transformers/all-MiniLM-L6-v2` und `danielheinz/e5-base-sts-en-de`. Unbekannte Werte ⇒ Exit-Code `2`.                  |
-| `-Dminilm.modelDir`             | Pfad                                                           | auto-discovery   | Pfad zum MiniLM-Modellordner. Auto: `model/all-MiniLM-L6-v2/`.                                                                                                                                |
-| `-De5.model`                    | `small-v2`, `base-v2`, `large-v2`, `base-sts-en-de`            | `base-sts-en-de` | E5-Variante. Pinnt `BertEncoderConfig` (hiddenSize/numLayers/…). Unbekannt ⇒ Exit-Code `2`.                                                                                                   |
-| `-De5.modelDir`                 | Pfad                                                           | auto-discovery   | Pfad zum E5-Modellordner. Auto: variant-spezifische Hints (z. B. `model/e5-base-sts-en-de/`).                                                                                                 |
-| `-Dembed.backend`               | `auto`, `directml`, `cpu`                                      | `auto`           | Wählt das Backend innerhalb der Familie. `directml`/`cpu` ⇒ Exit-Code `3` bei Fehlern; `auto` fällt sauber auf CPU zurück und schreibt die Warnung in `health.lastError`. Unbekannt ⇒ Exit `2`. |
+| Property            | Werte                                               | Default          | Wirkung                                                                                                                                                                                         |
+|---------------------|-----------------------------------------------------|------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-Dembed.model`     | `minilm`, `e5` (+ Full-IDs aus der Registry)        | `minilm`         | Wählt die Encoder-Familie. Unterstützt auch Full-IDs wie `sentence-transformers/all-MiniLM-L6-v2` und `danielheinz/e5-base-sts-en-de`. Unbekannte Werte ⇒ Exit-Code `2`.                        |
+| `-Dminilm.modelDir` | Pfad                                                | auto-discovery   | Pfad zum MiniLM-Modellordner. Auto: `model/all-MiniLM-L6-v2/`.                                                                                                                                  |
+| `-De5.model`        | `small-v2`, `base-v2`, `large-v2`, `base-sts-en-de` | `base-sts-en-de` | E5-Variante. Pinnt `BertEncoderConfig` (hiddenSize/numLayers/…). Unbekannt ⇒ Exit-Code `2`.                                                                                                     |
+| `-De5.modelDir`     | Pfad                                                | auto-discovery   | Pfad zum E5-Modellordner. Auto: variant-spezifische Hints (z. B. `model/e5-base-sts-en-de/`).                                                                                                   |
+| `-Dembed.backend`   | `auto`, `directml`, `cpu`                           | `auto`           | Wählt das Backend innerhalb der Familie. `directml`/`cpu` ⇒ Exit-Code `3` bei Fehlern; `auto` fällt sauber auf CPU zurück und schreibt die Warnung in `health.lastError`. Unbekannt ⇒ Exit `2`. |
 
 Für E5 ist `config.json` im Modellordner **Pflicht** – die Datei wird gegen
 die gewählte Variante geprüft (`hidden_size`, `num_hidden_layers`,
@@ -251,11 +251,11 @@ Fehler – kein stilles Re-Shape.
 Innerhalb einer Familie steuert `-Dembed.backend`, welches konkrete Backend
 verwendet wird:
 
-| Modus                            | Verhalten                                                                                                                                                                                                  |
-|----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `-Dembed.backend=cpu`            | Reine Java-CPU-Variante erzwingen (`CpuMiniLmEncoder` bzw. `CpuBertEncoder` für E5). Fehler beim Laden ⇒ Sidecar beendet sich mit Exit-Code `3` (sichtbarer Fehler).                                       |
+| Modus                            | Verhalten                                                                                                                                                                                                      |
+|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-Dembed.backend=cpu`            | Reine Java-CPU-Variante erzwingen (`CpuMiniLmEncoder` bzw. `CpuBertEncoder` für E5). Fehler beim Laden ⇒ Sidecar beendet sich mit Exit-Code `3` (sichtbarer Fehler).                                           |
 | `-Dembed.backend=directml`       | DirectML-Variante erzwingen (`DirectMlMiniLmEncoder` bzw. `DirectMlBertEncoder` für E5). Wenn DirectML nicht verfügbar ist (kein Windows/D3D12, keine kompatible Karte), Exit-Code `3`. Kein stiller Fallback. |
-| `-Dembed.backend=auto` (Default) | Erst DirectML versuchen, bei Fehler sauber auf CPU zurückfallen. Die Fallback-Warnung steht auf `stderr`/Log und ist als `lastError` im `health`-Result sichtbar.                                          |
+| `-Dembed.backend=auto` (Default) | Erst DirectML versuchen, bei Fehler sauber auf CPU zurückfallen. Die Fallback-Warnung steht auf `stderr`/Log und ist als `lastError` im `health`-Result sichtbar.                                              |
 
 Fehlt das Modellverzeichnis komplett (weder die Override-Property
 `-Dminilm.modelDir` / `-De5.modelDir` noch ein Auto-Discovery-Pfad),
@@ -434,11 +434,11 @@ re-resolved den Text.
 
 #### Score-Semantik
 
-| Eigenschaft | Beschreibung |
-|---|---|
-| **Modellabhängig** | Score-Werte stammen aus dem Classification-Head des jeweiligen Cross-Encoders. Verschiedene Modelle produzieren unterschiedliche Wertebereiche – ein Score von `8.0` bei `ms-marco-MiniLM-L-6-v2` ist nicht mit `8.0` bei einem anderen Modell vergleichbar. |
-| **Nur intra-Query vergleichbar** | Scores sind ausschließlich für das Ranking **innerhalb derselben Query** gedacht. Einen Score aus Query A mit einem Score aus Query B zu vergleichen ist semantisch nicht sinnvoll. |
-| **Nicht global kalibriert** | Scores sind **keine** Wahrscheinlichkeiten und besitzen keinen fixen Schwellenwert für „relevant" vs. „nicht relevant". Es gibt kein universelles Cutoff. |
+| Eigenschaft                      | Beschreibung                                                                                                                                                                                                                                                 |
+|----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Modellabhängig**               | Score-Werte stammen aus dem Classification-Head des jeweiligen Cross-Encoders. Verschiedene Modelle produzieren unterschiedliche Wertebereiche – ein Score von `8.0` bei `ms-marco-MiniLM-L-6-v2` ist nicht mit `8.0` bei einem anderen Modell vergleichbar. |
+| **Nur intra-Query vergleichbar** | Scores sind ausschließlich für das Ranking **innerhalb derselben Query** gedacht. Einen Score aus Query A mit einem Score aus Query B zu vergleichen ist semantisch nicht sinnvoll.                                                                          |
+| **Nicht global kalibriert**      | Scores sind **keine** Wahrscheinlichkeiten und besitzen keinen fixen Schwellenwert für „relevant" vs. „nicht relevant". Es gibt kein universelles Cutoff.                                                                                                    |
 
 #### Sortierreihenfolge
 

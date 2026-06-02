@@ -1,4 +1,5 @@
 package com.aresstack.windirectml.encoder.reranker;
+
 import com.aresstack.windirectml.encoder.EncoderTokenizer;
 import com.aresstack.windirectml.encoder.bert.BertCpuEncoderWeights;
 import com.aresstack.windirectml.encoder.bert.BertCpuLayerWeights;
@@ -19,6 +20,7 @@ import com.aresstack.windirectml.runtime.TensorShape;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
@@ -28,6 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
 /**
  * DirectML cross-encoder reranker. Reuses the generic
  * {@link DirectMlBertEncoderStack} (embedding-LN + N layer blocks) and
@@ -68,26 +71,44 @@ public final class DirectMlReranker implements Reranker {
      * usually = topN), so the cache stays small but reuse is high.
      */
     private final Map<Long, StackEntry> stackCache = new HashMap<>();
-    /** Reusable float[H] scratch the CPU classifier reads CLS rows into. */
+    /**
+     * Reusable float[H] scratch the CPU classifier reads CLS rows into.
+     */
     private final float[] clsScratch;
     private volatile boolean ready;
+
     private record StackEntry(int bucket, int batch,
                               DirectMlBertEncoderStack stack,
                               GpuBuffer xIn, GpuBuffer xOut, GpuBuffer mask,
                               CpuTensor readback) implements AutoCloseable {
-        @Override public void close() {
-            try { stack.close(); } catch (Exception ignored) {}
-            try { xIn.close();   } catch (Exception ignored) {}
-            try { xOut.close();  } catch (Exception ignored) {}
-            try { mask.close();  } catch (Exception ignored) {}
+        @Override
+        public void close() {
+            try {
+                stack.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                xIn.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                xOut.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                mask.close();
+            } catch (Exception ignored) {
+            }
         }
     }
+
     public static DirectMlReranker build(DirectMlContextImpl ctx,
                                          boolean ownsCtx,
                                          RerankerCpuWeights weights,
                                          EncoderTokenizer tokenizer) throws RerankException {
         return new DirectMlReranker(ctx, ownsCtx, weights, tokenizer);
     }
+
     private DirectMlReranker(DirectMlContextImpl ctx, boolean ownsCtx,
                              RerankerCpuWeights weights, EncoderTokenizer tokenizer)
             throws RerankException {
@@ -108,7 +129,7 @@ public final class DirectMlReranker implements Reranker {
             int I = cfg.intermediateSize();
             BertCpuEncoderWeights bert = weights.bert();
             embLnGammaBuf = uploadVec(bert.embLnGamma, H);
-            embLnBetaBuf  = uploadVec(bert.embLnBeta,  H);
+            embLnBetaBuf = uploadVec(bert.embLnBeta, H);
             List<BertGpuLayerWeights> built = new ArrayList<>(bert.layers.size());
             for (BertCpuLayerWeights l : bert.layers) {
                 built.add(new BertGpuLayerWeights(
@@ -118,7 +139,7 @@ public final class DirectMlReranker implements Reranker {
                         uploadMat(l.attnOutWeight(), H, H), uploadVec(l.attnOutBias(), H),
                         uploadVec(l.attnLnGamma(), H), uploadVec(l.attnLnBeta(), H),
                         uploadMat(l.mlpInterWeight(), I, H), uploadVec(l.mlpInterBias(), I),
-                        uploadMat(l.mlpOutWeight(),   H, I), uploadVec(l.mlpOutBias(), H),
+                        uploadMat(l.mlpOutWeight(), H, I), uploadVec(l.mlpOutBias(), H),
                         uploadVec(l.outLnGamma(), H), uploadVec(l.outLnBeta(), H)));
             }
             this.gpuLayers = List.copyOf(built);
@@ -136,8 +157,17 @@ public final class DirectMlReranker implements Reranker {
             throw e;
         }
     }
-    @Override public boolean isReady() { return ready; }
-    @Override public String modelName() { return cfg.modelName(); }
+
+    @Override
+    public boolean isReady() {
+        return ready;
+    }
+
+    @Override
+    public String modelName() {
+        return cfg.modelName();
+    }
+
     @Override
     public List<RerankResult> rerank(RerankRequest request) throws RerankException {
         Objects.requireNonNull(request, "request");
@@ -200,11 +230,11 @@ public final class DirectMlReranker implements Reranker {
                 CpuTensor maskCpu = CpuTensor.float32(TensorShape.of(N * B), mask);
                 entry.xIn.upload(xCpu);
                 entry.mask.upload(maskCpu);
-                DirectMlTensor xInT  = tensorOf(entry.xIn,  N * B, H);
+                DirectMlTensor xInT = tensorOf(entry.xIn, N * B, H);
                 DirectMlTensor xOutT = tensorOf(entry.xOut, N * B, H);
                 DirectMlTensor maskT = tensorOf(entry.mask, N * B);
                 DirectMlTensor embGT = tensorOf(embLnGammaBuf, H);
-                DirectMlTensor embBT = tensorOf(embLnBetaBuf,  H);
+                DirectMlTensor embBT = tensorOf(embLnBetaBuf, H);
                 entry.stack.dispatch(xInT, embGT, embBT, gpuLayers, maskT, xOutT);
                 // The download path supports partial reads (n * 4 bytes
                 // from offset 0) but not strided ones, so we read the
@@ -230,11 +260,15 @@ public final class DirectMlReranker implements Reranker {
         int top = request.effectiveTopN();
         return top >= scored.size() ? scored : scored.subList(0, top);
     }
+
     /**
      * Number of cached form-bound stacks - one entry per active
      * {@code (bucket, batch)} pair seen so far.
      */
-    public int cachedStackCount() { return stackCache.size(); }
+    public int cachedStackCount() {
+        return stackCache.size();
+    }
+
     private double applyClassifier(float[] clsHidden) {
         int H = cfg.hiddenSize();
         double sum = weights.classifierBias[0];
@@ -242,6 +276,7 @@ public final class DirectMlReranker implements Reranker {
         for (int i = 0; i < H; i++) sum += (double) w[i] * clsHidden[i];
         return sum;
     }
+
     private synchronized StackEntry stackFor(int bucket, int batch) throws DirectMlRuntimeException {
         long key = ((long) bucket << 32) | (batch & 0xffffffffL);
         StackEntry cached = stackCache.get(key);
@@ -252,7 +287,7 @@ public final class DirectMlReranker implements Reranker {
         GpuBuffer xIn = null, xOut = null, mask = null;
         DirectMlBertEncoderStack stack = null;
         try {
-            xIn  = ctx.allocateBuffer(rowsBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            xIn = ctx.allocateBuffer(rowsBytes, GpuBuffer.BufferUsage.ACTIVATION);
             xOut = ctx.allocateBuffer(rowsBytes, GpuBuffer.BufferUsage.ACTIVATION);
             mask = ctx.allocateBuffer(maskBytes, GpuBuffer.BufferUsage.ACTIVATION);
             stack = new DirectMlBertEncoderStack(ctx, batch, bucket, H,
@@ -265,15 +300,28 @@ public final class DirectMlReranker implements Reranker {
                     cfg.modelName(), bucket, batch, stackCache.size());
             return entry;
         } catch (DirectMlRuntimeException | RuntimeException e) {
-            if (stack != null) try { stack.close(); } catch (Exception ignored) {}
-            if (mask != null)  try { mask.close();  } catch (Exception ignored) {}
-            if (xOut != null)  try { xOut.close();  } catch (Exception ignored) {}
-            if (xIn != null)   try { xIn.close();   } catch (Exception ignored) {}
+            if (stack != null) try {
+                stack.close();
+            } catch (Exception ignored) {
+            }
+            if (mask != null) try {
+                mask.close();
+            } catch (Exception ignored) {
+            }
+            if (xOut != null) try {
+                xOut.close();
+            } catch (Exception ignored) {
+            }
+            if (xIn != null) try {
+                xIn.close();
+            } catch (Exception ignored) {
+            }
             throw (e instanceof DirectMlRuntimeException d) ? d
                     : new DirectMlRuntimeException("Failed to allocate stack for bucket="
-                            + bucket + ", batch=" + batch, e);
+                    + bucket + ", batch=" + batch, e);
         }
     }
+
     private GpuBuffer uploadMat(float[] data, int rows, int cols) throws DirectMlRuntimeException {
         if (data.length != (long) rows * cols) {
             throw new DirectMlRuntimeException("matrix size mismatch: " + data.length
@@ -285,6 +333,7 @@ public final class DirectMlReranker implements Reranker {
         ownedGpuBuffers.add(b);
         return b;
     }
+
     private GpuBuffer uploadVec(float[] data, int n) throws DirectMlRuntimeException {
         if (data.length != n) {
             throw new DirectMlRuntimeException("vector size mismatch: " + data.length + " != " + n);
@@ -295,15 +344,18 @@ public final class DirectMlReranker implements Reranker {
         ownedGpuBuffers.add(b);
         return b;
     }
+
     private static DirectMlTensor tensorOf(GpuBuffer buf, int... dims) {
         TensorShape s = TensorShape.of(dims);
         return new DirectMlTensor(s, TensorLayout.rowMajor(s), TensorDataType.FLOAT32, buf);
     }
+
     private static CpuTensor emptyCpuTensor(int n) {
         ByteBuffer storage = ByteBuffer.allocateDirect(n * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
         TensorShape s = TensorShape.of(n);
         return new CpuTensor(s, TensorLayout.rowMajor(s), TensorDataType.FLOAT32, storage);
     }
+
     @Override
     public synchronized void close() {
         if (!ready) return;
@@ -312,12 +364,19 @@ public final class DirectMlReranker implements Reranker {
         stackCache.clear();
         closeOwnedQuietly();
         if (ownsCtx) {
-            try { ctx.close(); } catch (Exception ignored) {}
+            try {
+                ctx.close();
+            } catch (Exception ignored) {
+            }
         }
     }
+
     private void closeOwnedQuietly() {
         for (int i = ownedGpuBuffers.size() - 1; i >= 0; i--) {
-            try { ownedGpuBuffers.get(i).close(); } catch (Exception ignored) {}
+            try {
+                ownedGpuBuffers.get(i).close();
+            } catch (Exception ignored) {
+            }
         }
         ownedGpuBuffers.clear();
     }

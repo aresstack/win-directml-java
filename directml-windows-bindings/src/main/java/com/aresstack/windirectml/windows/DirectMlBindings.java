@@ -16,10 +16,11 @@ public final class DirectMlBindings {
 
     private static final Logger log = LoggerFactory.getLogger(DirectMlBindings.class);
 
-    private DirectMlBindings() {}
+    private DirectMlBindings() {
+    }
 
     // ── DML constants ────────────────────────────────────────────────────
-    public static final int DML_CREATE_DEVICE_FLAG_NONE  = 0;
+    public static final int DML_CREATE_DEVICE_FLAG_NONE = 0;
     public static final int DML_CREATE_DEVICE_FLAG_DEBUG = 1;
     public static final int DML_EXECUTION_FLAG_NONE = 0;
 
@@ -104,14 +105,14 @@ public final class DirectMlBindings {
 
     // DML_CONVOLUTION_MODE / DIRECTION
     public static final int DML_CONVOLUTION_MODE_CROSS_CORRELATION = 0;
-    public static final int DML_CONVOLUTION_DIRECTION_FORWARD      = 0;
+    public static final int DML_CONVOLUTION_DIRECTION_FORWARD = 0;
 
     // DML_MATRIX_TRANSFORM
-    public static final int DML_MATRIX_TRANSFORM_NONE      = 0;
+    public static final int DML_MATRIX_TRANSFORM_NONE = 0;
     public static final int DML_MATRIX_TRANSFORM_TRANSPOSE = 1;
 
     // DML_BINDING_TYPE
-    public static final int DML_BINDING_TYPE_NONE   = 0;
+    public static final int DML_BINDING_TYPE_NONE = 0;
     public static final int DML_BINDING_TYPE_BUFFER = 1;
 
     // ── DML_FEATURE / DML_FEATURE_LEVEL ──────────────────────────────────
@@ -157,12 +158,12 @@ public final class DirectMlBindings {
 
     // ── IDMLDevice vtable slots ──────────────────────────────────────────
     // IUnknown: 0-2, IDMLObject: 3-6
-    static final int DML_DEV_CHECK_FEATURE_SUPPORT       = 7;
-    static final int DML_DEV_CREATE_OPERATOR              = 8;
-    static final int DML_DEV_COMPILE_OPERATOR             = 9;
-    static final int DML_DEV_CREATE_OPERATOR_INITIALIZER  = 10;
-    static final int DML_DEV_CREATE_COMMAND_RECORDER      = 11;
-    static final int DML_DEV_CREATE_BINDING_TABLE         = 12;
+    static final int DML_DEV_CHECK_FEATURE_SUPPORT = 7;
+    static final int DML_DEV_CREATE_OPERATOR = 8;
+    static final int DML_DEV_COMPILE_OPERATOR = 9;
+    static final int DML_DEV_CREATE_OPERATOR_INITIALIZER = 10;
+    static final int DML_DEV_CREATE_COMMAND_RECORDER = 11;
+    static final int DML_DEV_CREATE_BINDING_TABLE = 12;
 
     // IDMLDispatchable: GetBindingProperties = slot 8
     // Inheritance: IUnknown(0-2) → IDMLObject(3-6) → IDMLDeviceChild::GetDevice(7) → IDMLPageable(none) → IDMLDispatchable(8)
@@ -174,9 +175,9 @@ public final class DirectMlBindings {
 
     // IDMLBindingTable inherits from IDMLDeviceChild (NOT just IDMLObject!)
     // Inheritance: IUnknown(0-2) → IDMLObject(3-6) → IDMLDeviceChild::GetDevice(7) → IDMLBindingTable(8+)
-    static final int BT_BIND_INPUTS     = 8;
-    static final int BT_BIND_OUTPUTS    = 9;
-    static final int BT_BIND_TEMPORARY  = 10;
+    static final int BT_BIND_INPUTS = 8;
+    static final int BT_BIND_OUTPUTS = 9;
+    static final int BT_BIND_TEMPORARY = 10;
     static final int BT_BIND_PERSISTENT = 11;
 
     // ── DMLCreateDevice function handle ──────────────────────────────────
@@ -233,7 +234,9 @@ public final class DirectMlBindings {
         return dmlSymbolLookup;
     }
 
-    /** @return human-readable description of where DirectML.dll was loaded from. */
+    /**
+     * @return human-readable description of where DirectML.dll was loaded from.
+     */
     public static String directMlSource() {
         getDmlSymbolLookup();
         return dmlSourceLabel;
@@ -268,13 +271,20 @@ public final class DirectMlBindings {
             MemorySegment dev = pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
             log.info("IDMLDevice created: {}", dev);
             return dev;
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("DMLCreateDevice failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("DMLCreateDevice failed", t);
+        }
     }
 
     public static boolean isAvailable() {
-        try { getDmlCreateDeviceHandle(); return true; }
-        catch (Exception | UnsatisfiedLinkError e) { return false; }
+        try {
+            getDmlCreateDeviceHandle();
+            return true;
+        } catch (Exception | UnsatisfiedLinkError e) {
+            return false;
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -283,13 +293,14 @@ public final class DirectMlBindings {
 
     /**
      * IDMLDevice::CreateOperator (vtable slot 8).
-     * @param dmlDevice   IDMLDevice COM pointer
-     * @param opDesc      pointer to filled DML_OPERATOR_DESC struct
-     * @param arena       arena for allocations
+     *
+     * @param dmlDevice IDMLDevice COM pointer
+     * @param opDesc    pointer to filled DML_OPERATOR_DESC struct
+     * @param arena     arena for allocations
      * @return IDMLOperator COM pointer
      */
     public static MemorySegment createOperator(MemorySegment dmlDevice, MemorySegment opDesc,
-                                                Arena arena) throws WindowsNativeException {
+                                               Arena arena) throws WindowsNativeException {
         try {
             MemorySegment riid = ComIID.allocateGuid(arena, ComIID.IID_IDMLOperator_BYTES);
             MemorySegment pp = arena.allocate(ValueLayout.ADDRESS);
@@ -299,12 +310,16 @@ public final class DirectMlBindings {
             int hr = (int) mh.invokeExact(dmlDevice, opDesc, riid, pp);
             HResult.check(hr, "IDMLDevice::CreateOperator");
             return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateOperator failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateOperator failed", t);
+        }
     }
 
     /**
      * IDMLDevice::CompileOperator (vtable slot 9).
+     *
      * @param dmlDevice   IDMLDevice
      * @param dmlOperator IDMLOperator to compile
      * @param flags       DML_EXECUTION_FLAGS
@@ -312,7 +327,7 @@ public final class DirectMlBindings {
      * @return IDMLCompiledOperator COM pointer (also an IDMLDispatchable)
      */
     public static MemorySegment compileOperator(MemorySegment dmlDevice, MemorySegment dmlOperator,
-                                                 int flags, Arena arena) throws WindowsNativeException {
+                                                int flags, Arena arena) throws WindowsNativeException {
         try {
             MemorySegment riid = ComIID.allocateGuid(arena, ComIID.IID_IDMLCompiledOperator_BYTES);
             MemorySegment pp = arena.allocate(ValueLayout.ADDRESS);
@@ -323,16 +338,19 @@ public final class DirectMlBindings {
             int hr = (int) mh.invokeExact(dmlDevice, dmlOperator, flags, riid, pp);
             HResult.check(hr, "IDMLDevice::CompileOperator");
             return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CompileOperator failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CompileOperator failed", t);
+        }
     }
 
     /**
      * IDMLDevice::CreateOperatorInitializer (vtable slot 10).
      */
     public static MemorySegment createOperatorInitializer(MemorySegment dmlDevice,
-                                                           MemorySegment[] compiledOps,
-                                                           Arena arena) throws WindowsNativeException {
+                                                          MemorySegment[] compiledOps,
+                                                          Arena arena) throws WindowsNativeException {
         try {
             MemorySegment opsArray = arena.allocate(ValueLayout.ADDRESS.byteSize() * compiledOps.length, 8);
             for (int i = 0; i < compiledOps.length; i++) {
@@ -347,8 +365,11 @@ public final class DirectMlBindings {
             int hr = (int) mh.invokeExact(dmlDevice, compiledOps.length, opsArray, riid, pp);
             HResult.check(hr, "IDMLDevice::CreateOperatorInitializer");
             return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateOperatorInitializer failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateOperatorInitializer failed", t);
+        }
     }
 
     /**
@@ -365,17 +386,21 @@ public final class DirectMlBindings {
             int hr = (int) mh.invokeExact(dmlDevice, riid, pp);
             HResult.check(hr, "IDMLDevice::CreateCommandRecorder");
             return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateCommandRecorder failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateCommandRecorder failed", t);
+        }
     }
 
     /**
      * IDMLDevice::CreateBindingTable (vtable slot 12).
+     *
      * @param bindingTableDesc pointer to DML_BINDING_TABLE_DESC (can be NULL for deferred init)
      */
     public static MemorySegment createBindingTable(MemorySegment dmlDevice,
-                                                    MemorySegment bindingTableDesc,
-                                                    Arena arena) throws WindowsNativeException {
+                                                   MemorySegment bindingTableDesc,
+                                                   Arena arena) throws WindowsNativeException {
         try {
             MemorySegment riid = ComIID.allocateGuid(arena, ComIID.IID_IDMLBindingTable_BYTES);
             MemorySegment pp = arena.allocate(ValueLayout.ADDRESS);
@@ -385,8 +410,11 @@ public final class DirectMlBindings {
             int hr = (int) mh.invokeExact(dmlDevice, bindingTableDesc, riid, pp);
             HResult.check(hr, "IDMLDevice::CreateBindingTable");
             return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateBindingTable failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateBindingTable failed", t);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -420,7 +448,7 @@ public final class DirectMlBindings {
             long tempSize = outBuf.get(ValueLayout.JAVA_LONG, 8);
             long persistSize = outBuf.get(ValueLayout.JAVA_LONG, 16);
             log.debug("BindingProperties: descCount={}, temp={}, persist={}", descCount, tempSize, persistSize);
-            return new long[]{ descCount, tempSize, persistSize };
+            return new long[]{descCount, tempSize, persistSize};
         } catch (Throwable t) {
             throw new RuntimeException("GetBindingProperties failed", t);
         }
@@ -434,7 +462,7 @@ public final class DirectMlBindings {
      * IDMLCommandRecorder::RecordDispatch (vtable slot 8).
      */
     public static void recordDispatch(MemorySegment recorder, MemorySegment cmdList,
-                                       MemorySegment dispatchable, MemorySegment bindingTable) {
+                                      MemorySegment dispatchable, MemorySegment bindingTable) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(recorder, RECORDER_RECORD_DISPATCH,
                     FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS,
@@ -449,52 +477,72 @@ public final class DirectMlBindings {
     // IDMLBindingTable
     // ══════════════════════════════════════════════════════════════════════
 
-    /** IDMLBindingTable::BindInputs (slot 8). */
+    /**
+     * IDMLBindingTable::BindInputs (slot 8).
+     */
     public static void bindInputs(MemorySegment bt, int count, MemorySegment bindings) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(bt, BT_BIND_INPUTS,
                     FunctionDescriptor.ofVoid(ValueLayout.ADDRESS,
                             ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
             mh.invokeExact(bt, count, bindings);
-        } catch (Throwable t) { throw new RuntimeException("BindInputs failed", t); }
+        } catch (Throwable t) {
+            throw new RuntimeException("BindInputs failed", t);
+        }
     }
 
-    /** IDMLBindingTable::BindOutputs (slot 9). */
+    /**
+     * IDMLBindingTable::BindOutputs (slot 9).
+     */
     public static void bindOutputs(MemorySegment bt, int count, MemorySegment bindings) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(bt, BT_BIND_OUTPUTS,
                     FunctionDescriptor.ofVoid(ValueLayout.ADDRESS,
                             ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
             mh.invokeExact(bt, count, bindings);
-        } catch (Throwable t) { throw new RuntimeException("BindOutputs failed", t); }
+        } catch (Throwable t) {
+            throw new RuntimeException("BindOutputs failed", t);
+        }
     }
 
-    /** IDMLBindingTable::BindTemporaryResource (slot 10). */
+    /**
+     * IDMLBindingTable::BindTemporaryResource (slot 10).
+     */
     public static void bindTemporaryResource(MemorySegment bt, MemorySegment binding) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(bt, BT_BIND_TEMPORARY,
                     FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
             mh.invokeExact(bt, binding);
-        } catch (Throwable t) { throw new RuntimeException("BindTemporary failed", t); }
+        } catch (Throwable t) {
+            throw new RuntimeException("BindTemporary failed", t);
+        }
     }
 
-    /** IDMLBindingTable::BindPersistentResource (slot 11). */
+    /**
+     * IDMLBindingTable::BindPersistentResource (slot 11).
+     */
     public static void bindPersistentResource(MemorySegment bt, MemorySegment binding) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(bt, BT_BIND_PERSISTENT,
                     FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
             mh.invokeExact(bt, binding);
-        } catch (Throwable t) { throw new RuntimeException("BindPersistent failed", t); }
+        } catch (Throwable t) {
+            throw new RuntimeException("BindPersistent failed", t);
+        }
     }
 
-    /** IDMLBindingTable::Reset (slot 12). */
+    /**
+     * IDMLBindingTable::Reset (slot 12).
+     */
     public static void resetBindingTable(MemorySegment bt, MemorySegment newDesc) {
         try {
             MethodHandle mh = DxgiBindings.vtableMethod(bt, 12,
                     FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
             int hr = (int) mh.invokeExact(bt, newDesc);
             HResult.check(hr, "IDMLBindingTable::Reset");
-        } catch (Throwable t) { throw new RuntimeException("BindingTable::Reset failed", t); }
+        } catch (Throwable t) {
+            throw new RuntimeException("BindingTable::Reset failed", t);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -506,7 +554,7 @@ public final class DirectMlBindings {
      * Layout (x64): DataType(4)+Flags(4)+DimCount(4)+pad(4)+Sizes(8)+Strides(8)+TotalSize(8)+Alignment(4)+pad(4) = 48 bytes
      */
     public static MemorySegment allocBufferTensorDesc(Arena arena, int dataType, int[] sizes,
-                                                       int[] strides, long totalSizeBytes) {
+                                                      int[] strides, long totalSizeBytes) {
         MemorySegment desc = arena.allocate(48, 8);
         desc.set(ValueLayout.JAVA_INT, 0, dataType);
         desc.set(ValueLayout.JAVA_INT, 4, DML_TENSOR_FLAG_NONE);
@@ -555,7 +603,7 @@ public final class DirectMlBindings {
      * Layout: Dispatchable(8)+CPUHandle(8)+GPUHandle(8)+SizeInDesc(4)+pad(4) = 32 bytes
      */
     public static MemorySegment allocBindingTableDesc(Arena arena, MemorySegment dispatchable,
-                                                       long cpuHandle, long gpuHandle, int sizeInDesc) {
+                                                      long cpuHandle, long gpuHandle, int sizeInDesc) {
         MemorySegment desc = arena.allocate(32, 8);
         desc.set(ValueLayout.ADDRESS, 0, dispatchable);
         desc.set(ValueLayout.JAVA_LONG, 8, cpuHandle);
@@ -569,7 +617,7 @@ public final class DirectMlBindings {
      * Layout: Buffer(8)+Offset(8)+SizeInBytes(8) = 24 bytes
      */
     public static MemorySegment allocBufferBinding(Arena arena, MemorySegment buffer,
-                                                    long offset, long sizeInBytes) {
+                                                   long offset, long sizeInBytes) {
         MemorySegment bb = arena.allocate(24, 8);
         bb.set(ValueLayout.ADDRESS, 0, buffer);
         bb.set(ValueLayout.JAVA_LONG, 8, offset);
@@ -588,12 +636,16 @@ public final class DirectMlBindings {
         return bd;
     }
 
-    /** Build a "none" binding desc (no resource bound). */
+    /**
+     * Build a "none" binding desc (no resource bound).
+     */
     public static MemorySegment allocNoneBindingDesc(Arena arena) {
         return allocBindingDesc(arena, DML_BINDING_TYPE_NONE, MemorySegment.NULL);
     }
 
-    /** Compute the aligned byte size for a float tensor with given element count. DML requires 4-byte aligned sizes. */
+    /**
+     * Compute the aligned byte size for a float tensor with given element count. DML requires 4-byte aligned sizes.
+     */
     public static long tensorByteSize(int elementCount) {
         return (long) elementCount * Float.BYTES;
     }

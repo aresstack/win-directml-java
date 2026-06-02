@@ -25,7 +25,9 @@ package com.aresstack.windirectml.config.generation;
  */
 public interface TextGenerationModel {
 
-    /** Unique model identifier (e.g. {@code "microsoft/Phi-3-mini-4k-instruct-onnx"}). */
+    /**
+     * Unique model identifier (e.g. {@code "microsoft/Phi-3-mini-4k-instruct-onnx"}).
+     */
     GenerationModelId modelId();
 
     /**
@@ -37,6 +39,8 @@ public interface TextGenerationModel {
      */
     GenerationResult generate(GenerationRequest request) throws GenerationException;
 
-    /** Whether the model is loaded and ready to accept generation requests. */
+    /**
+     * Whether the model is loaded and ready to accept generation requests.
+     */
     boolean isReady();
 }

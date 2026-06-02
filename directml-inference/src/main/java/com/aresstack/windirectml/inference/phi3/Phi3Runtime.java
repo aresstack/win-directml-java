@@ -107,8 +107,8 @@ public final class Phi3Runtime {
     private long profLmHeadNs;
     private long profTokenDecNs;
     private long profPrefillNs;
-    private int  profSteps;
-    private int  profPrefillTokens;
+    private int profSteps;
+    private int profPrefillTokens;
     private String lastProfile;
 
     /**
@@ -147,24 +147,24 @@ public final class Phi3Runtime {
         // Pre-allocate decode buffers (seqLen=1)
         int hidden = config.hiddenSize();
         int interX2 = config.intermediateSize() * 2;
-        int inter   = config.intermediateSize();
-        int maxPos  = config.maxPositionEmbeddings();
+        int inter = config.intermediateSize();
+        int maxPos = config.maxPositionEmbeddings();
         this.maxPos = maxPos;
 
-        decBuf      = new float[hidden];
-        decQKV      = new float[hidden * 3];
-        decQ        = new float[hidden];
-        decK        = new float[hidden];
-        decV        = new float[hidden];
-        decAttnOut  = new float[hidden];
-        decOProj    = new float[hidden];
+        decBuf = new float[hidden];
+        decQKV = new float[hidden * 3];
+        decQ = new float[hidden];
+        decK = new float[hidden];
+        decV = new float[hidden];
+        decAttnOut = new float[hidden];
+        decOProj = new float[hidden];
         decResidual = new float[hidden];
         decPostNorm = new float[hidden];
-        decGateUp   = new float[interX2];
-        decMlpAct   = new float[inter];
-        decDown     = new float[hidden];
-        decScores   = new float[maxPos];
-        decLogits   = new float[config.vocabSize()];
+        decGateUp = new float[interX2];
+        decMlpAct = new float[inter];
+        decDown = new float[hidden];
+        decScores = new float[maxPos];
+        decLogits = new float[config.vocabSize()];
         decScoresPool = new float[config.numAttentionHeads() * maxPos];
 
         if (gpuPipeline != null) {
@@ -568,15 +568,15 @@ public final class Phi3Runtime {
         if (pipelineLayer) {
             // V2.0: QKV via shared pipeline (shared allocator/cmdlist/fence)
             gpuPipeline.qkvFused(layerIdx, decOProj, decQKV);
-            System.arraycopy(decQKV, 0,          decQ, 0, hidden);
-            System.arraycopy(decQKV, hidden,      decK, 0, hidden);
-            System.arraycopy(decQKV, 2 * hidden,  decV, 0, hidden);
+            System.arraycopy(decQKV, 0, decQ, 0, hidden);
+            System.arraycopy(decQKV, hidden, decK, 0, hidden);
+            System.arraycopy(decQKV, 2 * hidden, decV, 0, hidden);
         } else if (gpuLayer) {
             // V1.x fallback: per-kernel submission
             gpuKernels.qkvFused(layerIdx).matvec(decOProj, decQKV);
-            System.arraycopy(decQKV, 0,          decQ, 0, hidden);
-            System.arraycopy(decQKV, hidden,      decK, 0, hidden);
-            System.arraycopy(decQKV, 2 * hidden,  decV, 0, hidden);
+            System.arraycopy(decQKV, 0, decQ, 0, hidden);
+            System.arraycopy(decQKV, hidden, decK, 0, hidden);
+            System.arraycopy(decQKV, 2 * hidden, decV, 0, hidden);
         } else {
             Arrays.fill(decQ, 0);
             Arrays.fill(decK, 0);
@@ -631,7 +631,7 @@ public final class Phi3Runtime {
                     float d0 = 0, d1 = 0, d2 = 0, d3 = 0;
                     int d = 0;
                     for (; d + 3 < headDim; d += 4) {
-                        d0 += decQ[qOff + d]     * kHead[kOff + d];
+                        d0 += decQ[qOff + d] * kHead[kOff + d];
                         d1 += decQ[qOff + d + 1] * kHead[kOff + d + 1];
                         d2 += decQ[qOff + d + 2] * kHead[kOff + d + 2];
                         d3 += decQ[qOff + d + 3] * kHead[kOff + d + 3];
@@ -671,7 +671,7 @@ public final class Phi3Runtime {
                     float d0 = 0, d1 = 0, d2 = 0, d3 = 0;
                     int d = 0;
                     for (; d + 3 < headDim; d += 4) {
-                        d0 += decQ[qOff + d]     * kHead[kOff + d];
+                        d0 += decQ[qOff + d] * kHead[kOff + d];
                         d1 += decQ[qOff + d + 1] * kHead[kOff + d + 1];
                         d2 += decQ[qOff + d + 2] * kHead[kOff + d + 2];
                         d3 += decQ[qOff + d + 3] * kHead[kOff + d + 3];
@@ -817,9 +817,9 @@ public final class Phi3Runtime {
                 float[] row = new float[hidden];
                 System.arraycopy(normed, s * hidden, row, 0, hidden);
                 float[] qkvResult = gpuKernels.qkvFused(layerIdx).matvec(row);
-                System.arraycopy(qkvResult, 0,          q, s * hidden, hidden);
-                System.arraycopy(qkvResult, hidden,      k, s * hidden, hidden);
-                System.arraycopy(qkvResult, 2 * hidden,  v, s * hidden, hidden);
+                System.arraycopy(qkvResult, 0, q, s * hidden, hidden);
+                System.arraycopy(qkvResult, hidden, k, s * hidden, hidden);
+                System.arraycopy(qkvResult, 2 * hidden, v, s * hidden, hidden);
             }
         } else {
             lw.qProj().matmul(normed, q, seqLen);
@@ -963,8 +963,8 @@ public final class Phi3Runtime {
     // ── GPU matmul helper ─────────────────────────────────────────────────
 
     private static void gpuMatmul(MatMulNBitsKernel kernel,
-                                   float[] input, float[] output,
-                                   int seqLen, int K, int N) {
+                                  float[] input, float[] output,
+                                  int seqLen, int K, int N) {
         for (int s = 0; s < seqLen; s++) {
             float[] row = new float[K];
             System.arraycopy(input, s * K, row, 0, K);

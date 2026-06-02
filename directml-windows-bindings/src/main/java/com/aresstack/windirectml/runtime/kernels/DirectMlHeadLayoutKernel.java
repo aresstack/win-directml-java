@@ -67,11 +67,17 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(DirectMlHeadLayoutKernel.class);
 
-    /** Conversion direction enum (purely informational, used for log lines and validation). */
+    /**
+     * Conversion direction enum (purely informational, used for log lines and validation).
+     */
     public enum Direction {
-        /** {@code [S, H·D]} (a.k.a. {@code [S, H, D]} contiguous) → {@code [1, H, S, D]}. */
+        /**
+         * {@code [S, H·D]} (a.k.a. {@code [S, H, D]} contiguous) → {@code [1, H, S, D]}.
+         */
         SEQ_TO_HEAD,
-        /** {@code [1, H, S, D]} → {@code [S, H·D]}. */
+        /**
+         * {@code [1, H, S, D]} → {@code [S, H·D]}.
+         */
         HEAD_TO_SEQ
     }
 
@@ -362,14 +368,29 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
     public void close() {
         if (closed) return;
         closed = true;
-        try { DxgiBindings.release(cmdRecorder); } catch (Exception ignored) {}
-        try { DxgiBindings.release(descriptorHeap); } catch (Exception ignored) {}
-        try { DxgiBindings.release(compiled); } catch (Exception ignored) {}
+        try {
+            DxgiBindings.release(cmdRecorder);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(descriptorHeap);
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(compiled);
+        } catch (Exception ignored) {
+        }
         if (!persistBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(persistBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(persistBuffer);
+            } catch (Exception ignored) {
+            }
         }
         if (!tempBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(tempBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(tempBuffer);
+            } catch (Exception ignored) {
+            }
         }
         arena.close();
     }
@@ -422,13 +443,24 @@ public final class DirectMlHeadLayoutKernel implements AutoCloseable {
         array.set(ValueLayout.ADDRESS, off + 8, bb);
     }
 
-    public Direction direction() { return direction; }
+    public Direction direction() {
+        return direction;
+    }
 
     public int batch() {
         return batch;
     }
-    public int seq() { return seq; }
-    public int heads() { return heads; }
-    public int headDim() { return headDim; }
+
+    public int seq() {
+        return seq;
+    }
+
+    public int heads() {
+        return heads;
+    }
+
+    public int headDim() {
+        return headDim;
+    }
 }
 

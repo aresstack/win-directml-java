@@ -16,7 +16,9 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class Qwen2ConfigTest {
 
-    /** Qwen2.5-Coder-0.5B config values. */
+    /**
+     * Qwen2.5-Coder-0.5B config values.
+     */
     private static final String CONFIG_JSON_0_5B = """
             {
               "architectures": ["Qwen2ForCausalLM"],
@@ -33,7 +35,9 @@ class Qwen2ConfigTest {
             }
             """;
 
-    /** Qwen2.5-Coder-1.5B config values (for scalability check). */
+    /**
+     * Qwen2.5-Coder-1.5B config values (for scalability check).
+     */
     private static final String CONFIG_JSON_1_5B = """
             {
               "hidden_size": 1536,

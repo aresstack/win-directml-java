@@ -34,11 +34,17 @@ import java.util.Objects;
  */
 public final class RerankerCpuWeights {
 
-    /** Shape: {@code [numLabels, H]}, row-major. For reranking {@code numLabels = 1}. */
+    /**
+     * Shape: {@code [numLabels, H]}, row-major. For reranking {@code numLabels = 1}.
+     */
     public final float[] classifierWeight;
-    /** Shape: {@code [numLabels]}. */
+    /**
+     * Shape: {@code [numLabels]}.
+     */
     public final float[] classifierBias;
-    /** Always {@code 1} for the supported reranker checkpoints. */
+    /**
+     * Always {@code 1} for the supported reranker checkpoints.
+     */
     public final int numLabels;
     private final BertCpuEncoderWeights bert;
 
@@ -65,8 +71,13 @@ public final class RerankerCpuWeights {
         }
     }
 
-    public BertCpuEncoderWeights bert() { return bert; }
-    public BertEncoderConfig config() { return bert.config(); }
+    public BertCpuEncoderWeights bert() {
+        return bert;
+    }
+
+    public BertEncoderConfig config() {
+        return bert.config();
+    }
 
     /**
      * Load encoder + classifier-head weights from

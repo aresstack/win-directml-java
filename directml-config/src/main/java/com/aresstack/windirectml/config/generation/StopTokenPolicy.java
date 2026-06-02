@@ -17,7 +17,9 @@ import java.util.List;
  */
 public final class StopTokenPolicy {
 
-    /** Default: stop only on EOS or max-tokens. */
+    /**
+     * Default: stop only on EOS or max-tokens.
+     */
     private static final StopTokenPolicy EOS_ONLY =
             new StopTokenPolicy(Collections.<String>emptyList());
 
@@ -27,7 +29,9 @@ public final class StopTokenPolicy {
         this.stopStrings = Collections.unmodifiableList(new ArrayList<String>(stopStrings));
     }
 
-    /** Default policy: stop on the model's EOS token or when maxTokens is reached. */
+    /**
+     * Default policy: stop on the model's EOS token or when maxTokens is reached.
+     */
     public static StopTokenPolicy eosOnly() {
         return EOS_ONLY;
     }
@@ -50,7 +54,9 @@ public final class StopTokenPolicy {
         return new StopTokenPolicy(validated);
     }
 
-    /** Unmodifiable list of stop strings (may be empty). */
+    /**
+     * Unmodifiable list of stop strings (may be empty).
+     */
     public List<String> stopStrings() {
         return stopStrings;
     }

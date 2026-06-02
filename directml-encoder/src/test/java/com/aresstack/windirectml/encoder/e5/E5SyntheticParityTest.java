@@ -40,11 +40,18 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @EnabledOnOs(OS.WINDOWS)
 class E5SyntheticParityTest {
 
-    /** Tiny WordPiece-shaped tokenizer matching the synthetic vocab. */
+    /**
+     * Tiny WordPiece-shaped tokenizer matching the synthetic vocab.
+     */
     private static final class TinyTokenizer implements EncoderTokenizer {
         private final int vocab;
-        TinyTokenizer(int vocab) { this.vocab = vocab; }
-        @Override public Encoded encode(String text) {
+
+        TinyTokenizer(int vocab) {
+            this.vocab = vocab;
+        }
+
+        @Override
+        public Encoded encode(String text) {
             int n = Math.min(text.length() + 2, 8);
             int[] ids = new int[n];
             int[] mask = new int[n];
@@ -55,10 +62,26 @@ class E5SyntheticParityTest {
             for (int i = 0; i < n; i++) mask[i] = 1;
             return new Encoded(ids, mask, segs);
         }
-        @Override public int padTokenId() { return 0; }
-        @Override public int clsTokenId() { return 2; }
-        @Override public int sepTokenId() { return 3; }
-        @Override public int vocabSize()  { return vocab; }
+
+        @Override
+        public int padTokenId() {
+            return 0;
+        }
+
+        @Override
+        public int clsTokenId() {
+            return 2;
+        }
+
+        @Override
+        public int sepTokenId() {
+            return 3;
+        }
+
+        @Override
+        public int vocabSize() {
+            return vocab;
+        }
     }
 
     private static BertEncoderConfig tinyE5Config() {
@@ -81,8 +104,8 @@ class E5SyntheticParityTest {
     private static BertCpuEncoderWeights randomWeights(BertEncoderConfig cfg, long seed) {
         Random r = new Random(seed);
         int H = cfg.hiddenSize(), I = cfg.intermediateSize();
-        float[] we  = rand(r, cfg.vocabSize() * H, 0.02f);
-        float[] pe  = rand(r, cfg.maxPositionEmbeddings() * H, 0.02f);
+        float[] we = rand(r, cfg.vocabSize() * H, 0.02f);
+        float[] pe = rand(r, cfg.maxPositionEmbeddings() * H, 0.02f);
         float[] tte = rand(r, cfg.typeVocabSize() * H, 0.02f);
         float[] elng = ones(H);
         float[] elnb = zeros(H);
@@ -165,10 +188,21 @@ class E5SyntheticParityTest {
         for (int i = 0; i < n; i++) a[i] = (float) (r.nextGaussian() * scale);
         return a;
     }
-    private static float[] ones(int n) { float[] a = new float[n]; java.util.Arrays.fill(a, 1f); return a; }
-    private static float[] zeros(int n) { return new float[n]; }
+
+    private static float[] ones(int n) {
+        float[] a = new float[n];
+        java.util.Arrays.fill(a, 1f);
+        return a;
+    }
+
+    private static float[] zeros(int n) {
+        return new float[n];
+    }
+
     private static double norm(float[] v) {
-        double s = 0; for (float x : v) s += (double) x * x; return Math.sqrt(s);
+        double s = 0;
+        for (float x : v) s += (double) x * x;
+        return Math.sqrt(s);
     }
 }
 

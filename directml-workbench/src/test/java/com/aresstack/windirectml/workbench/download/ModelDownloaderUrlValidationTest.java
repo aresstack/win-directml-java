@@ -26,7 +26,8 @@ class ModelDownloaderUrlValidationTest {
                 )));
 
         IOException ex = assertThrows(IOException.class, () ->
-                ModelDownloader.downloadFromManifest(manifest, tempDir, false, s -> {}));
+                ModelDownloader.downloadFromManifest(manifest, tempDir, false, s -> {
+                }));
         assertTrue(ex.getMessage().contains("Invalid required download URL for model.onnx"),
                 "Expected clear required URL error, got: " + ex.getMessage());
     }
@@ -44,7 +45,8 @@ class ModelDownloaderUrlValidationTest {
                         "optional.json"
                 )));
 
-        ModelDownloader.downloadFromManifest(manifest, tempDir, false, s -> {});
+        ModelDownloader.downloadFromManifest(manifest, tempDir, false, s -> {
+        });
         assertFalse(Files.exists(tempDir.resolve("optional.json")));
     }
 
@@ -62,7 +64,8 @@ class ModelDownloaderUrlValidationTest {
                 )));
 
         IOException ex = assertThrows(IOException.class, () ->
-                ModelDownloader.downloadFromManifest(manifest, tempDir, false, s -> {}));
+                ModelDownloader.downloadFromManifest(manifest, tempDir, false, s -> {
+                }));
         assertTrue(ex.getMessage().contains("model.onnx"), "Expected filename in error");
         assertTrue(ex.getMessage().contains("ht!tp://bad url"), "Expected invalid URL in error");
     }

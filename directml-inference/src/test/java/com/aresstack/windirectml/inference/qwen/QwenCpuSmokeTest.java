@@ -54,42 +54,52 @@ class QwenCpuSmokeTest {
 
     // ── Prompt definitions ───────────────────────────────────────────────
 
-    /** English summarization prompt. */
+    /**
+     * English summarization prompt.
+     */
     static final String ENGLISH_SUMMARY_PROMPT =
             "Summarize the following text in one sentence:\n\n"
-            + "The Qwen2.5-Coder series is a code-specific large language model built "
-            + "upon the Qwen2.5 architecture. It has been pretrained on a large corpus "
-            + "of source code and demonstrates strong coding ability. The 0.5B variant "
-            + "is the smallest model in the series and is suitable for lightweight, "
-            + "low-latency code generation tasks on CPU.";
+                    + "The Qwen2.5-Coder series is a code-specific large language model built "
+                    + "upon the Qwen2.5 architecture. It has been pretrained on a large corpus "
+                    + "of source code and demonstrates strong coding ability. The 0.5B variant "
+                    + "is the smallest model in the series and is suitable for lightweight, "
+                    + "low-latency code generation tasks on CPU.";
 
-    /** German summarization prompt. */
+    /**
+     * German summarization prompt.
+     */
     static final String GERMAN_SUMMARY_PROMPT =
             "Fasse den folgenden Text in einem Satz zusammen:\n\n"
-            + "Die Qwen2.5-Coder-Reihe ist eine auf Code spezialisierte Familie großer "
-            + "Sprachmodelle, die auf der Qwen2.5-Architektur basiert. Sie wurde auf einem "
-            + "großen Korpus von Quellcode vortrainiert und zeigt starke Programmierfähigkeiten. "
-            + "Die 0.5B-Variante ist das kleinste Modell der Serie und eignet sich für "
-            + "ressourcenschonende Code-Generierung auf der CPU.";
+                    + "Die Qwen2.5-Coder-Reihe ist eine auf Code spezialisierte Familie großer "
+                    + "Sprachmodelle, die auf der Qwen2.5-Architektur basiert. Sie wurde auf einem "
+                    + "großen Korpus von Quellcode vortrainiert und zeigt starke Programmierfähigkeiten. "
+                    + "Die 0.5B-Variante ist das kleinste Modell der Serie und eignet sich für "
+                    + "ressourcenschonende Code-Generierung auf der CPU.";
 
-    /** Natural/ADABAS code explanation prompt. */
+    /**
+     * Natural/ADABAS code explanation prompt.
+     */
     static final String NATURAL_ADABAS_CODE_EXPLANATION_PROMPT =
             "Explain what the following Natural/ADABAS code does:\n\n"
-            + "DEFINE DATA LOCAL\n"
-            + "1 #EMPLOYEES VIEW OF EMPLOYEES\n"
-            + "  2 NAME\n"
-            + "  2 FIRST-NAME\n"
-            + "  2 PERSONNEL-ID\n"
-            + "END-DEFINE\n"
-            + "READ #EMPLOYEES BY NAME\n"
-            + "  DISPLAY NAME FIRST-NAME PERSONNEL-ID\n"
-            + "END-READ\n"
-            + "END";
+                    + "DEFINE DATA LOCAL\n"
+                    + "1 #EMPLOYEES VIEW OF EMPLOYEES\n"
+                    + "  2 NAME\n"
+                    + "  2 FIRST-NAME\n"
+                    + "  2 PERSONNEL-ID\n"
+                    + "END-DEFINE\n"
+                    + "READ #EMPLOYEES BY NAME\n"
+                    + "  DISPLAY NAME FIRST-NAME PERSONNEL-ID\n"
+                    + "END-READ\n"
+                    + "END";
 
-    /** System prompt for code assistant role. */
+    /**
+     * System prompt for code assistant role.
+     */
     static final String SYSTEM_PROMPT = "You are a helpful coding assistant.";
 
-    /** Short max-token limit for verifying basic generation works. */
+    /**
+     * Short max-token limit for verifying basic generation works.
+     */
     static final int SHORT_MAX_TOKENS = 32;
 
     // ── Condition ────────────────────────────────────────────────────────

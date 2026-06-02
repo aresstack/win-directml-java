@@ -102,7 +102,7 @@ class WorkbenchSmokeTest {
         assertEquals(com.aresstack.windirectml.runtime.facade.Backend.AUTO, model.getBackend());
         // Model root now defaults to %APPDATA%/.directml/model (or $HOME/.directml/model)
         assertTrue(model.getModelRoot().toString().endsWith(".directml" + java.io.File.separator + "model")
-                || model.getModelRoot().toString().endsWith(".directml/model"),
+                        || model.getModelRoot().toString().endsWith(".directml/model"),
                 "Expected model root under .directml/model, got: " + model.getModelRoot());
         assertEquals("all-MiniLM-L6-v2", model.getEmbeddingModel());
         assertEquals("cross-encoder-ms-marco-MiniLM-L-6-v2", model.getRerankerModel());

@@ -26,7 +26,9 @@ public class WindowsNativeException extends Exception {
         this.hresult = 0;
     }
 
-    /** The raw HRESULT returned by the failed Windows API call, or 0 if not applicable. */
+    /**
+     * The raw HRESULT returned by the failed Windows API call, or 0 if not applicable.
+     */
     public int getHresult() {
         return hresult;
     }

@@ -37,10 +37,14 @@ public final class DirectMlRedistInstaller {
 
     private static final Logger log = LoggerFactory.getLogger(DirectMlRedistInstaller.class);
 
-    /** Default-Version, gegen die diese Codebase getestet wurde. */
+    /**
+     * Default-Version, gegen die diese Codebase getestet wurde.
+     */
     public static final String DEFAULT_VERSION = "1.15.4";
 
-    /** NuGet-Paket-Id der Microsoft DirectML-Redistributable. */
+    /**
+     * NuGet-Paket-Id der Microsoft DirectML-Redistributable.
+     */
     public static final String PACKAGE_ID = "Microsoft.AI.DirectML";
 
     private final NuGetPackageInstaller installer;
@@ -118,9 +122,9 @@ public final class DirectMlRedistInstaller {
         if (lower.endsWith("-win")) lower = lower.substring(0, lower.length() - 4);
         return switch (lower) {
             case "x64", "amd64", "x86_64" -> "x64";
-            case "x86", "i386", "i686"    -> "x86";
-            case "arm64", "aarch64"        -> "arm64";
-            case "arm"                     -> "arm";
+            case "x86", "i386", "i686" -> "x86";
+            case "arm64", "aarch64" -> "arm64";
+            case "arm" -> "arm";
             default -> throw new IllegalArgumentException(
                     "Unsupported arch '" + arch + "' (expected x64, x86, arm64 or arm)");
         };

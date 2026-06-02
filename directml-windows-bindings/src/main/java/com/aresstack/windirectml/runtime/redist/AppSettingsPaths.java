@@ -17,7 +17,8 @@ import java.util.Locale;
  */
 public final class AppSettingsPaths {
 
-    private AppSettingsPaths() {}
+    private AppSettingsPaths() {
+    }
 
     /**
      * @param appName logischer App-Name, wird als Verzeichnisname benutzt
@@ -48,7 +49,9 @@ public final class AppSettingsPaths {
                 .toAbsolutePath().normalize();
     }
 
-    /** Default-Ordner für dieses Projekt: {@code "win-directml-java"}. */
+    /**
+     * Default-Ordner für dieses Projekt: {@code "win-directml-java"}.
+     */
     public static Path defaultForWinDirectMlJava() {
         return forApp("win-directml-java");
     }

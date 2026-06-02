@@ -29,9 +29,12 @@ import java.nio.file.Path;
  */
 public final class BertCrossEncoderRerankers {
 
-    private BertCrossEncoderRerankers() {}
+    private BertCrossEncoderRerankers() {
+    }
 
-    /** CPU loader. */
+    /**
+     * CPU loader.
+     */
     public static CpuReranker loadCpu(Path modelDir) throws EmbeddingException {
         verifyDir(modelDir);
         BertEncoderConfig cfg = readConfig(modelDir);
@@ -47,7 +50,9 @@ public final class BertCrossEncoderRerankers {
         }
     }
 
-    /** DirectML loader. Owns the context so a single {@code close()} cleans up everything. */
+    /**
+     * DirectML loader. Owns the context so a single {@code close()} cleans up everything.
+     */
     public static DirectMlReranker loadDirectMl(Path modelDir) throws EmbeddingException {
         verifyDir(modelDir);
         BertEncoderConfig cfg = readConfig(modelDir);
@@ -63,13 +68,22 @@ public final class BertCrossEncoderRerankers {
                     cfg.maxPositionEmbeddings());
             return DirectMlReranker.build(ctx, /* ownsCtx */ true, w, t);
         } catch (EmbeddingException e) {
-            if (ctx != null) try { ctx.close(); } catch (Exception ignored) {}
+            if (ctx != null) try {
+                ctx.close();
+            } catch (Exception ignored) {
+            }
             throw e;
         } catch (RerankException e) {
-            if (ctx != null) try { ctx.close(); } catch (Exception ignored) {}
+            if (ctx != null) try {
+                ctx.close();
+            } catch (Exception ignored) {
+            }
             throw new EmbeddingException("Failed to build DirectMlReranker from " + modelDir, e);
         } catch (Exception e) {
-            if (ctx != null) try { ctx.close(); } catch (Exception ignored) {}
+            if (ctx != null) try {
+                ctx.close();
+            } catch (Exception ignored) {
+            }
             throw new EmbeddingException("Failed to load DirectMlReranker from " + modelDir, e);
         }
     }

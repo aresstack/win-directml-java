@@ -54,12 +54,16 @@ public final class LocalRerankerModel implements AutoCloseable {
         return delegate.rerank(new RerankRequest(query, documents, topN));
     }
 
-    /** Human-readable model identifier. */
+    /**
+     * Human-readable model identifier.
+     */
     public String modelName() {
         return delegate.modelName();
     }
 
-    /** Whether the underlying model is initialized and ready. */
+    /**
+     * Whether the underlying model is initialized and ready.
+     */
     public boolean isReady() {
         return delegate.isReady();
     }

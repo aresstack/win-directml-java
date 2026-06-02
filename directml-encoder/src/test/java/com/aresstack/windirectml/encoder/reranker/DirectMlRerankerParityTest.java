@@ -49,9 +49,15 @@ class DirectMlRerankerParityTest {
      */
     private static final class TinyPairTokenizer implements EncoderTokenizer {
         private final int vocab;
-        TinyPairTokenizer(int vocab) { this.vocab = vocab; }
 
-        @Override public Encoded encode(String text) { return encodePair(text, ""); }
+        TinyPairTokenizer(int vocab) {
+            this.vocab = vocab;
+        }
+
+        @Override
+        public Encoded encode(String text) {
+            return encodePair(text, "");
+        }
 
         @Override
         public Encoded encodePair(String a, String b) {
@@ -63,10 +69,21 @@ class DirectMlRerankerParityTest {
             int[] seg = new int[n];
             int p = 0;
             ids[p++] = 2; // CLS
-            for (int x : aIds) { ids[p] = x; seg[p] = 0; p++; }
-            ids[p] = 3; seg[p] = 0; p++;       // first SEP
-            for (int x : bIds) { ids[p] = x; seg[p] = 1; p++; }
-            ids[p] = 3; seg[p] = 1;            // second SEP
+            for (int x : aIds) {
+                ids[p] = x;
+                seg[p] = 0;
+                p++;
+            }
+            ids[p] = 3;
+            seg[p] = 0;
+            p++;       // first SEP
+            for (int x : bIds) {
+                ids[p] = x;
+                seg[p] = 1;
+                p++;
+            }
+            ids[p] = 3;
+            seg[p] = 1;            // second SEP
             for (int i = 0; i < n; i++) mask[i] = 1;
             return new Encoded(ids, mask, seg);
         }
@@ -78,10 +95,25 @@ class DirectMlRerankerParityTest {
             return out;
         }
 
-        @Override public int padTokenId() { return 0; }
-        @Override public int clsTokenId() { return 2; }
-        @Override public int sepTokenId() { return 3; }
-        @Override public int vocabSize()  { return vocab; }
+        @Override
+        public int padTokenId() {
+            return 0;
+        }
+
+        @Override
+        public int clsTokenId() {
+            return 2;
+        }
+
+        @Override
+        public int sepTokenId() {
+            return 3;
+        }
+
+        @Override
+        public int vocabSize() {
+            return vocab;
+        }
     }
 
     private static BertEncoderConfig tinyConfig() {
@@ -104,8 +136,8 @@ class DirectMlRerankerParityTest {
     private static RerankerCpuWeights tinyWeights(BertEncoderConfig cfg, long seed) {
         Random r = new Random(seed);
         int H = cfg.hiddenSize(), I = cfg.intermediateSize();
-        float[] we  = rand(r, cfg.vocabSize() * H, 0.02f);
-        float[] pe  = rand(r, cfg.maxPositionEmbeddings() * H, 0.02f);
+        float[] we = rand(r, cfg.vocabSize() * H, 0.02f);
+        float[] pe = rand(r, cfg.maxPositionEmbeddings() * H, 0.02f);
         float[] tte = rand(r, cfg.typeVocabSize() * H, 0.02f);
         float[] elng = ones(H);
         float[] elnb = zeros(H);
@@ -124,7 +156,7 @@ class DirectMlRerankerParityTest {
         BertCpuEncoderWeights bert =
                 BertCpuEncoderWeights.forTesting(cfg, we, pe, tte, elng, elnb, layers);
         float[] clsW = rand(r, H, 0.1f);
-        float[] clsB = new float[]{ (float) (r.nextGaussian() * 0.01) };
+        float[] clsB = new float[]{(float) (r.nextGaussian() * 0.01)};
         return new RerankerCpuWeights(bert, clsW, clsB, 1);
     }
 
@@ -197,7 +229,15 @@ class DirectMlRerankerParityTest {
         for (int i = 0; i < n; i++) a[i] = (float) (r.nextGaussian() * scale);
         return a;
     }
-    private static float[] ones(int n) { float[] a = new float[n]; Arrays.fill(a, 1f); return a; }
-    private static float[] zeros(int n) { return new float[n]; }
+
+    private static float[] ones(int n) {
+        float[] a = new float[n];
+        Arrays.fill(a, 1f);
+        return a;
+    }
+
+    private static float[] zeros(int n) {
+        return new float[n];
+    }
 }
 

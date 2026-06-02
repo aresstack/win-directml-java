@@ -23,11 +23,14 @@ public final class OnnxModelReader {
 
     private static final Logger log = LoggerFactory.getLogger(OnnxModelReader.class);
 
-    private OnnxModelReader() {}
+    private OnnxModelReader() {
+    }
 
     // ── Public data types ────────────────────────────────────────────────
 
-    /** ONNX data type constants. */
+    /**
+     * ONNX data type constants.
+     */
     public static final int ONNX_FLOAT = 1, ONNX_UINT8 = 2, ONNX_INT8 = 3,
             ONNX_INT32 = 6, ONNX_INT64 = 7, ONNX_FLOAT16 = 10;
 
@@ -37,8 +40,10 @@ public final class OnnxModelReader {
      * non-FLOAT types (INT8, UINT8, INT32). Both may be populated.
      */
     public record OnnxTensor(String name, long[] dims, int dataType,
-                              float[] data, byte[] rawBytes) {
-        /** Convenience constructor for float-only tensors (backward compat). */
+                             float[] data, byte[] rawBytes) {
+        /**
+         * Convenience constructor for float-only tensors (backward compat).
+         */
         public OnnxTensor(String name, long[] dims, int dataType, float[] data) {
             this(name, dims, dataType, data, new byte[0]);
         }
@@ -49,13 +54,23 @@ public final class OnnxModelReader {
             return n;
         }
 
-        /** Read a single signed int8 value from rawBytes. */
-        public byte getInt8(int index) { return rawBytes[index]; }
+        /**
+         * Read a single signed int8 value from rawBytes.
+         */
+        public byte getInt8(int index) {
+            return rawBytes[index];
+        }
 
-        /** Read a single unsigned uint8 value from rawBytes. */
-        public int getUint8(int index) { return rawBytes[index] & 0xFF; }
+        /**
+         * Read a single unsigned uint8 value from rawBytes.
+         */
+        public int getUint8(int index) {
+            return rawBytes[index] & 0xFF;
+        }
 
-        /** Read a little-endian int32 from rawBytes at element index. */
+        /**
+         * Read a little-endian int32 from rawBytes at element index.
+         */
         public int getInt32(int index) {
             int off = index * 4;
             return (rawBytes[off] & 0xFF)
@@ -64,23 +79,27 @@ public final class OnnxModelReader {
                     | ((rawBytes[off + 3] & 0xFF) << 24);
         }
 
-        /** Read a single float from the data array, or 0 if out of bounds. */
+        /**
+         * Read a single float from the data array, or 0 if out of bounds.
+         */
         public float getFloat(int index) {
             return index < data.length ? data[index] : 0f;
         }
     }
 
     public record OnnxNode(String opType, List<String> inputs, List<String> outputs,
-                            Map<String, Object> attrs) {
+                           Map<String, Object> attrs) {
         @SuppressWarnings("unchecked")
         public List<Long> getInts(String name) {
             Object v = attrs.get(name);
             return v instanceof List<?> ? (List<Long>) v : List.of();
         }
+
         public long getInt(String name, long def) {
             Object v = attrs.get(name);
             return v instanceof Long l ? l : def;
         }
+
         public String getString(String name, String def) {
             Object v = attrs.get(name);
             return v instanceof String s ? s : def;
@@ -88,8 +107,9 @@ public final class OnnxModelReader {
     }
 
     public record OnnxGraph(String name, List<OnnxNode> nodes,
-                             Map<String, OnnxTensor> initializers,
-                             List<String> inputNames, List<String> outputNames) {}
+                            Map<String, OnnxTensor> initializers,
+                            List<String> inputNames, List<String> outputNames) {
+    }
 
     // ── Entry point ──────────────────────────────────────────────────────
 
@@ -219,10 +239,22 @@ public final class OnnxModelReader {
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
             switch (fieldNum) {
-                case 1 -> { if (wireType == 2) inputs.add(readString(buf)); else skipField(buf, wireType); }
-                case 2 -> { if (wireType == 2) outputs.add(readString(buf)); else skipField(buf, wireType); }
-                case 3 -> { if (wireType == 2) name = readString(buf); else skipField(buf, wireType); }
-                case 4 -> { if (wireType == 2) opType = readString(buf); else skipField(buf, wireType); }
+                case 1 -> {
+                    if (wireType == 2) inputs.add(readString(buf));
+                    else skipField(buf, wireType);
+                }
+                case 2 -> {
+                    if (wireType == 2) outputs.add(readString(buf));
+                    else skipField(buf, wireType);
+                }
+                case 3 -> {
+                    if (wireType == 2) name = readString(buf);
+                    else skipField(buf, wireType);
+                }
+                case 4 -> {
+                    if (wireType == 2) opType = readString(buf);
+                    else skipField(buf, wireType);
+                }
                 case 5 -> { // AttributeProto
                     if (wireType == 2) {
                         int len = readVarint32(buf);
@@ -253,10 +285,22 @@ public final class OnnxModelReader {
             int fieldNum = tag >>> 3;
             int wireType = tag & 0x7;
             switch (fieldNum) {
-                case 1 -> { if (wireType == 2) attrName = readString(buf); else skipField(buf, wireType); }
-                case 2 -> { if (wireType == 0) intVal = readVarint64(buf); else skipField(buf, wireType); }
-                case 3 -> { if (wireType == 2) strVal = readString(buf); else skipField(buf, wireType); }
-                case 4 -> { if (wireType == 5) floatVal = Float.intBitsToFloat(buf.getInt()); else skipField(buf, wireType); }
+                case 1 -> {
+                    if (wireType == 2) attrName = readString(buf);
+                    else skipField(buf, wireType);
+                }
+                case 2 -> {
+                    if (wireType == 0) intVal = readVarint64(buf);
+                    else skipField(buf, wireType);
+                }
+                case 3 -> {
+                    if (wireType == 2) strVal = readString(buf);
+                    else skipField(buf, wireType);
+                }
+                case 4 -> {
+                    if (wireType == 5) floatVal = Float.intBitsToFloat(buf.getInt());
+                    else skipField(buf, wireType);
+                }
                 case 7 -> { // repeated float — skip for now
                     skipField(buf, wireType);
                 }
@@ -332,7 +376,7 @@ public final class OnnxModelReader {
                         floatData = new float[count];
                         for (int i = 0; i < count; i++) floatData[i] = Float.intBitsToFloat(buf.getInt());
                     } else if (wireType == 5) {
-                        floatData = new float[]{ Float.intBitsToFloat(buf.getInt()) };
+                        floatData = new float[]{Float.intBitsToFloat(buf.getInt())};
                     } else skipField(buf, wireType);
                 }
                 case 5 -> { // repeated int32 int32_data (packed varints)

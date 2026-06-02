@@ -67,16 +67,49 @@ public final class MiniLmArchitecture implements EncoderArchitecture {
         this.config = config;
     }
 
-    public MiniLmConfig config() { return config; }
+    public MiniLmConfig config() {
+        return config;
+    }
 
-    @Override public String name() { return NAME; }
-    @Override public int hiddenSize() { return config.hiddenSize(); }
-    @Override public int numLayers() { return config.numLayers(); }
-    @Override public int numAttentionHeads() { return config.numAttentionHeads(); }
-    @Override public int maxSequenceLength() { return config.maxPositionEmbeddings(); }
-    @Override public int outputDimension() { return config.outputDimension(); }
-    @Override public PoolingStrategy poolingStrategy() { return PoolingStrategy.MEAN; }
-    @Override public boolean l2NormalizeByDefault() { return true; }
+    @Override
+    public String name() {
+        return NAME;
+    }
+
+    @Override
+    public int hiddenSize() {
+        return config.hiddenSize();
+    }
+
+    @Override
+    public int numLayers() {
+        return config.numLayers();
+    }
+
+    @Override
+    public int numAttentionHeads() {
+        return config.numAttentionHeads();
+    }
+
+    @Override
+    public int maxSequenceLength() {
+        return config.maxPositionEmbeddings();
+    }
+
+    @Override
+    public int outputDimension() {
+        return config.outputDimension();
+    }
+
+    @Override
+    public PoolingStrategy poolingStrategy() {
+        return PoolingStrategy.MEAN;
+    }
+
+    @Override
+    public boolean l2NormalizeByDefault() {
+        return true;
+    }
 
     /**
      * Loads MiniLM weights from {@code modelDir} into the CPU reference bundle

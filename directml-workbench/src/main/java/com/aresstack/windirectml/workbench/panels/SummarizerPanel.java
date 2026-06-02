@@ -205,12 +205,13 @@ public final class SummarizerPanel extends JPanel {
 
     private void runQwenGeneration(Path modelDir, String text, int maxTokens, String selectedModel)
             throws InferenceException {
-        validateQwenModelFiles(modelDir);
+        String qwenModelFile = model.getQwenModelFile();
+        validateQwenModelFiles(modelDir, qwenModelFile);
         long start = System.nanoTime();
         String backend = model.getBackend().name().toLowerCase();
-        QwenInferenceEngine engine = new QwenInferenceEngine(modelDir, maxTokens, backend);
+        QwenInferenceEngine engine = new QwenInferenceEngine(modelDir, maxTokens, backend, qwenModelFile);
         try {
-            appendResult("Initializing Qwen runtime (backend=" + backend + ")...");
+            appendResult("Initializing Qwen runtime (backend=" + backend + ", onnx=" + qwenModelFile + ")...");
             engine.initialize();
             appendResult("Model loaded in " + elapsedMs(start) + " ms");
             appendResult("Prefill running... first token may take a while for long prompts.");
@@ -274,10 +275,10 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void validateQwenModelFiles(Path modelDir) {
-        String missing = QwenModelDirValidator.describeMissingModelFile(modelDir);
+    private void validateQwenModelFiles(Path modelDir, String modelFileName) {
+        String missing = QwenModelDirValidator.describeMissingModelFile(modelDir, modelFileName);
         if (missing != null) {
-            throw new IllegalStateException(missing + ". Download the Qwen model first from the Download tab.");
+            throw new IllegalStateException(missing + ". Download the selected Qwen model first from the Download tab.");
         }
     }
 

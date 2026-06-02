@@ -8,7 +8,12 @@ package com.aresstack.windirectml.encoder.reranker;
 public class RerankException extends Exception {
     private static final long serialVersionUID = 1L;
 
-    public RerankException(String message) { super(message); }
-    public RerankException(String message, Throwable cause) { super(message, cause); }
+    public RerankException(String message) {
+        super(message);
+    }
+
+    public RerankException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }
 

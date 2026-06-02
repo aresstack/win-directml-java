@@ -27,22 +27,44 @@ public final class GenerationRequest {
         this.stopPolicy = builder.stopPolicy;
     }
 
-    /** The user-facing prompt text. Never null. */
-    public String userPrompt() { return userPrompt; }
+    /**
+     * The user-facing prompt text. Never null.
+     */
+    public String userPrompt() {
+        return userPrompt;
+    }
 
-    /** Optional system prompt. May be empty but never null. */
-    public String systemPrompt() { return systemPrompt; }
+    /**
+     * Optional system prompt. May be empty but never null.
+     */
+    public String systemPrompt() {
+        return systemPrompt;
+    }
 
-    /** Maximum number of tokens to generate; &le; 0 means backend default. */
-    public int maxTokens() { return maxTokens; }
+    /**
+     * Maximum number of tokens to generate; &le; 0 means backend default.
+     */
+    public int maxTokens() {
+        return maxTokens;
+    }
 
-    /** Sampling configuration. Never null (defaults to greedy). */
-    public SamplerConfig sampler() { return sampler; }
+    /**
+     * Sampling configuration. Never null (defaults to greedy).
+     */
+    public SamplerConfig sampler() {
+        return sampler;
+    }
 
-    /** Stop-token policy. Never null (defaults to EOS-only). */
-    public StopTokenPolicy stopPolicy() { return stopPolicy; }
+    /**
+     * Stop-token policy. Never null (defaults to EOS-only).
+     */
+    public StopTokenPolicy stopPolicy() {
+        return stopPolicy;
+    }
 
-    public static Builder builder() { return new Builder(); }
+    public static Builder builder() {
+        return new Builder();
+    }
 
     public static final class Builder {
         private String userPrompt = "";

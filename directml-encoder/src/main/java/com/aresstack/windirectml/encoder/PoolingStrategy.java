@@ -8,13 +8,19 @@ package com.aresstack.windirectml.encoder;
  */
 public enum PoolingStrategy {
 
-    /** Mean over token embeddings, weighted by the attention mask. */
+    /**
+     * Mean over token embeddings, weighted by the attention mask.
+     */
     MEAN,
 
-    /** Use the embedding of the {@code [CLS]} token. */
+    /**
+     * Use the embedding of the {@code [CLS]} token.
+     */
     CLS,
 
-    /** Elementwise maximum across tokens (mask-aware). */
+    /**
+     * Elementwise maximum across tokens (mask-aware).
+     */
     MAX
 }
 

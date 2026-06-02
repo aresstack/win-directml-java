@@ -19,7 +19,7 @@ import com.aresstack.windirectml.encoder.EmbeddingRequest;
  */
 public final class E5Prefixes {
 
-    public static final String QUERY   = "query: ";
+    public static final String QUERY = "query: ";
     public static final String PASSAGE = "passage: ";
 
     public enum Role {
@@ -31,9 +31,12 @@ public final class E5Prefixes {
         }
     }
 
-    private E5Prefixes() {}
+    private E5Prefixes() {
+    }
 
-    /** Build an {@link EmbeddingRequest} with the E5-appropriate prefix. */
+    /**
+     * Build an {@link EmbeddingRequest} with the E5-appropriate prefix.
+     */
     public static EmbeddingRequest request(String text, Role role, boolean normalize) {
         return new EmbeddingRequest(text, normalize, role.prefix());
     }

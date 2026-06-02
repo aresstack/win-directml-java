@@ -26,7 +26,9 @@ public final class WorkbenchModel {
      */
     private StopInfo lastStopInfo = StopInfo.never();
 
-    /** Immutable snapshot of a sidecar stop. */
+    /**
+     * Immutable snapshot of a sidecar stop.
+     */
     public static final class StopInfo {
         private final boolean everStopped;
         private final boolean forced;
@@ -42,11 +44,21 @@ public final class WorkbenchModel {
             return new StopInfo(false, false, null);
         }
 
-        public boolean everStopped() { return everStopped; }
-        public boolean forced() { return forced; }
-        public Integer exitCode() { return exitCode; }
+        public boolean everStopped() {
+            return everStopped;
+        }
 
-        /** Human-readable one-liner; never contains the misleading "exit=-1". */
+        public boolean forced() {
+            return forced;
+        }
+
+        public Integer exitCode() {
+            return exitCode;
+        }
+
+        /**
+         * Human-readable one-liner; never contains the misleading "exit=-1".
+         */
         public String describe() {
             if (!everStopped) return "Sidecar stopped";
             String kind = forced ? "forced" : "clean";

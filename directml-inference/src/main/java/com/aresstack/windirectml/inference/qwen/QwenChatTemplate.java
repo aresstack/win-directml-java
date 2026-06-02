@@ -37,7 +37,8 @@ public final class QwenChatTemplate {
     public static final String DEFAULT_SYSTEM_PROMPT =
             "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.";
 
-    private QwenChatTemplate() {} // utility class
+    private QwenChatTemplate() {
+    } // utility class
 
     /**
      * A single message in a multi-turn conversation.
@@ -46,9 +47,17 @@ public final class QwenChatTemplate {
      * @param content the message text
      */
     public record ChatMessage(String role, String content) {
-        public static ChatMessage system(String content) { return new ChatMessage("system", content); }
-        public static ChatMessage user(String content) { return new ChatMessage("user", content); }
-        public static ChatMessage assistant(String content) { return new ChatMessage("assistant", content); }
+        public static ChatMessage system(String content) {
+            return new ChatMessage("system", content);
+        }
+
+        public static ChatMessage user(String content) {
+            return new ChatMessage("user", content);
+        }
+
+        public static ChatMessage assistant(String content) {
+            return new ChatMessage("assistant", content);
+        }
     }
 
     /**
@@ -68,8 +77,8 @@ public final class QwenChatTemplate {
     /**
      * Format a single-turn chat prompt (system + user) using ChatML.
      *
-     * @param systemPrompt system instruction (may be {@code null} or empty)
-     * @param userMessage user message
+     * @param systemPrompt           system instruction (may be {@code null} or empty)
+     * @param userMessage            user message
      * @param useDefaultSystemPrompt if true, null/empty system prompts are replaced
      *                               with {@link #DEFAULT_SYSTEM_PROMPT}; if false,
      *                               the system turn is omitted
@@ -106,9 +115,9 @@ public final class QwenChatTemplate {
     /**
      * Format a multi-turn chat prompt using ChatML conventions.
      *
-     * @param systemPrompt optional system prompt (may be {@code null} or empty)
-     * @param messages ordered list of user/assistant messages; the last
-     *                 message should typically be a user message
+     * @param systemPrompt           optional system prompt (may be {@code null} or empty)
+     * @param messages               ordered list of user/assistant messages; the last
+     *                               message should typically be a user message
      * @param useDefaultSystemPrompt if true, null/empty system prompts are replaced
      *                               with {@link #DEFAULT_SYSTEM_PROMPT}; if false,
      *                               the system turn is omitted
@@ -124,14 +133,14 @@ public final class QwenChatTemplate {
 
         if (effectiveSystemPrompt != null && !effectiveSystemPrompt.isEmpty()) {
             sb.append("<|im_start|>system\n")
-              .append(effectiveSystemPrompt)
-              .append("<|im_end|>\n");
+                    .append(effectiveSystemPrompt)
+                    .append("<|im_end|>\n");
         }
 
         for (ChatMessage msg : messages) {
             sb.append("<|im_start|>").append(msg.role()).append('\n')
-              .append(msg.content())
-              .append("<|im_end|>\n");
+                    .append(msg.content())
+                    .append("<|im_end|>\n");
         }
 
         // Add generation prompt

@@ -86,11 +86,30 @@ class WordPieceTokenizerPairTest {
     void encodePairRejectsSingleSegmentTokenizers() {
         com.aresstack.windirectml.encoder.EncoderTokenizer noPair =
                 new com.aresstack.windirectml.encoder.EncoderTokenizer() {
-                    @Override public Encoded encode(String text) { return null; }
-                    @Override public int padTokenId() { return 0; }
-                    @Override public int clsTokenId() { return 0; }
-                    @Override public int sepTokenId() { return 0; }
-                    @Override public int vocabSize() { return 0; }
+                    @Override
+                    public Encoded encode(String text) {
+                        return null;
+                    }
+
+                    @Override
+                    public int padTokenId() {
+                        return 0;
+                    }
+
+                    @Override
+                    public int clsTokenId() {
+                        return 0;
+                    }
+
+                    @Override
+                    public int sepTokenId() {
+                        return 0;
+                    }
+
+                    @Override
+                    public int vocabSize() {
+                        return 0;
+                    }
                 };
         try {
             noPair.encodePair("a", "b");

@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+
 /**
  * Inference engine for Qwen2.5-Coder-Instruct models (CPU-only).
  *
@@ -79,6 +80,7 @@ public class QwenInferenceEngine implements InferenceEngine {
     private final Path modelDir;
     private final int defaultMaxTokens;
     private final String backend;   // "directml" | "cpu" | "auto" | "hybrid"
+    private final String modelFileName;
 
     private Qwen2Config config;
     private QwenTokenizer tokenizer;
@@ -95,7 +97,7 @@ public class QwenInferenceEngine implements InferenceEngine {
     /**
      * Create a new Qwen inference engine (CPU-only).
      *
-     * @param modelDir        path to the model directory
+     * @param modelDir         path to the model directory
      * @param defaultMaxTokens default maximum tokens if not specified in request
      */
     public QwenInferenceEngine(Path modelDir, int defaultMaxTokens) {
@@ -110,17 +112,30 @@ public class QwenInferenceEngine implements InferenceEngine {
      * @param backend          "directml", "auto", or "cpu"
      */
     public QwenInferenceEngine(Path modelDir, int defaultMaxTokens, String backend) {
+        this(modelDir, defaultMaxTokens, backend, QwenModelDirValidator.DEFAULT_MODEL_FILE);
+    }
+
+    /**
+     * Create a new Qwen inference engine with an explicit ONNX filename.
+     *
+     * @param modelDir         path to the model directory
+     * @param defaultMaxTokens default maximum tokens if not specified in request
+     * @param backend          "directml", "auto", "hybrid", or "cpu"
+     * @param modelFileName    ONNX filename inside modelDir
+     */
+    public QwenInferenceEngine(Path modelDir, int defaultMaxTokens, String backend, String modelFileName) {
         this.modelDir = modelDir;
         this.defaultMaxTokens = defaultMaxTokens > 0 ? defaultMaxTokens : 256;
         this.backend = backend != null ? backend : "cpu";
+        this.modelFileName = QwenModelDirValidator.normalizeModelFileName(modelFileName);
     }
 
     @Override
     public void initialize() throws InferenceException {
-        log.info("QwenInferenceEngine initializing from {}", modelDir);
+        log.info("QwenInferenceEngine initializing from {} using {}", modelDir, modelFileName);
 
         // Validate model directory
-        String missing = QwenModelDirValidator.describeMissingModelFile(modelDir);
+        String missing = QwenModelDirValidator.describeMissingModelFile(modelDir, modelFileName);
         if (missing != null) {
             throw new InferenceException("Cannot initialize Qwen engine: " + missing);
         }
@@ -142,7 +157,7 @@ public class QwenInferenceEngine implements InferenceEngine {
             log.info("Tokenizer loaded: vocabSize={}", tokenizer.vocabSize());
 
             // Load weights
-            weights = Qwen2Weights.load(modelDir, config);
+            weights = Qwen2Weights.load(modelDir, config, modelFileName);
 
             // ── GPU acceleration ──────────────────────────────────────
             if (!"cpu".equalsIgnoreCase(backend) && WindowsBindings.isSupported()) {
@@ -381,12 +396,16 @@ public class QwenInferenceEngine implements InferenceEngine {
         return ready;
     }
 
-    /** Returns the underlying runtime (for testing/profiling). */
+    /**
+     * Returns the underlying runtime (for testing/profiling).
+     */
     public Qwen2Runtime getRuntime() {
         return runtime;
     }
 
-    /** Returns the loaded config (for testing/diagnostics). */
+    /**
+     * Returns the loaded config (for testing/diagnostics).
+     */
     public Qwen2Config getConfig() {
         return config;
     }

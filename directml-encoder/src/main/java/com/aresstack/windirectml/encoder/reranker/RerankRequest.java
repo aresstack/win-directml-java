@@ -23,7 +23,9 @@ public record RerankRequest(String query, List<String> documents, int topN) {
         documents = List.copyOf(documents);
     }
 
-    /** Effective top-N: never larger than {@link #documents()} size. */
+    /**
+     * Effective top-N: never larger than {@link #documents()} size.
+     */
     public int effectiveTopN() {
         if (topN <= 0 || topN > documents.size()) return documents.size();
         return topN;

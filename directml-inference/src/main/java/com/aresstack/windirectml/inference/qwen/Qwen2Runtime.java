@@ -186,23 +186,23 @@ public final class Qwen2Runtime {
         int maxPos = config.maxPositionEmbeddings();
 
         // Pre-allocate decode buffers
-        decBuf      = new float[hidden];
-        decNormed   = new float[hidden];
-        decQ        = new float[qSize];
-        decK        = new float[kvSize];
-        decV        = new float[kvSize];
+        decBuf = new float[hidden];
+        decNormed = new float[hidden];
+        decQ = new float[qSize];
+        decK = new float[kvSize];
+        decV = new float[kvSize];
         decQKV = new float[qSize + 2 * kvSize];
-        decAttnOut  = new float[qSize];
-        decOProj    = new float[hidden];
+        decAttnOut = new float[qSize];
+        decOProj = new float[hidden];
         decResidual = new float[hidden];
         decPostNorm = new float[hidden];
-        decGate     = new float[intermediate];
-        decUp       = new float[intermediate];
+        decGate = new float[intermediate];
+        decUp = new float[intermediate];
         decGateUp = new float[intermediate * 2];
-        decMlpAct   = new float[intermediate];
-        decDown     = new float[hidden];
-        decScores   = new float[maxPos];
-        decLogits   = new float[config.vocabSize()];
+        decMlpAct = new float[intermediate];
+        decDown = new float[hidden];
+        decScores = new float[maxPos];
+        decLogits = new float[config.vocabSize()];
 
         // Pre-compute RoPE tables
         int halfDim = config.headDim() / 2;
@@ -1035,14 +1035,18 @@ public final class Qwen2Runtime {
         }
     }
 
-    /** Add bias vector to a single-position output: out[i] += bias[i]. */
+    /**
+     * Add bias vector to a single-position output: out[i] += bias[i].
+     */
     private static void addBias(float[] out, float[] bias) {
         for (int i = 0; i < bias.length; i++) {
             out[i] += bias[i];
         }
     }
 
-    /** Add bias vector to batched output: out[s * dim + i] += bias[i] for each sequence position. */
+    /**
+     * Add bias vector to batched output: out[s * dim + i] += bias[i] for each sequence position.
+     */
     private static void addBiasBatched(float[] out, float[] bias, int seqLen) {
         int dim = bias.length;
         for (int s = 0; s < seqLen; s++) {
@@ -1148,12 +1152,12 @@ public final class Qwen2Runtime {
         return String.format(
                 "[Qwen2 Decode Profile] %d tokens, %.1f ms total, %.1f ms/token%n"
                         + "  Mode:          %s%n"
-                + "  Prefill:       %.1f ms%n"
-                + "  Projections:   %.1f ms avg (%.0f%%)%n"
-                + "  Attention:     %.1f ms avg (%.0f%%)%n"
-                + "  Norms+RoPE:    %.1f ms avg (%.0f%%)%n"
-                + "  SwiGLU:        %.1f ms avg (%.0f%%)%n"
-                + "  LM head:       %.1f ms avg (%.0f%%)",
+                        + "  Prefill:       %.1f ms%n"
+                        + "  Projections:   %.1f ms avg (%.0f%%)%n"
+                        + "  Attention:     %.1f ms avg (%.0f%%)%n"
+                        + "  Norms+RoPE:    %.1f ms avg (%.0f%%)%n"
+                        + "  SwiGLU:        %.1f ms avg (%.0f%%)%n"
+                        + "  LM head:       %.1f ms avg (%.0f%%)",
                 profSteps, totalMs, perToken,
                 gpuL > 0
                         ? (pipelineV2

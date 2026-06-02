@@ -164,7 +164,8 @@ public final class Phi3Weights implements AutoCloseable {
             QuantizedWeight gateUpProj,  // [2*intermediateSize, hiddenSize]
             float[] mlpOutScale,         // [intermediateSize] activation scale before down_proj
             QuantizedWeight downProj     // [hiddenSize, intermediateSize]
-    ) {}
+    ) {
+    }
 
     // ── Instance fields ──────────────────────────────────────────────────
 
@@ -173,22 +174,34 @@ public final class Phi3Weights implements AutoCloseable {
     private final FileChannel channel;
     private final MappedByteBuffer externalData;
 
-    /** Token embedding: float32 [vocabSize, hiddenSize], converted from fp16. */
+    /**
+     * Token embedding: float32 [vocabSize, hiddenSize], converted from fp16.
+     */
     public final float[] embedTokens;
 
-    /** RoPE cos cache: float32 [maxPos, headDim/2], converted from fp16. */
+    /**
+     * RoPE cos cache: float32 [maxPos, headDim/2], converted from fp16.
+     */
     public final float[] cosCache;
 
-    /** RoPE sin cache: float32 [maxPos, headDim/2], converted from fp16. */
+    /**
+     * RoPE sin cache: float32 [maxPos, headDim/2], converted from fp16.
+     */
     public final float[] sinCache;
 
-    /** Per-layer weights, indexed 0..numHiddenLayers-1. */
+    /**
+     * Per-layer weights, indexed 0..numHiddenLayers-1.
+     */
     public final LayerWeights[] layers;
 
-    /** Final RMSNorm weight: float32 [hiddenSize]. */
+    /**
+     * Final RMSNorm weight: float32 [hiddenSize].
+     */
     public final float[] finalNormWeight;
 
-    /** LM head (logits projection): quantized [vocabSize, hiddenSize]. */
+    /**
+     * LM head (logits projection): quantized [vocabSize, hiddenSize].
+     */
     public final QuantizedWeight lmHead;
 
     // ── External-data tensor metadata ────────────────────────────────────
@@ -197,7 +210,8 @@ public final class Phi3Weights implements AutoCloseable {
      * Metadata for a tensor stored in the external data file.
      */
     private record ExternalTensorRef(String name, int dataType, long[] dims,
-                                     long offset, long length) {}
+                                     long offset, long length) {
+    }
 
     // ── Loading ──────────────────────────────────────────────────────────
 
@@ -418,7 +432,7 @@ public final class Phi3Weights implements AutoCloseable {
      * Read a fp16 tensor from external data and convert to fp32.
      */
     private static float[] readFp16AsFloat32(MappedByteBuffer extData,
-                                              ExternalTensorRef ref) throws IOException {
+                                             ExternalTensorRef ref) throws IOException {
         if (ref == null) throw new IOException("External tensor ref is null");
         return readFp16Floats(extData, ref.offset, (int) ref.length);
     }
@@ -453,7 +467,9 @@ public final class Phi3Weights implements AutoCloseable {
         return result;
     }
 
-    /** Read raw bytes from a mapped buffer. */
+    /**
+     * Read raw bytes from a mapped buffer.
+     */
     private static byte[] readBytes(MappedByteBuffer buf, long offset, int length) {
         byte[] result = new byte[length];
         int pos = (int) offset;
@@ -463,7 +479,9 @@ public final class Phi3Weights implements AutoCloseable {
         return result;
     }
 
-    /** Convert IEEE 754 half-precision (fp16) to single-precision (fp32). */
+    /**
+     * Convert IEEE 754 half-precision (fp16) to single-precision (fp32).
+     */
     static float fp16ToFp32(short bits) {
         int s = (bits >>> 15) & 1;
         int e = (bits >>> 10) & 0x1F;
@@ -515,7 +533,7 @@ public final class Phi3Weights implements AutoCloseable {
     }
 
     private static void parseGraphForExternalRefs(ByteBuffer buf, int end,
-                                                   Map<String, ExternalTensorRef> refs) {
+                                                  Map<String, ExternalTensorRef> refs) {
         while (buf.position() < end) {
             int tag = readVarint32(buf);
             int fieldNum = tag >>> 3;
@@ -666,7 +684,10 @@ public final class Phi3Weights implements AutoCloseable {
         switch (wireType) {
             case 0 -> readVarint64(buf);
             case 1 -> buf.position(buf.position() + 8);
-            case 2 -> { int len = readVarint32(buf); buf.position(buf.position() + len); }
+            case 2 -> {
+                int len = readVarint32(buf);
+                buf.position(buf.position() + len);
+            }
             case 5 -> buf.position(buf.position() + 4);
             default -> throw new RuntimeException("Unknown wire type: " + wireType);
         }
@@ -676,7 +697,13 @@ public final class Phi3Weights implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        try { channel.close(); } catch (Exception ignored) {}
-        try { raf.close(); } catch (Exception ignored) {}
+        try {
+            channel.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            raf.close();
+        } catch (Exception ignored) {
+        }
     }
 }

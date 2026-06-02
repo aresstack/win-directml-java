@@ -26,7 +26,9 @@ import java.util.List;
  */
 final class EmbedModelOptions {
 
-    /** Family aliases historically supported by the Workbench dropdown. */
+    /**
+     * Family aliases historically supported by the Workbench dropdown.
+     */
     static final String ALIAS_MINILM = "minilm";
     static final String ALIAS_E5 = "e5";
 

@@ -30,15 +30,21 @@ public final class ModelDownloader {
             "vocab.txt", "special_tokens_map.json", "tokenizer_config.json"
     );
 
-    /** Required files for Phi-3 ONNX decoder model. */
+    /**
+     * Required files for Phi-3 ONNX decoder model.
+     */
     public static final List<String> PHI3_REQUIRED_FILES = List.of(
             "model.onnx", "model.onnx.data", "tokenizer.json", "config.json"
     );
 
-    /** Subdirectory within the HuggingFace repo for Phi-3 DirectML INT4 quantised variant. */
+    /**
+     * Subdirectory within the HuggingFace repo for Phi-3 DirectML INT4 quantised variant.
+     */
     public static final String PHI3_SUBDIR = "directml/directml-int4-awq-block-128";
 
-    /** Required local files for Qwen2.5-Coder ONNX decoder model (derived from DEFAULT config). */
+    /**
+     * Required local files for Qwen2.5-Coder ONNX decoder model (derived from DEFAULT config).
+     */
     public static final List<String> QWEN_REQUIRED_FILES =
             QwenModelDownloadConfig.DEFAULT.requiredLocalFiles();
 
@@ -49,7 +55,8 @@ public final class ModelDownloader {
 
     private static final String HF_BASE_URL = "https://huggingface.co";
 
-    private ModelDownloader() {}
+    private ModelDownloader() {
+    }
 
     /**
      * Download embedding model files from Hugging Face (safetensors layout).

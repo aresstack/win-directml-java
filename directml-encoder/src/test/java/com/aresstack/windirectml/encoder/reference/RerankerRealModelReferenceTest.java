@@ -63,7 +63,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @EnabledIf("modelPresent")
 class RerankerRealModelReferenceTest {
 
-    /** Score-parity tolerance between CPU and DirectML cross-encoder logits. */
+    /**
+     * Score-parity tolerance between CPU and DirectML cross-encoder logits.
+     */
     private static final double SCORE_TOLERANCE = 1.0e-2;
 
     private static final String QUERY = "What is DirectML?";

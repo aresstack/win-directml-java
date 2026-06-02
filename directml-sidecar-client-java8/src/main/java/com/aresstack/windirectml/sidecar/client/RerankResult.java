@@ -60,10 +60,21 @@ public final class RerankResult {
         return new RerankResult(model, items, elapsedMillis, raw);
     }
 
-    public String getModel() { return model; }
-    public List<Item> getItems() { return items; }
-    public long getElapsedMillis() { return elapsedMillis; }
-    public String getRaw() { return raw; }
+    public String getModel() {
+        return model;
+    }
+
+    public List<Item> getItems() {
+        return items;
+    }
+
+    public long getElapsedMillis() {
+        return elapsedMillis;
+    }
+
+    public String getRaw() {
+        return raw;
+    }
 
     /**
      * One reranked entry: original document index plus raw classifier logit.
@@ -81,8 +92,13 @@ public final class RerankResult {
             this.score = score;
         }
 
-        public int getIndex() { return index; }
-        public double getScore() { return score; }
+        public int getIndex() {
+            return index;
+        }
+
+        public double getScore() {
+            return score;
+        }
     }
 }
 

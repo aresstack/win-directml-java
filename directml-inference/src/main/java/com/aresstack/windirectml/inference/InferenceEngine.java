@@ -17,15 +17,23 @@ package com.aresstack.windirectml.inference;
  */
 public interface InferenceEngine {
 
-    /** Initialize the engine (load model, allocate resources). */
+    /**
+     * Initialize the engine (load model, allocate resources).
+     */
     void initialize() throws InferenceException;
 
-    /** Run inference and produce a result. */
+    /**
+     * Run inference and produce a result.
+     */
     InferenceResult generate(InferenceRequest request) throws InferenceException;
 
-    /** Release all resources. */
+    /**
+     * Release all resources.
+     */
     void shutdown();
 
-    /** Whether the engine is ready to accept requests. */
+    /**
+     * Whether the engine is ready to accept requests.
+     */
     boolean isReady();
 }

@@ -124,7 +124,10 @@ public final class ModelValidator {
         for (List<String> group : expectation.getEitherOfFiles()) {
             boolean found = false;
             for (String file : group) {
-                if (new File(dir, file).isFile()) { found = true; break; }
+                if (new File(dir, file).isFile()) {
+                    found = true;
+                    break;
+                }
             }
             if (found) findings.add(ValidationFinding.ok("one weight file present: " + group));
             else findings.add(ValidationFinding.error("missing weight file; expected one of " + group));
@@ -133,8 +136,12 @@ public final class ModelValidator {
 
     private static void checkConfig(File file, ModelExpectation e, List<ValidationFinding> findings) {
         JsonNode root;
-        try { root = MAPPER.readTree(file); }
-        catch (IOException ex) { findings.add(ValidationFinding.error("cannot parse config.json: " + ex.getMessage())); return; }
+        try {
+            root = MAPPER.readTree(file);
+        } catch (IOException ex) {
+            findings.add(ValidationFinding.error("cannot parse config.json: " + ex.getMessage()));
+            return;
+        }
         checkInt(root, "hidden_size", e.getHiddenSize(), findings);
         checkInt(root, "num_hidden_layers", e.getLayers(), findings);
         checkInt(root, "num_attention_heads", e.getHeads(), findings);
@@ -154,8 +161,12 @@ public final class ModelValidator {
 
     private static void checkTokenizer(File file, String expected, List<ValidationFinding> findings) {
         JsonNode root;
-        try { root = MAPPER.readTree(file); }
-        catch (IOException ex) { findings.add(ValidationFinding.error("cannot parse tokenizer.json: " + ex.getMessage())); return; }
+        try {
+            root = MAPPER.readTree(file);
+        } catch (IOException ex) {
+            findings.add(ValidationFinding.error("cannot parse tokenizer.json: " + ex.getMessage()));
+            return;
+        }
         JsonNode model = root.get("model");
         JsonNode type = model == null ? null : model.get("type");
         if (type == null || !type.isTextual()) {

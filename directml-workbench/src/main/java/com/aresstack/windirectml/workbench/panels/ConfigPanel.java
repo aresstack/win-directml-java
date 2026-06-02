@@ -38,18 +38,23 @@ public final class ConfigPanel extends JPanel {
         int row = 0;
 
         // Backend
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.weightx = 0;
         form.add(new JLabel("Backend:"), gbc);
         backendCombo = new JComboBox<>(Backend.values());
         backendCombo.setSelectedItem(model.getBackend());
         backendCombo.addActionListener(e -> model.setBackend((Backend) backendCombo.getSelectedItem()));
-        gbc.gridx = 1; gbc.weightx = 1;
+        gbc.gridx = 1;
+        gbc.weightx = 1;
         form.add(backendCombo, gbc);
 
         row++;
 
         // Model root
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.weightx = 0;
         form.add(new JLabel("Model Root:"), gbc);
         modelRootField = new JTextField(model.getModelRoot().toString(), 30);
         modelRootField.addActionListener(e -> applyModelRoot());
@@ -59,13 +64,16 @@ public final class ConfigPanel extends JPanel {
                 applyModelRoot();
             }
         });
-        gbc.gridx = 1; gbc.weightx = 1;
+        gbc.gridx = 1;
+        gbc.weightx = 1;
         form.add(modelRootField, gbc);
 
         row++;
 
         // Embedding model
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.weightx = 0;
         form.add(new JLabel("Embedding Model:"), gbc);
         embeddingModelCombo = new JComboBox<>(new String[]{
                 "all-MiniLM-L6-v2",
@@ -76,13 +84,16 @@ public final class ConfigPanel extends JPanel {
         embeddingModelCombo.setSelectedItem(model.getEmbeddingModel());
         embeddingModelCombo.addActionListener(e ->
                 model.setEmbeddingModel((String) embeddingModelCombo.getSelectedItem()));
-        gbc.gridx = 1; gbc.weightx = 1;
+        gbc.gridx = 1;
+        gbc.weightx = 1;
         form.add(embeddingModelCombo, gbc);
 
         row++;
 
         // Reranker model
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.weightx = 0;
         form.add(new JLabel("Reranker Model:"), gbc);
         rerankerField = new JTextField(model.getRerankerModel(), 30);
         rerankerField.addActionListener(e -> model.setRerankerModel(rerankerField.getText().trim()));
@@ -95,13 +106,16 @@ public final class ConfigPanel extends JPanel {
                 }
             }
         });
-        gbc.gridx = 1; gbc.weightx = 1;
+        gbc.gridx = 1;
+        gbc.weightx = 1;
         form.add(rerankerField, gbc);
 
         row++;
 
         // Summarizer model (uses GenerationModelRegistry for generation-capable models)
-        gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0;
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.weightx = 0;
         form.add(new JLabel("Summarizer Model:"), gbc);
         var summarizerOptions = GenerationModelRegistry.runnableEntries()
                 .stream().map(GenerationModelRegistry.Entry::modelId).toArray(String[]::new);
@@ -109,7 +123,8 @@ public final class ConfigPanel extends JPanel {
         summarizerModelCombo.setSelectedItem(model.getSummarizerModel());
         summarizerModelCombo.addActionListener(e ->
                 model.setSummarizerModel((String) summarizerModelCombo.getSelectedItem()));
-        gbc.gridx = 1; gbc.weightx = 1;
+        gbc.gridx = 1;
+        gbc.weightx = 1;
         form.add(summarizerModelCombo, gbc);
 
         add(form, BorderLayout.NORTH);
@@ -139,5 +154,7 @@ public final class ConfigPanel extends JPanel {
         });
     }
 
-    public JTextArea getLogArea() { return logArea; }
+    public JTextArea getLogArea() {
+        return logArea;
+    }
 }

@@ -16,6 +16,7 @@ sidecar process.
 ```
 
 Gradle:
+
 ```groovy
 implementation 'com.aresstack:directml-runtime:<version>'
 ```
@@ -65,11 +66,11 @@ try (RerankerModelHandle reranker = runtime.loadReranker(rerankCfg)) {
 
 The `Backend` enum controls hardware execution:
 
-| Backend | Description |
-|---------|-------------|
+| Backend                  | Description                                          |
+|--------------------------|------------------------------------------------------|
 | `Backend.AUTO` (default) | Try DirectML first, fall back to CPU if unavailable. |
-| `Backend.DIRECTML` | Require DirectML; fail if unavailable. |
-| `Backend.CPU` | Always use the pure-Java CPU backend. |
+| `Backend.DIRECTML`       | Require DirectML; fail if unavailable.               |
+| `Backend.CPU`            | Always use the pure-Java CPU backend.                |
 
 ```java
 MlRuntime runtime = MlRuntime.builder()
@@ -79,22 +80,23 @@ MlRuntime runtime = MlRuntime.builder()
 
 ## Supported model families
 
-| Family | Model ID enum | Status |
-|--------|--------------|--------|
-| `minilm` | `EmbeddingModelId.MINILM_L6_V2` | Shipped (WordPiece, BERT-style) |
-| `e5` | `EmbeddingModelId.E5_SMALL_V2`, `E5_BASE_V2`, `E5_LARGE_V2` | Shipped (WordPiece E5 variants only) |
+| Family   | Model ID enum                                               | Status                               |
+|----------|-------------------------------------------------------------|--------------------------------------|
+| `minilm` | `EmbeddingModelId.MINILM_L6_V2`                             | Shipped (WordPiece, BERT-style)      |
+| `e5`     | `EmbeddingModelId.E5_SMALL_V2`, `E5_BASE_V2`, `E5_LARGE_V2` | Shipped (WordPiece E5 variants only) |
 
 ### Supported E5 variants (WordPiece)
 
-| Variant | Enum constant | Dimensions |
-|---------|---------------|------------|
-| `intfloat/e5-small-v2` | `EmbeddingModelId.E5_SMALL_V2` | 384 |
-| `intfloat/e5-base-v2` | `EmbeddingModelId.E5_BASE_V2` | 768 |
-| `intfloat/e5-large-v2` | `EmbeddingModelId.E5_LARGE_V2` | 1024 |
+| Variant                | Enum constant                  | Dimensions |
+|------------------------|--------------------------------|------------|
+| `intfloat/e5-small-v2` | `EmbeddingModelId.E5_SMALL_V2` | 384        |
+| `intfloat/e5-base-v2`  | `EmbeddingModelId.E5_BASE_V2`  | 768        |
+| `intfloat/e5-large-v2` | `EmbeddingModelId.E5_LARGE_V2` | 1024       |
 
 ### Not yet supported (planned)
 
 XLM-R/SentencePiece-based E5 models are **planned but not ready**:
+
 - `danielheinz/e5-base-sts-en-de` – XLM-RoBERTa encoder, requires SentencePiece tokenizer
 - `intfloat/multilingual-e5-large-instruct` – XLM-RoBERTa-large, requires SentencePiece + XLM-R encoder path
 
@@ -121,23 +123,23 @@ DirectML backends are thread-safe).
 The lower-level `com.aresstack.windirectml.runtime.facade.LocalMlRuntime` is
 still functional but has been deprecated. Migrate as follows:
 
-| Facade API | New API (`runtime.api`) |
-|-----------|------------------------|
-| `LocalMlRuntime.create()` | `MlRuntime.create()` |
-| `LocalMlRuntime.create(LocalMlRuntimeConfig)` | `MlRuntime.builder().backend(...).build()` |
-| `runtime.loadEmbeddingModel(EmbeddingModelConfig)` | `runtime.loadEmbeddings(EmbeddingConfig)` |
-| `runtime.loadRerankerModel(RerankerModelConfig)` | `runtime.loadReranker(RerankerConfig)` |
-| `LocalEmbeddingModel` handle | `EmbeddingModelHandle` |
-| `LocalRerankerModel` handle | `RerankerModelHandle` |
+| Facade API                                         | New API (`runtime.api`)                    |
+|----------------------------------------------------|--------------------------------------------|
+| `LocalMlRuntime.create()`                          | `MlRuntime.create()`                       |
+| `LocalMlRuntime.create(LocalMlRuntimeConfig)`      | `MlRuntime.builder().backend(...).build()` |
+| `runtime.loadEmbeddingModel(EmbeddingModelConfig)` | `runtime.loadEmbeddings(EmbeddingConfig)`  |
+| `runtime.loadRerankerModel(RerankerModelConfig)`   | `runtime.loadReranker(RerankerConfig)`     |
+| `LocalEmbeddingModel` handle                       | `EmbeddingModelHandle`                     |
+| `LocalRerankerModel` handle                        | `RerankerModelHandle`                      |
 
 ## Differences from the sidecar
 
-| Concern | Sidecar mode | Direct mode |
-|---------|-------------|-------------|
-| Transport | JSON-RPC over stdin/stdout | Direct method calls |
-| Java version | Host: Java 8+, Sidecar: Java 21 | Java 21 only |
-| Process model | Separate process | Same JVM |
-| Dependencies | `directml-sidecar-client-java8` | `directml-runtime` |
+| Concern       | Sidecar mode                    | Direct mode         |
+|---------------|---------------------------------|---------------------|
+| Transport     | JSON-RPC over stdin/stdout      | Direct method calls |
+| Java version  | Host: Java 8+, Sidecar: Java 21 | Java 21 only        |
+| Process model | Separate process                | Same JVM            |
+| Dependencies  | `directml-sidecar-client-java8` | `directml-runtime`  |
 
 The direct API is a lighter-weight integration path when the host application
 already runs on Java 21 and does not need process isolation.

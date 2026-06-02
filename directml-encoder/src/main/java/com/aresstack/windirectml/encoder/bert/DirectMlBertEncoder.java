@@ -63,13 +63,21 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
 
     private static final Logger log = LoggerFactory.getLogger(DirectMlBertEncoder.class);
 
-    /** Default pad-buckets. {@code maxPositionEmbeddings} caps the largest reusable bucket. */
+    /**
+     * Default pad-buckets. {@code maxPositionEmbeddings} caps the largest reusable bucket.
+     */
     private static final int[] PAD_BUCKETS = {64, 128, 256, 512};
 
-    /** Defensive-copy accessor for the configured pad-buckets. */
-    public static int[] buckets() { return PAD_BUCKETS.clone(); }
+    /**
+     * Defensive-copy accessor for the configured pad-buckets.
+     */
+    public static int[] buckets() {
+        return PAD_BUCKETS.clone();
+    }
 
-    /** Smallest bucket {@code b ≥ seqLen}, else {@code seqLen} itself. */
+    /**
+     * Smallest bucket {@code b ≥ seqLen}, else {@code seqLen} itself.
+     */
     public static int bucketFor(int seqLen) {
         for (int b : PAD_BUCKETS) {
             if (b >= seqLen) return b;
@@ -98,14 +106,36 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
                               GpuBuffer xIn, GpuBuffer xOut,
                               GpuBuffer mask, GpuBuffer meanWeights, GpuBuffer pooled,
                               DirectMlMeanPoolKernel meanPool) implements AutoCloseable {
-        @Override public void close() {
-            try { meanPool.close();    } catch (Exception ignored) {}
-            try { stack.close();       } catch (Exception ignored) {}
-            try { xIn.close();         } catch (Exception ignored) {}
-            try { xOut.close();        } catch (Exception ignored) {}
-            try { mask.close();        } catch (Exception ignored) {}
-            try { meanWeights.close(); } catch (Exception ignored) {}
-            try { pooled.close();      } catch (Exception ignored) {}
+        @Override
+        public void close() {
+            try {
+                meanPool.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                stack.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                xIn.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                xOut.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                mask.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                meanWeights.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                pooled.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -125,7 +155,8 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
                                    DirectMlBatchedL2NormalizeKernel l2,
                                    CpuTensor pooledReadback,
                                    CpuTensor normalizedReadback) implements AutoCloseable {
-        @Override public void close() {
+        @Override
+        public void close() {
             try {
                 l2.close();
             } catch (Exception ignored) {
@@ -203,7 +234,7 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
             int I = cfg.intermediateSize();
 
             embLnGammaBuf = uploadVec(weights.embLnGamma, H);
-            embLnBetaBuf  = uploadVec(weights.embLnBeta,  H);
+            embLnBetaBuf = uploadVec(weights.embLnBeta, H);
 
             List<BertGpuLayerWeights> built = new ArrayList<>(weights.layers.size());
             for (BertCpuLayerWeights l : weights.layers) {
@@ -214,7 +245,7 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
                         uploadMat(l.attnOutWeight(), H, H), uploadVec(l.attnOutBias(), H),
                         uploadVec(l.attnLnGamma(), H), uploadVec(l.attnLnBeta(), H),
                         uploadMat(l.mlpInterWeight(), I, H), uploadVec(l.mlpInterBias(), I),
-                        uploadMat(l.mlpOutWeight(),   H, I), uploadVec(l.mlpOutBias(), H),
+                        uploadMat(l.mlpOutWeight(), H, I), uploadVec(l.mlpOutBias(), H),
                         uploadVec(l.outLnGamma(), H), uploadVec(l.outLnBeta(), H)));
             }
             this.gpuLayers = List.copyOf(built);
@@ -226,8 +257,14 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
                 builtNorm = ctx.allocateBuffer((long) H * Float.BYTES,
                         GpuBuffer.BufferUsage.ACTIVATION);
             } catch (DirectMlRuntimeException | RuntimeException e) {
-                if (builtL2 != null) try { builtL2.close(); } catch (Exception ignored) {}
-                if (builtNorm != null) try { builtNorm.close(); } catch (Exception ignored) {}
+                if (builtL2 != null) try {
+                    builtL2.close();
+                } catch (Exception ignored) {
+                }
+                if (builtNorm != null) try {
+                    builtNorm.close();
+                } catch (Exception ignored) {
+                }
                 throw e;
             }
             this.l2Kernel = builtL2;
@@ -248,11 +285,22 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
         }
     }
 
-    @Override public boolean isReady() { return ready; }
-    @Override public int dimension()   { return cfg.outputDimension(); }
+    @Override
+    public boolean isReady() {
+        return ready;
+    }
 
-    /** Underlying generic config – exposed so callers can introspect the active model. */
-    public BertEncoderConfig config() { return cfg; }
+    @Override
+    public int dimension() {
+        return cfg.outputDimension();
+    }
+
+    /**
+     * Underlying generic config – exposed so callers can introspect the active model.
+     */
+    public BertEncoderConfig config() {
+        return cfg;
+    }
 
     @Override
     public EmbeddingVector embed(EmbeddingRequest request) throws EmbeddingException {
@@ -299,10 +347,10 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
             DirectMlTensor xInT = tensorOf(entry.xIn, B, H);
             DirectMlTensor xOutT = tensorOf(entry.xOut, B, H);
             DirectMlTensor maskT = tensorOf(entry.mask, B);
-            DirectMlTensor wT    = tensorOf(entry.meanWeights, B);
+            DirectMlTensor wT = tensorOf(entry.meanWeights, B);
             DirectMlTensor pooledT = tensorOf(entry.pooled, H);
-            DirectMlTensor embGT  = tensorOf(embLnGammaBuf, H);
-            DirectMlTensor embBT  = tensorOf(embLnBetaBuf,  H);
+            DirectMlTensor embGT = tensorOf(embLnGammaBuf, H);
+            DirectMlTensor embBT = tensorOf(embLnBetaBuf, H);
 
             entry.stack.dispatch(xInT, embGT, embBT, gpuLayers, maskT, xOutT);
             entry.meanPool.dispatch(xOutT, wT, pooledT);
@@ -478,9 +526,9 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
         DirectMlBertEncoderStack stack = null;
         DirectMlMeanPoolKernel meanPool = null;
         try {
-            xIn  = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
+            xIn = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
             xOut = ctx.allocateBuffer(hiddenBytes, GpuBuffer.BufferUsage.ACTIVATION);
-            mask = ctx.allocateBuffer(maskBytes,   GpuBuffer.BufferUsage.ACTIVATION);
+            mask = ctx.allocateBuffer(maskBytes, GpuBuffer.BufferUsage.ACTIVATION);
             meanWeights = ctx.allocateBuffer(maskBytes, GpuBuffer.BufferUsage.ACTIVATION);
             pooled = ctx.allocateBuffer(pooledBytes, GpuBuffer.BufferUsage.ACTIVATION);
             stack = new DirectMlBertEncoderStack(
@@ -495,13 +543,34 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
                     cfg.modelName(), bucket, stackCache.size());
             return entry;
         } catch (DirectMlRuntimeException | RuntimeException e) {
-            if (meanPool != null) try { meanPool.close(); } catch (Exception ignored) {}
-            if (stack != null) try { stack.close(); } catch (Exception ignored) {}
-            if (pooled != null)      try { pooled.close();      } catch (Exception ignored) {}
-            if (meanWeights != null) try { meanWeights.close(); } catch (Exception ignored) {}
-            if (mask != null)  try { mask.close();  } catch (Exception ignored) {}
-            if (xOut != null)  try { xOut.close();  } catch (Exception ignored) {}
-            if (xIn != null)   try { xIn.close();   } catch (Exception ignored) {}
+            if (meanPool != null) try {
+                meanPool.close();
+            } catch (Exception ignored) {
+            }
+            if (stack != null) try {
+                stack.close();
+            } catch (Exception ignored) {
+            }
+            if (pooled != null) try {
+                pooled.close();
+            } catch (Exception ignored) {
+            }
+            if (meanWeights != null) try {
+                meanWeights.close();
+            } catch (Exception ignored) {
+            }
+            if (mask != null) try {
+                mask.close();
+            } catch (Exception ignored) {
+            }
+            if (xOut != null) try {
+                xOut.close();
+            } catch (Exception ignored) {
+            }
+            if (xIn != null) try {
+                xIn.close();
+            } catch (Exception ignored) {
+            }
             throw (e instanceof DirectMlRuntimeException d) ? d
                     : new DirectMlRuntimeException("Failed to allocate stack for bucket=" + bucket, e);
         }
@@ -584,7 +653,7 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
             }
             throw (ex instanceof DirectMlRuntimeException d) ? d
                     : new DirectMlRuntimeException("Failed to allocate batched stack for bucket="
-                            + bucket + ", batch=" + batch, ex);
+                    + bucket + ", batch=" + batch, ex);
         }
     }
 
@@ -631,25 +700,42 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
         for (BatchStackEntry e : batchStackCache.values()) e.close();
         batchStackCache.clear();
         if (l2Kernel != null) {
-            try { l2Kernel.close(); } catch (Exception ignored) {}
+            try {
+                l2Kernel.close();
+            } catch (Exception ignored) {
+            }
         }
         closeOwnedQuietly();
         if (ownsCtx) {
-            try { ctx.close(); } catch (Exception ignored) {}
+            try {
+                ctx.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
     private void closeOwnedQuietly() {
         for (int i = ownedGpuBuffers.size() - 1; i >= 0; i--) {
-            try { ownedGpuBuffers.get(i).close(); } catch (Exception ignored) {}
+            try {
+                ownedGpuBuffers.get(i).close();
+            } catch (Exception ignored) {
+            }
         }
         ownedGpuBuffers.clear();
     }
 
-    /** Number of cached form-bound stacks (one per active pad bucket). */
-    public int cachedStackCount() { return stackCache.size(); }
+    /**
+     * Number of cached form-bound stacks (one per active pad bucket).
+     */
+    public int cachedStackCount() {
+        return stackCache.size();
+    }
 
-    /** Number of cached batched stacks (one per active {@code (bucket, batch)} pair). */
-    public int cachedBatchStackCount() { return batchStackCache.size(); }
+    /**
+     * Number of cached batched stacks (one per active {@code (bucket, batch)} pair).
+     */
+    public int cachedBatchStackCount() {
+        return batchStackCache.size();
+    }
 }
 

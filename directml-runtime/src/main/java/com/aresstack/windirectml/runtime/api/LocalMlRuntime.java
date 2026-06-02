@@ -8,11 +8,11 @@ import java.util.Objects;
  * Public Java 21 entry point for local embeddings and reranking.
  *
  * @deprecated Use {@link MlRuntime} instead. {@code LocalMlRuntime} in this
- *             package duplicates the simple name of
- *             {@link com.aresstack.windirectml.runtime.facade.LocalMlRuntime}
- *             and will be removed in a future release. Migrate to
- *             {@link MlRuntime} which is the single, unambiguous entry point
- *             for the {@code runtime.api} package.
+ * package duplicates the simple name of
+ * {@link com.aresstack.windirectml.runtime.facade.LocalMlRuntime}
+ * and will be removed in a future release. Migrate to
+ * {@link MlRuntime} which is the single, unambiguous entry point
+ * for the {@code runtime.api} package.
  */
 @Deprecated(forRemoval = true)
 public final class LocalMlRuntime {
@@ -52,7 +52,8 @@ public final class LocalMlRuntime {
     public static final class Builder {
         private Backend backend = Backend.AUTO;
 
-        private Builder() { }
+        private Builder() {
+        }
 
         public Builder backend(Backend backend) {
             this.backend = Objects.requireNonNull(backend, "backend");

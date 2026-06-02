@@ -121,12 +121,13 @@ public final class DirectMlMiniLmEncoderStack implements AutoCloseable {
 
     /**
      * Dispatch der gesamten Encoder-Pipeline.
-     * @param xIn        Pre-Embedding-Sum {@code [seq, hidden]} (word+pos+tokenType, F32).
-     * @param embLnGamma Embedding-LN-Gain {@code [hidden]}.
-     * @param embLnBeta  Embedding-LN-Bias {@code [hidden]}.
+     *
+     * @param xIn          Pre-Embedding-Sum {@code [seq, hidden]} (word+pos+tokenType, F32).
+     * @param embLnGamma   Embedding-LN-Gain {@code [hidden]}.
+     * @param embLnBeta    Embedding-LN-Bias {@code [hidden]}.
      * @param layerWeights Per-Layer-Gewichte; {@code size()} muss {@link #numLayers()} entsprechen.
-     * @param mask       Additive Float-Maske {@code [seq]} (0/-1e9) wenn {@code hasMask==true}, sonst {@code null}.
-     * @param xOut       Ziel-Tensor {@code [seq, hidden]} für den letzten LayerNorm-Output.
+     * @param mask         Additive Float-Maske {@code [seq]} (0/-1e9) wenn {@code hasMask==true}, sonst {@code null}.
+     * @param xOut         Ziel-Tensor {@code [seq, hidden]} für den letzten LayerNorm-Output.
      */
     public void dispatch(DirectMlTensor xIn,
                          DirectMlTensor embLnGamma,
@@ -160,7 +161,7 @@ public final class DirectMlMiniLmEncoderStack implements AutoCloseable {
         for (int i = 0; i < numLayers; i++) {
             boolean last = (i == numLayers - 1);
             GpuBuffer nextBuf = last ? null : (curBuf == scratchA ? scratchB : scratchA);
-            DirectMlTensor inT  = hidden2D(curBuf);
+            DirectMlTensor inT = hidden2D(curBuf);
             DirectMlTensor outT = last ? xOut : hidden2D(nextBuf);
             blocks.get(i).dispatch(inT, layerWeights.get(i), mask, outT);
             curBuf = nextBuf;
@@ -202,16 +203,41 @@ public final class DirectMlMiniLmEncoderStack implements AutoCloseable {
 
     private static void closeQuiet(AutoCloseable c) {
         if (c == null) return;
-        try { c.close(); } catch (Exception ignored) { /* best-effort */ }
+        try {
+            c.close();
+        } catch (Exception ignored) { /* best-effort */ }
     }
 
-    public int seq()          { return seq; }
-    public int hidden()       { return hidden; }
-    public int heads()        { return heads; }
-    public int headDim()      { return headDim; }
-    public int intermediate() { return intermediate; }
-    public int numLayers()    { return numLayers; }
-    public float eps()        { return eps; }
-    public boolean hasMask()  { return hasMask; }
+    public int seq() {
+        return seq;
+    }
+
+    public int hidden() {
+        return hidden;
+    }
+
+    public int heads() {
+        return heads;
+    }
+
+    public int headDim() {
+        return headDim;
+    }
+
+    public int intermediate() {
+        return intermediate;
+    }
+
+    public int numLayers() {
+        return numLayers;
+    }
+
+    public float eps() {
+        return eps;
+    }
+
+    public boolean hasMask() {
+        return hasMask;
+    }
 }
 

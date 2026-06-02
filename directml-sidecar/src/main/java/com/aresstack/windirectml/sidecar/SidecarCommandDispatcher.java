@@ -50,8 +50,8 @@ public final class SidecarCommandDispatcher {
      * Dispatch a parsed request (synchronous handlers only – legacy overload).
      *
      * @return a fully-formed {@link JsonRpcResponse}. For notifications the
-     *         response is still returned but the caller should not write it
-     *         to stdout (id is null).
+     * response is still returned but the caller should not write it
+     * to stdout (id is null).
      */
     public JsonRpcResponse dispatch(JsonRpcRequest request) {
         return dispatch(request, null);

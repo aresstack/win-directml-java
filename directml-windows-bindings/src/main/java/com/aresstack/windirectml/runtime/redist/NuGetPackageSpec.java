@@ -25,7 +25,9 @@ public record NuGetPackageSpec(String packageId, String version) {
         return trimmed;
     }
 
-    /** Dateiname im NuGet-Cache: {@code <id>.<version>.nupkg}. */
+    /**
+     * Dateiname im NuGet-Cache: {@code <id>.<version>.nupkg}.
+     */
     public String nupkgFileName() {
         return packageId + "." + version + ".nupkg";
     }

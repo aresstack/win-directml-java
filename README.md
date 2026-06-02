@@ -35,13 +35,13 @@ project that consumes this library as a local ML capability.
 
 ## Recommended model choices
 
-| Need | Recommended path | Notes |
-|---|---|---|
-| Fast default embeddings | `sentence-transformers/all-MiniLM-L6-v2` | Small, quick, good release baseline. |
-| Higher-quality E5-style retrieval | `intfloat/e5-base-v2` | Use `query: ` for queries and `passage: ` for indexed documents. |
-| Maximum E5 capacity in current WordPiece path | `intfloat/e5-large-v2` | Experimental and much larger. |
-| Better final ordering after vector search | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Scores query/document pairs jointly; best used on top-K candidates. |
-| German E5 STS checkpoint | `danielheinz/e5-base-sts-en-de` | Planned only: current upstream is XLM-R/SentencePiece, not the shipped WordPiece E5 path. |
+| Need                                          | Recommended path                         | Notes                                                                                     |
+|-----------------------------------------------|------------------------------------------|-------------------------------------------------------------------------------------------|
+| Fast default embeddings                       | `sentence-transformers/all-MiniLM-L6-v2` | Small, quick, good release baseline.                                                      |
+| Higher-quality E5-style retrieval             | `intfloat/e5-base-v2`                    | Use `query: ` for queries and `passage: ` for indexed documents.                          |
+| Maximum E5 capacity in current WordPiece path | `intfloat/e5-large-v2`                   | Experimental and much larger.                                                             |
+| Better final ordering after vector search     | `cross-encoder/ms-marco-MiniLM-L-6-v2`   | Scores query/document pairs jointly; best used on top-K candidates.                       |
+| German E5 STS checkpoint                      | `danielheinz/e5-base-sts-en-de`          | Planned only: current upstream is XLM-R/SentencePiece, not the shipped WordPiece E5 path. |
 
 See [`SUPPORTED_MODELS.md`](SUPPORTED_MODELS.md) for the full support matrix
 and [`MODEL_LICENSES.md`](MODEL_LICENSES.md) for model license notes.
@@ -50,11 +50,11 @@ and [`MODEL_LICENSES.md`](MODEL_LICENSES.md) for model license notes.
 
 `cpu`, `directml` and `auto` are first-class backend choices.
 
-| Mode | When to use it | Behavior |
-|---|---|---|
-| `Backend.CPU` | Servers, CI, VMs or desktops without a DirectML-capable GPU | Pure local CPU path. Not a failure mode. |
+| Mode               | When to use it                                               | Behavior                                             |
+|--------------------|--------------------------------------------------------------|------------------------------------------------------|
+| `Backend.CPU`      | Servers, CI, VMs or desktops without a DirectML-capable GPU  | Pure local CPU path. Not a failure mode.             |
 | `Backend.DIRECTML` | You require GPU acceleration and want failures to be visible | Fails fast if DirectML/model loading is unavailable. |
-| `Backend.AUTO` | Default application mode | Tries DirectML first and falls back to CPU. |
+| `Backend.AUTO`     | Default application mode                                     | Tries DirectML first and falls back to CPU.          |
 
 DirectML improves latency and throughput on Windows machines with suitable GPUs.
 CPU remains useful for small workloads, tests, offline environments and systems
@@ -186,12 +186,12 @@ pwsh scripts/download-reranker.ps1 -Variant ms-marco-MiniLM-L-12-v2
 
 Common script options:
 
-| Parameter | Meaning |
-|---|---|
-| `-ModelRoot` | Parent directory for model folders, default `model/`. |
-| `-Variant` | Model variant to download. |
-| `-Force` | Re-download even if files already exist. |
-| `-Validate` | Display SHA-256 checksums and file sizes after download. |
+| Parameter    | Meaning                                                  |
+|--------------|----------------------------------------------------------|
+| `-ModelRoot` | Parent directory for model folders, default `model/`.    |
+| `-Variant`   | Model variant to download.                               |
+| `-Force`     | Re-download even if files already exist.                 |
+| `-Validate`  | Display SHA-256 checksums and file sizes after download. |
 
 `download-e5.ps1` intentionally does **not** offer
 `danielheinz/e5-base-sts-en-de`; the current upstream checkpoint is
@@ -223,17 +223,17 @@ The default model location in examples is
 
 ## Status summary
 
-| Area | Status |
-|---|---|
-| Direct Java 21 API | Primary product path, implemented in `directml-runtime`. |
-| MiniLM embeddings | CPU and DirectML paths implemented. |
-| E5 WordPiece embeddings | `small-v2`, `base-v2`, experimental `large-v2` runtime path. |
-| Reranker | Cross-encoder reranker available through the direct API. |
-| CPU-only usage | Supported; not a failure mode. |
-| DirectML usage | Supported Windows acceleration path. |
-| Legacy JSON-RPC sidecar / Java 8 bridge | Source kept, no longer published in new releases. |
-| Phi-3 summarizer | Legacy/experimental; not part of the core release path. |
-| Decoder LLMs / ACP / MCP / A2A | Out of scope for this repository. |
+| Area                                    | Status                                                       |
+|-----------------------------------------|--------------------------------------------------------------|
+| Direct Java 21 API                      | Primary product path, implemented in `directml-runtime`.     |
+| MiniLM embeddings                       | CPU and DirectML paths implemented.                          |
+| E5 WordPiece embeddings                 | `small-v2`, `base-v2`, experimental `large-v2` runtime path. |
+| Reranker                                | Cross-encoder reranker available through the direct API.     |
+| CPU-only usage                          | Supported; not a failure mode.                               |
+| DirectML usage                          | Supported Windows acceleration path.                         |
+| Legacy JSON-RPC sidecar / Java 8 bridge | Source kept, no longer published in new releases.            |
+| Phi-3 summarizer                        | Legacy/experimental; not part of the core release path.      |
+| Decoder LLMs / ACP / MCP / A2A          | Out of scope for this repository.                            |
 
 ## Build
 
@@ -262,11 +262,11 @@ See [`howtobuild.md`](howtobuild.md) for details.
 
 ## Runtime configuration
 
-| System property | Default | Effect |
-|---|---|---|
-| `windirectml.debug` | `false` | Enables the D3D12 + DirectML debug layer and surfaces InfoQueue messages in exceptions. |
-| `windirectml.directml.dll` | unset, use in-box `System32` | Absolute path to a deliberately shipped `DirectML.dll` redistributable. |
-| `windirectml.dxgi.adapterIndex` | `0` | DXGI adapter index to bind. |
+| System property                 | Default                      | Effect                                                                                  |
+|---------------------------------|------------------------------|-----------------------------------------------------------------------------------------|
+| `windirectml.debug`             | `false`                      | Enables the D3D12 + DirectML debug layer and surfaces InfoQueue messages in exceptions. |
+| `windirectml.directml.dll`      | unset, use in-box `System32` | Absolute path to a deliberately shipped `DirectML.dll` redistributable.                 |
+| `windirectml.dxgi.adapterIndex` | `0`                          | DXGI adapter index to bind.                                                             |
 
 DirectML operators are gated by `DML_FEATURE_LEVEL`; unsupported fused kernels
 fall back to portable composite kernels or skip tests where appropriate. Do not
@@ -287,12 +287,12 @@ dependencies {
 
 Published artifacts under `com.aresstack:`:
 
-| Coordinate | Java | Purpose |
-|---|---|---|
-| `com.aresstack:directml-config` | 8/21 shared | Configuration, limits and model registry types. |
-| `com.aresstack:directml-windows-bindings` | 21 preview | FFM bindings to D3D12 / DXGI / DirectML plus low-level kernel primitives. |
-| `com.aresstack:directml-encoder` | 21 preview | MiniLM, E5 and cross-encoder reranker pipelines with CPU + DirectML parity. |
-| `com.aresstack:directml-runtime` | 21 preview | Public direct Java 21 ML API for embeddings and reranking. |
+| Coordinate                                | Java        | Purpose                                                                     |
+|-------------------------------------------|-------------|-----------------------------------------------------------------------------|
+| `com.aresstack:directml-config`           | 8/21 shared | Configuration, limits and model registry types.                             |
+| `com.aresstack:directml-windows-bindings` | 21 preview  | FFM bindings to D3D12 / DXGI / DirectML plus low-level kernel primitives.   |
+| `com.aresstack:directml-encoder`          | 21 preview  | MiniLM, E5 and cross-encoder reranker pipelines with CPU + DirectML parity. |
+| `com.aresstack:directml-runtime`          | 21 preview  | Public direct Java 21 ML API for embeddings and reranking.                  |
 
 Legacy beta artifacts such as `directml-sidecar`, `directml-sidecar-client-java8`,
 `directml-sidecar-protocol-java8`, `directml-sidecar-workbench` and

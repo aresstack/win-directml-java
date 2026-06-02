@@ -29,7 +29,9 @@ public record ExtractRule(String packageEntryPath, String targetRelativePath) {
         }
     }
 
-    /** @return {@code true} when {@code actualEntryPath} matches this rule (after normalisation). */
+    /**
+     * @return {@code true} when {@code actualEntryPath} matches this rule (after normalisation).
+     */
     public boolean matches(String actualEntryPath) {
         return packageEntryPath.equalsIgnoreCase(normalize(actualEntryPath, "actualEntryPath"));
     }

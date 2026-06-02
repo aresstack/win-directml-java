@@ -40,8 +40,15 @@ public final class CpuReranker implements Reranker {
         this.ready = true;
     }
 
-    @Override public boolean isReady() { return ready; }
-    @Override public String modelName() { return cfg.modelName(); }
+    @Override
+    public boolean isReady() {
+        return ready;
+    }
+
+    @Override
+    public String modelName() {
+        return cfg.modelName();
+    }
 
     @Override
     public List<RerankResult> rerank(RerankRequest request) throws RerankException {
@@ -58,7 +65,9 @@ public final class CpuReranker implements Reranker {
         return top >= scored.size() ? scored : scored.subList(0, top);
     }
 
-    /** Single pair forward-pass; returns the raw classifier logit. */
+    /**
+     * Single pair forward-pass; returns the raw classifier logit.
+     */
     public double scorePair(String query, String document) throws RerankException {
         EncoderTokenizer.Encoded enc;
         try {
@@ -158,6 +167,8 @@ public final class CpuReranker implements Reranker {
     }
 
     @Override
-    public void close() { ready = false; }
+    public void close() {
+        ready = false;
+    }
 }
 

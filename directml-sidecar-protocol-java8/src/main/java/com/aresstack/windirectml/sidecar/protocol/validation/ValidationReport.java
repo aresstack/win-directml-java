@@ -17,11 +17,21 @@ public final class ValidationReport {
                 : Collections.unmodifiableList(new ArrayList<ValidationFinding>(findings));
     }
 
-    public String getLabel() { return label; }
-    public File getDirectory() { return directory; }
-    public List<ValidationFinding> getFindings() { return findings; }
+    public String getLabel() {
+        return label;
+    }
 
-    public boolean isOk() { return errorCount() == 0; }
+    public File getDirectory() {
+        return directory;
+    }
+
+    public List<ValidationFinding> getFindings() {
+        return findings;
+    }
+
+    public boolean isOk() {
+        return errorCount() == 0;
+    }
 
     public int errorCount() {
         int count = 0;
@@ -54,5 +64,7 @@ public final class ValidationReport {
         return out.toString();
     }
 
-    public String toString() { return format(); }
+    public String toString() {
+        return format();
+    }
 }

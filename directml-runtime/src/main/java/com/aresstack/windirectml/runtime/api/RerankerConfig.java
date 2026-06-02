@@ -27,7 +27,9 @@ public final class RerankerConfig {
         }
     }
 
-    /** Validates that the explicit modelDir ends with the expected directory name for the model. */
+    /**
+     * Validates that the explicit modelDir ends with the expected directory name for the model.
+     */
     private static void validateModelDir(Path modelDir, RerankerModelId model) {
         String lastName = modelDir.getFileName() == null ? "" : modelDir.getFileName().toString();
         if (!lastName.equals(model.directoryName())) {
@@ -59,7 +61,8 @@ public final class RerankerConfig {
         private RerankerModelId model;
         private Path modelDir;
 
-        private Builder() { }
+        private Builder() {
+        }
 
         public Builder model(RerankerModelId model) {
             this.model = Objects.requireNonNull(model, "model");

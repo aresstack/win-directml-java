@@ -103,7 +103,7 @@ class SidecarProcessCommandLineTest {
 
         List<String> cmd = SidecarProcess.buildCommandLine(cfg);
         assertTrue(cmd.contains(
-                "-Dphi3.modelDir=model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128"),
+                        "-Dphi3.modelDir=model/phi3-mini-directml-int4/directml/directml-int4-awq-block-128"),
                 "must include -Dphi3.modelDir, cmd=" + cmd);
         assertTrue(cmd.contains("-Dphi3.backend=directml"),
                 "must include -Dphi3.backend, cmd=" + cmd);

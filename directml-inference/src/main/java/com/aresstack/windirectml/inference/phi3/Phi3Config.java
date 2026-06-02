@@ -36,12 +36,16 @@ public record Phi3Config(
         @JsonProperty("rms_norm_eps") float rmsNormEps,
         @JsonProperty("rope_theta") float ropeTheta
 ) {
-    /** Derived: dimension per attention head = hidden_size / num_attention_heads. */
+    /**
+     * Derived: dimension per attention head = hidden_size / num_attention_heads.
+     */
     public int headDim() {
         return hiddenSize / numAttentionHeads;
     }
 
-    /** Load config from a {@code config.json} file. */
+    /**
+     * Load config from a {@code config.json} file.
+     */
     public static Phi3Config load(Path configJson) throws IOException {
         return new ObjectMapper().readValue(configJson.toFile(), Phi3Config.class);
     }

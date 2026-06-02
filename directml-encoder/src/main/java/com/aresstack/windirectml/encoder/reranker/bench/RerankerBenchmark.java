@@ -37,7 +37,8 @@ public final class RerankerBenchmark {
 
     private static final String QUERY = "What is DirectML and how does it accelerate ML on Windows?";
 
-    private RerankerBenchmark() {}
+    private RerankerBenchmark() {
+    }
 
     public static void main(String[] args) throws Exception {
         Path modelDir = args.length > 0

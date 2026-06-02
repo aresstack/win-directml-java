@@ -44,11 +44,18 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @EnabledOnOs(OS.WINDOWS)
 class DirectMlEmbedBatchParityTest {
 
-    /** Same TinyTokenizer fixture as the existing synthetic parity test. */
+    /**
+     * Same TinyTokenizer fixture as the existing synthetic parity test.
+     */
     private static final class TinyTokenizer implements EncoderTokenizer {
         private final int vocab;
-        TinyTokenizer(int vocab) { this.vocab = vocab; }
-        @Override public Encoded encode(String text) {
+
+        TinyTokenizer(int vocab) {
+            this.vocab = vocab;
+        }
+
+        @Override
+        public Encoded encode(String text) {
             int n = Math.min(text.length() + 2, 8);
             int[] ids = new int[n];
             int[] mask = new int[n];
@@ -59,10 +66,26 @@ class DirectMlEmbedBatchParityTest {
             for (int i = 0; i < n; i++) mask[i] = 1;
             return new Encoded(ids, mask, segs);
         }
-        @Override public int padTokenId() { return 0; }
-        @Override public int clsTokenId() { return 2; }
-        @Override public int sepTokenId() { return 3; }
-        @Override public int vocabSize()  { return vocab; }
+
+        @Override
+        public int padTokenId() {
+            return 0;
+        }
+
+        @Override
+        public int clsTokenId() {
+            return 2;
+        }
+
+        @Override
+        public int sepTokenId() {
+            return 3;
+        }
+
+        @Override
+        public int vocabSize() {
+            return vocab;
+        }
     }
 
     private static BertEncoderConfig tinyConfig() {
@@ -77,8 +100,8 @@ class DirectMlEmbedBatchParityTest {
     private static BertCpuEncoderWeights randomWeights(BertEncoderConfig cfg, long seed) {
         Random r = new Random(seed);
         int H = cfg.hiddenSize(), I = cfg.intermediateSize();
-        float[] we  = rand(r, cfg.vocabSize() * H, 0.02f);
-        float[] pe  = rand(r, cfg.maxPositionEmbeddings() * H, 0.02f);
+        float[] we = rand(r, cfg.vocabSize() * H, 0.02f);
+        float[] pe = rand(r, cfg.maxPositionEmbeddings() * H, 0.02f);
         float[] tte = rand(r, cfg.typeVocabSize() * H, 0.02f);
         float[] elng = ones(H);
         float[] elnb = zeros(H);
@@ -189,11 +212,11 @@ class DirectMlEmbedBatchParityTest {
                     ctx, /* ownsCtx */ false, cfg, w, tok)) {
                 List<EmbeddingRequest> two = List.of(
                         new EmbeddingRequest("alpha", true, null),
-                        new EmbeddingRequest("beta",  true, null));
+                        new EmbeddingRequest("beta", true, null));
                 List<EmbeddingRequest> three = List.of(
                         new EmbeddingRequest("gamma", true, null),
                         new EmbeddingRequest("delta", true, null),
-                        new EmbeddingRequest("eps",   true, null));
+                        new EmbeddingRequest("eps", true, null));
 
                 List<EmbeddingVector> r2 = gpu.embedBatch(two);
                 List<EmbeddingVector> r3 = gpu.embedBatch(three);
@@ -207,12 +230,20 @@ class DirectMlEmbedBatchParityTest {
         }
     }
 
-    /** Variable-length tokenizer used by the real multi-bucket test below. */
+    /**
+     * Variable-length tokenizer used by the real multi-bucket test below.
+     */
     private static final class LengthTokenizer implements EncoderTokenizer {
         private final int vocab;
         private final int maxLen;
-        LengthTokenizer(int vocab, int maxLen) { this.vocab = vocab; this.maxLen = maxLen; }
-        @Override public Encoded encode(String text) {
+
+        LengthTokenizer(int vocab, int maxLen) {
+            this.vocab = vocab;
+            this.maxLen = maxLen;
+        }
+
+        @Override
+        public Encoded encode(String text) {
             int n = Math.min(text.length() + 2, maxLen);
             int[] ids = new int[n];
             int[] mask = new int[n];
@@ -223,13 +254,31 @@ class DirectMlEmbedBatchParityTest {
             for (int i = 0; i < n; i++) mask[i] = 1;
             return new Encoded(ids, mask, segs);
         }
-        @Override public int padTokenId() { return 0; }
-        @Override public int clsTokenId() { return 2; }
-        @Override public int sepTokenId() { return 3; }
-        @Override public int vocabSize()  { return vocab; }
+
+        @Override
+        public int padTokenId() {
+            return 0;
+        }
+
+        @Override
+        public int clsTokenId() {
+            return 2;
+        }
+
+        @Override
+        public int sepTokenId() {
+            return 3;
+        }
+
+        @Override
+        public int vocabSize() {
+            return vocab;
+        }
     }
 
-    /** Larger config that allows seqLen > 16 so we can land in multiple pad buckets. */
+    /**
+     * Larger config that allows seqLen > 16 so we can land in multiple pad buckets.
+     */
     private static BertEncoderConfig multiBucketConfig() {
         return new BertEncoderConfig(
                 "test/e5-multibucket",
@@ -256,12 +305,12 @@ class DirectMlEmbedBatchParityTest {
         // Inputs deliberately straddle two pad buckets:
         //   * short text  → seqLen ≈ 5  → bucket 64
         //   * medium text → seqLen ≈ 100 → bucket 128
-        String shortText  = "abc";                                   // length 3 → 5 tokens
+        String shortText = "abc";                                   // length 3 → 5 tokens
         String mediumText = repeat("x", 100);                         // length 100 → 102 tokens
         List<EmbeddingRequest> mixed = List.of(
-                new EmbeddingRequest(shortText,  true, null),
+                new EmbeddingRequest(shortText, true, null),
                 new EmbeddingRequest(mediumText, true, null),
-                new EmbeddingRequest(shortText  + "!", true, null),   // also bucket 64
+                new EmbeddingRequest(shortText + "!", true, null),   // also bucket 64
                 new EmbeddingRequest(mediumText.substring(0, 80), true, null) // bucket 128
         );
 
@@ -417,10 +466,21 @@ class DirectMlEmbedBatchParityTest {
         for (int i = 0; i < n; i++) a[i] = (float) (r.nextGaussian() * scale);
         return a;
     }
-    private static float[] ones(int n) { float[] a = new float[n]; java.util.Arrays.fill(a, 1f); return a; }
-    private static float[] zeros(int n) { return new float[n]; }
+
+    private static float[] ones(int n) {
+        float[] a = new float[n];
+        java.util.Arrays.fill(a, 1f);
+        return a;
+    }
+
+    private static float[] zeros(int n) {
+        return new float[n];
+    }
+
     private static double norm(float[] v) {
-        double s = 0; for (float x : v) s += (double) x * x; return Math.sqrt(s);
+        double s = 0;
+        for (float x : v) s += (double) x * x;
+        return Math.sqrt(s);
     }
 }
 

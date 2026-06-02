@@ -10,7 +10,9 @@ package com.aresstack.windirectml.config.generation;
  */
 public final class SamplerConfig {
 
-    /** Singleton greedy sampler (temperature=0, topK=1). */
+    /**
+     * Singleton greedy sampler (temperature=0, topK=1).
+     */
     private static final SamplerConfig GREEDY = new SamplerConfig(0.0f, 1);
 
     private final float temperature;
@@ -21,7 +23,9 @@ public final class SamplerConfig {
         this.topK = topK;
     }
 
-    /** Returns the greedy decoding configuration (argmax). */
+    /**
+     * Returns the greedy decoding configuration (argmax).
+     */
     public static SamplerConfig greedy() {
         return GREEDY;
     }
@@ -49,9 +53,17 @@ public final class SamplerConfig {
         return new SamplerConfig(temperature, topK);
     }
 
-    public float temperature() { return temperature; }
-    public int topK() { return topK; }
-    public boolean isGreedy() { return temperature == 0.0f && topK == 1; }
+    public float temperature() {
+        return temperature;
+    }
+
+    public int topK() {
+        return topK;
+    }
+
+    public boolean isGreedy() {
+        return temperature == 0.0f && topK == 1;
+    }
 
     @Override
     public String toString() {

@@ -27,11 +27,25 @@ public class InferenceRequest {
         this.temperature = builder.temperature;
     }
 
-    public String getModelId() { return modelId; }
-    public String getSystemPrompt() { return systemPrompt; }
-    public String getUserPrompt() { return userPrompt; }
-    public int getMaxTokens() { return maxTokens; }
-    public float getTemperature() { return temperature; }
+    public String getModelId() {
+        return modelId;
+    }
+
+    public String getSystemPrompt() {
+        return systemPrompt;
+    }
+
+    public String getUserPrompt() {
+        return userPrompt;
+    }
+
+    public int getMaxTokens() {
+        return maxTokens;
+    }
+
+    public float getTemperature() {
+        return temperature;
+    }
 
     /**
      * Convenience: full prompt as a single string (system + user).
@@ -43,7 +57,9 @@ public class InferenceRequest {
         return systemPrompt + "\n\n" + userPrompt;
     }
 
-    public static Builder builder() { return new Builder(); }
+    public static Builder builder() {
+        return new Builder();
+    }
 
     public static class Builder {
         private String modelId;
@@ -52,13 +68,34 @@ public class InferenceRequest {
         private int maxTokens = 256;
         private float temperature = 0.7f;
 
-        public Builder modelId(String modelId) { this.modelId = modelId; return this; }
-        public Builder systemPrompt(String systemPrompt) { this.systemPrompt = systemPrompt; return this; }
-        public Builder userPrompt(String userPrompt) { this.userPrompt = userPrompt; return this; }
-        public Builder maxTokens(int maxTokens) { this.maxTokens = maxTokens; return this; }
-        public Builder temperature(float temperature) { this.temperature = temperature; return this; }
+        public Builder modelId(String modelId) {
+            this.modelId = modelId;
+            return this;
+        }
 
-        public InferenceRequest build() { return new InferenceRequest(this); }
+        public Builder systemPrompt(String systemPrompt) {
+            this.systemPrompt = systemPrompt;
+            return this;
+        }
+
+        public Builder userPrompt(String userPrompt) {
+            this.userPrompt = userPrompt;
+            return this;
+        }
+
+        public Builder maxTokens(int maxTokens) {
+            this.maxTokens = maxTokens;
+            return this;
+        }
+
+        public Builder temperature(float temperature) {
+            this.temperature = temperature;
+            return this;
+        }
+
+        public InferenceRequest build() {
+            return new InferenceRequest(this);
+        }
     }
 
     @Override

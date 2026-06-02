@@ -17,7 +17,9 @@ public final class UnsupportedModelException extends RuntimeException {
         this.family = family;
     }
 
-    /** The model family that was requested but is not supported. */
+    /**
+     * The model family that was requested but is not supported.
+     */
     public String family() {
         return family;
     }

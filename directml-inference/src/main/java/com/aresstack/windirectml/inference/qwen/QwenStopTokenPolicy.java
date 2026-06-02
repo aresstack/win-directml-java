@@ -29,15 +29,22 @@ import java.util.List;
  */
 public final class QwenStopTokenPolicy {
 
-    private QwenStopTokenPolicy() {} // utility class
+    private QwenStopTokenPolicy() {
+    } // utility class
 
-    /** End-of-text token: {@code <|endoftext|>}. */
+    /**
+     * End-of-text token: {@code <|endoftext|>}.
+     */
     public static final int ENDOFTEXT_ID = QwenTokenizer.ENDOFTEXT_ID;
 
-    /** ChatML turn-end token: {@code <|im_end|>}. */
+    /**
+     * ChatML turn-end token: {@code <|im_end|>}.
+     */
     public static final int IM_END_ID = QwenTokenizer.IM_END_ID;
 
-    /** All token IDs that terminate Qwen generation. */
+    /**
+     * All token IDs that terminate Qwen generation.
+     */
     public static final List<Integer> STOP_TOKEN_IDS = List.of(ENDOFTEXT_ID, IM_END_ID);
 
     /**

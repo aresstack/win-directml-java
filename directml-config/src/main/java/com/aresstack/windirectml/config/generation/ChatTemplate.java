@@ -12,15 +12,23 @@ package com.aresstack.windirectml.config.generation;
  */
 public enum ChatTemplate {
 
-    /** Phi-3 instruction template ({@code <|user|>...<|end|><|assistant|>}). */
+    /**
+     * Phi-3 instruction template ({@code <|user|>...<|end|><|assistant|>}).
+     */
     PHI3,
 
-    /** Qwen/ChatML-style template ({@code <|im_start|>user\n...<|im_end|>}). */
+    /**
+     * Qwen/ChatML-style template ({@code <|im_start|>user\n...<|im_end|>}).
+     */
     CHATML,
 
-    /** Raw prompt with no template wrapping. */
+    /**
+     * Raw prompt with no template wrapping.
+     */
     RAW,
 
-    /** Template is not yet determined (planned models). */
+    /**
+     * Template is not yet determined (planned models).
+     */
     UNKNOWN;
 }

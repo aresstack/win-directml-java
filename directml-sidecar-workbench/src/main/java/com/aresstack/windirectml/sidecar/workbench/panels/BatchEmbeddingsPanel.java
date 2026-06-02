@@ -42,18 +42,18 @@ public final class BatchEmbeddingsPanel extends JPanel {
     private static final String PREFIX_NONE = "none";
     private static final String PREFIX_QUERY = "query: ";
     private static final String PREFIX_PASSAGE = "passage: ";
-    private static final String[] PREFIX_CHOICES = { PREFIX_NONE, PREFIX_QUERY, PREFIX_PASSAGE };
+    private static final String[] PREFIX_CHOICES = {PREFIX_NONE, PREFIX_QUERY, PREFIX_PASSAGE};
 
     private final WorkbenchModel model;
 
     private final JTextArea input = new JTextArea(10, 60);
     private final JComboBox<String> prefixBox = new JComboBox<String>(PREFIX_CHOICES);
-    private final JLabel countLbl   = new JLabel("count: —");
-    private final JLabel dimLbl     = new JLabel("dimension: —");
-    private final JLabel modelLbl   = new JLabel("model: —");
-    private final JLabel timingLbl  = new JLabel("timing: —");
-    private final JLabel normLbl    = new JLabel("normalized: —");
-    private final JTextArea output  = new JTextArea(14, 60);
+    private final JLabel countLbl = new JLabel("count: —");
+    private final JLabel dimLbl = new JLabel("dimension: —");
+    private final JLabel modelLbl = new JLabel("model: —");
+    private final JLabel timingLbl = new JLabel("timing: —");
+    private final JLabel normLbl = new JLabel("normalized: —");
+    private final JTextArea output = new JTextArea(14, 60);
 
     public BatchEmbeddingsPanel(WorkbenchModel model) {
         this.model = model;
@@ -122,7 +122,9 @@ public final class BatchEmbeddingsPanel extends JPanel {
         return s;
     }
 
-    /** Visible-for-testing parser: split textarea into non-blank lines. */
+    /**
+     * Visible-for-testing parser: split textarea into non-blank lines.
+     */
     static List<String> parseTexts(String blob) {
         List<String> out = new ArrayList<String>();
         if (blob == null) return out;

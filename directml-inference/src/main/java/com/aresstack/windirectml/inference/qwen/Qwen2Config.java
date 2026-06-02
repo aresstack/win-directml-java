@@ -50,22 +50,30 @@ public record Qwen2Config(
         @JsonProperty("rope_theta") float ropeTheta,
         @JsonProperty("tie_word_embeddings") boolean tieWordEmbeddings
 ) {
-    /** Derived: dimension per attention head = hidden_size / num_attention_heads. */
+    /**
+     * Derived: dimension per attention head = hidden_size / num_attention_heads.
+     */
     public int headDim() {
         return hiddenSize / numAttentionHeads;
     }
 
-    /** Derived: size of Q projection output = num_attention_heads * head_dim. */
+    /**
+     * Derived: size of Q projection output = num_attention_heads * head_dim.
+     */
     public int qSize() {
         return numAttentionHeads * headDim();
     }
 
-    /** Derived: size of K/V projection output = num_key_value_heads * head_dim. */
+    /**
+     * Derived: size of K/V projection output = num_key_value_heads * head_dim.
+     */
     public int kvSize() {
         return numKeyValueHeads * headDim();
     }
 
-    /** Load config from a {@code config.json} file. */
+    /**
+     * Load config from a {@code config.json} file.
+     */
     public static Qwen2Config load(Path configJson) throws IOException {
         if (configJson == null || !configJson.toFile().exists()) {
             throw new IOException("Qwen config.json not found: " + configJson);

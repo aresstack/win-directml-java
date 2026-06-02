@@ -70,12 +70,16 @@ public final class LocalEmbeddingModel implements AutoCloseable {
         return result;
     }
 
-    /** The output dimension of the loaded model (e.g. 384 for MiniLM). */
+    /**
+     * The output dimension of the loaded model (e.g. 384 for MiniLM).
+     */
     public int dimension() {
         return delegate.dimension();
     }
 
-    /** Whether the underlying model is initialized and ready. */
+    /**
+     * Whether the underlying model is initialized and ready.
+     */
     public boolean isReady() {
         return delegate.isReady();
     }

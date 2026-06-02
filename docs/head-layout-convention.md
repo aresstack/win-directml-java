@@ -38,13 +38,13 @@ Vektoren – Cosine-Similarity gegen die CPU-Referenz fällt typisch auf
 
 ## Symbole und ihre Bedeutung
 
-| Symbol     | Bedeutung                                                                                     |
-| ---------- | --------------------------------------------------------------------------------------------- |
-| `S`        | Sequenzlänge (Anzahl Tokens nach Tokenizer + Padding)                                         |
-| `H`        | Anzahl Attention-Heads (MiniLM-L6-v2: `H = 12`)                                               |
-| `D`        | Head-Dimension (MiniLM-L6-v2: `D = 32`)                                                       |
-| `hidden`   | Modell-Hidden-Size; per Vertrag `hidden = H * D` (MiniLM-L6-v2: `384 = 12 * 32`)              |
-| `B`        | Batch-Größe; für den Encoder-Pfad aktuell immer `1` (eine Anfrage = eine Sequenz)             |
+| Symbol   | Bedeutung                                                                         |
+|----------|-----------------------------------------------------------------------------------|
+| `S`      | Sequenzlänge (Anzahl Tokens nach Tokenizer + Padding)                             |
+| `H`      | Anzahl Attention-Heads (MiniLM-L6-v2: `H = 12`)                                   |
+| `D`      | Head-Dimension (MiniLM-L6-v2: `D = 32`)                                           |
+| `hidden` | Modell-Hidden-Size; per Vertrag `hidden = H * D` (MiniLM-L6-v2: `384 = 12 * 32`)  |
+| `B`      | Batch-Größe; für den Encoder-Pfad aktuell immer `1` (eine Anfrage = eine Sequenz) |
 
 ## „Sequence-major" Layout `[S, H, D]`
 
@@ -76,10 +76,10 @@ mit nicht-default-Strides auf dem Input-Tensor und Default-Strides
 in der vom Output diktierten Reihenfolge – materialisiert also die
 Permutation.
 
-| Richtung       | Logische Shape | Input-Strides         | Output-Strides                |
-| -------------- | -------------- | --------------------- | ----------------------------- |
-| `SEQ_TO_HEAD`  | `[1, H, S, D]` | `[S·H·D, D, H·D, 1]`  | `null` (= `[H·S·D, S·D, D, 1]`) |
-| `HEAD_TO_SEQ`  | `[1, S, H, D]` | `[S·H·D, D, S·D, 1]`  | `null` (= `[S·H·D, H·D, D, 1]`) |
+| Richtung      | Logische Shape | Input-Strides        | Output-Strides                  |
+|---------------|----------------|----------------------|---------------------------------|
+| `SEQ_TO_HEAD` | `[1, H, S, D]` | `[S·H·D, D, H·D, 1]` | `null` (= `[H·S·D, S·D, D, 1]`) |
+| `HEAD_TO_SEQ` | `[1, S, H, D]` | `[S·H·D, D, S·D, 1]` | `null` (= `[S·H·D, H·D, D, 1]`) |
 
 Die beiden Stride-Vektoren sind exakte Inverse zueinander, formal
 verifiziert durch den Unit-Test `roundTripIsIdentity()` mit

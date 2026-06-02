@@ -1,7 +1,7 @@
 package com.aresstack.windirectml.sidecar.protocol.validation;
 
 public final class ValidationFinding {
-    public enum Severity { OK, WARN, ERROR }
+    public enum Severity {OK, WARN, ERROR}
 
     private final Severity severity;
     private final String message;
@@ -13,14 +13,35 @@ public final class ValidationFinding {
         this.message = message;
     }
 
-    public Severity getSeverity() { return severity; }
-    public String getMessage() { return message; }
-    public boolean isError() { return severity == Severity.ERROR; }
-    public boolean isWarning() { return severity == Severity.WARN; }
+    public Severity getSeverity() {
+        return severity;
+    }
 
-    public static ValidationFinding ok(String message) { return new ValidationFinding(Severity.OK, message); }
-    public static ValidationFinding warn(String message) { return new ValidationFinding(Severity.WARN, message); }
-    public static ValidationFinding error(String message) { return new ValidationFinding(Severity.ERROR, message); }
+    public String getMessage() {
+        return message;
+    }
 
-    public String toString() { return severity + ": " + message; }
+    public boolean isError() {
+        return severity == Severity.ERROR;
+    }
+
+    public boolean isWarning() {
+        return severity == Severity.WARN;
+    }
+
+    public static ValidationFinding ok(String message) {
+        return new ValidationFinding(Severity.OK, message);
+    }
+
+    public static ValidationFinding warn(String message) {
+        return new ValidationFinding(Severity.WARN, message);
+    }
+
+    public static ValidationFinding error(String message) {
+        return new ValidationFinding(Severity.ERROR, message);
+    }
+
+    public String toString() {
+        return severity + ": " + message;
+    }
 }

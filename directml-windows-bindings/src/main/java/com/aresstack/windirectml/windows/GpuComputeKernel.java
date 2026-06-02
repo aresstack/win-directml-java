@@ -62,8 +62,8 @@ public final class GpuComputeKernel implements AutoCloseable {
      * @param groupSizeX     thread group size (matches [numthreads(X,1,1)] in shader)
      */
     public GpuComputeKernel(WindowsBindings wb, MemorySegment cmdListForMH,
-                             String hlslSource, String name,
-                             int numUavs, int num32BitConsts, int groupSizeX)
+                            String hlslSource, String name,
+                            int numUavs, int num32BitConsts, int groupSizeX)
             throws WindowsNativeException {
         this.name = name;
         this.arena = Arena.ofShared();
@@ -92,8 +92,11 @@ public final class GpuComputeKernel implements AutoCloseable {
             int hr = (int) mh.invokeExact(dev, 0, rootSigPtr, rootSigSize, riid, pp);
             HResult.check(hr, "CreateRootSignature(" + name + ")");
             rootSignature = pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateRootSignature failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateRootSignature failed", t);
+        }
 
         // ── 3. Create compute PSO ─────────────────────────────────────
         try {
@@ -118,8 +121,11 @@ public final class GpuComputeKernel implements AutoCloseable {
             int hr = (int) mh.invokeExact(dev, psoDesc, riid, pp);
             HResult.check(hr, "CreateComputePipelineState(" + name + ")");
             pipelineState = pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
-        } catch (WindowsNativeException e) { throw e; }
-        catch (Throwable t) { throw new WindowsNativeException("CreateComputePSO failed", t); }
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateComputePSO failed", t);
+        }
 
         // Release shader blobs (bytecode is copied into PSO)
         DxgiBindings.release(shaderBlob);
@@ -149,13 +155,13 @@ public final class GpuComputeKernel implements AutoCloseable {
     /**
      * Record this compute shader dispatch into a pipeline's command list.
      *
-     * @param cl             the command list (from GpuPipeline)
-     * @param uavAddresses   GPU virtual addresses for each UAV parameter
-     * @param constants      32-bit constant values (can be null if no constants)
-     * @param elementCount   total elements to process (dispatch groups = ceil(count / groupSize))
+     * @param cl           the command list (from GpuPipeline)
+     * @param uavAddresses GPU virtual addresses for each UAV parameter
+     * @param constants    32-bit constant values (can be null if no constants)
+     * @param elementCount total elements to process (dispatch groups = ceil(count / groupSize))
      */
     public void recordDispatch(MemorySegment cl, long[] uavAddresses,
-                                int[] constants, int elementCount) {
+                               int[] constants, int elementCount) {
         try {
             // Set PSO + root signature
             mhSetPipelineState.invokeExact(cl, pipelineState);

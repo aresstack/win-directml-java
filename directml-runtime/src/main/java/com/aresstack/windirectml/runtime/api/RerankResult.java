@@ -4,7 +4,7 @@ package com.aresstack.windirectml.runtime.api;
  * Public rerank result returned by the Java 21 runtime API.
  *
  * @param originalIndex 0-based index into the caller-provided documents list.
- * @param score raw cross-encoder relevance score; higher means more relevant.
+ * @param score         raw cross-encoder relevance score; higher means more relevant.
  */
 public record RerankResult(int originalIndex, double score) {
     public RerankResult {

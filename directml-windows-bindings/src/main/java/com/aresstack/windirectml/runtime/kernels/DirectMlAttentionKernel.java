@@ -91,8 +91,9 @@ public final class DirectMlAttentionKernel implements AttentionKernel, AutoClose
      * Lives for the lifetime of the surrounding {@link DirectMlAttentionKernel}.
      */
     private record Stage(MemorySegment compiled, MemorySegment descHeap, int descCount,
-                          long tempSize, MemorySegment tempBuffer,
-                          long persistSize, MemorySegment persistBuffer) {}
+                         long tempSize, MemorySegment tempBuffer,
+                         long persistSize, MemorySegment persistBuffer) {
+    }
 
     public DirectMlAttentionKernel(DirectMlContextImpl ctx,
                                    int batch, int heads, int seq, int headDim,
@@ -588,28 +589,49 @@ public final class DirectMlAttentionKernel implements AttentionKernel, AutoClose
     public void close() {
         if (closed) return;
         closed = true;
-        try { DxgiBindings.release(cmdRecorder); } catch (Exception ignored) {}
+        try {
+            DxgiBindings.release(cmdRecorder);
+        } catch (Exception ignored) {
+        }
         releaseStage(stageQk);
         if (stageMask != null) releaseStage(stageMask);
         releaseStage(stageSoftmax);
         releaseStage(stageOut);
         if (!scoresBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(scoresBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(scoresBuffer);
+            } catch (Exception ignored) {
+            }
         }
         if (!probsBuffer.equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(probsBuffer); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(probsBuffer);
+            } catch (Exception ignored) {
+            }
         }
         arena.close();
     }
 
     private static void releaseStage(Stage st) {
-        try { DxgiBindings.release(st.descHeap()); } catch (Exception ignored) {}
-        try { DxgiBindings.release(st.compiled()); } catch (Exception ignored) {}
+        try {
+            DxgiBindings.release(st.descHeap());
+        } catch (Exception ignored) {
+        }
+        try {
+            DxgiBindings.release(st.compiled());
+        } catch (Exception ignored) {
+        }
         if (!st.tempBuffer().equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(st.tempBuffer()); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(st.tempBuffer());
+            } catch (Exception ignored) {
+            }
         }
         if (!st.persistBuffer().equals(MemorySegment.NULL)) {
-            try { DxgiBindings.release(st.persistBuffer()); } catch (Exception ignored) {}
+            try {
+                DxgiBindings.release(st.persistBuffer());
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -681,11 +703,28 @@ public final class DirectMlAttentionKernel implements AttentionKernel, AutoClose
         array.set(ValueLayout.ADDRESS, off + 8, bb);
     }
 
-    public int batch()   { return B; }
-    public int heads()   { return H; }
-    public int seq()     { return S; }
-    public int headDim() { return D; }
-    public float scale() { return scale; }
-    public boolean hasMask() { return hasMask; }
+    public int batch() {
+        return B;
+    }
+
+    public int heads() {
+        return H;
+    }
+
+    public int seq() {
+        return S;
+    }
+
+    public int headDim() {
+        return D;
+    }
+
+    public float scale() {
+        return scale;
+    }
+
+    public boolean hasMask() {
+        return hasMask;
+    }
 }
 

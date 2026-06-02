@@ -37,7 +37,9 @@ public final class SummarizerPanel extends JPanel {
     private final JTextArea outputArea = new JTextArea(8, 60);
     private final JTextArea rawArea = new JTextArea(6, 60);
 
-    /** Whether the input area currently shows the grey placeholder text. */
+    /**
+     * Whether the input area currently shows the grey placeholder text.
+     */
     private boolean showingPlaceholder = true;
 
     public SummarizerPanel(WorkbenchModel model) {
@@ -46,10 +48,10 @@ public final class SummarizerPanel extends JPanel {
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         // ── Placeholder behaviour ────────────────────────────────────────
-        final Color normalFg    = inputArea.getForeground();
+        final Color normalFg = inputArea.getForeground();
         final Color placeholderFg = Color.GRAY;
-        final Font  normalFont  = inputArea.getFont();
-        final Font  placeholderFont = normalFont.deriveFont(Font.ITALIC);
+        final Font normalFont = inputArea.getFont();
+        final Font placeholderFont = normalFont.deriveFont(Font.ITALIC);
 
         inputArea.setForeground(placeholderFg);
         inputArea.setFont(placeholderFont);

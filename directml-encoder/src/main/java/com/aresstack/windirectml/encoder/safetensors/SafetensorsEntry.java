@@ -8,11 +8,11 @@ import java.util.Objects;
 /**
  * Metadaten eines einzelnen Tensors in einer {@code .safetensors}-Datei.
  *
- * @param name        Tensor-Name (Schlüssel im JSON-Header).
- * @param dataType    Datentyp gemäß Safetensors-Spezifikation.
- * @param shape       Form-Beschreibung.
- * @param dataOffset  Offset in Bytes ab Beginn des Daten-Bereichs.
- * @param byteLength  Länge in Bytes.
+ * @param name       Tensor-Name (Schlüssel im JSON-Header).
+ * @param dataType   Datentyp gemäß Safetensors-Spezifikation.
+ * @param shape      Form-Beschreibung.
+ * @param dataOffset Offset in Bytes ab Beginn des Daten-Bereichs.
+ * @param byteLength Länge in Bytes.
  */
 public record SafetensorsEntry(
         String name,
