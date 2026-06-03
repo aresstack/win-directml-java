@@ -69,6 +69,57 @@ public final class QwenComputeShaders {
             """;
 
     // ═══════════════════════════════════════════════════════════════════
+    // ARGMAX: find index of max element in a float array
+    // Root params: u0=Input (logits), u1=Output (uint), b0={vocabSize}
+    // One thread group: 256 threads cooperatively find max + index
+    // ═══════════════════════════════════════════════════════════════════
+    public static final String ARGMAX_HLSL = """
+            RWByteAddressBuffer Input  : register(u0);
+            RWByteAddressBuffer Output : register(u1);
+            cbuffer CB : register(b0) { uint vocabSize; };
+            
+            groupshared float gsMaxVal[256];
+            groupshared uint  gsMaxIdx[256];
+            
+            [numthreads(256, 1, 1)]
+            void CSMain(uint3 gtid : SV_GroupThreadID, uint3 dtid : SV_DispatchThreadID) {
+                uint t = gtid.x;
+                uint localVocab = (vocabSize + 255) / 256;
+                float myMax = -1e30f;
+                uint  myIdx = 0;
+                for (uint i = 0; i < localVocab; i++) {
+                    uint idx = t * localVocab + i;
+                    if (idx < vocabSize) {
+                        float v = asfloat(Input.Load(idx * 4));
+                        if (v > myMax) { myMax = v; myIdx = idx; }
+                    }
+                }
+                gsMaxVal[t] = myMax;
+                gsMaxIdx[t] = myIdx;
+                GroupMemoryBarrierWithGroupSync();
+                // Tree reduce
+                if (t < 128) { if (gsMaxVal[t+128] > gsMaxVal[t]) { gsMaxVal[t] = gsMaxVal[t+128]; gsMaxIdx[t] = gsMaxIdx[t+128]; } }
+                GroupMemoryBarrierWithGroupSync();
+                if (t <  64) { if (gsMaxVal[t+64] > gsMaxVal[t]) { gsMaxVal[t] = gsMaxVal[t+64]; gsMaxIdx[t] = gsMaxIdx[t+64]; } }
+                GroupMemoryBarrierWithGroupSync();
+                if (t <  32) { if (gsMaxVal[t+32] > gsMaxVal[t]) { gsMaxVal[t] = gsMaxVal[t+32]; gsMaxIdx[t] = gsMaxIdx[t+32]; } }
+                GroupMemoryBarrierWithGroupSync();
+                if (t <  16) { if (gsMaxVal[t+16] > gsMaxVal[t]) { gsMaxVal[t] = gsMaxVal[t+16]; gsMaxIdx[t] = gsMaxIdx[t+16]; } }
+                GroupMemoryBarrierWithGroupSync();
+                if (t <   8) { if (gsMaxVal[t+8] > gsMaxVal[t]) { gsMaxVal[t] = gsMaxVal[t+8]; gsMaxIdx[t] = gsMaxIdx[t+8]; } }
+                GroupMemoryBarrierWithGroupSync();
+                if (t <   4) { if (gsMaxVal[t+4] > gsMaxVal[t]) { gsMaxVal[t] = gsMaxVal[t+4]; gsMaxIdx[t] = gsMaxIdx[t+4]; } }
+                GroupMemoryBarrierWithGroupSync();
+                if (t <   2) { if (gsMaxVal[t+2] > gsMaxVal[t]) { gsMaxVal[t] = gsMaxVal[t+2]; gsMaxIdx[t] = gsMaxIdx[t+2]; } }
+                GroupMemoryBarrierWithGroupSync();
+                if (t == 0) {
+                    if (gsMaxVal[1] > gsMaxVal[0]) gsMaxIdx[0] = gsMaxIdx[1];
+                    Output.Store(0, gsMaxIdx[0]);
+                }
+            }
+            """;
+
+    // ═══════════════════════════════════════════════════════════════════
     // Factory
     // ═══════════════════════════════════════════════════════════════════
 
@@ -94,9 +145,13 @@ public final class QwenComputeShaders {
         GpuComputeKernel swigluKernel = new GpuComputeKernel(wb, cmdList,
                 SWIGLU_HLSL, "qwen_swiglu", 2, 1, GROUP_SIZE);
 
+        // Argmax: 2 UAV (Input, Output uint), 1 constant (vocabSize)
+        GpuComputeKernel argmaxKernel = new GpuComputeKernel(wb, cmdList,
+                ARGMAX_HLSL, "qwen_argmax", 2, 1, 256);
+
         log.info("Qwen compute shaders compiled in {} ms",
                 System.currentTimeMillis() - t0);
-        return new ComputeKernelSet(addKernel, rmsNormKernel, swigluKernel);
+        return new ComputeKernelSet(addKernel, rmsNormKernel, swigluKernel, argmaxKernel);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -109,13 +164,15 @@ public final class QwenComputeShaders {
     public record ComputeKernelSet(
             GpuComputeKernel add,
             GpuComputeKernel rmsNorm,
-            GpuComputeKernel swiglu
+            GpuComputeKernel swiglu,
+            GpuComputeKernel argmax
     ) implements AutoCloseable {
         @Override
         public void close() {
             add.close();
             rmsNorm.close();
             swiglu.close();
+            argmax.close();
         }
     }
 }

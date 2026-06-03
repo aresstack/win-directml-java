@@ -71,6 +71,10 @@ public final class QwenGpuPipeline implements AutoCloseable {
     // ── Per-layer GPU-resident inputNorm weight buffers (Opt-C chained decode) ─
     private MemorySegment[] inputNormWeightBufs;  // [numLayers]
 
+    // ── GPU-resident finalNorm weight buffer + logits buffer for device-resident decode ─
+    private MemorySegment finalNormWeightBuf;
+    private MemorySegment logitsBuf;
+
     // ── Per-layer fused QKV bias buffers [qSize + 2*kvSize] (Opt-B; null when no biases) ──
     private MemorySegment[] qkvBiasBufs;          // [numLayers] entry may be null
     private boolean anyLayerHasQkvBias = false;
@@ -91,6 +95,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
     private final int kvSize;
     private final int qHeadsPerKvHead;
     private final float ropeTheta;
+    private final int vocabSize;
     private boolean mlpBatchEnabled = false;
     private boolean weightsUploaded = false;
     private boolean chainedDecodeEnabled = false;
@@ -119,6 +124,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
         this.kvSize = config.kvSize();
         this.qHeadsPerKvHead = numHeads / kvHeads;
         this.ropeTheta = config.ropeTheta();
+        this.vocabSize = config.vocabSize();
 
         // Size the shared staging buffers:
         //   upload   = max(hidden, qkvFusedN)  — largest GEMM input
@@ -159,6 +165,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
             var arena = pipeline.getArena();
 
             residualBuf = D3D12Bindings.createDefaultBuffer(dev, hiddenBytes, arena);
+            logitsBuf = D3D12Bindings.createDefaultBuffer(dev, vocabBytes, arena);
 
             uavBarrier = pipeline.allocUavBarrier();
             barrierResidualCopyDestToUav = pipeline.allocTransitionBarrier(residualBuf,
@@ -349,6 +356,10 @@ public final class QwenGpuPipeline implements AutoCloseable {
             inputNormWeightBufs[l] = D3D12Bindings.createDefaultBuffer(dev, hiddenBytes2, arena);
             D3D12Bindings.uploadFloats(dev, queue, inputNormWeightBufs[l], w, arena);
         }
+
+        // Upload finalNorm weight for device-resident decode
+        finalNormWeightBuf = D3D12Bindings.createDefaultBuffer(dev, hiddenBytes2, arena);
+        D3D12Bindings.uploadFloats(dev, queue, finalNormWeightBuf, weights.finalNormWeight, arena);
 
         log.info("Qwen postNorm weights uploaded to GPU: {} layers, qkvBias layers={}/{} ({} KB each) in {} ms",
                 nLayers, uploadedBiasLayers, nLayers, qkvBiasBytes / 1024,
@@ -886,7 +897,15 @@ public final class QwenGpuPipeline implements AutoCloseable {
             }
         }
 
-        // Final readback
+        // ── Final RMSNorm (residualBuf → residualBuf) – keep residualBuf for readback
+        computeKernels.rmsNorm().recordDispatch(cl,
+                new long[]{D3D12Bindings.getGpuVirtualAddress(residualBuf),
+                        D3D12Bindings.getGpuVirtualAddress(finalNormWeightBuf),
+                        D3D12Bindings.getGpuVirtualAddress(residualBuf)},
+                new int[]{hidden, epsBits}, 1);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        // Readback final hidden state (after finalNorm) – caller does lm_head + argmax
         pipeline.recordBarrier(barrierResidualUavToCopySource);
         pipeline.recordReadback(residualBuf, 0, hiddenBytes);
         pipeline.submitAndWait();
