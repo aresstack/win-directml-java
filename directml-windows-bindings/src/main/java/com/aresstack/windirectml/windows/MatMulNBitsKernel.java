@@ -999,11 +999,11 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             HResult.check(hr, "Queue::Signal");
 
             // 5. Spin-wait for GPU completion (pre-cached fence MethodHandle)
-            long deadline = System.currentTimeMillis() + 10_000;
+            long deadline = System.currentTimeMillis() + 120_000;
             while ((long) mhFenceGetCompleted.invokeExact(execFence) < fenceValue) {
                 if (System.currentTimeMillis() > deadline) {
                     throw new WindowsNativeException(
-                            "GPU fence timeout after 10000 ms – the GPU may be hung");
+                            "GPU fence timeout after 120000 ms – the GPU may be hung");
                 }
                 Thread.onSpinWait();
             }
@@ -1333,11 +1333,11 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             HResult.check(hr, "Queue::Signal");
 
             // 5. Spin-wait for GPU completion.
-            long deadline = System.currentTimeMillis() + 30_000;
+            long deadline = System.currentTimeMillis() + 120_000;
             while ((long) mhFenceGetCompleted.invokeExact(execFence) < fenceValue) {
                 if (System.currentTimeMillis() > deadline) {
                     throw new WindowsNativeException(
-                            "GPU fence timeout after 30000 ms in matmulBatch(M=" + M + ")");
+                            "GPU fence timeout after 120000 ms in matmulBatch(M=" + M + ")");
                 }
                 Thread.onSpinWait();
             }

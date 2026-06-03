@@ -285,11 +285,11 @@ public final class GpuPipeline implements AutoCloseable {
             HResult.check(hr, "Pipeline::QueueSignal");
 
             // Spin-wait
-            long deadline = System.currentTimeMillis() + 10_000;
+            long deadline = System.currentTimeMillis() + 120_000;
             while ((long) mhFenceGetCompleted.invokeExact(fence) < fenceValue) {
                 if (System.currentTimeMillis() > deadline) {
                     throw new WindowsNativeException(
-                            "GPU pipeline fence timeout after 10000 ms – the GPU may be hung");
+                            "GPU pipeline fence timeout after 120000 ms – the GPU may be hung");
                 }
                 Thread.onSpinWait();
             }
