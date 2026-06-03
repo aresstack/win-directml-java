@@ -107,46 +107,30 @@ public final class DxgiBindings {
     }
 
     /**
-     * Create an IDXGIFactory1, then query for IDXGIFactory4 (needed for EnumWarpAdapter).
-     * Falls back to the original Factory1 if Factory4 is not available
-     * (pre-Windows 8.1 / pre-KB4019990).
+     * Create an IDXGIFactory4 by calling {@code CreateDXGIFactory1(&IID_IDXGIFactory4, ...)}.
+     * This works on Windows 8.1+ where the IDXGIFactory4 interface is available.
+     * For WARP backend, this MUST succeed – EnumWarpAdapter requires IDXGIFactory4.
      *
      * @param arena arena for allocations
-     * @return COM pointer to IDXGIFactory4 (or IDXGIFactory1 cast to it)
+     * @return COM pointer to IDXGIFactory4
+     * @throws WindowsNativeException if IDXGIFactory4 cannot be created
      */
     public static MemorySegment createFactory4(Arena arena) throws WindowsNativeException {
-        // Step 1: Create Factory1
-        MemorySegment factory1 = createFactory1(arena);
-
-        // Step 2: QueryInterface for Factory4
         try {
             MemorySegment riid = ComIID.allocateGuid(arena, ComIID.IID_IDXGIFactory4_BYTES);
             MemorySegment ppFactory = arena.allocate(ValueLayout.ADDRESS);
 
-            MethodHandle qi = vtableMethod(factory1, VTABLE_QUERY_INTERFACE,
-                    FunctionDescriptor.of(
-                            ValueLayout.JAVA_INT,   // HRESULT
-                            ValueLayout.ADDRESS,     // this
-                            ValueLayout.ADDRESS,     // REFIID riid
-                            ValueLayout.ADDRESS      // void **ppvObject
-                    ));
+            int hr = (int) getCreateDxgiFactory1Handle().invokeExact(riid, ppFactory);
+            HResult.check(hr, "CreateDXGIFactory1(IID_IDXGIFactory4)");
 
-            int hr = (int) qi.invokeExact(factory1, riid, ppFactory);
-            if (hr >= 0) {
-                // QI succeeded – release the Factory1 ref, return Factory4
-                release(factory1);
-                MemorySegment factory4 = ppFactory.get(ValueLayout.ADDRESS, 0)
-                        .reinterpret(Long.MAX_VALUE);
-                log.info("IDXGIFactory4 created via QI from Factory1: {}", factory4);
-                return factory4;
-            } else {
-                // QI failed (Factory4 not available, e.g. Win7) – use Factory1 directly
-                log.warn("IDXGIFactory4 not available (HRESULT=0x{}), falling back to Factory1 – WARP may not be available",
-                        Integer.toHexString(hr));
-                return factory1;
-            }
+            MemorySegment factory = ppFactory.get(ValueLayout.ADDRESS, 0)
+                    .reinterpret(Long.MAX_VALUE);
+            log.info("IDXGIFactory4 created: {}", factory);
+            return factory;
+        } catch (WindowsNativeException e) {
+            throw e;
         } catch (Throwable t) {
-            throw new WindowsNativeException("QueryInterface for IDXGIFactory4 failed", t);
+            throw new WindowsNativeException("CreateDXGIFactory1(IID_IDXGIFactory4) failed", t);
         }
     }
 
