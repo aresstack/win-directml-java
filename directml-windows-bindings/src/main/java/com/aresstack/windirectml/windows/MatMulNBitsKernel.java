@@ -1209,9 +1209,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         try {
             ensureBatchCapacity(M);
-        } catch (WindowsNativeException e) {
+        } catch (Throwable e) {
             log.warn("matmulBatch: failed to alloc batch scratch for [{},{}] M={} — disabling batching, falling back to per-row matvec ({})",
-                    N, K, M, e.getMessage());
+                    N, K, M, e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
             batchEnabled = false;
             float[] row = new float[K];
             float[] rowOut = new float[N];
