@@ -111,26 +111,50 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     // instances. The HLSL source is identical for every layer × projection, so
     // compiling it 96 times (one per kernel) wasted ~30–40 s of prefill on
     // Intel iGPU per the diagnosis log. Static + lazy init = compile once,
-    // reuse for every kernel. Per-kernel scratch buffers, barriers and UAV
-    // address tables stay instance-private (they bind to the kernel's own
-    // weight buffers + input/output buffers).
+    // reuse for every kernel.
     //
-    // The static shaders are intentionally leaked for the lifetime of the JVM
-    // (a few KB per PSO + RootSig) — ref-counting them across kernel close()
-    // would re-introduce the compile-on-first-use cost when a kernel is
-    // recreated for the next model load.
+    // Opt-A-3 (2026-06-03): the batch *scratch buffers* are NOW ALSO SHARED.
+    // During prefill, layers run sequentially — only ONE matmulBatch() executes
+    // at a time — so a single set of scratch buffers can be reused across all
+    // 96 kernel instances. This drops VRAM from 96×20MB → 1×20MB.
+    //
+    // The static shaders AND buffers are intentionally leaked for the lifetime of
+    // the JVM (a few KB per PSO + RootSig + buffers) — re-allocating would
+    // re-introduce the compile-and-upload cost when a kernel is recreated.
     private static volatile GpuComputeKernel sharedInt4BatchShader;
     private static volatile GpuComputeKernel sharedFp32BatchShader;
     private static final Object batchShaderLock = new Object();
-    private MemorySegment int4BatchInputBuf;        // GPU default [maxBatchM, K]
-    private MemorySegment int4BatchOutputBuf;       // GPU default [maxBatchM, N]
-    private MemorySegment int4BatchUploadBuf;       // upload heap [maxBatchM * K * 4 bytes]
-    private MemorySegment int4BatchReadbackBuf;     // readback heap [maxBatchM * N * 4 bytes]
-    private MemorySegment int4BatchMappedUpload;    // persistently mapped upload
-    private MemorySegment int4BatchMappedReadback;  // persistently mapped readback
-    private long[] int4BatchUavAddrs;               // INT4 mode: [X_batch, QW, Scales, ZP, Y_batch]
-    private long[] fp32BatchUavAddrs;               // FP32 mode: [X_batch, W, Y_batch]
-    private int batchCapacityM = 0;                 // currently-allocated capacity
+
+    // ── SHARED batch scratch buffers (static — one set for all kernel instances) ──
+    private static volatile MemorySegment sharedInt4BatchInputBuf;    // GPU default [maxBatchM, K]
+    private static volatile MemorySegment sharedInt4BatchOutputBuf;   // GPU default [maxBatchM, N]
+    private static volatile MemorySegment sharedInt4BatchUploadBuf;   // upload heap [maxBatchM * K * 4 bytes]
+    private static volatile MemorySegment sharedInt4BatchReadbackBuf; // readback heap [maxBatchM * N * 4 bytes]
+    private static volatile MemorySegment sharedInt4BatchMappedUpload;    // persistently mapped upload
+    private static volatile MemorySegment sharedInt4BatchMappedReadback; // persistently mapped readback
+    private static volatile long[] sharedInt4BatchUavAddrs;           // INT4 mode: [X_batch, QW, Scales, ZP, Y_batch]
+    private static volatile long[] sharedFp32BatchUavAddrs;           // FP32 mode: [X_batch, W, Y_batch]
+    private static volatile int sharedBatchCapacityM = 0;              // currently-allocated capacity (static)
+    private static final Object batchBufferLock = new Object();
+
+    // ── Static Arena for SHARED batch buffers (lives for JVM lifetime) ────────
+    // MUST be separate from per-instance 'arena' — otherwise arena.close() on first
+    // kernel.close() invalidates ALL static buffers while other instances still use them.
+    private static volatile Arena sharedBatchArena = null;
+    private static final Object sharedArenaLock = new Object();
+
+    // ── Per-instance references to the shared buffers (for clean code) ─────────────
+    // These are NOT allocated per-instance — they just point to the shared buffers.
+    // Kept as instance fields so existing code (int4BatchInputBuf, etc.) still works.
+    private MemorySegment int4BatchInputBuf;        // → sharedInt4BatchInputBuf
+    private MemorySegment int4BatchOutputBuf;       // → sharedInt4BatchOutputBuf
+    private MemorySegment int4BatchUploadBuf;       // → sharedInt4BatchUploadBuf
+    private MemorySegment int4BatchReadbackBuf;     // → sharedInt4BatchReadbackBuf
+    private MemorySegment int4BatchMappedUpload;    // → sharedInt4BatchMappedUpload
+    private MemorySegment int4BatchMappedReadback;  // → sharedInt4BatchMappedReadback
+    private long[] int4BatchUavAddrs;               // → sharedInt4BatchUavAddrs
+    private long[] fp32BatchUavAddrs;               // → sharedFp32BatchUavAddrs
+    private int batchCapacityM = 0;                 // → sharedBatchCapacityM
     private MemorySegment barrierBatchInputToUAV;
     private MemorySegment barrierBatchOutputToCS;
     private MemorySegment barrierBatchInputToCommon;
@@ -1295,99 +1319,154 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      * {@code requiredM} rows. Idempotent: calls with {@code requiredM <= batchCapacityM}
      * return immediately.
      *
+     * <p>SHARED BUFFER OPTIMISATION (Opt-A-3, 2026-06-03):
+     * The scratch buffers are now {@code static} — one set for ALL kernel instances.
+     * During prefill, layers run sequentially (one matmulBatch() at a time), so
+     * a single set of buffers can be safely reused. This drops VRAM from
+     * 96×20MB → 1×20MB, fixing Intel iGPU crashes.
+     *
      * <p>On first call also compiles the batched HLSL shader.
      */
     private void ensureBatchCapacity(int requiredM) throws WindowsNativeException {
-        if (requiredM <= batchCapacityM) return;
+        if (requiredM <= sharedBatchCapacityM) return;
         if (requiredM > MAX_BATCH_M) {
             throw new IllegalArgumentException(
                     "requiredM=" + requiredM + " exceeds MAX_BATCH_M=" + MAX_BATCH_M);
         }
         var dev = wb.getD3d12Device();
 
-        // Release previous (smaller) buffers if any; the Arena owns the metadata so
-        // we only need to release the GPU resources themselves.
-        if (int4BatchInputBuf != null) {
-            D3D12Bindings.unmapResource(int4BatchUploadBuf);
-            D3D12Bindings.unmapResource(int4BatchReadbackBuf);
-            DxgiBindings.release(int4BatchInputBuf);
-            DxgiBindings.release(int4BatchOutputBuf);
-            DxgiBindings.release(int4BatchUploadBuf);
-            DxgiBindings.release(int4BatchReadbackBuf);
-        }
+        // ── STATIC BUFFER ALLOCATION (synchronised) ─────────────────────
+        synchronized (batchBufferLock) {
+            // Double-check under lock
+            if (requiredM <= sharedBatchCapacityM) return;
 
-        long inputBytes = (long) requiredM * K * Float.BYTES;
-        long outputBytes = (long) requiredM * N * Float.BYTES;
+            // Release previous (smaller) buffers if any
+            if (sharedInt4BatchInputBuf != null) {
+                D3D12Bindings.unmapResource(sharedInt4BatchUploadBuf);
+                D3D12Bindings.unmapResource(sharedInt4BatchReadbackBuf);
+                DxgiBindings.release(sharedInt4BatchInputBuf);
+                DxgiBindings.release(sharedInt4BatchOutputBuf);
+                DxgiBindings.release(sharedInt4BatchUploadBuf);
+                DxgiBindings.release(sharedInt4BatchReadbackBuf);
+            }
 
-        int4BatchInputBuf = D3D12Bindings.createDefaultBuffer(dev, inputBytes, arena);
-        int4BatchOutputBuf = D3D12Bindings.createDefaultBuffer(dev, outputBytes, arena);
-        int4BatchUploadBuf = D3D12Bindings.createUploadBuffer(dev, inputBytes, arena);
-        int4BatchReadbackBuf = D3D12Bindings.createReadbackBuffer(dev, outputBytes, arena);
-        int4BatchMappedUpload = D3D12Bindings.mapResource(int4BatchUploadBuf, arena);
-        int4BatchMappedReadback = D3D12Bindings.mapResource(int4BatchReadbackBuf, arena);
+            long inputBytes = (long) requiredM * K * Float.BYTES;
+            long outputBytes = (long) requiredM * N * Float.BYTES;
 
-        // Compile the batched shader on first call (mode-dependent: INT4 vs FP32).
-        // Opt-A-2 v2: shaders are SHARED across all kernel instances — compiled
-        // once per JVM, reused for every layer × projection. This eliminates
-        // ~30–40 s of redundant DXC compile overhead on Intel iGPU prefill.
-        if (useInt4Gpu) {
-            if (sharedInt4BatchShader == null) {
-                synchronized (batchShaderLock) {
-                    if (sharedInt4BatchShader == null) {
-                        sharedInt4BatchShader = new GpuComputeKernel(wb, execCmdList,
-                                INT4_MATMUL_BATCH_TILED_HLSL, "int4_matmul_batch_tiled",
-                                5,   // UAVs: X, QW, Scales, ZP, Y
-                                5,   // constants: N, K, blockSize, M, nTiles
-                                256);
+            // ── STATIC ARENA: allocate ONCE, reuse for all kernel instances ─────
+            if (sharedBatchArena == null) {
+                synchronized (sharedArenaLock) {
+                    if (sharedBatchArena == null) {
+                        sharedBatchArena = Arena.ofShared();
+                        // Register shutdown hook to clean up static resources on JVM exit
+                        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                            log.info("Shutdown hook: releasing static batch resources");
+                            releaseStaticBatchResources();
+                        }));
                     }
                 }
             }
-            int4BatchUavAddrs = new long[]{
-                    D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
-                    D3D12Bindings.getGpuVirtualAddress(int4WeightBuf),
-                    D3D12Bindings.getGpuVirtualAddress(int4ScalesBuf),
-                    D3D12Bindings.getGpuVirtualAddress(int4ZpBuf),
-                    D3D12Bindings.getGpuVirtualAddress(int4BatchOutputBuf)
-            };
-        } else {
-            // FP32 / pre-dequantized weight path (used by qkvFused, gateUpFused).
-            // Opt-A-2: tiled shader, 4 root constants (N, K, M, nTiles), groupSize=256.
-            if (sharedFp32BatchShader == null) {
-                synchronized (batchShaderLock) {
-                    if (sharedFp32BatchShader == null) {
-                        sharedFp32BatchShader = new GpuComputeKernel(wb, execCmdList,
-                                FP32_MATMUL_BATCH_HLSL, "fp32_matmul_batch_tiled",
-                                3,    // UAVs: X, W, Y
-                                4,    // constants: N, K, M, nTiles
-                                256); // 16×16 threads per output tile
+
+            // Allocate SHARED scratch buffers (static — one set for all instances)
+            // NOTE: Uses sharedBatchArena, NOT instance 'arena'!
+            sharedInt4BatchInputBuf = D3D12Bindings.createDefaultBuffer(dev, inputBytes, sharedBatchArena);
+            sharedInt4BatchOutputBuf = D3D12Bindings.createDefaultBuffer(dev, outputBytes, sharedBatchArena);
+            sharedInt4BatchUploadBuf = D3D12Bindings.createUploadBuffer(dev, inputBytes, sharedBatchArena);
+            sharedInt4BatchReadbackBuf = D3D12Bindings.createReadbackBuffer(dev, outputBytes, sharedBatchArena);
+            sharedInt4BatchMappedUpload = D3D12Bindings.mapResource(sharedInt4BatchUploadBuf, sharedBatchArena);
+            sharedInt4BatchMappedReadback = D3D12Bindings.mapResource(sharedInt4BatchReadbackBuf, sharedBatchArena);
+
+            // ── SHARED shader compilation (mode-dependent: INT4 vs FP32) ───
+            if (useInt4Gpu) {
+                if (sharedInt4BatchShader == null) {
+                    synchronized (batchShaderLock) {
+                        if (sharedInt4BatchShader == null) {
+                            // Note: uses a TEMPORARY command list for compilation
+                            // (shared shader outlives any single kernel instance)
+                            var tempAlloc = D3D12Bindings.createCommandAllocator(dev,
+                                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, arena);
+                            var tempCL = D3D12Bindings.createCommandList(dev,
+                                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, tempAlloc, arena);
+                            D3D12Bindings.closeCommandList(tempCL);
+
+                            sharedInt4BatchShader = new GpuComputeKernel(wb, tempCL,
+                                    INT4_MATMUL_BATCH_TILED_HLSL, "int4_matmul_batch_tiled",
+                                    5,   // UAVs: X, QW, Scales, ZP, Y
+                                    5,   // constants: N, K, blockSize, M, nTiles
+                                    256);
+
+                            DxgiBindings.release(tempCL);
+                            DxgiBindings.release(tempAlloc);
+                        }
                     }
                 }
+                sharedInt4BatchUavAddrs = new long[]{
+                        D3D12Bindings.getGpuVirtualAddress(sharedInt4BatchInputBuf),
+                        D3D12Bindings.getGpuVirtualAddress(int4WeightBuf),
+                        D3D12Bindings.getGpuVirtualAddress(int4ScalesBuf),
+                        D3D12Bindings.getGpuVirtualAddress(int4ZpBuf),
+                        D3D12Bindings.getGpuVirtualAddress(sharedInt4BatchOutputBuf)
+                };
+            } else {
+                // FP32 / pre-dequantized weight path (used by qkvFused, gateUpFused).
+                if (sharedFp32BatchShader == null) {
+                    synchronized (batchShaderLock) {
+                        if (sharedFp32BatchShader == null) {
+                            var tempAlloc = D3D12Bindings.createCommandAllocator(dev,
+                                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, arena);
+                            var tempCL = D3D12Bindings.createCommandList(dev,
+                                    D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, tempAlloc, arena);
+                            D3D12Bindings.closeCommandList(tempCL);
+
+                            sharedFp32BatchShader = new GpuComputeKernel(wb, tempCL,
+                                    FP32_MATMUL_BATCH_HLSL, "fp32_matmul_batch_tiled",
+                                    3,    // UAVs: X, W, Y
+                                    4,    // constants: N, K, M, nTiles
+                                    256); // 16×16 threads per output tile
+
+                            DxgiBindings.release(tempCL);
+                            DxgiBindings.release(tempAlloc);
+                        }
+                    }
+                }
+                sharedFp32BatchUavAddrs = new long[]{
+                        D3D12Bindings.getGpuVirtualAddress(sharedInt4BatchInputBuf),
+                        D3D12Bindings.getGpuVirtualAddress(weightBuf),
+                        D3D12Bindings.getGpuVirtualAddress(sharedInt4BatchOutputBuf)
+                };
             }
-            fp32BatchUavAddrs = new long[]{
-                    D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
-                    D3D12Bindings.getGpuVirtualAddress(weightBuf),
-                    D3D12Bindings.getGpuVirtualAddress(int4BatchOutputBuf)
-            };
+
+            // ── Per-instance barrier structs (bind to shared buffers) ─────────
+            // Barriers are instance-specific because they reference the SHARED buffers.
+            barrierBatchInputToUAV = allocTransitionBarrier(sharedInt4BatchInputBuf,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            barrierBatchOutputToCS = allocTransitionBarrier(sharedInt4BatchOutputBuf,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE);
+            barrierBatchInputToCommon = allocTransitionBarrier(sharedInt4BatchInputBuf,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
+            barrierBatchOutputToCommon = allocTransitionBarrier(sharedInt4BatchOutputBuf,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
+
+            // ── Update INSTANCE references to point to SHARED buffers ─────────
+            this.int4BatchInputBuf = sharedInt4BatchInputBuf;
+            this.int4BatchOutputBuf = sharedInt4BatchOutputBuf;
+            this.int4BatchUploadBuf = sharedInt4BatchUploadBuf;
+            this.int4BatchReadbackBuf = sharedInt4BatchReadbackBuf;
+            this.int4BatchMappedUpload = sharedInt4BatchMappedUpload;
+            this.int4BatchMappedReadback = sharedInt4BatchMappedReadback;
+            this.int4BatchUavAddrs = sharedInt4BatchUavAddrs;
+            this.fp32BatchUavAddrs = sharedFp32BatchUavAddrs;
+            this.batchCapacityM = sharedBatchCapacityM;
+
+            sharedBatchCapacityM = requiredM;
+            long totalKb = (inputBytes + outputBytes) * 2 / 1024;
+            log.info("MatMulNBitsKernel[N={}, K={}]: SHARED batch capacity grown to M={} ({} KB scratch, static)",
+                    N, K, requiredM, totalKb);
         }
-
-        // Re-allocate barriers against the new resources.
-        barrierBatchInputToUAV = allocTransitionBarrier(int4BatchInputBuf,
-                D3D12Bindings.D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        barrierBatchOutputToCS = allocTransitionBarrier(int4BatchOutputBuf,
-                D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE);
-        barrierBatchInputToCommon = allocTransitionBarrier(int4BatchInputBuf,
-                D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
-        barrierBatchOutputToCommon = allocTransitionBarrier(int4BatchOutputBuf,
-                D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE,
-                D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
-
-        batchCapacityM = requiredM;
-        long totalKb = (inputBytes + outputBytes) * 2 / 1024;
-        log.info("MatMulNBitsKernel[N={}, K={}]: batch capacity grown to M={} ({} KB scratch)",
-                N, K, requiredM, totalKb);
     }
 
     // ── GPU buffer accessors (for pipeline-batched operations) ─────────
@@ -1526,20 +1605,30 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         // Release INT4 GPU mode resources (if active)
         if (int4Shader != null) int4Shader.close();
-        // NOTE: sharedInt4BatchShader / sharedFp32BatchShader are static and
-        // intentionally NOT closed here — they live for the JVM lifetime so
-        // subsequent QwenInferenceEngine instances reuse them without paying
-        // the ~30 s DXC compile cost again (Opt-A-2 v2 fix, 2026-05-29).
+
+        // ── STATIC RESOURCES: intentionally NOT released here ─────────────
+        // SHARED shaders + SHARED batch scratch buffers live for the JVM lifetime.
+        // Subsequent model loads reuse them without paying the ~30 s DXC cost.
+        // (Opt-A-2 v2 fix, 2026-05-29; Opt-A-3 shared buffers, 2026-06-03).
+        //
+        // NOTE: We do NOT close sharedInt4BatchShader, sharedFp32BatchShader,
+        //       sharedInt4BatchInputBuf, sharedInt4BatchOutputBuf, etc. here.
+        //       They are released only when the JVM exits (or via a static shutdown hook).
+        
         if (int4WeightBuf != null) DxgiBindings.release(int4WeightBuf);
         if (int4ScalesBuf != null) DxgiBindings.release(int4ScalesBuf);
         if (int4ZpBuf != null) DxgiBindings.release(int4ZpBuf);
-        // Release batched scratch buffers (lazily allocated; may be null)
-        if (int4BatchUploadBuf != null) D3D12Bindings.unmapResource(int4BatchUploadBuf);
-        if (int4BatchReadbackBuf != null) D3D12Bindings.unmapResource(int4BatchReadbackBuf);
-        if (int4BatchInputBuf != null) DxgiBindings.release(int4BatchInputBuf);
-        if (int4BatchOutputBuf != null) DxgiBindings.release(int4BatchOutputBuf);
-        if (int4BatchUploadBuf != null) DxgiBindings.release(int4BatchUploadBuf);
-        if (int4BatchReadbackBuf != null) DxgiBindings.release(int4BatchReadbackBuf);
+
+        // ── Per-instance fields pointing to shared buffers: NULL them only ─────
+        // (The actual GPU resources are static — NOT released here.)
+        this.int4BatchInputBuf = null;
+        this.int4BatchOutputBuf = null;
+        this.int4BatchUploadBuf = null;
+        this.int4BatchReadbackBuf = null;
+        this.int4BatchMappedUpload = null;
+        this.int4BatchMappedReadback = null;
+        this.int4BatchUavAddrs = null;
+        this.fp32BatchUavAddrs = null;
 
         // Release pre-allocated execution infrastructure (reverse creation order)
         if (execBindingTable != null) DxgiBindings.release(execBindingTable);
@@ -1561,7 +1650,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         if (weightBuf != null) DxgiBindings.release(weightBuf);
 
         arena.close();
-        log.debug("MatMulNBitsKernel closed [{}, {}]", N, K);
+        log.debug("MatMulNBitsKernel closed [{}, {}] — shared buffers retained for JVM lifetime", N, K);
     }
 
     /**
