@@ -107,6 +107,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private GpuComputeKernel int4Shader;   // compiled HLSL INT4 MatVec kernel
     private final boolean useWarpParallelInt4Matvec;
     private static final int WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE = 128;
+    private static final int WARP_PARALLEL_INT4_MATVEC_ROWS = 4;
     private long[] int4UavAddrs;           // pre-cached GPU VAs: [X, QW, Scales, ZP, Y]
     private int[] int4Constants;           // pre-cached constants: [N, K, blockSize]
 
@@ -242,11 +243,10 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             """;
 
     // ── WARP-optimised INT4 matrix-vector product ───────────────────────────
-    // One thread group computes one output row. The 128 lanes cooperatively
-    // reduce the K dimension, which avoids the very slow WARP pattern where one
-    // logical shader thread serially walks the full row. This is intended for
-    // decode (M=1) on the D3D12 WARP software adapter; hardware GPUs can keep
-    // the simpler one-thread-per-row shader by default.
+    // One thread group computes four adjacent output rows. The 128 lanes
+    // cooperatively reduce the K dimension and reuse each X element for all
+    // four rows. This reduces WARP scheduling overhead by 4x compared with the
+    // one-row-per-group kernel and improves cache locality on CPU execution.
     private static final String INT4_MATVEC_WARP_PARALLEL_HLSL = """
             RWByteAddressBuffer X      : register(u0);
             RWByteAddressBuffer QW     : register(u1);
@@ -256,61 +256,122 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             cbuffer CB : register(b0) { uint N; uint K; uint blockSz; };
             
             #define THREADS 128
-            groupshared float partial[THREADS];
-            groupshared float blockScale;
-            groupshared float blockZeroPoint;
+            #define ROWS 4
+            groupshared float partial[THREADS * ROWS];
+            groupshared float blockScale[ROWS];
+            groupshared float blockZeroPoint[ROWS];
+            
+            float loadZeroPoint(uint scIdx) {
+                uint zpByteIdx = scIdx / 2;
+                uint zpDword = ZP.Load((zpByteIdx / 4) * 4);
+                uint zpByte = (zpDword >> ((zpByteIdx % 4) * 8)) & 0xFF;
+                return (scIdx % 2u == 0u) ? float(zpByte & 0xFu) : float(zpByte >> 4u);
+            }
+            
+            uint loadPackedWeightByte(uint byteAddress) {
+                uint dword = QW.Load((byteAddress / 4) * 4);
+                return (dword >> ((byteAddress % 4) * 8)) & 0xFF;
+            }
             
             [numthreads(THREADS, 1, 1)]
             void CSMain(uint3 gid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
-                uint n = gid.x;
                 uint lane = ltid.x;
-                if (n >= N) return;
-            
+                uint rowBase = gid.x * ROWS;
                 uint blocksPerRow = K / blockSz;
                 uint bytesPerBlock = blockSz / 2;
-                float sum = 0.0;
+            
+                float sum0 = 0.0;
+                float sum1 = 0.0;
+                float sum2 = 0.0;
+                float sum3 = 0.0;
             
                 for (uint blk = 0; blk < blocksPerRow; blk++) {
-                    uint scIdx = n * blocksPerRow + blk;
-                    if (lane == 0) {
-                        blockScale = asfloat(Scales.Load(scIdx * 4));
-            
-                        uint zpByteIdx = scIdx / 2;
-                        uint zpDword = ZP.Load((zpByteIdx / 4) * 4);
-                        uint zpByte = (zpDword >> ((zpByteIdx % 4) * 8)) & 0xFF;
-                        blockZeroPoint = (scIdx % 2u == 0u)
-                                ? float(zpByte & 0xFu)
-                                : float(zpByte >> 4u);
+                    if (lane < ROWS) {
+                        uint n = rowBase + lane;
+                        if (n < N) {
+                            uint scIdx = n * blocksPerRow + blk;
+                            blockScale[lane] = asfloat(Scales.Load(scIdx * 4));
+                            blockZeroPoint[lane] = loadZeroPoint(scIdx);
+                        } else {
+                            blockScale[lane] = 0.0;
+                            blockZeroPoint[lane] = 0.0;
+                        }
                     }
                     GroupMemoryBarrierWithGroupSync();
             
                     if (lane < bytesPerBlock) {
-                        uint qByteBase = n * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
-                        uint qByteAddr = qByteBase + lane;
-                        uint qDword = QW.Load((qByteAddr / 4) * 4);
-                        uint qByte = (qDword >> ((qByteAddr % 4) * 8)) & 0xFF;
-            
                         uint kOff = blk * blockSz + lane * 2;
-                        float scale = blockScale;
-                        float zp = blockZeroPoint;
-                        sum += (float(qByte & 0xFu) - zp) * scale * asfloat(X.Load((kOff + 0) * 4));
-                        sum += (float(qByte >> 4u) - zp) * scale * asfloat(X.Load((kOff + 1) * 4));
+                        float x0 = asfloat(X.Load((kOff + 0) * 4));
+                        float x1 = asfloat(X.Load((kOff + 1) * 4));
+            
+                        uint n0 = rowBase + 0;
+                        if (n0 < N) {
+                            uint qByteBase0 = n0 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte0 = loadPackedWeightByte(qByteBase0 + lane);
+                            float scale0 = blockScale[0];
+                            float zp0 = blockZeroPoint[0];
+                            sum0 += (float(qByte0 & 0xFu) - zp0) * scale0 * x0;
+                            sum0 += (float(qByte0 >> 4u) - zp0) * scale0 * x1;
+                        }
+            
+                        uint n1 = rowBase + 1;
+                        if (n1 < N) {
+                            uint qByteBase1 = n1 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte1 = loadPackedWeightByte(qByteBase1 + lane);
+                            float scale1 = blockScale[1];
+                            float zp1 = blockZeroPoint[1];
+                            sum1 += (float(qByte1 & 0xFu) - zp1) * scale1 * x0;
+                            sum1 += (float(qByte1 >> 4u) - zp1) * scale1 * x1;
+                        }
+            
+                        uint n2 = rowBase + 2;
+                        if (n2 < N) {
+                            uint qByteBase2 = n2 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte2 = loadPackedWeightByte(qByteBase2 + lane);
+                            float scale2 = blockScale[2];
+                            float zp2 = blockZeroPoint[2];
+                            sum2 += (float(qByte2 & 0xFu) - zp2) * scale2 * x0;
+                            sum2 += (float(qByte2 >> 4u) - zp2) * scale2 * x1;
+                        }
+            
+                        uint n3 = rowBase + 3;
+                        if (n3 < N) {
+                            uint qByteBase3 = n3 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte3 = loadPackedWeightByte(qByteBase3 + lane);
+                            float scale3 = blockScale[3];
+                            float zp3 = blockZeroPoint[3];
+                            sum3 += (float(qByte3 & 0xFu) - zp3) * scale3 * x0;
+                            sum3 += (float(qByte3 >> 4u) - zp3) * scale3 * x1;
+                        }
                     }
                     GroupMemoryBarrierWithGroupSync();
                 }
             
-                partial[lane] = sum;
+                partial[lane + THREADS * 0] = sum0;
+                partial[lane + THREADS * 1] = sum1;
+                partial[lane + THREADS * 2] = sum2;
+                partial[lane + THREADS * 3] = sum3;
                 GroupMemoryBarrierWithGroupSync();
             
                 for (uint stride = THREADS / 2; stride > 0; stride >>= 1) {
                     if (lane < stride) {
-                        partial[lane] += partial[lane + stride];
+                        partial[lane + THREADS * 0] += partial[lane + stride + THREADS * 0];
+                        partial[lane + THREADS * 1] += partial[lane + stride + THREADS * 1];
+                        partial[lane + THREADS * 2] += partial[lane + stride + THREADS * 2];
+                        partial[lane + THREADS * 3] += partial[lane + stride + THREADS * 3];
                     }
                     GroupMemoryBarrierWithGroupSync();
                 }
             
                 if (lane == 0) {
-                    Y.Store(n * 4, asuint(partial[0]));
+                    uint n0 = rowBase + 0;
+                    uint n1 = rowBase + 1;
+                    uint n2 = rowBase + 2;
+                    uint n3 = rowBase + 3;
+                    if (n0 < N) Y.Store(n0 * 4, asuint(partial[THREADS * 0]));
+                    if (n1 < N) Y.Store(n1 * 4, asuint(partial[THREADS * 1]));
+                    if (n2 < N) Y.Store(n2 * 4, asuint(partial[THREADS * 2]));
+                    if (n3 < N) Y.Store(n3 * 4, asuint(partial[THREADS * 3]));
                 }
             }
             """;
@@ -609,7 +670,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         prepareExecInfraInt4(dev, inputBytes, outputBytes);
 
         // Compile INT4 MatVec shader (on the shared execCmdList for MH caching).
-        // WARP benefits from parallelising each output row over the K dimension;
+        // WARP benefits from reducing multiple output rows in one thread group;
         // hardware GPUs keep the simpler one-thread-per-row shader unless explicitly
         // forced through the WARP backend.
         int4Shader = new GpuComputeKernel(wb, execCmdList,
@@ -634,7 +695,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 N, K, qBytes + scaleBytes + zpBytes,
                 qBytes + scaleBytes + zpBytes,
                 (long) N * K * 4,
-                useWarpParallelInt4Matvec ? "warp-parallel" : "row-serial");
+                useWarpParallelInt4Matvec ? "warp-parallel-rows4" : "row-serial");
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -725,7 +786,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         if (!useWarpParallelInt4Matvec) {
             return N;
         }
-        return Math.multiplyExact(N, WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE);
+
+        int rowGroups = (N + WARP_PARALLEL_INT4_MATVEC_ROWS - 1) / WARP_PARALLEL_INT4_MATVEC_ROWS;
+        return Math.multiplyExact(rowGroups, WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE);
     }
 
     // ── INT4-only execution infrastructure (no DML, no descriptor heap) ─────
