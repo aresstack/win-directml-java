@@ -162,12 +162,19 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
      * Construct an encoder that owns its own {@link DirectMlContextImpl}.
      */
     public static DirectMlMiniLmEncoder load(Path modelDir) throws EmbeddingException {
+        return load(modelDir, "directml");
+    }
+
+    /**
+     * Construct an encoder that owns its own {@link DirectMlContextImpl}.
+     */
+    public static DirectMlMiniLmEncoder load(Path modelDir, String nativeBackend) throws EmbeddingException {
         DirectMlContextImpl ctx = null;
         try {
             if (!WindowsBindings.isSupported()) {
                 throw new EmbeddingException("DirectML requires Windows + D3D12 on this host");
             }
-            ctx = new DirectMlContextImpl("directml");
+            ctx = new DirectMlContextImpl(normalizeNativeBackend(nativeBackend));
             ctx.initialize();
             if (!ctx.isReady() || !ctx.bindings().hasDirectMl()) {
                 throw new EmbeddingException("No DirectML device available on this adapter");
@@ -197,6 +204,13 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
             }
             throw new EmbeddingException("Failed to load DirectMlMiniLmEncoder from " + modelDir, e);
         }
+    }
+
+    private static String normalizeNativeBackend(String nativeBackend) {
+        if (nativeBackend == null || nativeBackend.trim().isEmpty()) {
+            return "directml";
+        }
+        return nativeBackend.trim();
     }
 
     public DirectMlMiniLmEncoder(DirectMlContextImpl ctx,

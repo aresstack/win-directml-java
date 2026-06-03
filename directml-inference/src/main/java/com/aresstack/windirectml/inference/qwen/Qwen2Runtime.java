@@ -525,11 +525,7 @@ public final class Qwen2Runtime {
             gpuPipeline.decodeLayersChained(decBuf, decBuf, pos);
             profProjNs += System.nanoTime() - t0;
 
-            // Final norm + lm head still on CPU (or GPU via separate submission)
-            t0 = System.nanoTime();
-            rmsNorm(decBuf, weights.finalNormWeight, config.rmsNormEps());
-            profNormNs += System.nanoTime() - t0;
-
+            // decodeLayersChained already applies the final RMSNorm on the device.
             t0 = System.nanoTime();
             if (gpuPipeline.hasLmHead()) {
                 gpuPipeline.lmHead(decBuf, decLogits);

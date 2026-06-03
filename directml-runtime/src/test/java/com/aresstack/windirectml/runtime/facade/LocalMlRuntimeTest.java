@@ -93,6 +93,8 @@ class LocalMlRuntimeTest {
         assertEquals(Backend.CPU, Backend.parse("cpu"));
         assertEquals(Backend.DIRECTML, Backend.parse("directml"));
         assertEquals(Backend.DIRECTML, Backend.parse("dml"));
+        assertEquals(Backend.HYBRID, Backend.parse("hybrid"));
+        assertEquals(Backend.WARP, Backend.parse("warp"));
         assertThrows(IllegalArgumentException.class, () -> Backend.parse("unknown"));
     }
 

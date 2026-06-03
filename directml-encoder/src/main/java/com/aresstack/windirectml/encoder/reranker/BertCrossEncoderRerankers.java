@@ -54,11 +54,18 @@ public final class BertCrossEncoderRerankers {
      * DirectML loader. Owns the context so a single {@code close()} cleans up everything.
      */
     public static DirectMlReranker loadDirectMl(Path modelDir) throws EmbeddingException {
+        return loadDirectMl(modelDir, "directml");
+    }
+
+    /**
+     * DirectML loader with an explicit native backend.
+     */
+    public static DirectMlReranker loadDirectMl(Path modelDir, String nativeBackend) throws EmbeddingException {
         verifyDir(modelDir);
         BertEncoderConfig cfg = readConfig(modelDir);
         DirectMlContextImpl ctx = null;
         try {
-            ctx = new DirectMlContextImpl("directml-reranker");
+            ctx = new DirectMlContextImpl(normalizeNativeBackend(nativeBackend));
             ctx.initialize();
             if (!ctx.isReady() || !ctx.bindings().hasDirectMl()) {
                 throw new EmbeddingException("No DirectML device available on this adapter");
@@ -86,6 +93,13 @@ public final class BertCrossEncoderRerankers {
             }
             throw new EmbeddingException("Failed to load DirectMlReranker from " + modelDir, e);
         }
+    }
+
+    private static String normalizeNativeBackend(String nativeBackend) {
+        if (nativeBackend == null || nativeBackend.trim().isEmpty()) {
+            return "directml";
+        }
+        return nativeBackend.trim();
     }
 
     private static BertEncoderConfig readConfig(Path modelDir) throws EmbeddingException {

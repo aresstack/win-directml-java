@@ -59,7 +59,7 @@ public final class DirectMlContextImpl implements DirectMlContext {
     /**
      * Erzeugt einen Context, der seine eigene {@link WindowsBindings} initialisiert.
      *
-     * @param backend "directml", "cpu" oder "auto" (siehe {@link WindowsBindings#init(String)})
+     * @param backend "directml", "warp", "cpu" or "auto" (see {@link WindowsBindings#init(String)})
      */
     public DirectMlContextImpl(String backend) {
         this.bindings = new WindowsBindings();

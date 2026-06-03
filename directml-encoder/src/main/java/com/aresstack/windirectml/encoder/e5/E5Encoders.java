@@ -53,7 +53,15 @@ public final class E5Encoders {
      */
     public static DirectMlBertEncoder loadDirectMl(Path modelDir, E5Variant variant)
             throws EmbeddingException {
-        return loadDirectMl(modelDir, resolveConfig(modelDir, variant));
+        return loadDirectMl(modelDir, variant, "directml");
+    }
+
+    /**
+     * DirectML loader for a specific {@link E5Variant} and native backend.
+     */
+    public static DirectMlBertEncoder loadDirectMl(Path modelDir, E5Variant variant, String nativeBackend)
+            throws EmbeddingException {
+        return loadDirectMl(modelDir, resolveConfig(modelDir, variant), nativeBackend);
     }
 
     /**
@@ -78,10 +86,18 @@ public final class E5Encoders {
      */
     public static DirectMlBertEncoder loadDirectMl(Path modelDir, BertEncoderConfig cfg)
             throws EmbeddingException {
+        return loadDirectMl(modelDir, cfg, "directml");
+    }
+
+    /**
+     * DirectML loader for a raw {@link BertEncoderConfig} and native backend.
+     */
+    public static DirectMlBertEncoder loadDirectMl(Path modelDir, BertEncoderConfig cfg, String nativeBackend)
+            throws EmbeddingException {
         verifyDir(modelDir);
         DirectMlContextImpl ctx = null;
         try {
-            ctx = new DirectMlContextImpl("directml-e5");
+            ctx = new DirectMlContextImpl(normalizeNativeBackend(nativeBackend));
             ctx.initialize();
             if (!ctx.isReady() || !ctx.bindings().hasDirectMl()) {
                 throw new EmbeddingException("No DirectML device available on this adapter");
@@ -113,6 +129,13 @@ public final class E5Encoders {
     }
 
     /**
+     * Default loader with an explicit native backend.
+     */
+    public static DirectMlBertEncoder loadDirectMl(Path modelDir, String nativeBackend) throws EmbeddingException {
+        return loadDirectMl(modelDir, E5Variant.BASE_STS_EN_DE, nativeBackend);
+    }
+
+    /**
      * CPU equivalent of {@link #loadDirectMl(Path)}.
      */
     public static CpuBertEncoder loadCpu(Path modelDir) throws EmbeddingException {
@@ -132,6 +155,13 @@ public final class E5Encoders {
      * E5 weights "blindly" against a hard-coded variant config because
      * that is exactly how silent path/config mismatches sneak in.
      */
+    private static String normalizeNativeBackend(String nativeBackend) {
+        if (nativeBackend == null || nativeBackend.trim().isEmpty()) {
+            return "directml";
+        }
+        return nativeBackend.trim();
+    }
+
     public static BertEncoderConfig resolveConfig(Path modelDir, E5Variant variant)
             throws EmbeddingException {
         BertEncoderConfig declared = variant.config();

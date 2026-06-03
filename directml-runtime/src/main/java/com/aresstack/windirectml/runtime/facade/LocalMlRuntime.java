@@ -115,7 +115,7 @@ public final class LocalMlRuntime {
 
         EmbeddingModel model = switch (backend) {
             case CPU -> loadEmbeddingCpu(family, config);
-            case DIRECTML, WARP -> loadEmbeddingDirectMl(family, config);
+            case DIRECTML, WARP -> loadEmbeddingDirectMl(family, config, nativeBackendName());
             case AUTO, HYBRID -> loadEmbeddingAuto(family, config);
         };
 
@@ -136,7 +136,7 @@ public final class LocalMlRuntime {
 
         Reranker reranker = switch (backend) {
             case CPU -> BertCrossEncoderRerankers.loadCpu(modelDir);
-            case DIRECTML, WARP -> BertCrossEncoderRerankers.loadDirectMl(modelDir);
+            case DIRECTML, WARP -> BertCrossEncoderRerankers.loadDirectMl(modelDir, nativeBackendName());
             // HYBRID is Qwen2-specific (GPU prefill + CPU decode); for embedding/
             // reranker encoders there is no decode loop, so HYBRID behaves like AUTO.
             case AUTO, HYBRID -> loadRerankerAuto(modelDir);
@@ -200,12 +200,21 @@ public final class LocalMlRuntime {
 
     private EmbeddingModel loadEmbeddingDirectMl(String family, EmbeddingModelConfig config)
             throws EmbeddingException {
+        return loadEmbeddingDirectMl(family, config, nativeBackendName());
+    }
+
+    private EmbeddingModel loadEmbeddingDirectMl(String family, EmbeddingModelConfig config, String nativeBackend)
+            throws EmbeddingException {
         return switch (family) {
-            case "minilm" -> DirectMlMiniLmEncoder.load(config.modelDir());
-            case "e5" -> E5Encoders.loadDirectMl(config.modelDir(), config.e5Variant());
+            case "minilm" -> DirectMlMiniLmEncoder.load(config.modelDir(), nativeBackend);
+            case "e5" -> E5Encoders.loadDirectMl(config.modelDir(), config.e5Variant(), nativeBackend);
             default -> throw new UnsupportedModelException(family,
                     "No DirectML loader for family: " + family);
         };
+    }
+
+    private String nativeBackendName() {
+        return backend == Backend.WARP ? "warp" : "directml";
     }
 
     private EmbeddingModel loadEmbeddingAuto(String family, EmbeddingModelConfig config)
