@@ -109,7 +109,7 @@ public final class DirectMlMiniLmEncoderStack implements AutoCloseable {
 
             log.info("DirectMlMiniLmEncoderStack ready: seq={}, hidden={} (H={} × D={}), inter={}, layers={}, hasMask={}",
                     seq, hidden, heads, headDim, intermediate, numLayers, hasMask);
-        } catch (DirectMlRuntimeException | RuntimeException e) {
+        } catch (RuntimeException e) {
             for (int i = blockList.size() - 1; i >= 0; i--) closeQuiet(blockList.get(i));
             closeQuiet(sB);
             closeQuiet(sA);

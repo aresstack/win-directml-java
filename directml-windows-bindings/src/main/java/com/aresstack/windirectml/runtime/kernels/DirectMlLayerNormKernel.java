@@ -72,6 +72,7 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
     private static final Logger log = LoggerFactory.getLogger(DirectMlLayerNormKernel.class);
 
     private final WindowsBindings wb;
+    private final DirectMlContextImpl ctx;  // Store context for shared temp buffer access
     private final int M;
     private final int H;
     private final float epsilon;
@@ -102,6 +103,7 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
         if (M <= 0 || H <= 0) {
             throw new IllegalArgumentException("M,H must be > 0");
         }
+        this.ctx = ctx;  // Store context for shared temp buffer access
         this.wb = ctx.bindings();
         if (!wb.hasDirectMl()) {
             throw new DirectMlRuntimeException("Context has no DirectML device");

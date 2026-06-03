@@ -213,7 +213,7 @@ public final class DirectMlMiniLmLayerBlock implements AutoCloseable {
 
             log.info("DirectMlMiniLmLayerBlock ready: seq={}, hidden={} (H={} × D={}), inter={}, hasMask={}",
                     seq, hidden, heads, headDim, intermediate, hasMask);
-        } catch (DirectMlRuntimeException | RuntimeException e) {
+        } catch (RuntimeException e) {
             // Release any partial allocations on failure (LIFO order).
             closeQuiet(bRes2);
             closeQuiet(bMlpOut);

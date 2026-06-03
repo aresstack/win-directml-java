@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.runtime;
 
 import com.aresstack.windirectml.windows.D3D12Bindings;
+import com.aresstack.windirectml.windows.DxgiBindings;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 import org.slf4j.Logger;
@@ -172,7 +173,7 @@ public final class DirectMlContextImpl implements DirectMlContext {
      * wenn dieser Kernel eine größere tempSize benötigt als der aktuelle Maximum.
      * Thread-safe durch synchronized.
      */
-    public synchronized void registerTempSize(long tempSize) {
+    public synchronized void registerTempSize(long tempSize) throws DirectMlRuntimeException {
         if (tempSize <= 0) return;
         if (tempSize > sharedTempSize) {
             // Alten Buffer freigeben, wenn vorhanden
@@ -180,10 +181,15 @@ public final class DirectMlContextImpl implements DirectMlContext {
                 try { DxgiBindings.release(sharedTempBuffer); } catch (Exception ignored) {}
             }
             // Neuen, größeren alloziieren
-            this.sharedTempBuffer = D3D12Bindings.createDefaultBuffer(
-                    bindings.getD3d12Device(), tempSize, arena);
-            this.sharedTempSize = tempSize;
-            log.info("Shared temp buffer resized to {} bytes", tempSize);
+            try {
+                this.sharedTempBuffer = D3D12Bindings.createDefaultBuffer(
+                        bindings.getD3d12Device(), tempSize, arena);
+                this.sharedTempSize = tempSize;
+                log.info("Shared temp buffer resized to {} bytes", tempSize);
+            } catch (WindowsNativeException e) {
+                throw new DirectMlRuntimeException(
+                        "Failed to allocate shared temp buffer (size=" + tempSize + ")", e);
+            }
         }
     }
 

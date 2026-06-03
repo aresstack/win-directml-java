@@ -1,11 +1,13 @@
 package com.aresstack.windirectml.runtime;
 
 /**
- * Geprüfte Ausnahme der DirectML-Runtime-Schicht.
+ * Ungeprüfte (unchecked) Ausnahme der DirectML-Runtime-Schicht.
  * <p>
  * Wickelt HRESULT-Fehler, COM-Fehler und Treiber-Probleme einheitlich ein.
+ * Erweitert {@link RuntimeException}, damit Methoden sie werfen
+ * können, ohne sie in der Signatur deklarieren zu müssen.
  */
-public class DirectMlRuntimeException extends Exception {
+public class DirectMlRuntimeException extends RuntimeException {
 
     public DirectMlRuntimeException(String message) {
         super(message);

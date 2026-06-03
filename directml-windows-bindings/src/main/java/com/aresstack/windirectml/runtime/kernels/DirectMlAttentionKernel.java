@@ -106,10 +106,13 @@ public final class DirectMlAttentionKernel implements AttentionKernel, AutoClose
         if (batch <= 0 || heads <= 0 || seq <= 0 || headDim <= 0) {
             throw new IllegalArgumentException("batch, heads, seq, headDim must be > 0");
         }
-        this.wb = ctx.bindings();
+        // Initialize wb BEFORE try block so catch blocks can use it
+        WindowsBindings wb = ctx.bindings();
         if (!wb.hasDirectMl()) {
             throw new DirectMlRuntimeException("Context has no DirectML device");
         }
+        this.ctx = ctx;
+        this.wb = wb;
         this.B = batch;
         this.H = heads;
         this.S = seq;

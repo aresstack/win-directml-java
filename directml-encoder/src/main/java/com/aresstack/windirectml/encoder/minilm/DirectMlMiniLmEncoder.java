@@ -242,7 +242,7 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
                 builtL2 = new DirectMlL2NormalizeKernel(ctx, H, 1e-12f);
                 builtNorm = ctx.allocateBuffer((long) H * Float.BYTES,
                         GpuBuffer.BufferUsage.ACTIVATION);
-            } catch (DirectMlRuntimeException | RuntimeException e) {
+            } catch (RuntimeException e) {
                 if (builtL2 != null) try {
                     builtL2.close();
                 } catch (Exception ignored) {
@@ -391,7 +391,7 @@ public final class DirectMlMiniLmEncoder implements EmbeddingModel, AutoCloseabl
             log.info("DirectMlMiniLmEncoder stack ready for bucket S={} (cached buckets so far: {})",
                     bucket, stackCache.size());
             return entry;
-        } catch (DirectMlRuntimeException | RuntimeException e) {
+        } catch (RuntimeException e) {
             if (meanPool != null) try {
                 meanPool.close();
             } catch (Exception ignored) {

@@ -299,7 +299,7 @@ public final class DirectMlReranker implements Reranker {
             log.info("DirectMlReranker({}) stack ready for bucket S={}, batch N={} (cached so far: {})",
                     cfg.modelName(), bucket, batch, stackCache.size());
             return entry;
-        } catch (DirectMlRuntimeException | RuntimeException e) {
+        } catch (RuntimeException e) {
             if (stack != null) try {
                 stack.close();
             } catch (Exception ignored) {

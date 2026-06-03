@@ -256,7 +256,7 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
                 builtL2 = new DirectMlL2NormalizeKernel(ctx, H, 1e-12f);
                 builtNorm = ctx.allocateBuffer((long) H * Float.BYTES,
                         GpuBuffer.BufferUsage.ACTIVATION);
-            } catch (DirectMlRuntimeException | RuntimeException e) {
+            } catch (RuntimeException e) {
                 if (builtL2 != null) try {
                     builtL2.close();
                 } catch (Exception ignored) {
@@ -542,7 +542,7 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
             log.info("DirectMlBertEncoder({}) stack ready for bucket S={} (cached so far: {})",
                     cfg.modelName(), bucket, stackCache.size());
             return entry;
-        } catch (DirectMlRuntimeException | RuntimeException e) {
+        } catch (RuntimeException e) {
             if (meanPool != null) try {
                 meanPool.close();
             } catch (Exception ignored) {
@@ -614,7 +614,7 @@ public final class DirectMlBertEncoder implements EmbeddingModel, AutoCloseable 
             log.info("DirectMlBertEncoder({}) batched stack ready for bucket S={}, batch N={} (cached so far: {})",
                     cfg.modelName(), bucket, batch, batchStackCache.size());
             return entry;
-        } catch (DirectMlRuntimeException | RuntimeException ex) {
+        } catch (RuntimeException ex) {
             if (l2 != null) try {
                 l2.close();
             } catch (Exception ignored) {

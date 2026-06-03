@@ -1,5 +1,7 @@
 package com.aresstack.windirectml.windows;
 
+import com.aresstack.windirectml.windows.D3D12Bindings;
+import com.aresstack.windirectml.windows.DxgiBindings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

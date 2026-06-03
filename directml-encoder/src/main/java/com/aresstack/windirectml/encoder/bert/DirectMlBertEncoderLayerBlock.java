@@ -223,7 +223,7 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
 
             log.info("DirectMlBertEncoderLayerBlock ready: batch={}, seq={}, hidden={} (H={} × D={}), inter={}, hasMask={}",
                     batch, seq, hidden, heads, headDim, intermediate, hasMask);
-        } catch (DirectMlRuntimeException | RuntimeException e) {
+        } catch (RuntimeException e) {
             closeQuiet(bRes2);
             closeQuiet(bMlpOut);
             closeQuiet(bInter);
