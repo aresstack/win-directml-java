@@ -16,13 +16,16 @@ import java.util.Locale;
  *       costs 10–40&nbsp;ms — running 24-layer per-token decode through the GPU
  *       costs ~1.5&nbsp;s/token of pure submission overhead, but a 30-token
  *       prefill in one batched GEMM amortises that to a few hundred ms total.</li>
+ *   <li>{@link #WARP} – use DirectML on the D3D12 WARP software adapter (CPU-only).
+ *       Useful for testing without a hardware GPU or on locked-down hosts.</li>
  * </ul>
  */
 public enum Backend {
     AUTO,
     DIRECTML,
     CPU,
-    HYBRID;
+    HYBRID,
+    WARP;
 
     /**
      * Parse a backend string (case-insensitive). {@code null}/blank → {@link #AUTO}.
@@ -36,8 +39,9 @@ public enum Backend {
             case "directml", "dml" -> DIRECTML;
             case "cpu" -> CPU;
             case "hybrid" -> HYBRID;
+            case "warp" -> WARP;
             default -> throw new IllegalArgumentException(
-                    "Unknown backend: '" + raw + "' (expected: auto, directml, cpu, hybrid)");
+                    "Unknown backend: '" + raw + "' (expected: auto, directml, cpu, hybrid, warp)");
         };
     }
 }
