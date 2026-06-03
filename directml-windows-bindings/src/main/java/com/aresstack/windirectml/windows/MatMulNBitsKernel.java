@@ -134,9 +134,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private static volatile MemorySegment sharedInt4BatchReadbackBuf; // readback heap [maxBatchM * N * 4 bytes]
     private static volatile MemorySegment sharedInt4BatchMappedUpload;    // persistently mapped upload
     private static volatile MemorySegment sharedInt4BatchMappedReadback; // persistently mapped readback
-    private static volatile long[] sharedInt4BatchUavAddrs;           // INT4 mode: [X_batch, QW, Scales, ZP, Y_batch]
-    private static volatile long[] sharedFp32BatchUavAddrs;           // FP32 mode: [X_batch, W, Y_batch]
-    private static volatile int sharedBatchCapacityM = 0;              // currently-allocated capacity (static)
+    private static volatile int sharedBatchMaxK = 0;               // max K seen across all kernel instances (for shared buffer sizing)
+    private static volatile int sharedBatchMaxN = 0;                  // max N seen across all kernel instances
+    private static volatile int sharedBatchCapacityM = 0;              // currently-allocated M capacity (static)
     private static final Object batchBufferLock = new Object();
 
     // ── Static Arena for SHARED batch buffers (lives for JVM lifetime) ────────
@@ -154,8 +154,6 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private MemorySegment int4BatchReadbackBuf;     // → sharedInt4BatchReadbackBuf
     private MemorySegment int4BatchMappedUpload;    // → sharedInt4BatchMappedUpload
     private MemorySegment int4BatchMappedReadback;  // → sharedInt4BatchMappedReadback
-    private long[] int4BatchUavAddrs;               // → sharedInt4BatchUavAddrs
-    private long[] fp32BatchUavAddrs;               // → sharedFp32BatchUavAddrs
     private int batchCapacityM = 0;                 // → sharedBatchCapacityM
     private MemorySegment barrierBatchInputToUAV;
     private MemorySegment barrierBatchOutputToCS;
@@ -1258,7 +1256,17 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         int[] batchConstants = useInt4Gpu
                 ? new int[]{N, K, int4BlockSize, M, nTiles}
                 : new int[]{N, K, M, nTilesFp32};
-        long[] batchUavs = useInt4Gpu ? int4BatchUavAddrs : fp32BatchUavAddrs;
+        long[] batchUavs = useInt4Gpu
+                ? new long[]{
+                D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4WeightBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4ScalesBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4ZpBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4BatchOutputBuf)}
+                : new long[]{
+                D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
+                D3D12Bindings.getGpuVirtualAddress(weightBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4BatchOutputBuf)};
         GpuComputeKernel batchShader = useInt4Gpu ? sharedInt4BatchShader : sharedFp32BatchShader;
         // Tiled mode (both INT4 and FP32): 1 thread group per [16,16] output tile
         // (groupSize=256). elementCount = mTiles*nTiles*256 threads total.
@@ -1336,7 +1344,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         }
 
         // ── If shared buffers already exist, just wire instance fields ──
-        if (requiredM <= sharedBatchCapacityM) {
+        if (requiredM <= sharedBatchCapacityM && K <= sharedBatchMaxK && N <= sharedBatchMaxN) {
             synchronized (batchBufferLock) {
                 if (sharedInt4BatchInputBuf != null) {
                     this.int4BatchInputBuf = sharedInt4BatchInputBuf;
@@ -1345,10 +1353,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                     this.int4BatchReadbackBuf = sharedInt4BatchReadbackBuf;
                     this.int4BatchMappedUpload = sharedInt4BatchMappedUpload;
                     this.int4BatchMappedReadback = sharedInt4BatchMappedReadback;
-                    this.int4BatchUavAddrs = sharedInt4BatchUavAddrs;
-                    this.fp32BatchUavAddrs = sharedFp32BatchUavAddrs;
                     this.batchCapacityM = sharedBatchCapacityM;
-                    // Also create per-instance barriers pointing to shared buffers
+                    // Barriers for this instance (pointing to shared buffers)
                     barrierBatchInputToUAV = allocTransitionBarrier(sharedInt4BatchInputBuf,
                             D3D12Bindings.D3D12_RESOURCE_STATE_COPY_DEST,
                             D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -1371,15 +1377,13 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         // ── STATIC BUFFER ALLOCATION (synchronised) ─────────────────────
         synchronized (batchBufferLock) {
             // Double-check under lock (another thread may have grown buffers)
-            if (requiredM <= sharedBatchCapacityM && sharedInt4BatchInputBuf != null) {
+            if (requiredM <= sharedBatchCapacityM && K <= sharedBatchMaxK && N <= sharedBatchMaxN && sharedInt4BatchInputBuf != null) {
                 this.int4BatchInputBuf = sharedInt4BatchInputBuf;
                 this.int4BatchOutputBuf = sharedInt4BatchOutputBuf;
                 this.int4BatchUploadBuf = sharedInt4BatchUploadBuf;
                 this.int4BatchReadbackBuf = sharedInt4BatchReadbackBuf;
                 this.int4BatchMappedUpload = sharedInt4BatchMappedUpload;
                 this.int4BatchMappedReadback = sharedInt4BatchMappedReadback;
-                this.int4BatchUavAddrs = sharedInt4BatchUavAddrs;
-                this.fp32BatchUavAddrs = sharedFp32BatchUavAddrs;
                 this.batchCapacityM = sharedBatchCapacityM;
                 // Barriers for this instance (pointing to shared buffers)
                 barrierBatchInputToUAV = allocTransitionBarrier(sharedInt4BatchInputBuf,
@@ -1407,8 +1411,10 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 DxgiBindings.release(sharedInt4BatchReadbackBuf);
             }
 
-            long inputBytes = (long) requiredM * K * Float.BYTES;
-            long outputBytes = (long) requiredM * N * Float.BYTES;
+            int allocK = Math.max(K, sharedBatchMaxK);
+            int allocN = Math.max(N, sharedBatchMaxN);
+            long inputBytes = (long) requiredM * allocK * Float.BYTES;
+            long outputBytes = (long) requiredM * allocN * Float.BYTES;
 
             // ── STATIC ARENA: allocate ONCE, reuse for all kernel instances ─────
             if (sharedBatchArena == null) {
@@ -1457,13 +1463,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                         }
                     }
                 }
-                sharedInt4BatchUavAddrs = new long[]{
-                        D3D12Bindings.getGpuVirtualAddress(sharedInt4BatchInputBuf),
-                        D3D12Bindings.getGpuVirtualAddress(int4WeightBuf),
-                        D3D12Bindings.getGpuVirtualAddress(int4ScalesBuf),
-                        D3D12Bindings.getGpuVirtualAddress(int4ZpBuf),
-                        D3D12Bindings.getGpuVirtualAddress(sharedInt4BatchOutputBuf)
-                };
+                sharedBatchMaxK = Math.max(sharedBatchMaxK, K);
+                sharedBatchMaxN = Math.max(sharedBatchMaxN, N);
             } else {
                 // FP32 / pre-dequantized weight path (used by qkvFused, gateUpFused).
                 if (sharedFp32BatchShader == null) {
@@ -1486,11 +1487,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                         }
                     }
                 }
-                sharedFp32BatchUavAddrs = new long[]{
-                        D3D12Bindings.getGpuVirtualAddress(sharedInt4BatchInputBuf),
-                        D3D12Bindings.getGpuVirtualAddress(weightBuf),
-                        D3D12Bindings.getGpuVirtualAddress(sharedInt4BatchOutputBuf)
-                };
+                sharedBatchMaxK = Math.max(sharedBatchMaxK, K);
+                sharedBatchMaxN = Math.max(sharedBatchMaxN, N);
             }
 
             // ── Per-instance barrier structs (bind to shared buffers) ─────────
@@ -1515,8 +1513,6 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             this.int4BatchReadbackBuf = sharedInt4BatchReadbackBuf;
             this.int4BatchMappedUpload = sharedInt4BatchMappedUpload;
             this.int4BatchMappedReadback = sharedInt4BatchMappedReadback;
-            this.int4BatchUavAddrs = sharedInt4BatchUavAddrs;
-            this.fp32BatchUavAddrs = sharedFp32BatchUavAddrs;
             this.batchCapacityM = sharedBatchCapacityM;
 
             sharedBatchCapacityM = requiredM;
@@ -1684,8 +1680,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         this.int4BatchReadbackBuf = null;
         this.int4BatchMappedUpload = null;
         this.int4BatchMappedReadback = null;
-        this.int4BatchUavAddrs = null;
-        this.fp32BatchUavAddrs = null;
+        // int4BatchUavAddrs/fp32BatchUavAddrs: built dynamically in matmulBatch, no static refs to null
 
         // Release pre-allocated execution infrastructure (reverse creation order)
         if (execBindingTable != null) DxgiBindings.release(execBindingTable);
@@ -1774,9 +1769,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
             sharedInt4BatchMappedUpload = null;
             sharedInt4BatchMappedReadback = null;
-            sharedInt4BatchUavAddrs = null;
-            sharedFp32BatchUavAddrs = null;
             sharedBatchCapacityM = 0;
+            sharedBatchMaxK = 0;
+            sharedBatchMaxN = 0;
 
             // Close static arena (releases all GPU resources allocated in it)
             if (sharedBatchArena != null) {
