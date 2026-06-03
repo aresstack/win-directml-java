@@ -139,7 +139,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     /**
      * Hard upper bound on batched M to keep VRAM bounded (~tens of MB per kernel).
      */
-    private static final int MAX_BATCH_M = 1024;
+    private static final int MAX_BATCH_M = 256; // reduced for iGPU VRAM (96 kernels × M×K×4 must fit)
 
     /**
      * Whether this kernel's batch scratch buffers were successfully allocated.
