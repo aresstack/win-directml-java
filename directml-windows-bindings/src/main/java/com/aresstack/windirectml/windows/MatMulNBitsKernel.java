@@ -1666,5 +1666,69 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     public int getK() {
         return K;
     }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Static batch resource cleanup (JVM shutdown hook)
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Release ALL static batch resources (shared buffers + shared shaders).
+     * Called by JVM shutdown hook or manually if needed.
+     * <p>
+     * This is the ONLY place where static resources are released —
+     * individual {@link #close()} calls do NOT touch them.
+     */
+    private static void releaseStaticBatchResources() {
+        synchronized (batchBufferLock) {
+            if (sharedInt4BatchShader != null) {
+                sharedInt4BatchShader.close();
+                sharedInt4BatchShader = null;
+            }
+            if (sharedFp32BatchShader != null) {
+                sharedFp32BatchShader.close();
+                sharedFp32BatchShader = null;
+            }
+
+            // Unmap + release shared scratch buffers
+            if (sharedInt4BatchUploadBuf != null) {
+                D3D12Bindings.unmapResource(sharedInt4BatchUploadBuf);
+                sharedInt4BatchUploadBuf = null;
+            }
+            if (sharedInt4BatchReadbackBuf != null) {
+                D3D12Bindings.unmapResource(sharedInt4BatchReadbackBuf);
+                sharedInt4BatchReadbackBuf = null;
+            }
+            if (sharedInt4BatchInputBuf != null) {
+                DxgiBindings.release(sharedInt4BatchInputBuf);
+                sharedInt4BatchInputBuf = null;
+            }
+            if (sharedInt4BatchOutputBuf != null) {
+                DxgiBindings.release(sharedInt4BatchOutputBuf);
+                sharedInt4BatchOutputBuf = null;
+            }
+            if (sharedInt4BatchUploadBuf != null) {
+                DxgiBindings.release(sharedInt4BatchUploadBuf);
+                sharedInt4BatchUploadBuf = null;
+            }
+            if (sharedInt4BatchReadbackBuf != null) {
+                DxgiBindings.release(sharedInt4BatchReadbackBuf);
+                sharedInt4BatchReadbackBuf = null;
+            }
+
+            sharedInt4BatchMappedUpload = null;
+            sharedInt4BatchMappedReadback = null;
+            sharedInt4BatchUavAddrs = null;
+            sharedFp32BatchUavAddrs = null;
+            sharedBatchCapacityM = 0;
+
+            // Close static arena (releases all GPU resources allocated in it)
+            if (sharedBatchArena != null) {
+                sharedBatchArena.close();
+                sharedBatchArena = null;
+            }
+
+            log.info("Static batch resources released");
+        }
+    }
 }
 
