@@ -1330,17 +1330,72 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      * <p>On first call also compiles the batched HLSL shader.
      */
     private void ensureBatchCapacity(int requiredM) throws WindowsNativeException {
-        if (requiredM <= sharedBatchCapacityM) return;
         if (requiredM > MAX_BATCH_M) {
             throw new IllegalArgumentException(
                     "requiredM=" + requiredM + " exceeds MAX_BATCH_M=" + MAX_BATCH_M);
         }
+
+        // ── If shared buffers already exist, just wire instance fields ──
+        if (requiredM <= sharedBatchCapacityM) {
+            synchronized (batchBufferLock) {
+                if (sharedInt4BatchInputBuf != null) {
+                    this.int4BatchInputBuf = sharedInt4BatchInputBuf;
+                    this.int4BatchOutputBuf = sharedInt4BatchOutputBuf;
+                    this.int4BatchUploadBuf = sharedInt4BatchUploadBuf;
+                    this.int4BatchReadbackBuf = sharedInt4BatchReadbackBuf;
+                    this.int4BatchMappedUpload = sharedInt4BatchMappedUpload;
+                    this.int4BatchMappedReadback = sharedInt4BatchMappedReadback;
+                    this.int4BatchUavAddrs = sharedInt4BatchUavAddrs;
+                    this.fp32BatchUavAddrs = sharedFp32BatchUavAddrs;
+                    this.batchCapacityM = sharedBatchCapacityM;
+                    // Also create per-instance barriers pointing to shared buffers
+                    barrierBatchInputToUAV = allocTransitionBarrier(sharedInt4BatchInputBuf,
+                            D3D12Bindings.D3D12_RESOURCE_STATE_COPY_DEST,
+                            D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                    barrierBatchOutputToCS = allocTransitionBarrier(sharedInt4BatchOutputBuf,
+                            D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                            D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE);
+                    barrierBatchInputToCommon = allocTransitionBarrier(sharedInt4BatchInputBuf,
+                            D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                            D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
+                    barrierBatchOutputToCommon = allocTransitionBarrier(sharedInt4BatchOutputBuf,
+                            D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE,
+                            D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
+                    return;
+                }
+            }
+        }
+
         var dev = wb.getD3d12Device();
 
         // ── STATIC BUFFER ALLOCATION (synchronised) ─────────────────────
         synchronized (batchBufferLock) {
-            // Double-check under lock
-            if (requiredM <= sharedBatchCapacityM) return;
+            // Double-check under lock (another thread may have grown buffers)
+            if (requiredM <= sharedBatchCapacityM && sharedInt4BatchInputBuf != null) {
+                this.int4BatchInputBuf = sharedInt4BatchInputBuf;
+                this.int4BatchOutputBuf = sharedInt4BatchOutputBuf;
+                this.int4BatchUploadBuf = sharedInt4BatchUploadBuf;
+                this.int4BatchReadbackBuf = sharedInt4BatchReadbackBuf;
+                this.int4BatchMappedUpload = sharedInt4BatchMappedUpload;
+                this.int4BatchMappedReadback = sharedInt4BatchMappedReadback;
+                this.int4BatchUavAddrs = sharedInt4BatchUavAddrs;
+                this.fp32BatchUavAddrs = sharedFp32BatchUavAddrs;
+                this.batchCapacityM = sharedBatchCapacityM;
+                // Barriers for this instance (pointing to shared buffers)
+                barrierBatchInputToUAV = allocTransitionBarrier(sharedInt4BatchInputBuf,
+                        D3D12Bindings.D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                barrierBatchOutputToCS = allocTransitionBarrier(sharedInt4BatchOutputBuf,
+                        D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE);
+                barrierBatchInputToCommon = allocTransitionBarrier(sharedInt4BatchInputBuf,
+                        D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
+                barrierBatchOutputToCommon = allocTransitionBarrier(sharedInt4BatchOutputBuf,
+                        D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE,
+                        D3D12Bindings.D3D12_RESOURCE_STATE_COMMON);
+                return;
+            }
 
             // Release previous (smaller) buffers if any
             if (sharedInt4BatchInputBuf != null) {
