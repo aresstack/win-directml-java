@@ -58,7 +58,7 @@ public final class D3D12Bindings {
 
     public static final int DXGI_FORMAT_UNKNOWN = 0;
 
-    public static final int D3D12_QUERY_HEAP_TYPE_TIMESTAMP = 3;
+    public static final int D3D12_QUERY_HEAP_TYPE_TIMESTAMP = 1;
     public static final int D3D12_QUERY_TYPE_TIMESTAMP = 2;
 
     public static final int D3D12_TEXTURE_LAYOUT_ROW_MAJOR = 1;
