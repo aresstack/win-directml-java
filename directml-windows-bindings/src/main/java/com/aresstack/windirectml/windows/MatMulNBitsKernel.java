@@ -1158,6 +1158,35 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     }
 
     /**
+     * Record dispatch from a GPU-resident input buffer.
+     * Like {@link #recordBatchFromCpu} but the input is already on GPU.
+     * Copies from {@code gpuSrcBuf} → inputBuf, barriers, dispatches,
+     * leaves output in UAV. Used by Opt-C chained decode to route
+     * the normed hidden state from one layer into the next layer's QKV.
+     *
+     * @param pipeline  shared GPU pipeline (recording state)
+     * @param gpuSrcBuf GPU default buffer containing the input [K] floats
+     */
+    public void recordBatchFromGpu(GpuPipeline pipeline, MemorySegment gpuSrcBuf) {
+        if (!prepared) throw new IllegalStateException("Kernel not prepared");
+        long inputBytes = (long) K * Float.BYTES;
+        try {
+            var cl = pipeline.getCommandList();
+            mhCopyBufferRegion.invokeExact(cl, inputBuf, 0L, gpuSrcBuf, 0L, inputBytes);
+            mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
+            if (useInt4Gpu) {
+                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, N);
+            } else {
+                mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
+                mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+            }
+            // Output stays in UAV
+        } catch (Throwable t) {
+            throw new RuntimeException("MatMulNBitsKernel.recordBatchFromGpu failed", t);
+        }
+    }
+
+    /**
      * Record only the dispatch — input buffer already contains data in UAV state
      * (written by a preceding compute shader, e.g., RMSNorm or SwiGLU).
      * <p>

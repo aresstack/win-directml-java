@@ -68,6 +68,9 @@ public final class QwenGpuPipeline implements AutoCloseable {
     // ── Per-layer GPU-resident postNorm weight buffers (uploaded once) ───────
     private MemorySegment[] postNormWeightBufs;   // [numLayers]
 
+    // ── Per-layer GPU-resident inputNorm weight buffers (Opt-C chained decode) ─
+    private MemorySegment[] inputNormWeightBufs;  // [numLayers]
+
     // ── Per-layer fused QKV bias buffers [qSize + 2*kvSize] (Opt-B; null when no biases) ──
     private MemorySegment[] qkvBiasBufs;          // [numLayers] entry may be null
     private boolean anyLayerHasQkvBias = false;
@@ -90,6 +93,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
     private final float ropeTheta;
     private boolean mlpBatchEnabled = false;
     private boolean weightsUploaded = false;
+    private boolean chainedDecodeEnabled = false;
     private boolean closed = false;
 
     // ── Constructor ──────────────────────────────────────────────────────────
@@ -336,6 +340,16 @@ public final class QwenGpuPipeline implements AutoCloseable {
         anyLayerHasQkvBias = uploadedBiasLayers > 0;
 
         weightsUploaded = true;
+
+        // Upload per-layer inputNorm weights for Opt-C chained decode
+        inputNormWeightBufs = new MemorySegment[nLayers];
+        long hiddenBytes2 = (long) hidden * Float.BYTES;
+        for (int l = 0; l < nLayers; l++) {
+            float[] w = weights.layers[l].inputNormWeight();
+            inputNormWeightBufs[l] = D3D12Bindings.createDefaultBuffer(dev, hiddenBytes2, arena);
+            D3D12Bindings.uploadFloats(dev, queue, inputNormWeightBufs[l], w, arena);
+        }
+
         log.info("Qwen postNorm weights uploaded to GPU: {} layers, qkvBias layers={}/{} ({} KB each) in {} ms",
                 nLayers, uploadedBiasLayers, nLayers, qkvBiasBytes / 1024,
                 System.currentTimeMillis() - t0);
@@ -702,6 +716,177 @@ public final class QwenGpuPipeline implements AutoCloseable {
                 hidden);
 
         // ── 9. Transition residualBuf → COPY_SOURCE, readback into hiddenOut ──
+        pipeline.recordBarrier(barrierResidualUavToCopySource);
+        pipeline.recordReadback(residualBuf, 0, hiddenBytes);
+        pipeline.submitAndWait();
+        pipeline.readbackInto(hiddenOut, 0, hidden);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Opt-C: Chained decode — ALL 24 layers in ONE GPU submission
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * True iff the chained decode path is available (Opt-B + inputNorm weights).
+     */
+    public boolean isAttnChainedEnabled() {
+        return chainedDecodeEnabled;
+    }
+
+    /**
+     * Enable chained decode after prefill.
+     * Idempotent; silently returns if any prerequisite is missing.
+     */
+    public void tryEnableChainedDecode() {
+        if (chainedDecodeEnabled) return;
+        if (!isAttnGpuResidentEnabled()) {
+            log.warn("Opt-C chained decode not available: isAttnGpuResidentEnabled=false");
+            return;
+        }
+        if (inputNormWeightBufs == null) {
+            log.warn("Opt-C chained decode not available: inputNormWeightBufs not uploaded");
+            return;
+        }
+        chainedDecodeEnabled = true;
+        log.info("QwenGpuPipeline Opt-C: chained decode ENABLED ({} layers in 1 submission)",
+                deferredNumLayers > 0 ? deferredNumLayers : inputNormWeightBufs.length);
+    }
+
+    /**
+     * ALL decoder layers in ONE GPU submission (Opt-C).
+     *
+     * <p>For each layer l: RMSNorm → QKV → bias → RoPE+append → GQA → o_proj →
+     * residual1 → RMSNorm → gate_up → SwiGLU → down_proj → residual2.
+     * Hidden state stays GPU-resident across all layers.
+     *
+     * @param hiddenInput CPU hidden state entering layer 0 (embedding output) [hidden]
+     * @param hiddenOut   where to write final hidden state [hidden]
+     * @param pos         current decode position (KV cache slot)
+     */
+    public void decodeLayersChained(float[] hiddenInput, float[] hiddenOut, int pos) {
+        if (!chainedDecodeEnabled) {
+            throw new IllegalStateException("Opt-C chained decode not enabled");
+        }
+        if (pos < 0 || pos >= kvCache.getMaxSeqLen()) {
+            throw new IllegalArgumentException("pos=" + pos
+                    + " out of [0.." + kvCache.getMaxSeqLen() + ")");
+        }
+
+        long hiddenBytes = (long) hidden * Float.BYTES;
+        int epsBits = Float.floatToRawIntBits(rmsNormEps);
+        float scale = (float) (1.0 / Math.sqrt(headDim));
+        int scaleBits = Float.floatToRawIntBits(scale);
+        int halfDim = headDim / 2;
+        int ropeThetaBits = Float.floatToRawIntBits(ropeTheta);
+        int seqLen = pos + 1;
+
+        pipeline.begin();
+        var cl = pipeline.getCommandList();
+
+        // 0. Upload hiddenInput → residualBuf (entry for layer 0)
+        pipeline.recordUpload(hiddenInput, 0, hidden, residualBuf, 0);
+        pipeline.recordBarrier(barrierResidualCopyDestToUav);
+        pipeline.recordUavBarrier(uavBarrier);
+
+        for (int l = 0; l < kernels.getGpuLayers(); l++) {
+            MatMulNBitsKernel qkvK = kernels.qkvFused(l);
+            MatMulNBitsKernel oK = kernels.oProj(l);
+            MatMulNBitsKernel guK = kernels.gateUpFused(l);
+            MatMulNBitsKernel downK = kernels.downProj(l);
+
+            // 1. RMSNorm → qkvK.inputBuf
+            computeKernels.rmsNorm().recordDispatch(cl,
+                    new long[]{D3D12Bindings.getGpuVirtualAddress(residualBuf),
+                            D3D12Bindings.getGpuVirtualAddress(inputNormWeightBufs[l]),
+                            D3D12Bindings.getGpuVirtualAddress(qkvK.getInputBuf())},
+                    new int[]{hidden, epsBits}, 1);
+            pipeline.recordUavBarrier(uavBarrier);
+
+            // 2. QKV fused GEMM
+            qkvK.recordBatchDispatchOnly(pipeline);
+            pipeline.recordUavBarrier(uavBarrier);
+
+            // 3. Add QKV bias (if present)
+            long qkvBaseAddr = D3D12Bindings.getGpuVirtualAddress(qkvK.getOutputBuf());
+            int qkvN = qSize + 2 * kvSize;
+            if (qkvBiasBufs != null && qkvBiasBufs[l] != null) {
+                computeKernels.add().recordDispatch(cl,
+                        new long[]{qkvBaseAddr,
+                                D3D12Bindings.getGpuVirtualAddress(qkvBiasBufs[l]),
+                                qkvBaseAddr},
+                        new int[]{qkvN}, qkvN);
+                pipeline.recordUavBarrier(uavBarrier);
+            }
+
+            // 4. RoPE + append K/V to KV cache
+            long qAddr = qkvBaseAddr;
+            long kAddr = qkvBaseAddr + (long) qSize * Float.BYTES;
+            long vAddr = qkvBaseAddr + (long) (qSize + kvSize) * Float.BYTES;
+            attentionKernels.ropeAndAppend().recordDispatch(cl,
+                    new long[]{qAddr, kAddr, vAddr, kvCache.getKAddr(l), kvCache.getVAddr(l)},
+                    new int[]{numHeads, kvHeads, headDim, pos,
+                            kvCache.getMaxSeqLen(), ropeThetaBits},
+                    (numHeads + kvHeads) * halfDim);
+            pipeline.recordUavBarrier(uavBarrier);
+
+            // 5. GQA attention → oK.inputBuf
+            long attnOutAddr = D3D12Bindings.getGpuVirtualAddress(oK.getInputBuf());
+            attentionKernels.gqaAttentionDecode().recordDispatch(cl,
+                    new long[]{qAddr, kvCache.getKAddr(l), kvCache.getVAddr(l), attnOutAddr},
+                    new int[]{numHeads, kvHeads, headDim, qHeadsPerKvHead,
+                            seqLen, kvCache.getMaxSeqLen(), scaleBits},
+                    numHeads * headDim);
+            pipeline.recordUavBarrier(uavBarrier);
+
+            // 6. o_proj GEMM
+            oK.recordBatchDispatchOnly(pipeline);
+            pipeline.recordUavBarrier(uavBarrier);
+
+            // 7. residual1 = oProj + residualBuf
+            computeKernels.add().recordDispatch(cl,
+                    new long[]{D3D12Bindings.getGpuVirtualAddress(oK.getOutputBuf()),
+                            D3D12Bindings.getGpuVirtualAddress(residualBuf),
+                            D3D12Bindings.getGpuVirtualAddress(residualBuf)},
+                    new int[]{hidden}, hidden);
+            pipeline.recordUavBarrier(uavBarrier);
+
+            // 8. RMSNorm → guK.inputBuf
+            computeKernels.rmsNorm().recordDispatch(cl,
+                    new long[]{D3D12Bindings.getGpuVirtualAddress(residualBuf),
+                            D3D12Bindings.getGpuVirtualAddress(postNormWeightBufs[l]),
+                            D3D12Bindings.getGpuVirtualAddress(guK.getInputBuf())},
+                    new int[]{hidden, epsBits}, 1);
+            pipeline.recordUavBarrier(uavBarrier);
+
+            // 9. gate_up GEMM
+            guK.recordBatchDispatchOnly(pipeline);
+            pipeline.recordUavBarrier(uavBarrier);
+
+            // 10. SwiGLU → downK.inputBuf
+            computeKernels.swiglu().recordDispatch(cl,
+                    new long[]{D3D12Bindings.getGpuVirtualAddress(guK.getOutputBuf()),
+                            D3D12Bindings.getGpuVirtualAddress(downK.getInputBuf())},
+                    new int[]{intermediate}, intermediate);
+            pipeline.recordUavBarrier(uavBarrier);
+
+            // 11. down_proj GEMM
+            downK.recordBatchDispatchOnly(pipeline);
+            pipeline.recordUavBarrier(uavBarrier);
+
+            // 12. residual2 = residualBuf + downOut (in-place)
+            computeKernels.add().recordDispatch(cl,
+                    new long[]{D3D12Bindings.getGpuVirtualAddress(residualBuf),
+                            D3D12Bindings.getGpuVirtualAddress(downK.getOutputBuf()),
+                            D3D12Bindings.getGpuVirtualAddress(residualBuf)},
+                    new int[]{hidden}, hidden);
+
+            // Barrier between layers (not after last)
+            if (l < kernels.getGpuLayers() - 1) {
+                pipeline.recordUavBarrier(uavBarrier);
+            }
+        }
+
+        // Final readback
         pipeline.recordBarrier(barrierResidualUavToCopySource);
         pipeline.recordReadback(residualBuf, 0, hiddenBytes);
         pipeline.submitAndWait();

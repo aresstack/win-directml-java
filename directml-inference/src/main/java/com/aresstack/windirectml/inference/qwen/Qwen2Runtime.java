@@ -489,6 +489,9 @@ public final class Qwen2Runtime {
             }
             log.info("Opt-B: uploaded prefill KV cache to GPU ({} layers, seqLen={}, {} ms)",
                     uploaded, seqLen, (System.nanoTime() - upStart) / 1_000_000L);
+
+            // Opt-C: enable chained decode after KV cache upload
+            gpuPipeline.tryEnableChainedDecode();
         }
 
         return logits;
@@ -514,6 +517,30 @@ public final class Qwen2Runtime {
             System.arraycopy(weights.embedTokens, tokenId * hidden, decBuf, 0, hidden);
         } else {
             Arrays.fill(decBuf, 0);
+        }
+
+        // Opt-C chained decode: ALL layers in ONE GPU submission
+        if (useGpuForDecode && gpuPipeline != null && gpuPipeline.isAttnChainedEnabled()) {
+            long t0 = System.nanoTime();
+            gpuPipeline.decodeLayersChained(decBuf, decBuf, pos);
+            profProjNs += System.nanoTime() - t0;
+
+            // Final norm + lm head still on CPU (or GPU via separate submission)
+            t0 = System.nanoTime();
+            rmsNorm(decBuf, weights.finalNormWeight, config.rmsNormEps());
+            profNormNs += System.nanoTime() - t0;
+
+            t0 = System.nanoTime();
+            if (gpuPipeline.hasLmHead()) {
+                gpuPipeline.lmHead(decBuf, decLogits);
+            } else {
+                Arrays.fill(decLogits, 0);
+                weights.lmHead.matvec(decBuf, decLogits);
+            }
+            profLmHeadNs += System.nanoTime() - t0;
+
+            cachedSeqLen = pos + 1;
+            return decLogits;
         }
 
         // Process each layer
