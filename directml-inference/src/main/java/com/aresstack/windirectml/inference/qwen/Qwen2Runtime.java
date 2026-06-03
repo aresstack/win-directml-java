@@ -91,6 +91,13 @@ public final class Qwen2Runtime {
 
     // ── Profiling ────────────────────────────────────────────────────────
     private long profProjNs;
+    private long profDeviceDecodeNs;
+    private long profGpuResidentLayerNs;
+    private long profQkvProjNs;
+    private long profOProjNs;
+    private long profMlpBatchNs;
+    private long profGateUpProjNs;
+    private long profDownProjNs;
     private long profAttnNs;
     private long profNormNs;
     private long profActNs;
@@ -436,8 +443,8 @@ public final class Qwen2Runtime {
         long perStageSumMs = (profPrefillQkvBatchNs + profPrefillOProjBatchNs
                 + profPrefillGuBatchNs + profPrefillDownBatchNs
                 + profPrefillAttnNs) / 1_000_000L;
-        log.info("Prefill per-stage ({} layers, seqLen={}): qkvBatch(FP32)={} ms, "
-                        + "oProjBatch(INT4)={} ms, gateUpBatch(FP32)={} ms, downBatch(INT4)={} ms, "
+        log.info("Prefill per-stage ({} layers, seqLen={}): qkvBatch(NBits)={} ms, "
+                        + "oProjBatch(NBits)={} ms, gateUpBatch(NBits)={} ms, downBatch(NBits)={} ms, "
                         + "attn(CPU)={} ms; sumStages={} ms",
                 totalLayers, seqLen,
                 profPrefillQkvBatchNs / 1_000_000L,
@@ -523,7 +530,7 @@ public final class Qwen2Runtime {
         if (useGpuForDecode && gpuPipeline != null && gpuPipeline.isAttnChainedEnabled()) {
             long t0 = System.nanoTime();
             gpuPipeline.decodeLayersChained(decBuf, decBuf, pos);
-            profProjNs += System.nanoTime() - t0;
+            profDeviceDecodeNs += System.nanoTime() - t0;
 
             // decodeLayersChained already applies the final RMSNorm on the device.
             t0 = System.nanoTime();
@@ -604,7 +611,7 @@ public final class Qwen2Runtime {
             // all subsequent decodes must keep going through this same fast path.
             t0 = System.nanoTime();
             gpuPipeline.decodeLayerGpuResident(layerIdx, decNormed, hiddenIo, hiddenIo, pos);
-            profProjNs += System.nanoTime() - t0;
+            profGpuResidentLayerNs += System.nanoTime() - t0;
             return;
         }
 
@@ -634,7 +641,9 @@ public final class Qwen2Runtime {
         if (lw.qBias() != null) addBias(decQ, lw.qBias());
         if (lw.kBias() != null) addBias(decK, lw.kBias());
         if (lw.vBias() != null) addBias(decV, lw.vBias());
-        profProjNs += System.nanoTime() - t0;
+        long qkvElapsedNs = System.nanoTime() - t0;
+        profQkvProjNs += qkvElapsedNs;
+        profProjNs += qkvElapsedNs;
 
         // ── RoPE ─────────────────────────────────────────────────────
         t0 = System.nanoTime();
@@ -688,7 +697,9 @@ public final class Qwen2Runtime {
             // ── V2.0 MLP batch: o_proj + residual1 + rmsNorm2 + gateUp + swiglu + down + residual2
             //    All 6 ops in ONE GPU submission → 1 fence wait instead of 3
             gpuPipeline.batchMlp(decAttnOut, hiddenIo, hiddenIo, layerIdx);
-            profProjNs += System.nanoTime() - t0;
+            long mlpBatchElapsedNs = System.nanoTime() - t0;
+            profMlpBatchNs += mlpBatchElapsedNs;
+            profProjNs += mlpBatchElapsedNs;
             return;  // Layer complete — hiddenIo holds the updated hidden state
         }
 
@@ -702,7 +713,9 @@ public final class Qwen2Runtime {
             Arrays.fill(decOProj, 0);
             lw.oProj().matvec(decAttnOut, decOProj);
         }
-        profProjNs += System.nanoTime() - t0;
+        long oProjElapsedNs = System.nanoTime() - t0;
+        profOProjNs += oProjElapsedNs;
+        profProjNs += oProjElapsedNs;
 
         // ── Residual 1 → decResidual ─────────────────────────────────
         for (int i = 0; i < hidden; i++) {
@@ -727,7 +740,9 @@ public final class Qwen2Runtime {
             lw.gateProj().matvec(decPostNorm, decGate);
             lw.upProj().matvec(decPostNorm, decUp);
         }
-        profProjNs += System.nanoTime() - t0;
+        long gateUpElapsedNs = System.nanoTime() - t0;
+        profGateUpProjNs += gateUpElapsedNs;
+        profProjNs += gateUpElapsedNs;
 
         // SwiGLU activation: silu(gate) * up
         t0 = System.nanoTime();
@@ -751,7 +766,9 @@ public final class Qwen2Runtime {
             Arrays.fill(decDown, 0);
             lw.downProj().matvec(decMlpAct, decDown);
         }
-        profProjNs += System.nanoTime() - t0;
+        long downElapsedNs = System.nanoTime() - t0;
+        profDownProjNs += downElapsedNs;
+        profProjNs += downElapsedNs;
 
         // ── Residual 2 → hiddenIo (output, in-place) ────────────────
         for (int i = 0; i < hidden; i++) {
@@ -1156,43 +1173,96 @@ public final class Qwen2Runtime {
     // ── Profiling ────────────────────────────────────────────────────────
 
     private void resetProfile() {
-        profProjNs = profAttnNs = profNormNs = profActNs = profLmHeadNs = profPrefillNs = 0;
+        profProjNs = 0;
+        profDeviceDecodeNs = 0;
+        profGpuResidentLayerNs = 0;
+        profQkvProjNs = 0;
+        profOProjNs = 0;
+        profMlpBatchNs = 0;
+        profGateUpProjNs = 0;
+        profDownProjNs = 0;
+        profAttnNs = 0;
+        profNormNs = 0;
+        profActNs = 0;
+        profLmHeadNs = 0;
+        profPrefillNs = 0;
         profSteps = 0;
         lastProfile = null;
     }
 
     private String buildProfileSummary() {
         if (profSteps == 0) return "[No tokens generated]";
-        long totalDecode = profProjNs + profAttnNs + profNormNs + profActNs + profLmHeadNs;
+
+        long totalDecode = profDeviceDecodeNs + profGpuResidentLayerNs + profProjNs
+                + profAttnNs + profNormNs + profActNs + profLmHeadNs;
         double totalMs = totalDecode / 1e6;
         double perToken = totalMs / profSteps;
         double pctDivisor = totalDecode > 0 ? totalDecode : 1;
-        int gpuL = gpuPipeline != null ? (gpuPipeline.hasLayer(config.numHiddenLayers() - 1)
+
+        StringBuilder sb = new StringBuilder(512);
+        sb.append(String.format("[Qwen2 Decode Profile] %d tokens, %.1f ms total, %.1f ms/token%n",
+                profSteps, totalMs, perToken));
+        sb.append(String.format("  Mode:          %s%n", describeDecodeMode()));
+        sb.append(String.format("  Prefill:       %.1f ms%n", profPrefillNs / 1e6));
+
+        appendProfileLine(sb, "Device graph", profDeviceDecodeNs, pctDivisor,
+                "Opt-C chained decode: all layers + final RMSNorm in one submit; internal stages need GPU timestamp queries");
+        appendProfileLine(sb, "GPU-res layer", profGpuResidentLayerNs, pctDivisor,
+                "Opt-B per-layer resident path");
+        appendProfileLine(sb, "Proj total", profProjNs, pctDivisor,
+                "non-chained projection work only");
+        appendProfileLine(sb, "  qkv_proj", profQkvProjNs, pctDivisor, null);
+        appendProfileLine(sb, "  o_proj", profOProjNs, pctDivisor, null);
+        appendProfileLine(sb, "  mlp_batch", profMlpBatchNs, pctDivisor,
+                "o_proj + residual + post_norm + gate_up + SwiGLU + down_proj + residual");
+        appendProfileLine(sb, "  gate_up", profGateUpProjNs, pctDivisor, null);
+        appendProfileLine(sb, "  down_proj", profDownProjNs, pctDivisor, null);
+        appendProfileLine(sb, "Attention", profAttnNs, pctDivisor, null);
+        appendProfileLine(sb, "Norms+RoPE", profNormNs, pctDivisor, null);
+        appendProfileLine(sb, "SwiGLU", profActNs, pctDivisor, null);
+        appendProfileLine(sb, "LM head", profLmHeadNs, pctDivisor, null);
+        return sb.toString();
+    }
+
+    private void appendProfileLine(StringBuilder sb, String label, long elapsedNs,
+                                   double pctDivisor, String note) {
+        if (elapsedNs == 0) {
+            return;
+        }
+
+        double perTokenMs = elapsedNs / 1e6 / profSteps;
+        double percent = 100.0 * elapsedNs / pctDivisor;
+        sb.append(String.format("  %-13s %.1f ms avg (%.0f%%)", label + ":", perTokenMs, percent));
+        if (note != null) {
+            sb.append(" — ").append(note);
+        }
+        sb.append(System.lineSeparator());
+    }
+
+    private String describeDecodeMode() {
+        int gpuLayers = gpuPipeline != null ? (gpuPipeline.hasLayer(config.numHiddenLayers() - 1)
                 ? config.numHiddenLayers() : gpuKernels != null ? gpuKernels.getGpuLayers() : 0)
                 : gpuKernels != null ? gpuKernels.getGpuLayers() : 0;
-        boolean pipelineV2 = gpuPipeline != null && gpuPipeline.isMlpBatchEnabled();
 
-        return String.format(
-                "[Qwen2 Decode Profile] %d tokens, %.1f ms total, %.1f ms/token%n"
-                        + "  Mode:          %s%n"
-                        + "  Prefill:       %.1f ms%n"
-                        + "  Projections:   %.1f ms avg (%.0f%%)%n"
-                        + "  Attention:     %.1f ms avg (%.0f%%)%n"
-                        + "  Norms+RoPE:    %.1f ms avg (%.0f%%)%n"
-                        + "  SwiGLU:        %.1f ms avg (%.0f%%)%n"
-                        + "  LM head:       %.1f ms avg (%.0f%%)",
-                profSteps, totalMs, perToken,
-                gpuL > 0
-                        ? (pipelineV2
-                        ? "GPU-V2 (pipeline, " + gpuL + " layers, mlpBatch=true, 48 submits/token)"
-                        : "GPU-V1 (" + gpuL + " layers, lmHead=" + (gpuKernels != null && gpuKernels.hasLmHead()) + ")")
-                        : "CPU-only",
-                profPrefillNs / 1e6,
-                profProjNs / 1e6 / profSteps, 100.0 * profProjNs / pctDivisor,
-                profAttnNs / 1e6 / profSteps, 100.0 * profAttnNs / pctDivisor,
-                profNormNs / 1e6 / profSteps, 100.0 * profNormNs / pctDivisor,
-                profActNs / 1e6 / profSteps, 100.0 * profActNs / pctDivisor,
-                profLmHeadNs / 1e6 / profSteps, 100.0 * profLmHeadNs / pctDivisor
-        );
+        if (gpuPipeline != null && gpuPipeline.isAttnChainedEnabled()) {
+            return "GPU Opt-C chained (" + gpuLayers
+                    + " layers, 1 submit/token, finalNorm=device, lmHead=" + gpuPipeline.hasLmHead() + ")";
+        }
+        if (gpuPipeline != null && gpuPipeline.isAttnGpuResidentEnabled()) {
+            return "GPU Opt-B layer-resident (" + gpuLayers
+                    + " layers, 1 submit/layer, lmHead=" + gpuPipeline.hasLmHead() + ")";
+        }
+        if (gpuPipeline != null && gpuPipeline.isMlpBatchEnabled()) {
+            return "GPU-V2 pipeline (" + gpuLayers
+                    + " layers, mlpBatch=true, chained=false)";
+        }
+        if (gpuLayers > 0) {
+            boolean lmHeadOnGpu = gpuKernels != null && gpuKernels.hasLmHead();
+            if (gpuPipeline != null) {
+                lmHeadOnGpu = gpuPipeline.hasLmHead();
+            }
+            return "GPU-V1 (" + gpuLayers + " layers, lmHead=" + lmHeadOnGpu + ")";
+        }
+        return "CPU-only";
     }
 }
