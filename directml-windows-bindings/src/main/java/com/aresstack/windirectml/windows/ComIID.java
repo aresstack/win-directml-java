@@ -125,6 +125,15 @@ public final class ComIID {
             (byte) 0x90, (byte) 0xf7, (byte) 0x12, (byte) 0x7b,
             (byte) 0xb7, (byte) 0x63, (byte) 0xfa, (byte) 0x51);
 
+
+    /**
+     * IID_ID3D12QueryHeap = {0d9658ae-ed45-469e-a61d-970ec583cab4}
+     */
+    public static final byte[] IID_ID3D12QueryHeap_BYTES = guidBytes(
+            0x0d9658ae, (short) 0xed45, (short) 0x469e,
+            (byte) 0xa6, (byte) 0x1d, (byte) 0x97, (byte) 0x0e,
+            (byte) 0xc5, (byte) 0x83, (byte) 0xca, (byte) 0xb4);
+
     /**
      * IID_ID3D12Resource = {696442be-a72e-4059-bc79-5b5c98040fad}
      */

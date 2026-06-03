@@ -3,10 +3,14 @@ package com.aresstack.windirectml.inference.qwen;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.aresstack.windirectml.windows.GpuTimestampProfile;
+
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
 import java.util.stream.IntStream;
@@ -109,6 +113,8 @@ public final class Qwen2Runtime {
     private long profPrefillGuBatchNs;
     private long profPrefillDownBatchNs;
     private long profPrefillAttnNs;
+    private final Map<String, Long> profGpuTimestampNs = new LinkedHashMap<>();
+    private int profGpuTimestampSamples;
     private int profSteps;
     private String lastProfile;
 
@@ -531,6 +537,7 @@ public final class Qwen2Runtime {
             long t0 = System.nanoTime();
             gpuPipeline.decodeLayersChained(decBuf, decBuf, pos);
             profDeviceDecodeNs += System.nanoTime() - t0;
+            accumulateGpuTimestampProfile(gpuPipeline.lastChainedTimestampProfile());
 
             // decodeLayersChained already applies the final RMSNorm on the device.
             t0 = System.nanoTime();
@@ -1186,6 +1193,8 @@ public final class Qwen2Runtime {
         profActNs = 0;
         profLmHeadNs = 0;
         profPrefillNs = 0;
+        profGpuTimestampNs.clear();
+        profGpuTimestampSamples = 0;
         profSteps = 0;
         lastProfile = null;
     }
@@ -1221,7 +1230,64 @@ public final class Qwen2Runtime {
         appendProfileLine(sb, "Norms+RoPE", profNormNs, pctDivisor, null);
         appendProfileLine(sb, "SwiGLU", profActNs, pctDivisor, null);
         appendProfileLine(sb, "LM head", profLmHeadNs, pctDivisor, null);
+        appendGpuTimestampProfile(sb);
         return sb.toString();
+    }
+
+    private void accumulateGpuTimestampProfile(GpuTimestampProfile profile) {
+        if (profile == null || profile.isEmpty()) {
+            return;
+        }
+        profGpuTimestampSamples++;
+        for (Map.Entry<String, Long> entry : profile.elapsedNanosByStage().entrySet()) {
+            Long previous = profGpuTimestampNs.get(entry.getKey());
+            profGpuTimestampNs.put(entry.getKey(), previous == null
+                    ? entry.getValue()
+                    : previous + entry.getValue());
+        }
+    }
+
+    private void appendGpuTimestampProfile(StringBuilder sb) {
+        if (profGpuTimestampSamples == 0 || profGpuTimestampNs.isEmpty()) {
+            return;
+        }
+
+        long totalNs = 0L;
+        for (Long value : profGpuTimestampNs.values()) {
+            totalNs += value;
+        }
+        if (totalNs <= 0L) {
+            return;
+        }
+
+        sb.append(String.format("[Qwen2 GPU Timestamp Profile] %d samples, %.1f ms/token measured on command queue%n",
+                profGpuTimestampSamples, totalNs / 1e6 / profGpuTimestampSamples));
+        appendGpuTimestampLine(sb, "input_upload", totalNs);
+        appendGpuTimestampLine(sb, "input_norm", totalNs);
+        appendGpuTimestampLine(sb, "qkv_proj", totalNs);
+        appendGpuTimestampLine(sb, "qkv_bias", totalNs);
+        appendGpuTimestampLine(sb, "rope_append", totalNs);
+        appendGpuTimestampLine(sb, "attention", totalNs);
+        appendGpuTimestampLine(sb, "o_proj", totalNs);
+        appendGpuTimestampLine(sb, "residual1", totalNs);
+        appendGpuTimestampLine(sb, "post_norm", totalNs);
+        appendGpuTimestampLine(sb, "gate_up", totalNs);
+        appendGpuTimestampLine(sb, "swiglu", totalNs);
+        appendGpuTimestampLine(sb, "down_proj", totalNs);
+        appendGpuTimestampLine(sb, "residual2", totalNs);
+        appendGpuTimestampLine(sb, "final_norm", totalNs);
+        appendGpuTimestampLine(sb, "readback_copy", totalNs);
+    }
+
+    private void appendGpuTimestampLine(StringBuilder sb, String stage, long totalNs) {
+        Long elapsedNs = profGpuTimestampNs.get(stage);
+        if (elapsedNs == null || elapsedNs == 0L) {
+            return;
+        }
+
+        double perTokenMs = elapsedNs / 1e6 / profGpuTimestampSamples;
+        double percent = 100.0 * elapsedNs / totalNs;
+        sb.append(String.format("  %-13s %.1f ms avg (%.0f%%)%n", stage + ":", perTokenMs, percent));
     }
 
     private void appendProfileLine(StringBuilder sb, String label, long elapsedNs,

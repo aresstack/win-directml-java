@@ -58,6 +58,9 @@ public final class D3D12Bindings {
 
     public static final int DXGI_FORMAT_UNKNOWN = 0;
 
+    public static final int D3D12_QUERY_HEAP_TYPE_TIMESTAMP = 3;
+    public static final int D3D12_QUERY_TYPE_TIMESTAMP = 2;
+
     public static final int D3D12_TEXTURE_LAYOUT_ROW_MAJOR = 1;
 
     // ── ID3D12Device vtable slot indices ─────────────────────────────────
@@ -69,6 +72,7 @@ public final class D3D12Bindings {
     static final int DEV_GET_DESCRIPTOR_INCREMENT = 15;
     static final int DEV_CREATE_COMMITTED_RESOURCE = 27;
     static final int DEV_CREATE_FENCE = 36;
+    static final int DEV_CREATE_QUERY_HEAP = 39;
 
     // ── Function descriptor for D3D12CreateDevice ────────────────────────
     private static final FunctionDescriptor D3D12_CREATE_DEVICE_DESC =
@@ -684,6 +688,104 @@ public final class D3D12Bindings {
             return handle;
         } catch (Throwable t) {
             throw new RuntimeException("GetGPUDescriptorHandleForHeapStart failed", t);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Timestamp query heap (GPU profiling)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Create a timestamp query heap.
+     *
+     * @param device     ID3D12Device
+     * @param queryCount number of timestamp slots
+     * @param arena      arena used for temporary descriptor memory
+     * @return ID3D12QueryHeap COM pointer
+     */
+    public static MemorySegment createTimestampQueryHeap(MemorySegment device, int queryCount, Arena arena)
+            throws WindowsNativeException {
+        if (queryCount <= 0) {
+            throw new IllegalArgumentException("queryCount must be positive");
+        }
+        try {
+            // D3D12_QUERY_HEAP_DESC: Type(UINT), Count(UINT), NodeMask(UINT)
+            MemorySegment desc = arena.allocate(12, 4);
+            desc.set(ValueLayout.JAVA_INT, 0, D3D12_QUERY_HEAP_TYPE_TIMESTAMP);
+            desc.set(ValueLayout.JAVA_INT, 4, queryCount);
+            desc.set(ValueLayout.JAVA_INT, 8, 0);
+
+            MemorySegment riid = ComIID.allocateGuid(arena, ComIID.IID_ID3D12QueryHeap_BYTES);
+            MemorySegment pp = arena.allocate(ValueLayout.ADDRESS);
+            MethodHandle mh = DxgiBindings.vtableMethod(device, DEV_CREATE_QUERY_HEAP,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                            ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+            int hr = (int) mh.invokeExact(device, desc, riid, pp);
+            HResult.check(hr, "ID3D12Device::CreateQueryHeap(TIMESTAMP)");
+            return pp.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateQueryHeap(TIMESTAMP) failed", t);
+        }
+    }
+
+    /**
+     * Record a timestamp query at the current command-list position.
+     */
+    public static void endTimestampQuery(MemorySegment cmdList, MemorySegment queryHeap, int queryIndex) {
+        try {
+            MethodHandle mh = DxgiBindings.vtableMethod(cmdList, 53,
+                    FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                            ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+            mh.invokeExact(cmdList, queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, queryIndex);
+        } catch (Throwable t) {
+            throw new RuntimeException("EndQuery(TIMESTAMP) failed", t);
+        }
+    }
+
+    /**
+     * Resolve timestamp queries into a readback resource.
+     */
+    public static void resolveTimestampQueries(MemorySegment cmdList, MemorySegment queryHeap,
+                                               int startIndex, int queryCount,
+                                               MemorySegment destinationBuffer,
+                                               long destinationOffset) {
+        if (queryCount <= 0) {
+            return;
+        }
+        try {
+            MethodHandle mh = DxgiBindings.vtableMethod(cmdList, 54,
+                    FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                            ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                            ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
+            mh.invokeExact(cmdList, queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, startIndex,
+                    queryCount, destinationBuffer, destinationOffset);
+        } catch (Throwable t) {
+            throw new RuntimeException("ResolveQueryData(TIMESTAMP) failed", t);
+        }
+    }
+
+    /**
+     * Query timestamp ticks per second for the command queue.
+     */
+    public static long getTimestampFrequency(MemorySegment commandQueue, Arena arena)
+            throws WindowsNativeException {
+        try {
+            MemorySegment pFrequency = arena.allocate(ValueLayout.JAVA_LONG);
+            MethodHandle mh = DxgiBindings.vtableMethod(commandQueue, 16,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+            int hr = (int) mh.invokeExact(commandQueue, pFrequency);
+            HResult.check(hr, "ID3D12CommandQueue::GetTimestampFrequency");
+            long frequency = pFrequency.get(ValueLayout.JAVA_LONG, 0);
+            if (frequency <= 0) {
+                throw new WindowsNativeException("D3D12 timestamp frequency is not positive: " + frequency);
+            }
+            return frequency;
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("GetTimestampFrequency failed", t);
         }
     }
 

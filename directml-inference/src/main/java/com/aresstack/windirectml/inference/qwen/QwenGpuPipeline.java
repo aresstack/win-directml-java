@@ -48,6 +48,8 @@ public final class QwenGpuPipeline implements AutoCloseable {
 
     private final GpuPipeline pipeline;
     private final QwenGpuKernels kernels;
+    private final GpuTimestampProfiler timestampProfiler;
+    private GpuTimestampProfile lastChainedTimestampProfile;
     private ComputeKernelSet computeKernels;   // null if shader compilation fails
     private AttentionKernelSet attentionKernels;  // null if Opt-B shaders fail to compile
     private QwenGpuKvCache kvCache;             // null until lazy attention enable succeeds
@@ -136,6 +138,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
         long maxReadback = Math.max(qkvBytes, Math.max(vocabBytes, hiddenBytes));
 
         this.pipeline = new GpuPipeline(wb, maxUpload, maxReadback);
+        this.timestampProfiler = createTimestampProfiler(wb, config);
 
         // ── Compile V2.0 compute shaders ─────────────────────────────────────
         try {
@@ -178,6 +181,17 @@ public final class QwenGpuPipeline implements AutoCloseable {
 
         log.info("QwenGpuPipeline ready: mlpBatch={}, upload={}KB, readback={}KB",
                 mlpBatchEnabled, maxUpload / 1024, maxReadback / 1024);
+    }
+
+    private GpuTimestampProfiler createTimestampProfiler(WindowsBindings wb, Qwen2Config config) {
+        boolean enabled = Boolean.parseBoolean(System.getProperty("qwen.gpu.timestampProfile", "true"));
+        if (!enabled) {
+            return null;
+        }
+
+        int markersPerLayer = 12;
+        int maxQueries = 4 + config.numHiddenLayers() * markersPerLayer + 4;
+        return GpuTimestampProfiler.tryCreate(wb, maxQueries);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -729,8 +743,13 @@ public final class QwenGpuPipeline implements AutoCloseable {
         // ── 9. Transition residualBuf → COPY_SOURCE, readback into hiddenOut ──
         pipeline.recordBarrier(barrierResidualUavToCopySource);
         pipeline.recordReadback(residualBuf, 0, hiddenBytes);
+        recordTimestamp(cl, "token.readback_copy");
+        resolveTimestamps(cl);
         pipeline.submitAndWait();
         pipeline.readbackInto(hiddenOut, 0, hidden);
+        if (timestampProfiler != null) {
+            lastChainedTimestampProfile = timestampProfiler.readProfile();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -763,6 +782,20 @@ public final class QwenGpuPipeline implements AutoCloseable {
                 deferredNumLayers > 0 ? deferredNumLayers : inputNormWeightBufs.length);
     }
 
+    private void recordTimestamp(MemorySegment commandList, String label) {
+        if (timestampProfiler == null) {
+            return;
+        }
+        timestampProfiler.record(commandList, label);
+    }
+
+    private void resolveTimestamps(MemorySegment commandList) {
+        if (timestampProfiler == null) {
+            return;
+        }
+        timestampProfiler.resolve(commandList);
+    }
+
     /**
      * ALL decoder layers in ONE GPU submission (Opt-C).
      *
@@ -793,11 +826,17 @@ public final class QwenGpuPipeline implements AutoCloseable {
 
         pipeline.begin();
         var cl = pipeline.getCommandList();
+        lastChainedTimestampProfile = null;
+        if (timestampProfiler != null) {
+            timestampProfiler.reset();
+            recordTimestamp(cl, "token_start");
+        }
 
         // 0. Upload hiddenInput → residualBuf (entry for layer 0)
         pipeline.recordUpload(hiddenInput, 0, hidden, residualBuf, 0);
         pipeline.recordBarrier(barrierResidualCopyDestToUav);
         pipeline.recordUavBarrier(uavBarrier);
+        recordTimestamp(cl, "token.input_upload");
 
         for (int l = 0; l < kernels.getGpuLayers(); l++) {
             MatMulNBitsKernel qkvK = kernels.qkvFused(l);
@@ -812,10 +851,12 @@ public final class QwenGpuPipeline implements AutoCloseable {
                             D3D12Bindings.getGpuVirtualAddress(qkvK.getInputBuf())},
                     new int[]{hidden, epsBits}, 1);
             pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "layer" + l + ".input_norm");
 
             // 2. QKV fused GEMM
             qkvK.recordBatchDispatchOnly(pipeline);
             pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "layer" + l + ".qkv_proj");
 
             // 3. Add QKV bias (if present)
             long qkvBaseAddr = D3D12Bindings.getGpuVirtualAddress(qkvK.getOutputBuf());
@@ -828,6 +869,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
                         new int[]{qkvN}, qkvN);
                 pipeline.recordUavBarrier(uavBarrier);
             }
+            recordTimestamp(cl, "layer" + l + ".qkv_bias");
 
             // 4. RoPE + append K/V to KV cache
             long qAddr = qkvBaseAddr;
@@ -839,6 +881,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
                             kvCache.getMaxSeqLen(), ropeThetaBits},
                     (numHeads + kvHeads) * halfDim);
             pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "layer" + l + ".rope_append");
 
             // 5. GQA attention → oK.inputBuf
             long attnOutAddr = D3D12Bindings.getGpuVirtualAddress(oK.getInputBuf());
@@ -848,10 +891,12 @@ public final class QwenGpuPipeline implements AutoCloseable {
                             seqLen, kvCache.getMaxSeqLen(), scaleBits},
                     numHeads * headDim);
             pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "layer" + l + ".attention");
 
             // 6. o_proj GEMM
             oK.recordBatchDispatchOnly(pipeline);
             pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "layer" + l + ".o_proj");
 
             // 7. residual1 = oProj + residualBuf
             computeKernels.add().recordDispatch(cl,
@@ -860,6 +905,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
                             D3D12Bindings.getGpuVirtualAddress(residualBuf)},
                     new int[]{hidden}, hidden);
             pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "layer" + l + ".residual1");
 
             // 8. RMSNorm → guK.inputBuf
             computeKernels.rmsNorm().recordDispatch(cl,
@@ -868,10 +914,12 @@ public final class QwenGpuPipeline implements AutoCloseable {
                             D3D12Bindings.getGpuVirtualAddress(guK.getInputBuf())},
                     new int[]{hidden, epsBits}, 1);
             pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "layer" + l + ".post_norm");
 
             // 9. gate_up GEMM
             guK.recordBatchDispatchOnly(pipeline);
             pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "layer" + l + ".gate_up");
 
             // 10. SwiGLU → downK.inputBuf
             computeKernels.swiglu().recordDispatch(cl,
@@ -879,10 +927,12 @@ public final class QwenGpuPipeline implements AutoCloseable {
                             D3D12Bindings.getGpuVirtualAddress(downK.getInputBuf())},
                     new int[]{intermediate}, intermediate);
             pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "layer" + l + ".swiglu");
 
             // 11. down_proj GEMM
             downK.recordBatchDispatchOnly(pipeline);
             pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "layer" + l + ".down_proj");
 
             // 12. residual2 = residualBuf + downOut (in-place)
             computeKernels.add().recordDispatch(cl,
@@ -890,6 +940,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
                             D3D12Bindings.getGpuVirtualAddress(downK.getOutputBuf()),
                             D3D12Bindings.getGpuVirtualAddress(residualBuf)},
                     new int[]{hidden}, hidden);
+            recordTimestamp(cl, "layer" + l + ".residual2");
 
             // Barrier between layers (not after last)
             if (l < kernels.getGpuLayers() - 1) {
@@ -904,12 +955,18 @@ public final class QwenGpuPipeline implements AutoCloseable {
                         D3D12Bindings.getGpuVirtualAddress(residualBuf)},
                 new int[]{hidden, epsBits}, 1);
         pipeline.recordUavBarrier(uavBarrier);
+        recordTimestamp(cl, "token.final_norm");
 
         // Readback final hidden state (after finalNorm) – caller does lm_head + argmax
         pipeline.recordBarrier(barrierResidualUavToCopySource);
         pipeline.recordReadback(residualBuf, 0, hiddenBytes);
+        recordTimestamp(cl, "token.readback_copy");
+        resolveTimestamps(cl);
         pipeline.submitAndWait();
         pipeline.readbackInto(hiddenOut, 0, hidden);
+        if (timestampProfiler != null) {
+            lastChainedTimestampProfile = timestampProfiler.readProfile();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -937,6 +994,13 @@ public final class QwenGpuPipeline implements AutoCloseable {
         return pipeline;
     }
 
+    /**
+     * Return the last Opt-C D3D12 timestamp profile, or {@code null} when unavailable.
+     */
+    public GpuTimestampProfile lastChainedTimestampProfile() {
+        return lastChainedTimestampProfile;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // AutoCloseable
     // ═══════════════════════════════════════════════════════════════════════════
@@ -958,6 +1022,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
             }
             kvCache = null;
         }
+        if (timestampProfiler != null) timestampProfiler.close();
         pipeline.close();
         log.info("QwenGpuPipeline closed");
     }
