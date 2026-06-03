@@ -53,6 +53,7 @@ public final class WindowsBindings implements AutoCloseable {
 
     private boolean initialised = false;
     private boolean closed = false;
+    private String selectedBackend = "";
 
     public WindowsBindings() {
         this(Boolean.getBoolean("windirectml.debug"));
@@ -89,6 +90,7 @@ public final class WindowsBindings implements AutoCloseable {
         if (closed) throw new IllegalStateException("WindowsBindings already closed");
         if (initialised) return;
         log.info("WindowsBindings.init(backend={})", backend);
+        selectedBackend = backend == null ? "" : backend.trim().toLowerCase(java.util.Locale.ROOT);
 
         if (!isSupported()) {
             throw new WindowsNativeException("Not running on Windows – native bindings unavailable");
@@ -192,6 +194,10 @@ public final class WindowsBindings implements AutoCloseable {
 
     public boolean hasDirectMl() {
         return dmlDevice != null;
+    }
+
+    public boolean isWarpBackend() {
+        return "warp".equals(selectedBackend);
     }
 
     /**

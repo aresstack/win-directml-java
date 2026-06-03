@@ -105,6 +105,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private MemorySegment int4ScalesBuf;   // GPU default buffer: FP32 scales [N * blocksPerRow * 4]
     private MemorySegment int4ZpBuf;       // GPU default buffer: packed INT4 zero-points
     private GpuComputeKernel int4Shader;   // compiled HLSL INT4 MatVec kernel
+    private final boolean useWarpParallelInt4Matvec;
+    private static final int WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE = 128;
     private long[] int4UavAddrs;           // pre-cached GPU VAs: [X, QW, Scales, ZP, Y]
     private int[] int4Constants;           // pre-cached constants: [N, K, blockSize]
 
@@ -236,6 +238,80 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 }
             
                 Y.Store(n * 4, asuint(sum));
+            }
+            """;
+
+    // ── WARP-optimised INT4 matrix-vector product ───────────────────────────
+    // One thread group computes one output row. The 128 lanes cooperatively
+    // reduce the K dimension, which avoids the very slow WARP pattern where one
+    // logical shader thread serially walks the full row. This is intended for
+    // decode (M=1) on the D3D12 WARP software adapter; hardware GPUs can keep
+    // the simpler one-thread-per-row shader by default.
+    private static final String INT4_MATVEC_WARP_PARALLEL_HLSL = """
+            RWByteAddressBuffer X      : register(u0);
+            RWByteAddressBuffer QW     : register(u1);
+            RWByteAddressBuffer Scales : register(u2);
+            RWByteAddressBuffer ZP     : register(u3);
+            RWByteAddressBuffer Y      : register(u4);
+            cbuffer CB : register(b0) { uint N; uint K; uint blockSz; };
+            
+            #define THREADS 128
+            groupshared float partial[THREADS];
+            groupshared float blockScale;
+            groupshared float blockZeroPoint;
+            
+            [numthreads(THREADS, 1, 1)]
+            void CSMain(uint3 gid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
+                uint n = gid.x;
+                uint lane = ltid.x;
+                if (n >= N) return;
+            
+                uint blocksPerRow = K / blockSz;
+                uint bytesPerBlock = blockSz / 2;
+                float sum = 0.0;
+            
+                for (uint blk = 0; blk < blocksPerRow; blk++) {
+                    uint scIdx = n * blocksPerRow + blk;
+                    if (lane == 0) {
+                        blockScale = asfloat(Scales.Load(scIdx * 4));
+            
+                        uint zpByteIdx = scIdx / 2;
+                        uint zpDword = ZP.Load((zpByteIdx / 4) * 4);
+                        uint zpByte = (zpDword >> ((zpByteIdx % 4) * 8)) & 0xFF;
+                        blockZeroPoint = (scIdx % 2u == 0u)
+                                ? float(zpByte & 0xFu)
+                                : float(zpByte >> 4u);
+                    }
+                    GroupMemoryBarrierWithGroupSync();
+            
+                    if (lane < bytesPerBlock) {
+                        uint qByteBase = n * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                        uint qByteAddr = qByteBase + lane;
+                        uint qDword = QW.Load((qByteAddr / 4) * 4);
+                        uint qByte = (qDword >> ((qByteAddr % 4) * 8)) & 0xFF;
+            
+                        uint kOff = blk * blockSz + lane * 2;
+                        float scale = blockScale;
+                        float zp = blockZeroPoint;
+                        sum += (float(qByte & 0xFu) - zp) * scale * asfloat(X.Load((kOff + 0) * 4));
+                        sum += (float(qByte >> 4u) - zp) * scale * asfloat(X.Load((kOff + 1) * 4));
+                    }
+                    GroupMemoryBarrierWithGroupSync();
+                }
+            
+                partial[lane] = sum;
+                GroupMemoryBarrierWithGroupSync();
+            
+                for (uint stride = THREADS / 2; stride > 0; stride >>= 1) {
+                    if (lane < stride) {
+                        partial[lane] += partial[lane + stride];
+                    }
+                    GroupMemoryBarrierWithGroupSync();
+                }
+            
+                if (lane == 0) {
+                    Y.Store(n * 4, asuint(partial[0]));
+                }
             }
             """;
 
@@ -429,6 +505,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         this.N = N;
         this.K = K;
         this.useInt4Gpu = INT4_GPU_ENABLED;
+        this.useWarpParallelInt4Matvec = useInt4Gpu
+                && wb.isWarpBackend()
+                && !Boolean.getBoolean("directml.int4.warpParallelMatvec.disabled");
 
         try {
             if (useInt4Gpu) {
@@ -473,6 +552,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         this.N = N;
         this.K = K;
         this.useInt4Gpu = false;  // pre-dequantized path always uses DML FP32
+        this.useWarpParallelInt4Matvec = false;
 
         try {
             prepareGpu(fp32Weights);
@@ -528,12 +608,16 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         // Pass null for dml — INT4 mode does not use DirectML
         prepareExecInfraInt4(dev, inputBytes, outputBytes);
 
-        // Compile INT4 MatVec shader (on the shared execCmdList for MH caching)
+        // Compile INT4 MatVec shader (on the shared execCmdList for MH caching).
+        // WARP benefits from parallelising each output row over the K dimension;
+        // hardware GPUs keep the simpler one-thread-per-row shader unless explicitly
+        // forced through the WARP backend.
         int4Shader = new GpuComputeKernel(wb, execCmdList,
-                INT4_MATVEC_HLSL, "int4_matvec",
+                useWarpParallelInt4Matvec ? INT4_MATVEC_WARP_PARALLEL_HLSL : INT4_MATVEC_HLSL,
+                useWarpParallelInt4Matvec ? "int4_matvec_warp_parallel" : "int4_matvec",
                 5,   // 5 UAVs: X, QW, Scales, ZP, Y
                 3,   // 3 constants: N, K, blockSize
-                64); // 64 threads per group → dispatch N/64 groups
+                useWarpParallelInt4Matvec ? WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE : 64);
 
         // Pre-cache GPU VAs and constants (fixed for lifetime of this kernel)
         int4UavAddrs = new long[]{
@@ -546,10 +630,11 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         int4Constants = new int[]{N, K, blockSize};
 
         prepared = true;
-        log.info("MatMulNBitsKernel (INT4 GPU) ready: [{}, {}] — {}/{} bytes on GPU vs {} legacy",
+        log.info("MatMulNBitsKernel (INT4 GPU) ready: [{}, {}] — {}/{} bytes on GPU vs {} legacy, matvecShader={}",
                 N, K, qBytes + scaleBytes + zpBytes,
                 qBytes + scaleBytes + zpBytes,
-                (long) N * K * 4);
+                (long) N * K * 4,
+                useWarpParallelInt4Matvec ? "warp-parallel" : "row-serial");
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -634,6 +719,13 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         prepared = true;
         log.info("MatMulNBitsKernel ready: [{}, {}] on GPU (optimized single-submit)", N, K);
+    }
+
+    private int matvecDispatchElementCount() {
+        if (!useWarpParallelInt4Matvec) {
+            return N;
+        }
+        return Math.multiplyExact(N, WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE);
     }
 
     // ── INT4-only execution infrastructure (no DML, no descriptor heap) ─────
@@ -978,7 +1070,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhResourceBarrier.invokeExact(execCmdList, 1, barrierInputToUAV);
             if (useInt4Gpu) {
                 // V3.0: custom HLSL INT4 compute dispatch — no descriptor heap needed
-                int4Shader.recordDispatch(execCmdList, int4UavAddrs, int4Constants, N);
+                int4Shader.recordDispatch(execCmdList, int4UavAddrs, int4Constants, matvecDispatchElementCount());
             } else {
                 // Legacy: DML GEMM with FP32 weight buffer
                 mhSetDescriptorHeaps.invokeExact(execCmdList, 1, heapArrayPtr);
@@ -1051,7 +1143,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhCopyBufferRegion.invokeExact(cl, inputBuf, 0L, uploadBuf, 0L, inputBytes);
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
             if (useInt4Gpu) {
-                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, N);
+                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
             } else {
                 mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
                 mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
@@ -1093,7 +1185,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhCopyBufferRegion.invokeExact(cl, inputBuf, 0L, gpuInputBuf, 0L, gpuInputBytes);
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
             if (useInt4Gpu) {
-                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, N);
+                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
             } else {
                 mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
                 mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
@@ -1146,7 +1238,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhCopyBufferRegion.invokeExact(cl, inputBuf, 0L, uploadBuf, 0L, inputBytes);
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
             if (useInt4Gpu) {
-                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, N);
+                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
             } else {
                 mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
                 mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
@@ -1175,7 +1267,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhCopyBufferRegion.invokeExact(cl, inputBuf, 0L, gpuSrcBuf, 0L, inputBytes);
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
             if (useInt4Gpu) {
-                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, N);
+                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
             } else {
                 mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
                 mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
@@ -1200,7 +1292,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         try {
             var cl = pipeline.getCommandList();
             if (useInt4Gpu) {
-                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, N);
+                int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
             } else {
                 mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
                 mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
