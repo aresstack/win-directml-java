@@ -48,9 +48,14 @@ public final class DxgiBindings {
     // IDXGIObject: SetPrivateData(3), SetPrivateDataInterface(4), GetPrivateData(5), GetParent(6)
     // IDXGIFactory: EnumAdapters(7), MakeWindowAssociation(8), GetWindowAssociation(9), CreateSwapChain(10), CreateSoftwareAdapter(11)
     // IDXGIFactory1: EnumAdapters1(12), IsCurrent(13)
+    // IDXGIFactory4: (inherits all above) + SetGPUThreadPriority(14), 
+    //                GetSharedResourceAdapterLuid(15), RegisterStereoStatus(16),
+    //                ...
+    //                EnumWarpAdapter(27) via IDXGIFactory4
     static final int VTABLE_ADDREF = 1;
     static final int VTABLE_RELEASE = 2;
     static final int VTABLE_ENUM_ADAPTERS1 = 12;
+    static final int VTABLE_ENUM_WARP_ADAPTER = 27;
 
     // ── Lazy-initialised handles ─────────────────────────────────────────
 
@@ -100,6 +105,67 @@ public final class DxgiBindings {
             throw e;
         } catch (Throwable t) {
             throw new WindowsNativeException("CreateDXGIFactory1 invocation failed", t);
+        }
+    }
+
+    /**
+     * Call {@code CreateDXGIFactory1(&IID_IDXGIFactory4, &pFactory)} to
+     * create an IDXGIFactory4 (needed for EnumWarpAdapter).
+     *
+     * @param arena confined arena that owns the allocated memory
+     * @return COM pointer to IDXGIFactory4
+     */
+    public static MemorySegment createFactory4(Arena arena) throws WindowsNativeException {
+        try {
+            MemorySegment riid = ComIID.allocateGuid(arena, ComIID.IID_IDXGIFactory4_BYTES);
+            MemorySegment ppFactory = arena.allocate(ValueLayout.ADDRESS);
+
+            int hr = (int) getCreateDxgiFactory1Handle().invokeExact(riid, ppFactory);
+            HResult.check(hr, "CreateDXGIFactory1(IID_IDXGIFactory4)");
+
+            MemorySegment factory = ppFactory.get(ValueLayout.ADDRESS, 0)
+                    .reinterpret(Long.MAX_VALUE);
+            log.info("IDXGIFactory4 created: {}", factory);
+            return factory;
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("CreateDXGIFactory1(IID_IDXGIFactory4) failed", t);
+        }
+    }
+
+    /**
+     * Enumerate the WARP software adapter via {@code IDXGIFactory4::EnumWarpAdapter}.
+     *
+     * @param factory4 COM pointer to IDXGIFactory4
+     * @param arena    arena for allocations
+     * @return COM pointer to IDXGIAdapter1 (WARP adapter)
+     */
+    public static MemorySegment enumWarpAdapter(MemorySegment factory4, Arena arena)
+            throws WindowsNativeException {
+        try {
+            MemorySegment adapterIid = ComIID.allocateGuid(arena, ComIID.IID_IDXGIAdapter1_BYTES);
+            MemorySegment ppAdapter = arena.allocate(ValueLayout.ADDRESS);
+
+            MethodHandle enumWarp = vtableMethod(factory4, VTABLE_ENUM_WARP_ADAPTER,
+                    FunctionDescriptor.of(
+                            ValueLayout.JAVA_INT,   // HRESULT
+                            ValueLayout.ADDRESS,     // this
+                            ValueLayout.ADDRESS,     // REFIID
+                            ValueLayout.ADDRESS      // IDXGIAdapter1 **ppAdapter
+                    ));
+
+            int hr = (int) enumWarp.invokeExact(factory4, adapterIid, ppAdapter);
+            HResult.check(hr, "IDXGIFactory4::EnumWarpAdapter");
+
+            MemorySegment adapter = ppAdapter.get(ValueLayout.ADDRESS, 0)
+                    .reinterpret(Long.MAX_VALUE);
+            log.info("WARP adapter selected: {}", adapter);
+            return adapter;
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("EnumWarpAdapter invocation failed", t);
         }
     }
 

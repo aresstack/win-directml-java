@@ -58,6 +58,14 @@ public final class ComIID {
             (byte) 0x91, (byte) 0xfd, (byte) 0x08, (byte) 0x68,
             (byte) 0x79, (byte) 0x01, (byte) 0x1a, (byte) 0x05);
 
+    /**
+     * IID_IDXGIFactory4 = {1bc6ea02-ef36-464f-bf0c-2139e5168a55}
+     */
+    public static final byte[] IID_IDXGIFactory4_BYTES = guidBytes(
+            0x1bc6ea02, (short) 0xef36, (short) 0x464f,
+            (byte) 0xbf, (byte) 0x0c, (byte) 0x21, (byte) 0x39,
+            (byte) 0xe5, (byte) 0x16, (byte) 0x8a, (byte) 0x55);
+
     // ── D3D12 ─────────────────────────────────────────────────────────────
     /**
      * IID_ID3D12Device = {189819f1-1db6-4b57-be54-1821339b85f7}

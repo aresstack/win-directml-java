@@ -75,12 +75,13 @@ public final class WindowsBindings implements AutoCloseable {
      * Initialise the full DXGI → D3D12 → DirectML stack.
      * <ol>
      *   <li>Create a DXGI factory and pick the first hardware adapter</li>
+     *   <li>For "warp" backend, use IDXGIFactory4::EnumWarpAdapter</li>
      *   <li>Create a D3D12 device on that adapter</li>
      *   <li>Create a D3D12 DIRECT command queue</li>
      *   <li>Create a DirectML device on top of D3D12</li>
      * </ol>
      *
-     * @param backend "directml", "cpu", or "auto"
+     * @param backend "directml", "auto", "warp", or "cpu"
      * @throws WindowsNativeException if initialisation fails
      * @throws IllegalStateException  if already closed
      */
@@ -99,32 +100,38 @@ public final class WindowsBindings implements AutoCloseable {
             log.info("DirectML debug mode requested (-Dwindirectml.debug=true); D3D12 layer enabled={}", ok);
         }
 
-// 1. DXGI Factory
+        // 1. DXGI Factory + Adapter
         int adapterIndex = Integer.getInteger("windirectml.dxgi.adapterIndex", 0);
 
-        dxgiFactory = DxgiBindings.createFactory1(arena);
-
-// 2. First hardware adapter
-        dxgiAdapter = DxgiBindings.enumAdapters1(dxgiFactory, adapterIndex, arena);
-        if (dxgiAdapter == null) {
-            throw new WindowsNativeException("No DXGI adapter found at index " + adapterIndex);
+        if ("warp".equalsIgnoreCase(backend)) {
+            // WARP path: Factory4 → EnumWarpAdapter
+            dxgiFactory = DxgiBindings.createFactory4(arena);
+            dxgiAdapter = DxgiBindings.enumWarpAdapter(dxgiFactory, arena);
+            log.info("Using WARP (software) adapter");
+        } else {
+            // Standard path: Factory1 → EnumAdapters1
+            dxgiFactory = DxgiBindings.createFactory1(arena);
+            dxgiAdapter = DxgiBindings.enumAdapters1(dxgiFactory, adapterIndex, arena);
+            if (dxgiAdapter == null) {
+                throw new WindowsNativeException("No DXGI adapter found at index " + adapterIndex);
+            }
+            log.info("Using DXGI adapter at index {}: {}", adapterIndex, dxgiAdapter);
         }
-        log.info("Using DXGI adapter at index {}: {}", adapterIndex, dxgiAdapter);
 
-        // 3. D3D12 device
+        // 2. D3D12 device
         d3d12Device = D3D12Bindings.createDevice(
                 dxgiAdapter, D3D12Bindings.D3D_FEATURE_LEVEL_11_0, arena);
 
-        // 3b. With debug layer active, grab the info queue for later message draining.
+        // 2b. With debug layer active, grab the info queue
         if (debugRequested) {
             infoQueue = D3D12Bindings.queryInfoQueue(d3d12Device, arena);
             log.info("D3D12 info queue available: {}", infoQueue != null);
         }
 
-        // 4. Command queue (needed for DirectML dispatch)
+        // 3. Command queue
         commandQueue = D3D12Bindings.createCommandQueue(d3d12Device, arena);
 
-        // 5. DirectML device
+        // 4. DirectML device (even for WARP – WARP runs DML on CPU)
         if ("cpu".equalsIgnoreCase(backend)) {
             log.info("CPU-only mode requested – skipping DirectML device creation");
         } else {
@@ -139,9 +146,6 @@ public final class WindowsBindings implements AutoCloseable {
                             DirectMlBindings.directMlSource(),
                             DirectMlBindings.formatFeatureLevel(dmlFeatureLevel),
                             Integer.toHexString(dmlFeatureLevel));
-                    log.info("Fused-op availability: GELU(FL>=5.1)={}, MultiHeadAttention(FL>=6.1)={}",
-                            DirectMlBindings.supportsFusedGelu(dmlFeatureLevel),
-                            DirectMlBindings.supportsMultiHeadAttention(dmlFeatureLevel));
                 } catch (WindowsNativeException fe) {
                     log.warn("Could not query DML feature level: {}", fe.getMessage());
                 }
@@ -156,8 +160,8 @@ public final class WindowsBindings implements AutoCloseable {
         }
 
         initialised = true;
-        log.info("WindowsBindings initialised: d3d12={}, dml={}",
-                d3d12Device, dmlDevice != null ? dmlDevice : "(none)");
+        log.info("WindowsBindings initialised: backend={}, d3d12={}, dml={}",
+                backend, d3d12Device, dmlDevice != null ? dmlDevice : "(none)");
     }
 
     // ── Accessors for downstream code ────────────────────────────────────
