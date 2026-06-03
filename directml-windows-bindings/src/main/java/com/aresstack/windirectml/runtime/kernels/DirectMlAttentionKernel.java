@@ -61,6 +61,7 @@ public final class DirectMlAttentionKernel implements AttentionKernel, AutoClose
 
     private static final Logger log = LoggerFactory.getLogger(DirectMlAttentionKernel.class);
 
+    private final DirectMlContextImpl ctx;  // needed for shared temp buffer
     private final WindowsBindings wb;
     private final int B;
     private final int H;

@@ -12,6 +12,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
+ * Shared-Temp-Buffer-Verwaltung:
+ * Intel iGPU hat oft nur 512 MB VRAM reserviert.
+ * 96 Layer × ~15 Kernel × ~20 MB Scratch = ~2 GB → Treiber-Crash.
+ * Lösung: Ein einziger Shared Scratch-Buffer, sized auf max(tempSize aller Kernel).
+ */
+
+/**
  * Erste konkrete {@link DirectMlContext}-Implementierung.
  * <p>
  * Wrappt die bereits produktive {@link WindowsBindings}-Fassade (DXGI →
@@ -40,6 +47,13 @@ public final class DirectMlContextImpl implements DirectMlContext {
     private final List<DefaultGpuBuffer> liveBuffers = new ArrayList<>();
     private final String backend;
     private boolean closed = false;
+
+    // ── Shared Temp-Buffer für alle Kernel (vermeidet 96×20MB VRAM-Bedarf) ──
+    //    Intel iGPU hat oft nur 512 MB reserviert → Treiber-Crash ohne diese Optimierung.
+    //    Der Buffer wird einmal auf die maximale tempSize aller Kernel alloziiert
+    //    und von jedem Kernel wiederverwendet (nur eine Command-Liste pro Layer).
+    private MemorySegment sharedTempBuffer = MemorySegment.NULL;
+    private long sharedTempSize = 0;
 
     /**
      * Erzeugt einen Context, der seine eigene {@link WindowsBindings} initialisiert.
@@ -148,11 +162,61 @@ public final class DirectMlContextImpl implements DirectMlContext {
         return arena;
     }
 
+    // ── Shared Temp-Buffer Verwaltung ─────────────────────────────────
+    // Intel iGPU: 96 Layer × ~15 Kernel × ~20 MB = ~2 GB VRAM-Bedarf.
+    // Die GPU hat oft nur 512 MB reserviert → Treiber-Crash.
+    // Lösung: Ein einziger statischer Buffer, sized auf max(tempSize aller Kernel).
+
+    /**
+     * Meldet die tempSize eines Kernels. Alloziiert den shared Buffer neu,
+     * wenn dieser Kernel eine größere tempSize benötigt als der aktuelle Maximum.
+     * Thread-safe durch synchronized.
+     */
+    public synchronized void registerTempSize(long tempSize) {
+        if (tempSize <= 0) return;
+        if (tempSize > sharedTempSize) {
+            // Alten Buffer freigeben, wenn vorhanden
+            if (!sharedTempBuffer.equals(MemorySegment.NULL)) {
+                try { DxgiBindings.release(sharedTempBuffer); } catch (Exception ignored) {}
+            }
+            // Neuen, größeren alloziieren
+            this.sharedTempBuffer = D3D12Bindings.createDefaultBuffer(
+                    bindings.getD3d12Device(), tempSize, arena);
+            this.sharedTempSize = tempSize;
+            log.info("Shared temp buffer resized to {} bytes", tempSize);
+        }
+    }
+
+    /**
+     * Gibt den geteilten Temp-Buffer zurück. Darf nur aufgerufen werden,
+     * nachdem {@link #registerTempSize(long)} mindestens einmal aufgerufen wurde.
+     * Gibt MemorySegment.NULL zurück, wenn kein Kernel einen Temp-Buffer benötigt.
+     */
+    public MemorySegment getSharedTempBuffer() {
+        return sharedTempBuffer;
+    }
+
+    /**
+     * Gibt die Größe des geteilten Temp-Buffers zurück (0, wenn keiner alloziiert wurde).
+     */
+    public long getSharedTempSize() {
+        return sharedTempSize;
+    }
+
     @Override
     public void close() {
         if (closed) return;
         closed = true;
-        // Buffer zuerst freigeben, bevor die Devices geschlossen werden.
+        // 1) Shared Temp-Buffer freigeben (vor der Arena!).
+        if (!sharedTempBuffer.equals(MemorySegment.NULL)) {
+            try {
+                DxgiBindings.release(sharedTempBuffer);
+                log.info("Shared temp buffer ({}) released", sharedTempSize);
+            } catch (Exception ignored) { /* best-effort */ }
+            sharedTempBuffer = MemorySegment.NULL;
+            sharedTempSize = 0;
+        }
+        // 2) Live Buffers freigeben, bevor die Devices geschlossen werden.
         for (int i = liveBuffers.size() - 1; i >= 0; i--) {
             try {
                 liveBuffers.get(i).close();

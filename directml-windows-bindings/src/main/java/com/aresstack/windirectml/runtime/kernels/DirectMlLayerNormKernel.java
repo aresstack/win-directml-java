@@ -156,8 +156,15 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
             this.descriptorHeap = D3D12Bindings.createDescriptorHeap(dev, descriptorCount, arena);
             this.cmdRecorder = DirectMlBindings.createCommandRecorder(dml, arena);
 
-            this.tempBuffer = (tempSize > 0)
-                    ? D3D12Bindings.createDefaultBuffer(dev, tempSize, arena) : MemorySegment.NULL;
+            // Shared Temp-Buffer: Intel iGPU hat oft nur 512 MB VRAM reserviert.
+            // 96 Layer × ~15 Kernel × ~20 MB = ~2 GB → Treiber-Crash ohne diese Optimierung.
+            // Lösung: Ein einziger statischer Buffer, sized auf max(tempSize aller Kernel).
+            if (tempSize > 0) {
+                ctx.registerTempSize(tempSize);   // meldet Größe an → ggf. Vergrößerung
+                log.info("DirectMlLayerNormKernel: tempSize={}B → shared temp buffer (max now {})",
+                        tempSize, ctx.getSharedTempSize());
+            }
+            this.tempBuffer = MemorySegment.NULL;  // nicht mehr eigen-alloziieren
             this.persistBuffer = (persistSize > 0)
                     ? D3D12Bindings.createDefaultBuffer(dev, persistSize, arena) : MemorySegment.NULL;
 
@@ -314,7 +321,18 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
                 setBufferBinding(scratch, outputs, 0, yb.resource(), (long) M * H * Float.BYTES);
                 DirectMlBindings.bindOutputs(bt, 1, outputs);
 
-                if (tempSize > 0) {
+                // Shared Temp-Buffer: Intel iGPU (512 MB) schützt vor 2 GB VRAM-Bedarf.
+                // ctx.getSharedTempBuffer() liefert den einmalig alloziierten Buffer
+                // (siehe DirectMlContextImpl.registerTempSize).
+                MemorySegment sharedTmp = ctx.getSharedTempBuffer();
+                if (!sharedTmp.equals(MemorySegment.NULL)) {
+                    MemorySegment binding = DirectMlBindings.allocBufferBinding(scratch,
+                            sharedTmp, 0, tempSize);
+                    DirectMlBindings.bindTemporaryResource(bt,
+                            DirectMlBindings.allocBindingDesc(scratch,
+                                    DirectMlBindings.DML_BINDING_TYPE_BUFFER, binding));
+                } else if (tempSize > 0) {
+                    // Fallback: kein Shared Buffer verfügbar (sollte nicht passieren)
                     MemorySegment binding = DirectMlBindings.allocBufferBinding(scratch,
                             tempBuffer, 0, tempSize);
                     DirectMlBindings.bindTemporaryResource(bt,
