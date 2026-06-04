@@ -106,8 +106,20 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private MemorySegment int4ZpBuf;       // GPU default buffer: packed INT4 zero-points
     private GpuComputeKernel int4Shader;   // compiled HLSL INT4 MatVec kernel
     private final boolean useWarpParallelInt4Matvec;
+    private int warpParallelInt4MatvecRows;
     private static final int WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE = 128;
-    private static final int WARP_PARALLEL_INT4_MATVEC_ROWS = 16;
+    private static final int WARP_PARALLEL_INT4_MATVEC_ROWS16 = 16;
+    private static final int WARP_PARALLEL_INT4_MATVEC_ROWS32 = 32;
+
+    /**
+     * Use the ROWS=32 WARP matvec variant only for very large output matrices
+     * (currently lm_head). The normal decoder projections stay on ROWS=16 because
+     * they are already near the sweet spot and ROWS=32 can increase register
+     * pressure. Override with -Ddirectml.int4.warpLmHeadRows32.minN=... or disable
+     * with -Ddirectml.int4.warpLmHeadRows32.disabled=true.
+     */
+    private static final int WARP_LMHEAD_ROWS32_MIN_N =
+            Integer.getInteger("directml.int4.warpLmHeadRows32.minN", 32768);
     private long[] int4UavAddrs;           // pre-cached GPU VAs: [X, QW, Scales, ZP, Y]
     private int[] int4Constants;           // pre-cached constants: [N, K, blockSize]
 
@@ -557,6 +569,113 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             }
             """;
 
+    // ── WARP-optimised lm_head INT4 matrix-vector product ─────────────────────
+    // Same algorithmic idea as ROWS=16, but only selected for very large N
+    // (lm_head). It halves the number of WARP thread groups and reuses each
+    // loaded X element across 32 vocabulary rows. Decoder layer projections keep
+    // ROWS=16 to avoid unnecessary register pressure.
+    private static final String INT4_MATVEC_WARP_PARALLEL_ROWS32_HLSL = """
+            RWByteAddressBuffer X      : register(u0);
+            RWByteAddressBuffer QW     : register(u1);
+            RWByteAddressBuffer Scales : register(u2);
+            RWByteAddressBuffer ZP     : register(u3);
+            RWByteAddressBuffer Y      : register(u4);
+            cbuffer CB : register(b0) { uint N; uint K; uint blockSz; };
+            
+            #define THREADS 128
+            #define ROWS 32
+            groupshared float partial[THREADS * ROWS];
+            groupshared float blockScale[ROWS];
+            groupshared float blockZeroPoint[ROWS];
+            
+            float loadZeroPoint(uint scIdx) {
+                uint zpByteIdx = scIdx / 2;
+                uint zpDword = ZP.Load((zpByteIdx / 4) * 4);
+                uint zpByte = (zpDword >> ((zpByteIdx % 4) * 8)) & 0xFF;
+                return (scIdx % 2u == 0u) ? float(zpByte & 0xFu) : float(zpByte >> 4u);
+            }
+            
+            uint loadPackedWeightByte(uint byteAddress) {
+                uint dword = QW.Load((byteAddress / 4) * 4);
+                return (dword >> ((byteAddress % 4) * 8)) & 0xFF;
+            }
+            
+            [numthreads(THREADS, 1, 1)]
+            void CSMain(uint3 gid : SV_GroupID, uint3 ltid : SV_GroupThreadID) {
+                uint lane = ltid.x;
+                uint rowBase = gid.x * ROWS;
+                uint blocksPerRow = K / blockSz;
+                uint bytesPerBlock = blockSz / 2;
+            
+                float sum[ROWS];
+                [unroll]
+                for (uint r = 0; r < ROWS; r++) {
+                    sum[r] = 0.0;
+                }
+            
+                for (uint blk = 0; blk < blocksPerRow; blk++) {
+                    if (lane < ROWS) {
+                        uint n = rowBase + lane;
+                        if (n < N) {
+                            uint scIdx = n * blocksPerRow + blk;
+                            blockScale[lane] = asfloat(Scales.Load(scIdx * 4));
+                            blockZeroPoint[lane] = loadZeroPoint(scIdx);
+                        } else {
+                            blockScale[lane] = 0.0;
+                            blockZeroPoint[lane] = 0.0;
+                        }
+                    }
+                    GroupMemoryBarrierWithGroupSync();
+            
+                    if (lane < bytesPerBlock) {
+                        uint kOff = blk * blockSz + lane * 2;
+                        float x0 = asfloat(X.Load((kOff + 0) * 4));
+                        float x1 = asfloat(X.Load((kOff + 1) * 4));
+            
+                        [unroll]
+                        for (uint r = 0; r < ROWS; r++) {
+                            uint n = rowBase + r;
+                            if (n < N) {
+                                uint qByteBase = n * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                                uint qByte = loadPackedWeightByte(qByteBase + lane);
+                                float scale = blockScale[r];
+                                float zp = blockZeroPoint[r];
+                                sum[r] += (float(qByte & 0xFu) - zp) * scale * x0;
+                                sum[r] += (float(qByte >> 4u) - zp) * scale * x1;
+                            }
+                        }
+                    }
+                    GroupMemoryBarrierWithGroupSync();
+                }
+            
+                [unroll]
+                for (uint r = 0; r < ROWS; r++) {
+                    partial[lane + THREADS * r] = sum[r];
+                }
+                GroupMemoryBarrierWithGroupSync();
+            
+                for (uint stride = THREADS / 2; stride > 0; stride >>= 1) {
+                    if (lane < stride) {
+                        [unroll]
+                        for (uint r = 0; r < ROWS; r++) {
+                            partial[lane + THREADS * r] += partial[lane + stride + THREADS * r];
+                        }
+                    }
+                    GroupMemoryBarrierWithGroupSync();
+                }
+            
+                if (lane == 0) {
+                    [unroll]
+                    for (uint r = 0; r < ROWS; r++) {
+                        uint outRow = rowBase + r;
+                        if (outRow < N) {
+                            Y.Store(outRow * 4, asuint(partial[THREADS * r]));
+                        }
+                    }
+                }
+            }
+            """;
+
     // ── HLSL shader source for INT4 batched matmul with groupshared X tiling ──
     // Each thread group computes a [TILE, TILE] = [16, 16] output sub-tile.
     // 256 threads cooperatively load a [TILE, TILE_K] = [16, 16] X-sub-tile into
@@ -758,6 +877,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         this.useWarpParallelInt4Matvec = useInt4Gpu
                 && wb.isWarpBackend()
                 && !Boolean.getBoolean("directml.int4.warpParallelMatvec.disabled");
+        this.warpParallelInt4MatvecRows = selectWarpParallelRows(N, this.useWarpParallelInt4Matvec);
 
         try {
             if (useInt4Gpu) {
@@ -803,6 +923,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         this.K = K;
         this.useInt4Gpu = false;  // pre-dequantized path always uses DML FP32
         this.useWarpParallelInt4Matvec = false;
+        this.warpParallelInt4MatvecRows = 1;
 
         try {
             prepareGpu(fp32Weights);
@@ -815,6 +936,21 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     // ══════════════════════════════════════════════════════════════════════
     // INT4 GPU preparation (V3.0 — keeps INT4 on GPU, 8× bandwidth reduction)
     // ══════════════════════════════════════════════════════════════════════
+
+    private static int selectWarpParallelRows(int n, boolean useWarpParallel) {
+        if (!useWarpParallel) return 1;
+        if (!Boolean.getBoolean("directml.int4.warpLmHeadRows32.disabled")
+                && n >= WARP_LMHEAD_ROWS32_MIN_N) {
+            return WARP_PARALLEL_INT4_MATVEC_ROWS32;
+        }
+        return WARP_PARALLEL_INT4_MATVEC_ROWS16;
+    }
+
+    private static String warpParallelMatvecShaderSource(int rows) {
+        return rows == WARP_PARALLEL_INT4_MATVEC_ROWS32
+                ? INT4_MATVEC_WARP_PARALLEL_ROWS32_HLSL
+                : INT4_MATVEC_WARP_PARALLEL_HLSL;
+    }
 
     /**
      * INT4 GPU path: upload packed INT4 weights + scales + zero-points to GPU,
@@ -862,12 +998,27 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         // WARP benefits from reducing multiple output rows in one thread group;
         // hardware GPUs keep the simpler one-thread-per-row shader unless explicitly
         // forced through the WARP backend.
-        int4Shader = new GpuComputeKernel(wb, execCmdList,
-                useWarpParallelInt4Matvec ? INT4_MATVEC_WARP_PARALLEL_HLSL : INT4_MATVEC_HLSL,
-                useWarpParallelInt4Matvec ? "int4_matvec_warp_parallel" : "int4_matvec",
-                5,   // 5 UAVs: X, QW, Scales, ZP, Y
-                3,   // 3 constants: N, K, blockSize
-                useWarpParallelInt4Matvec ? WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE : 64);
+        try {
+            int4Shader = new GpuComputeKernel(wb, execCmdList,
+                    useWarpParallelInt4Matvec ? warpParallelMatvecShaderSource(warpParallelInt4MatvecRows) : INT4_MATVEC_HLSL,
+                    useWarpParallelInt4Matvec ? "int4_matvec_warp_parallel_rows" + warpParallelInt4MatvecRows : "int4_matvec",
+                    5,   // 5 UAVs: X, QW, Scales, ZP, Y
+                    3,   // 3 constants: N, K, blockSize
+                    useWarpParallelInt4Matvec ? WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE : 64);
+        } catch (RuntimeException ex) {
+            if (!useWarpParallelInt4Matvec || warpParallelInt4MatvecRows != WARP_PARALLEL_INT4_MATVEC_ROWS32) {
+                throw ex;
+            }
+            log.warn("WARP ROWS=32 INT4 matvec shader failed to compile for [{},{}]; falling back to ROWS=16. Reason: {}",
+                    N, K, ex.toString());
+            warpParallelInt4MatvecRows = WARP_PARALLEL_INT4_MATVEC_ROWS16;
+            int4Shader = new GpuComputeKernel(wb, execCmdList,
+                    INT4_MATVEC_WARP_PARALLEL_HLSL,
+                    "int4_matvec_warp_parallel_rows16",
+                    5,
+                    3,
+                    WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE);
+        }
 
         // Pre-cache GPU VAs and constants (fixed for lifetime of this kernel)
         int4UavAddrs = new long[]{
@@ -884,7 +1035,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 N, K, qBytes + scaleBytes + zpBytes,
                 qBytes + scaleBytes + zpBytes,
                 (long) N * K * 4,
-                useWarpParallelInt4Matvec ? "warp-parallel-rows16" : "row-serial");
+                useWarpParallelInt4Matvec ? "warp-parallel-rows" + warpParallelInt4MatvecRows : "row-serial");
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -976,7 +1127,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             return N;
         }
 
-        int rowGroups = (N + WARP_PARALLEL_INT4_MATVEC_ROWS - 1) / WARP_PARALLEL_INT4_MATVEC_ROWS;
+        int rowGroups = (N + warpParallelInt4MatvecRows - 1) / warpParallelInt4MatvecRows;
         return Math.multiplyExact(rowGroups, WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE);
     }
 
