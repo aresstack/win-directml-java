@@ -450,6 +450,7 @@ public final class Qwen2Weights implements AutoCloseable {
         Map<String, ExternalTensorRef> externalRefs = imported.externalRefs();
         Map<String, OnnxTensor> inlineTensors = imported.inlineTensors();
         log.info("Qwen tensor catalog: {}", imported.tensorCatalog().summary());
+        QwenWdmlPackCompiler.writeManifestIfRequested(imported, config, modelDir, safeModelFileName);
 
         RandomAccessFile raf = null;
         FileChannel channel = null;
