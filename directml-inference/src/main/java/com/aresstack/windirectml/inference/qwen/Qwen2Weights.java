@@ -292,8 +292,8 @@ public final class Qwen2Weights implements AutoCloseable {
 
     // ── External-data tensor metadata ────────────────────────────────────
 
-    private record ExternalTensorRef(String name, int dataType, long[] dims,
-                                     long offset, long length) {
+    record ExternalTensorRef(String name, int dataType, long[] dims,
+                             long offset, long length) {
     }
 
     // ── Constructor ──────────────────────────────────────────────────────
@@ -335,15 +335,16 @@ public final class Qwen2Weights implements AutoCloseable {
      */
     public static Qwen2Weights load(Path modelDir, Qwen2Config config, String modelFileName) throws IOException {
         String safeModelFileName = QwenModelDirValidator.normalizeModelFileName(modelFileName);
-        Path onnxPath = modelDir.resolve(safeModelFileName);
-        if (!Files.exists(onnxPath)) {
-            throw new IOException("Required file missing: " + safeModelFileName + " (looked in " + modelDir + ")");
-        }
+        QwenOnnxModelSource modelSource = new QwenOnnxModelSource(modelDir, safeModelFileName);
+        Path onnxPath = modelSource.location();
 
-        log.info("Loading ONNX graph from {}", onnxPath);
-        OnnxGraph graph = OnnxModelReader.parse(onnxPath);
-        Map<String, ExternalTensorRef> externalRefs = parseExternalRefs(onnxPath);
-        Map<String, OnnxTensor> inlineTensors = graph.initializers();
+        log.info("Loading Qwen model through import layer: format={}, source={}",
+                modelSource.format(), onnxPath);
+        QwenModelImport imported = modelSource.load();
+        OnnxGraph graph = imported.graph();
+        Map<String, ExternalTensorRef> externalRefs = imported.externalRefs();
+        Map<String, OnnxTensor> inlineTensors = imported.inlineTensors();
+        log.info("Qwen tensor catalog: {}", imported.tensorCatalog().summary());
 
         RandomAccessFile raf = null;
         FileChannel channel = null;
@@ -1468,9 +1469,20 @@ public final class Qwen2Weights implements AutoCloseable {
 
     // ── ONNX external data metadata parsing ──────────────────────────────
 
-    private static Map<String, ExternalTensorRef> parseExternalRefs(Path onnxFile) throws IOException {
-        byte[] bytes = Files.readAllBytes(onnxFile);
-        ByteBuffer buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+    static Map<String, ExternalTensorRef> parseExternalRefs(Path onnxFile) throws IOException {
+        try (FileChannel channel = FileChannel.open(onnxFile, java.nio.file.StandardOpenOption.READ)) {
+            long size = channel.size();
+            if (size > Integer.MAX_VALUE) {
+                throw new IOException("ONNX model is too large for external-ref scan: "
+                        + onnxFile.getFileName() + " (" + size + " bytes)");
+            }
+            MappedByteBuffer mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0, size);
+            mapped.order(ByteOrder.LITTLE_ENDIAN);
+            return parseExternalRefs(mapped);
+        }
+    }
+
+    private static Map<String, ExternalTensorRef> parseExternalRefs(ByteBuffer buf) {
         Map<String, ExternalTensorRef> refs = new LinkedHashMap<>();
 
         while (buf.hasRemaining()) {

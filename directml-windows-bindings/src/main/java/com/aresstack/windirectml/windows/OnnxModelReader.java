@@ -6,8 +6,10 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.file.Files;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
 
 /**
@@ -22,6 +24,7 @@ import java.util.*;
 public final class OnnxModelReader {
 
     private static final Logger log = LoggerFactory.getLogger(OnnxModelReader.class);
+    private static final boolean TENSOR_DEBUG_LOGGING = Boolean.getBoolean("directml.onnx.tensorDebug");
 
     private OnnxModelReader() {
     }
@@ -114,10 +117,20 @@ public final class OnnxModelReader {
     // ── Entry point ──────────────────────────────────────────────────────
 
     public static OnnxGraph parse(Path onnxFile) throws IOException {
-        byte[] bytes = Files.readAllBytes(onnxFile);
-        ByteBuffer buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
-        log.info("Parsing ONNX model: {} ({} bytes)", onnxFile.getFileName(), bytes.length);
+        try (FileChannel channel = FileChannel.open(onnxFile, StandardOpenOption.READ)) {
+            long size = channel.size();
+            if (size > Integer.MAX_VALUE) {
+                throw new IOException("ONNX model is too large for the lightweight parser mapping: "
+                        + onnxFile.getFileName() + " (" + size + " bytes)");
+            }
+            MappedByteBuffer mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0, size);
+            mapped.order(ByteOrder.LITTLE_ENDIAN);
+            log.info("Parsing ONNX model: {} ({} bytes, mmap)", onnxFile.getFileName(), size);
+            return parseBuffer(mapped, onnxFile.getFileName().toString(), size);
+        }
+    }
 
+    private static OnnxGraph parseBuffer(ByteBuffer buf, String sourceName, long sourceSize) throws IOException {
         OnnxGraph[] graph = new OnnxGraph[1];
 
         try {
@@ -146,8 +159,8 @@ public final class OnnxModelReader {
             // Wrap underflow / illegal-argument errors with the byte offset so the
             // caller (e.g. describeUnsupportedFormat) can produce a useful message
             // instead of a bare "BufferUnderflowException (no detail message)".
-            throw new IOException("Failed to parse ONNX model '" + onnxFile.getFileName()
-                    + "' at byte offset " + buf.position() + " of " + bytes.length
+            throw new IOException("Failed to parse ONNX model '" + sourceName
+                    + "' at byte offset " + buf.position() + " of " + sourceSize
                     + " (" + e.getClass().getSimpleName()
                     + (e.getMessage() != null ? ": " + e.getMessage() : "") + ")", e);
         }
@@ -485,9 +498,10 @@ public final class OnnxModelReader {
         }
 
         long[] dimsArr = dims.stream().mapToLong(Long::longValue).toArray();
-        int elementCount = (data.length > 0) ? data.length : rawBytes.length;
-        log.debug("Tensor '{}': dims={}, dataType={}, floats={}, rawBytes={}",
-                name, Arrays.toString(dimsArr), dataType, data.length, rawBytes.length);
+        if (TENSOR_DEBUG_LOGGING && log.isDebugEnabled()) {
+            log.debug("Tensor '{}': dims={}, dataType={}, floats={}, rawBytes={}",
+                    name, Arrays.toString(dimsArr), dataType, data.length, rawBytes.length);
+        }
         return new OnnxTensor(name, dimsArr, dataType, data, rawBytes);
     }
 
