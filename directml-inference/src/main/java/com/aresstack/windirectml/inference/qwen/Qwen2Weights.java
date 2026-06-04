@@ -460,6 +460,11 @@ public final class Qwen2Weights implements AutoCloseable {
             if (!packageLoaded) {
                 throw packageError;
             }
+            Path onnxFallback = modelDir.resolve(safeModelFileName);
+            if (!Files.isRegularFile(onnxFallback)) {
+                throw new IOException("Could not load Qwen wdmlpack package and ONNX fallback is unavailable: "
+                        + packagePath + " (fallback " + onnxFallback.getFileName() + " is missing)", packageError);
+            }
             log.warn("Could not load Qwen wdmlpack cache {}; deleting it and falling back to ONNX: {}",
                     packagePath, packageError.toString());
             log.debug("wdmlpack load failure", packageError);

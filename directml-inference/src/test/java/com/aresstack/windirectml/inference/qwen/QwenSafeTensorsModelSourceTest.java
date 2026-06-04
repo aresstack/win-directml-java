@@ -60,7 +60,7 @@ class QwenSafeTensorsModelSourceTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> qwenLayout = (Map<String, Object>) manifest.get("qwenLayout");
         assertNotNull(qwenLayout);
-        assertEquals("qwen2-hf-dense-layout-v26", qwenLayout.get("schema"));
+        assertEquals("qwen2-hf-dense-layout-v28", qwenLayout.get("schema"));
         assertEquals(false, qwenLayout.get("complete"));
         assertEquals(false, qwenLayout.get("runtimeLoadable"));
         @SuppressWarnings("unchecked")

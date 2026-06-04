@@ -14,14 +14,14 @@ import java.util.Objects;
  *
  * <p>The SafeTensors container has no graph, so this class is the place where
  * foreign Hugging Face tensor names are mapped to the fixed Qwen runtime roles.
- * The current v26 step is intentionally conservative: it does not quantize or
+ * The current v28 step is intentionally conservative: it does not quantize or
  * repack dense weights yet. It proves whether a SafeTensors directory is a
  * complete Qwen2 dense layout and records that contract in the wdmlpack manifest.</p>
  */
 final class QwenSafeTensorsLayoutCompiler {
 
-    static final String LAYOUT_SCHEMA = "qwen2-hf-dense-layout-v26";
-    static final int COMPILER_VERSION = 26;
+    static final String LAYOUT_SCHEMA = "qwen2-hf-dense-layout-v28";
+    static final int COMPILER_VERSION = 28;
 
     private QwenSafeTensorsLayoutCompiler() {
     }

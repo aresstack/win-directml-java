@@ -27,7 +27,7 @@ import java.util.Map;
 /**
  * Qwen-specific compiler front-end for the internal {@code .wdmlpack} format.
  *
- * <p>v24 writes payload-carrying packages with cache metadata. Manifest-only
+ * <p>v28 writes payload-carrying packages with cache metadata. Manifest-only
  * packages remain supported as a compatibility front door and delegate tensor
  * payloads back to ONNX.</p>
  */
@@ -41,9 +41,9 @@ final class QwenWdmlPackCompiler {
     static final String PROP_OUTPUT = "windirectml.wdmlpack.output";
     static final String PROP_PAYLOAD = "windirectml.wdmlpack.payload";
 
-    static final String CACHE_SCHEMA = "qwen-wdmlpack-cache-v24";
-    static final int COMPILER_VERSION = 24;
-    static final int SAFETENSORS_LAYOUT_COMPILER_VERSION = 26;
+    static final String CACHE_SCHEMA = "qwen-wdmlpack-cache-v28";
+    static final int COMPILER_VERSION = 28;
+    static final int SAFETENSORS_LAYOUT_COMPILER_VERSION = 28;
 
 
     private QwenWdmlPackCompiler() {
@@ -161,8 +161,8 @@ final class QwenWdmlPackCompiler {
         root.put("runtimeLoadable", runtimeLoadable);
         root.put("runtimeLoadMode", runtimeLoadable ? "wdmlpack-frontdoor-onnx-payload" : "import-only-tensor-catalog");
         root.put("note", runtimeLoadable
-                ? "v24 compatibility manifest: Qwen runtime can start from this package, while tensor payload delegates to the source ONNX."
-                : "v26 import-only manifest: source tensors are cataloged; SafeTensors payload packages become runtime-loadable only when the Qwen layout compiler validates a complete dense layout.");
+                ? "v28 compatibility manifest: Qwen runtime can start from this package, while tensor payload delegates to the source ONNX."
+                : "v28 import-only manifest: source tensors are cataloged; SafeTensors payload packages become runtime-loadable only when the Qwen layout compiler validates a complete dense layout.");
         root.put("tensors", buildTensorDirectory(imported, null));
         return root;
     }
@@ -288,12 +288,12 @@ final class QwenWdmlPackCompiler {
                                       QwenSafeTensorsLayoutCompiler.LayoutAnalysis safeTensorsLayout) {
         if (safeTensorsLayout != null) {
             if (runtimeLoadable) {
-                return "v26 SafeTensors payload package: Qwen HF dense tensor layout was validated and can be opened through the wdmlpack runtime front door. This path is dense and not yet INT4/prepacked.";
+                return "v28 SafeTensors payload package: Qwen HF dense tensor layout was validated and can be opened through the wdmlpack runtime front door. This path is dense and not yet INT4/prepacked.";
             }
-            return "v26 SafeTensors payload package: tensors are mmap-packaged and layout-analyzed, but the package is not runtime-loadable because required tensors are missing, shapes mismatch, or dtype conversion is still needed.";
+            return "v28 SafeTensors payload package: tensors are mmap-packaged and layout-analyzed, but the package is not runtime-loadable because required tensors are missing, shapes mismatch, or dtype conversion is still needed.";
         }
         return runtimeLoadable
-                ? "v24 payload package: Qwen runtime can reconstruct the tensor catalog and minimal graph without parsing ONNX."
+                ? "v28 payload package: Qwen runtime can reconstruct the tensor catalog and minimal graph without parsing ONNX."
                 : "Import-only payload package: tensors are cataloged for a later model-family layout compiler.";
     }
 

@@ -75,7 +75,7 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
     private QwenModelImport loadManifestOnlyDelegate(RuntimeModelPackage modelPackage) throws IOException {
         Path sourceOnnx = modelPackage.resolveSourcePath(modelDir, requestedModelFileName);
         modelPackage.validateSourceSize(sourceOnnx);
-        log.info("wdmlpack v22 front door: using package manifest, tensor payload source={}",
+        log.info("wdmlpack front door: using package manifest, tensor payload source={}",
                 sourceOnnx.getFileName());
 
         QwenOnnxModelSource delegate = new QwenOnnxModelSource(sourceOnnx.getParent(), sourceOnnx.getFileName().toString());
@@ -113,7 +113,7 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
     private void validateCacheContract(RuntimeModelPackage modelPackage) throws IOException {
         Object cacheObj = modelPackage.manifest().get("cache");
         if (!(cacheObj instanceof Map<?, ?>)) {
-            throw new IOException("Stale wdmlpack cache: missing v24 cache contract");
+            throw new IOException("Stale wdmlpack cache: missing v28 cache contract");
         }
         Map<String, Object> cache = modelPackage.requireMap("cache");
         String schema = RuntimeModelPackage.stringValue(cache.get("schema"));

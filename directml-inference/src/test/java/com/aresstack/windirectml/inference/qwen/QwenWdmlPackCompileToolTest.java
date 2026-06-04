@@ -41,8 +41,33 @@ class QwenWdmlPackCompileToolTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> layout = (Map<String, Object>) modelPackage.manifest().get("qwenLayout");
         assertNotNull(layout);
-        assertEquals("qwen2-hf-dense-layout-v26", layout.get("schema"));
+        assertEquals("qwen2-hf-dense-layout-v28", layout.get("schema"));
         assertEquals(true, layout.get("complete"));
+    }
+
+
+    @Test
+    void compiledSafeTensorsPackageLoadsThroughQwenWeightsWithoutOnnxSource() throws Exception {
+        writeConfig(tempDir, true);
+        Path source = writeCompleteDenseQwenSafeTensors(tempDir.resolve("model.safetensors"));
+        Path output = tempDir.resolve("model.wdmlpack");
+
+        QwenWdmlPackCompileTool.compileSafeTensorsDirectory(tempDir, output);
+        Files.delete(source);
+
+        writeTokenizerMetadata(tempDir);
+        assertNull(QwenModelDirValidator.describeMissingModelFile(tempDir));
+        assertTrue(QwenModelDirValidator.isValidModelDir(tempDir));
+
+        Qwen2Config config = Qwen2Config.load(tempDir.resolve("config.json"));
+        try (Qwen2Weights weights = Qwen2Weights.load(tempDir, config)) {
+            assertEquals(config.vocabSize(), weights.embedTokens.rows());
+            assertEquals(config.hiddenSize(), weights.embedTokens.cols());
+            assertEquals(config.numHiddenLayers(), weights.layers.length);
+            assertEquals(config.hiddenSize(), weights.finalNormWeight.length);
+            assertEquals(config.vocabSize(), weights.lmHead.N());
+            assertEquals(config.hiddenSize(), weights.lmHead.K());
+        }
     }
 
     @Test
@@ -76,6 +101,12 @@ class QwenWdmlPackCompileToolTest {
 
         assertEquals(0, exitCode);
         assertTrue(Files.exists(output));
+    }
+
+    private static void writeTokenizerMetadata(Path dir) throws Exception {
+        Files.writeString(dir.resolve("tokenizer.json"), "{}");
+        Files.writeString(dir.resolve("tokenizer_config.json"), "{}");
+        Files.writeString(dir.resolve("special_tokens_map.json"), "{}");
     }
 
     private static void writeConfig(Path dir, boolean tieWordEmbeddings) throws Exception {

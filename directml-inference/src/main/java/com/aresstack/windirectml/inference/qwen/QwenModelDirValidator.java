@@ -1,5 +1,8 @@
 package com.aresstack.windirectml.inference.qwen;
 
+import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
+
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -59,6 +62,10 @@ public final class QwenModelDirValidator {
             return "Invalid Qwen ONNX filename: " + ex.getMessage();
         }
 
+        if (hasRuntimeLoadablePackage(dir, safeModelFile)) {
+            return null;
+        }
+
         String unsupportedFormat = Qwen2Weights.describeUnsupportedFormat(dir, safeModelFile);
         if (unsupportedFormat != null) {
             return unsupportedFormat;
@@ -97,13 +104,19 @@ public final class QwenModelDirValidator {
 
         Path modelFile = dir.resolve(safeModelFile);
         if (!Files.exists(modelFile)) {
-            return "Qwen model directory is missing " + safeModelFile + " (looked in " + dir + ")";
+            if (hasRuntimeLoadablePackage(dir, safeModelFile)) {
+                return null;
+            }
+            return "Qwen model directory is missing " + safeModelFile
+                    + " or runtime-loadable " + packageFileName(safeModelFile) + " (looked in " + dir + ")";
         }
         if (requiresExternalDataFile(safeModelFile)
                 && !Files.exists(dir.resolve(DATA_FILE_PRIMARY))
-                && !Files.exists(dir.resolve(DATA_FILE_ALT))) {
+                && !Files.exists(dir.resolve(DATA_FILE_ALT))
+                && !hasRuntimeLoadablePackage(dir, safeModelFile)) {
             return "Qwen model directory is missing " + DATA_FILE_PRIMARY
-                    + " (or " + DATA_FILE_ALT + ") (looked in " + dir + ")";
+                    + " (or " + DATA_FILE_ALT + ") and no runtime-loadable " + packageFileName(safeModelFile)
+                    + " exists (looked in " + dir + ")";
         }
         try {
             if (Files.size(modelFile) == 0L) {
@@ -113,6 +126,36 @@ public final class QwenModelDirValidator {
             return "Unsupported Qwen ONNX format: cannot inspect " + safeModelFile + " (" + e.getMessage() + ")";
         }
         return null;
+    }
+
+    private static boolean hasRuntimeLoadablePackage(Path dir, String modelFileName) {
+        if (!QwenWdmlPackCompiler.shouldLoadPackage()) {
+            return false;
+        }
+        Path packagePath;
+        try {
+            packagePath = QwenWdmlPackCompiler.resolveOutputPath(dir, modelFileName);
+        } catch (RuntimeException ex) {
+            return false;
+        }
+        if (!Files.isRegularFile(packagePath)) {
+            return false;
+        }
+        try {
+            RuntimeModelPackage modelPackage = RuntimeModelPackage.open(packagePath);
+            return modelPackage.payloadIncluded() && modelPackage.runtimeLoadable();
+        } catch (IOException | RuntimeException ex) {
+            return false;
+        }
+    }
+
+    private static String packageFileName(String modelFileName) {
+        try {
+            Path packagePath = QwenWdmlPackCompiler.resolveOutputPath(Path.of("."), modelFileName);
+            return packagePath.getFileName().toString();
+        } catch (RuntimeException ex) {
+            return "model.wdmlpack";
+        }
     }
 
     public static Path resolveExternalDataPath(Path modelDir) throws java.io.IOException {
