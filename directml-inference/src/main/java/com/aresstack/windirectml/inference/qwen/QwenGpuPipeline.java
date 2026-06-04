@@ -76,6 +76,7 @@ public final class QwenGpuPipeline implements AutoCloseable {
     // ── GPU-resident finalNorm weight buffer + logits buffer for device-resident decode ─
     private MemorySegment finalNormWeightBuf;
     private MemorySegment logitsBuf;
+    private MemorySegment barrierLogitsUavToCopySource;
 
     // ── Per-layer fused QKV bias buffers [qSize + 2*kvSize] (Opt-B; null when no biases) ──
     private MemorySegment[] qkvBiasBufs;          // [numLayers] entry may be null
@@ -177,6 +178,11 @@ public final class QwenGpuPipeline implements AutoCloseable {
             barrierResidualUavToCopySource = pipeline.allocTransitionBarrier(residualBuf,
                     D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                     D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE);
+            if (kernels.hasLmHead()) {
+                barrierLogitsUavToCopySource = pipeline.allocTransitionBarrier(kernels.lmHead().getOutputBuf(),
+                        D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE);
+            }
         }
 
         log.info("QwenGpuPipeline ready: mlpBatch={}, upload={}KB, readback={}KB",
@@ -957,13 +963,34 @@ public final class QwenGpuPipeline implements AutoCloseable {
         pipeline.recordUavBarrier(uavBarrier);
         recordTimestamp(cl, "token.final_norm");
 
-        // Readback final hidden state (after finalNorm) – caller does lm_head + argmax
-        pipeline.recordBarrier(barrierResidualUavToCopySource);
-        pipeline.recordReadback(residualBuf, 0, hiddenBytes);
-        recordTimestamp(cl, "token.readback_copy");
-        resolveTimestamps(cl);
-        pipeline.submitAndWait();
-        pipeline.readbackInto(hiddenOut, 0, hidden);
+        // If the caller provides a vocab-sized output buffer and lm_head is present,
+        // keep final hidden on the device and append lm_head to this same Opt-C
+        // command list. This removes the previous hidden readback + hidden upload +
+        // second submit before logits were available. Otherwise preserve the legacy
+        // hidden-state readback path.
+        boolean outputLogits = hiddenOut.length >= vocabSize && kernels.hasLmHead();
+        if (outputLogits) {
+            MatMulNBitsKernel lmHead = kernels.lmHead();
+            pipeline.recordBarrier(barrierResidualUavToCopySource);
+            lmHead.recordBatchFromGpu(pipeline, residualBuf);
+            pipeline.recordUavBarrier(uavBarrier);
+            recordTimestamp(cl, "token.lm_head");
+
+            pipeline.recordBarrier(barrierLogitsUavToCopySource);
+            pipeline.recordReadback(lmHead.getOutputBuf(), 0, (long) vocabSize * Float.BYTES);
+            recordTimestamp(cl, "token.logits_readback");
+            resolveTimestamps(cl);
+            pipeline.submitAndWait();
+            pipeline.readbackInto(hiddenOut, 0, vocabSize);
+        } else {
+            // Readback final hidden state (after finalNorm) – caller does lm_head.
+            pipeline.recordBarrier(barrierResidualUavToCopySource);
+            pipeline.recordReadback(residualBuf, 0, hiddenBytes);
+            recordTimestamp(cl, "token.readback_copy");
+            resolveTimestamps(cl);
+            pipeline.submitAndWait();
+            pipeline.readbackInto(hiddenOut, 0, hidden);
+        }
         if (timestampProfiler != null) {
             lastChainedTimestampProfile = timestampProfiler.readProfile();
         }

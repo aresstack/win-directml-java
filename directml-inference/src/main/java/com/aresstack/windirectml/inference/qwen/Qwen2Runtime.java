@@ -532,22 +532,36 @@ public final class Qwen2Runtime {
             Arrays.fill(decBuf, 0);
         }
 
-        // Opt-C chained decode: ALL layers in ONE GPU submission
+        // Opt-C chained decode: ALL layers in ONE GPU submission. When lm_head
+        // is available on the GPU, the pipeline also appends lm_head to the same
+        // command list and reads back logits directly, avoiding the former
+        // hidden readback + second lm_head submit.
         if (useGpuForDecode && gpuPipeline != null && gpuPipeline.isAttnChainedEnabled()) {
             long t0 = System.nanoTime();
-            gpuPipeline.decodeLayersChained(decBuf, decBuf, pos);
-            profDeviceDecodeNs += System.nanoTime() - t0;
-            accumulateGpuTimestampProfile(gpuPipeline.lastChainedTimestampProfile());
-
-            // decodeLayersChained already applies the final RMSNorm on the device.
-            t0 = System.nanoTime();
             if (gpuPipeline.hasLmHead()) {
-                gpuPipeline.lmHead(decBuf, decLogits);
+                gpuPipeline.decodeLayersChained(decBuf, decLogits, pos);
             } else {
+                gpuPipeline.decodeLayersChained(decBuf, decBuf, pos);
+            }
+            long elapsedNs = System.nanoTime() - t0;
+            GpuTimestampProfile timestampProfile = gpuPipeline.lastChainedTimestampProfile();
+            accumulateGpuTimestampProfile(timestampProfile);
+
+            if (gpuPipeline.hasLmHead()) {
+                long fusedLmHeadNs = timestampProfile == null ? 0L
+                        : timestampProfile.elapsedNanos("lm_head")
+                        + timestampProfile.elapsedNanos("logits_readback");
+                profLmHeadNs += fusedLmHeadNs;
+                profDeviceDecodeNs += Math.max(0L, elapsedNs - fusedLmHeadNs);
+            } else {
+                profDeviceDecodeNs += elapsedNs;
+
+                // decodeLayersChained already applies the final RMSNorm on the device.
+                t0 = System.nanoTime();
                 Arrays.fill(decLogits, 0);
                 weights.lmHead.matvec(decBuf, decLogits);
+                profLmHeadNs += System.nanoTime() - t0;
             }
-            profLmHeadNs += System.nanoTime() - t0;
 
             cachedSeqLen = pos + 1;
             return decLogits;
@@ -1215,7 +1229,7 @@ public final class Qwen2Runtime {
         sb.append(String.format("  Prefill:       %.1f ms%n", profPrefillNs / 1e6));
 
         appendProfileLine(sb, "Device graph", profDeviceDecodeNs, pctDivisor,
-                "Opt-C chained decode: all layers + final RMSNorm in one submit; internal stages need GPU timestamp queries");
+                "Opt-C chained decode: all layers + final RMSNorm in one submit; lm_head is fused when available");
         appendProfileLine(sb, "GPU-res layer", profGpuResidentLayerNs, pctDivisor,
                 "Opt-B per-layer resident path");
         appendProfileLine(sb, "Proj total", profProjNs, pctDivisor,
@@ -1276,6 +1290,8 @@ public final class Qwen2Runtime {
         appendGpuTimestampLine(sb, "down_proj", totalNs);
         appendGpuTimestampLine(sb, "residual2", totalNs);
         appendGpuTimestampLine(sb, "final_norm", totalNs);
+        appendGpuTimestampLine(sb, "lm_head", totalNs);
+        appendGpuTimestampLine(sb, "logits_readback", totalNs);
         appendGpuTimestampLine(sb, "readback_copy", totalNs);
     }
 

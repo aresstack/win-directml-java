@@ -313,6 +313,17 @@ public final class GpuPipeline implements AutoCloseable {
         MemorySegment.copy(mappedReadback, ValueLayout.JAVA_FLOAT, 0, out, offset, length);
     }
 
+    /**
+     * Read one 32-bit integer from the start of the mapped readback buffer.
+     * Must be called after {@link #submitAndWait()}.
+     *
+     * @return first int value from the readback buffer
+     */
+    public int readbackInt() {
+        if (recording) throw new IllegalStateException("Still recording — call submitAndWait first");
+        return mappedReadback.get(ValueLayout.JAVA_INT, 0);
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // Pre-allocated barrier helpers
     // ═══════════════════════════════════════════════════════════════════
