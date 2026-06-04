@@ -4,6 +4,8 @@ import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -87,6 +89,66 @@ class QwenWdmlPackCompileToolTest {
         assertTrue(result.payloadIncluded());
         assertFalse(result.runtimeLoadable());
         assertEquals("safetensors-layout-only", result.runtimeLoadMode());
+    }
+
+
+    @Test
+    void dryRunReportsIncompleteLayoutWithoutWritingPackage() throws Exception {
+        writeConfig(tempDir, true);
+        writeEmbeddingOnlySafeTensors(tempDir.resolve("model.safetensors"));
+        Path output = tempDir.resolve("dry-run.wdmlpack");
+
+        QwenWdmlPackCompileTool.CompileResult result = QwenWdmlPackCompileTool.compileSafeTensorsDirectory(
+                new QwenWdmlPackCompileTool.CompileOptions(tempDir, output, true, false, true, false));
+
+        assertFalse(Files.exists(output));
+        assertTrue(result.dryRun());
+        assertFalse(result.runtimeLoadable());
+        assertFalse(result.inspection().layoutComplete());
+        assertTrue(result.inspection().runtimeLoadabilityReasons().stream()
+                .anyMatch(reason -> reason.contains("missing required tensor")));
+    }
+
+    @Test
+    void commandLineRejectsExistingOutputUnlessForceIsSupplied() throws Exception {
+        writeConfig(tempDir, true);
+        writeCompleteDenseQwenSafeTensors(tempDir.resolve("model.safetensors"));
+        Path output = tempDir.resolve("existing.wdmlpack");
+        Files.writeString(output, "existing");
+
+        int rejected = QwenWdmlPackCompileTool.run(new String[]{
+                "--model-dir", tempDir.toString(),
+                "--output", output.toString()
+        }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(new ByteArrayOutputStream()));
+
+        assertEquals(2, rejected);
+
+        int accepted = QwenWdmlPackCompileTool.run(new String[]{
+                "--model-dir", tempDir.toString(),
+                "--output", output.toString(),
+                "--force"
+        }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(new ByteArrayOutputStream()));
+
+        assertEquals(0, accepted);
+        assertTrue(RuntimeModelPackage.open(output).runtimeLoadable());
+    }
+
+    @Test
+    void commandLineInspectsExistingPackage() throws Exception {
+        writeConfig(tempDir, true);
+        writeCompleteDenseQwenSafeTensors(tempDir.resolve("model.safetensors"));
+        Path output = tempDir.resolve("inspectable.wdmlpack");
+        QwenWdmlPackCompileTool.compileSafeTensorsDirectory(tempDir, output);
+
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        int exitCode = QwenWdmlPackCompileTool.run(new String[]{
+                "--inspect", output.toString()
+        }, new PrintStream(stdout), new PrintStream(new ByteArrayOutputStream()));
+
+        assertEquals(0, exitCode);
+        String text = stdout.toString();
+        assertTrue(text.contains("runtimeLoadable=yes"));
+        assertTrue(text.contains("layoutComplete=yes"));
     }
 
     @Test
