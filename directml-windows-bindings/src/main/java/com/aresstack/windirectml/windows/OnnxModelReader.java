@@ -25,6 +25,13 @@ public final class OnnxModelReader {
 
     private static final Logger log = LoggerFactory.getLogger(OnnxModelReader.class);
     private static final boolean TENSOR_DEBUG_LOGGING = Boolean.getBoolean("directml.onnx.tensorDebug");
+    /**
+     * Large inline FP16 tensors can be held as slices into the mmap'ed ONNX file
+     * instead of copying them into byte[]. The default is tuned for Qwen's
+     * embed_tokens.weight (≈260 MiB) while keeping small tensors simple.
+     */
+    private static final int MMAP_LARGE_FP16_RAW_MIN_BYTES =
+            Integer.getInteger("directml.onnx.mmapLargeFp16Raw.minBytes", 128 * 1024 * 1024);
 
     private OnnxModelReader() {
     }
@@ -43,12 +50,20 @@ public final class OnnxModelReader {
      * non-FLOAT types (INT8, UINT8, INT32). Both may be populated.
      */
     public record OnnxTensor(String name, long[] dims, int dataType,
-                             float[] data, byte[] rawBytes) {
+                             float[] data, byte[] rawBytes,
+                             ByteBuffer rawBuffer, int rawByteLength) {
         /**
          * Convenience constructor for float-only tensors (backward compat).
          */
         public OnnxTensor(String name, long[] dims, int dataType, float[] data) {
-            this(name, dims, dataType, data, new byte[0]);
+            this(name, dims, dataType, data, new byte[0], null, 0);
+        }
+
+        /**
+         * Convenience constructor for byte-array backed raw tensors.
+         */
+        public OnnxTensor(String name, long[] dims, int dataType, float[] data, byte[] rawBytes) {
+            this(name, dims, dataType, data, rawBytes, null, rawBytes != null ? rawBytes.length : 0);
         }
 
         public int elementCount() {
@@ -57,25 +72,60 @@ public final class OnnxModelReader {
             return n;
         }
 
+        public boolean hasRawData() {
+            return rawByteLength > 0;
+        }
+
         /**
-         * Read a single signed int8 value from rawBytes.
+         * Returns a little-endian duplicate positioned at 0 and limited to rawByteLength.
+         * The backing storage may be an mmap slice and is intentionally not copied.
+         */
+        public ByteBuffer rawDataBuffer() {
+            if (rawBuffer != null) {
+                ByteBuffer dup = rawBuffer.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
+                dup.position(0);
+                dup.limit(rawByteLength);
+                return dup;
+            }
+            return ByteBuffer.wrap(rawBytes).order(ByteOrder.LITTLE_ENDIAN).asReadOnlyBuffer();
+        }
+
+        /**
+         * Materializes raw tensor bytes. Use only for legacy paths that genuinely
+         * require byte[]. Hot or huge tensors should use rawDataBuffer() instead.
+         */
+        public byte[] rawBytesOrCopy() {
+            if (rawBytes.length == rawByteLength) {
+                return rawBytes;
+            }
+            ByteBuffer src = rawDataBuffer();
+            byte[] copy = new byte[rawByteLength];
+            src.get(copy);
+            return copy;
+        }
+
+        /**
+         * Read a single signed int8 value from raw storage.
          */
         public byte getInt8(int index) {
-            return rawBytes[index];
+            return rawBuffer != null ? rawDataBuffer().get(index) : rawBytes[index];
         }
 
         /**
-         * Read a single unsigned uint8 value from rawBytes.
+         * Read a single unsigned uint8 value from raw storage.
          */
         public int getUint8(int index) {
-            return rawBytes[index] & 0xFF;
+            return getInt8(index) & 0xFF;
         }
 
         /**
-         * Read a little-endian int32 from rawBytes at element index.
+         * Read a little-endian int32 from raw storage at element index.
          */
         public int getInt32(int index) {
             int off = index * 4;
+            if (rawBuffer != null) {
+                return rawDataBuffer().getInt(off);
+            }
             return (rawBytes[off] & 0xFF)
                     | ((rawBytes[off + 1] & 0xFF) << 8)
                     | ((rawBytes[off + 2] & 0xFF) << 16)
@@ -356,6 +406,8 @@ public final class OnnxModelReader {
         String name = "";
         float[] floatData = null;
         byte[] rawData = null;
+        ByteBuffer rawDataBuffer = null;
+        int rawDataLength = 0;
         List<Integer> int32Values = null; // from field 5 (packed varints)
         int dataLocation = 0; // TensorProto.data_location (field 14)
 
@@ -429,8 +481,18 @@ public final class OnnxModelReader {
                             // (external-data stubs can also inflate the outer message length).
                             buf.position(Math.min(end, buf.limit()));
                         } else {
-                            rawData = new byte[len];
-                            buf.get(rawData);
+                            int rawStart = buf.position();
+                            if (len >= MMAP_LARGE_FP16_RAW_MIN_BYTES && (dataType == ONNX_FLOAT16 || dataType == 0)) {
+                                ByteBuffer view = buf.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
+                                view.position(rawStart);
+                                view.limit(rawStart + len);
+                                rawDataBuffer = view.slice().order(ByteOrder.LITTLE_ENDIAN);
+                                rawDataLength = len;
+                                buf.position(rawStart + len);
+                            } else {
+                                rawData = new byte[len];
+                                buf.get(rawData);
+                            }
                         }
                     } else skipField(buf, wireType);
                 }
@@ -451,6 +513,8 @@ public final class OnnxModelReader {
         // is empty: weights live in model.onnx_data and are resolved separately.
         float[] data;
         byte[] rawBytes;
+        ByteBuffer rawBuffer = null;
+        int rawLength = 0;
 
         if (dataLocation == DATA_LOCATION_EXTERNAL) {
             data = new float[0];
@@ -459,6 +523,12 @@ public final class OnnxModelReader {
             // FLOAT tensor with explicit float_data
             data = floatData;
             rawBytes = new byte[0];
+        } else if (rawDataBuffer != null) {
+            // Large inline raw tensor held as a slice into the mmap'ed ONNX file.
+            data = new float[0];
+            rawBytes = new byte[0];
+            rawBuffer = rawDataBuffer;
+            rawLength = rawDataLength;
         } else if (rawData != null && dataType == ONNX_FLOAT) {
             // FLOAT tensor with raw_data
             ByteBuffer rb = ByteBuffer.wrap(rawData).order(ByteOrder.LITTLE_ENDIAN);
@@ -497,12 +567,16 @@ public final class OnnxModelReader {
             rawBytes = new byte[0];
         }
 
+        if (rawLength == 0) {
+            rawLength = rawBytes.length;
+        }
+
         long[] dimsArr = dims.stream().mapToLong(Long::longValue).toArray();
         if (TENSOR_DEBUG_LOGGING && log.isDebugEnabled()) {
-            log.debug("Tensor '{}': dims={}, dataType={}, floats={}, rawBytes={}",
-                    name, Arrays.toString(dimsArr), dataType, data.length, rawBytes.length);
+            log.debug("Tensor '{}': dims={}, dataType={}, floats={}, rawBytes={}, rawBuffer={}",
+                    name, Arrays.toString(dimsArr), dataType, data.length, rawLength, rawBuffer != null);
         }
-        return new OnnxTensor(name, dimsArr, dataType, data, rawBytes);
+        return new OnnxTensor(name, dimsArr, dataType, data, rawBytes, rawBuffer, rawLength);
     }
 
     // ── ValueInfoProto (just extract name) ───────────────────────────────
