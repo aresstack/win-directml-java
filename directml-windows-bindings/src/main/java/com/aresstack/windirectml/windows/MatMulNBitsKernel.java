@@ -107,7 +107,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private GpuComputeKernel int4Shader;   // compiled HLSL INT4 MatVec kernel
     private final boolean useWarpParallelInt4Matvec;
     private static final int WARP_PARALLEL_INT4_MATVEC_GROUP_SIZE = 128;
-    private static final int WARP_PARALLEL_INT4_MATVEC_ROWS = 8;
+    private static final int WARP_PARALLEL_INT4_MATVEC_ROWS = 16;
     private long[] int4UavAddrs;           // pre-cached GPU VAs: [X, QW, Scales, ZP, Y]
     private int[] int4Constants;           // pre-cached constants: [N, K, blockSize]
 
@@ -243,9 +243,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             """;
 
     // ── WARP-optimised INT4 matrix-vector product ───────────────────────────
-    // One thread group computes four adjacent output rows. The 128 lanes
+    // One thread group computes 16 adjacent output rows. The 128 lanes
     // cooperatively reduce the K dimension and reuse each X element for all
-    // four rows. This reduces WARP scheduling overhead by 4x compared with the
+    // 16 rows. This reduces WARP scheduling overhead compared with the
     // one-row-per-group kernel and improves cache locality on CPU execution.
     private static final String INT4_MATVEC_WARP_PARALLEL_HLSL = """
             RWByteAddressBuffer X      : register(u0);
@@ -256,7 +256,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             cbuffer CB : register(b0) { uint N; uint K; uint blockSz; };
             
             #define THREADS 128
-            #define ROWS 8
+            #define ROWS 16
             groupshared float partial[THREADS * ROWS];
             groupshared float blockScale[ROWS];
             groupshared float blockZeroPoint[ROWS];
@@ -288,6 +288,14 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 float sum5 = 0.0;
                 float sum6 = 0.0;
                 float sum7 = 0.0;
+                float sum8 = 0.0;
+                float sum9 = 0.0;
+                float sum10 = 0.0;
+                float sum11 = 0.0;
+                float sum12 = 0.0;
+                float sum13 = 0.0;
+                float sum14 = 0.0;
+                float sum15 = 0.0;
             
                 for (uint blk = 0; blk < blocksPerRow; blk++) {
                     if (lane < ROWS) {
@@ -387,6 +395,87 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                             sum7 += (float(qByte7 & 0xFu) - zp7) * scale7 * x0;
                             sum7 += (float(qByte7 >> 4u) - zp7) * scale7 * x1;
                         }
+            
+                        uint n8 = rowBase + 8;
+                        if (n8 < N) {
+                            uint qByteBase8 = n8 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte8 = loadPackedWeightByte(qByteBase8 + lane);
+                            float scale8 = blockScale[8];
+                            float zp8 = blockZeroPoint[8];
+                            sum8 += (float(qByte8 & 0xFu) - zp8) * scale8 * x0;
+                            sum8 += (float(qByte8 >> 4u) - zp8) * scale8 * x1;
+                        }
+            
+                        uint n9 = rowBase + 9;
+                        if (n9 < N) {
+                            uint qByteBase9 = n9 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte9 = loadPackedWeightByte(qByteBase9 + lane);
+                            float scale9 = blockScale[9];
+                            float zp9 = blockZeroPoint[9];
+                            sum9 += (float(qByte9 & 0xFu) - zp9) * scale9 * x0;
+                            sum9 += (float(qByte9 >> 4u) - zp9) * scale9 * x1;
+                        }
+            
+                        uint n10 = rowBase + 10;
+                        if (n10 < N) {
+                            uint qByteBase10 = n10 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte10 = loadPackedWeightByte(qByteBase10 + lane);
+                            float scale10 = blockScale[10];
+                            float zp10 = blockZeroPoint[10];
+                            sum10 += (float(qByte10 & 0xFu) - zp10) * scale10 * x0;
+                            sum10 += (float(qByte10 >> 4u) - zp10) * scale10 * x1;
+                        }
+            
+                        uint n11 = rowBase + 11;
+                        if (n11 < N) {
+                            uint qByteBase11 = n11 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte11 = loadPackedWeightByte(qByteBase11 + lane);
+                            float scale11 = blockScale[11];
+                            float zp11 = blockZeroPoint[11];
+                            sum11 += (float(qByte11 & 0xFu) - zp11) * scale11 * x0;
+                            sum11 += (float(qByte11 >> 4u) - zp11) * scale11 * x1;
+                        }
+            
+                        uint n12 = rowBase + 12;
+                        if (n12 < N) {
+                            uint qByteBase12 = n12 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte12 = loadPackedWeightByte(qByteBase12 + lane);
+                            float scale12 = blockScale[12];
+                            float zp12 = blockZeroPoint[12];
+                            sum12 += (float(qByte12 & 0xFu) - zp12) * scale12 * x0;
+                            sum12 += (float(qByte12 >> 4u) - zp12) * scale12 * x1;
+                        }
+            
+                        uint n13 = rowBase + 13;
+                        if (n13 < N) {
+                            uint qByteBase13 = n13 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte13 = loadPackedWeightByte(qByteBase13 + lane);
+                            float scale13 = blockScale[13];
+                            float zp13 = blockZeroPoint[13];
+                            sum13 += (float(qByte13 & 0xFu) - zp13) * scale13 * x0;
+                            sum13 += (float(qByte13 >> 4u) - zp13) * scale13 * x1;
+                        }
+            
+                        uint n14 = rowBase + 14;
+                        if (n14 < N) {
+                            uint qByteBase14 = n14 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte14 = loadPackedWeightByte(qByteBase14 + lane);
+                            float scale14 = blockScale[14];
+                            float zp14 = blockZeroPoint[14];
+                            sum14 += (float(qByte14 & 0xFu) - zp14) * scale14 * x0;
+                            sum14 += (float(qByte14 >> 4u) - zp14) * scale14 * x1;
+                        }
+            
+                        uint n15 = rowBase + 15;
+                        if (n15 < N) {
+                            uint qByteBase15 = n15 * blocksPerRow * bytesPerBlock + blk * bytesPerBlock;
+                            uint qByte15 = loadPackedWeightByte(qByteBase15 + lane);
+                            float scale15 = blockScale[15];
+                            float zp15 = blockZeroPoint[15];
+                            sum15 += (float(qByte15 & 0xFu) - zp15) * scale15 * x0;
+                            sum15 += (float(qByte15 >> 4u) - zp15) * scale15 * x1;
+                        }
+            
                     }
                     GroupMemoryBarrierWithGroupSync();
                 }
@@ -399,6 +488,14 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 partial[lane + THREADS * 5] = sum5;
                 partial[lane + THREADS * 6] = sum6;
                 partial[lane + THREADS * 7] = sum7;
+                partial[lane + THREADS * 8] = sum8;
+                partial[lane + THREADS * 9] = sum9;
+                partial[lane + THREADS * 10] = sum10;
+                partial[lane + THREADS * 11] = sum11;
+                partial[lane + THREADS * 12] = sum12;
+                partial[lane + THREADS * 13] = sum13;
+                partial[lane + THREADS * 14] = sum14;
+                partial[lane + THREADS * 15] = sum15;
                 GroupMemoryBarrierWithGroupSync();
             
                 for (uint stride = THREADS / 2; stride > 0; stride >>= 1) {
@@ -411,6 +508,14 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                         partial[lane + THREADS * 5] += partial[lane + stride + THREADS * 5];
                         partial[lane + THREADS * 6] += partial[lane + stride + THREADS * 6];
                         partial[lane + THREADS * 7] += partial[lane + stride + THREADS * 7];
+                        partial[lane + THREADS * 8] += partial[lane + stride + THREADS * 8];
+                        partial[lane + THREADS * 9] += partial[lane + stride + THREADS * 9];
+                        partial[lane + THREADS * 10] += partial[lane + stride + THREADS * 10];
+                        partial[lane + THREADS * 11] += partial[lane + stride + THREADS * 11];
+                        partial[lane + THREADS * 12] += partial[lane + stride + THREADS * 12];
+                        partial[lane + THREADS * 13] += partial[lane + stride + THREADS * 13];
+                        partial[lane + THREADS * 14] += partial[lane + stride + THREADS * 14];
+                        partial[lane + THREADS * 15] += partial[lane + stride + THREADS * 15];
                     }
                     GroupMemoryBarrierWithGroupSync();
                 }
@@ -432,6 +537,22 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                     if (outRow6 < N) Y.Store(outRow6 * 4, asuint(partial[THREADS * 6]));
                     uint outRow7 = rowBase + 7;
                     if (outRow7 < N) Y.Store(outRow7 * 4, asuint(partial[THREADS * 7]));
+                    uint outRow8 = rowBase + 8;
+                    if (outRow8 < N) Y.Store(outRow8 * 4, asuint(partial[THREADS * 8]));
+                    uint outRow9 = rowBase + 9;
+                    if (outRow9 < N) Y.Store(outRow9 * 4, asuint(partial[THREADS * 9]));
+                    uint outRow10 = rowBase + 10;
+                    if (outRow10 < N) Y.Store(outRow10 * 4, asuint(partial[THREADS * 10]));
+                    uint outRow11 = rowBase + 11;
+                    if (outRow11 < N) Y.Store(outRow11 * 4, asuint(partial[THREADS * 11]));
+                    uint outRow12 = rowBase + 12;
+                    if (outRow12 < N) Y.Store(outRow12 * 4, asuint(partial[THREADS * 12]));
+                    uint outRow13 = rowBase + 13;
+                    if (outRow13 < N) Y.Store(outRow13 * 4, asuint(partial[THREADS * 13]));
+                    uint outRow14 = rowBase + 14;
+                    if (outRow14 < N) Y.Store(outRow14 * 4, asuint(partial[THREADS * 14]));
+                    uint outRow15 = rowBase + 15;
+                    if (outRow15 < N) Y.Store(outRow15 * 4, asuint(partial[THREADS * 15]));
                 }
             }
             """;
@@ -755,7 +876,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 N, K, qBytes + scaleBytes + zpBytes,
                 qBytes + scaleBytes + zpBytes,
                 (long) N * K * 4,
-                useWarpParallelInt4Matvec ? "warp-parallel-rows8" : "row-serial");
+                useWarpParallelInt4Matvec ? "warp-parallel-rows16" : "row-serial");
     }
 
     // ══════════════════════════════════════════════════════════════════════
