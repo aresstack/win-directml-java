@@ -1009,6 +1009,19 @@ public final class Qwen2Weights implements AutoCloseable {
                                                           MappedByteBuffer extData,
                                                           boolean isQuantized,
                                                           float[] embedTokens) throws IOException {
+        boolean preferExplicitQuantizedLmHead = isQuantized && Boolean.parseBoolean(
+                System.getProperty("qwen.tiedLmHead.preferExplicitQuantized", "true"));
+        if (preferExplicitQuantizedLmHead) {
+            WeightMatrix quantizedLmHead = findQuantizedLmHead(graph, matmulWeightNames,
+                    externalRefs, inlineTensors, extData);
+            if (quantizedLmHead != null) {
+                log.info("Using explicit quantized lm_head from ONNX instead of tied dense embedding "
+                                + "(tie_word_embeddings={})",
+                        config.tieWordEmbeddings());
+                return quantizedLmHead;
+            }
+        }
+
         if (config.tieWordEmbeddings()) {
             return createTiedLmHead(config, isQuantized, embedTokens);
         }
@@ -1162,9 +1175,11 @@ public final class Qwen2Weights implements AutoCloseable {
                                                     MappedByteBuffer extData) throws IOException {
         for (Map.Entry<String, String[]> entry : matmulWeightNames.entrySet()) {
             String output = entry.getKey();
-            if (looksLikeLmHeadOutput(output)) {
-                log.info("Using quantized lm_head from MatMulNBits output '{}'", output);
-                QuantizedWeight quantizedWeight = loadQuantizedWeight(entry.getValue(), externalRefs, inlineTensors, extData);
+            String[] tensorNames = entry.getValue();
+            if (looksLikeLmHeadOutput(output) || looksLikeLmHeadTensorNames(tensorNames)) {
+                log.info("Using quantized lm_head from MatMulNBits output '{}' (weight={})",
+                        output, tensorNames.length > 0 ? tensorNames[0] : "<missing>");
+                QuantizedWeight quantizedWeight = loadQuantizedWeight(tensorNames, externalRefs, inlineTensors, extData);
                 return new QuantizedWeightMatrix(quantizedWeight);
             }
         }
@@ -1175,6 +1190,18 @@ public final class Qwen2Weights implements AutoCloseable {
     private static boolean looksLikeLmHeadOutput(String outputName) {
         String lower = outputName.toLowerCase(Locale.ROOT);
         return lower.contains("lm_head") || lower.equals("logits") || lower.endsWith("/logits");
+    }
+
+    private static boolean looksLikeLmHeadTensorNames(String[] tensorNames) {
+        if (tensorNames == null) {
+            return false;
+        }
+        for (String tensorName : tensorNames) {
+            if (tensorName != null && tensorName.toLowerCase(Locale.ROOT).contains("lm_head")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static WeightMatrix findDenseLmHead(Qwen2Config config,

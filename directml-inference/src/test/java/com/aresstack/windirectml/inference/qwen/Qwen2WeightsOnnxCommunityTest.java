@@ -246,4 +246,53 @@ class Qwen2WeightsOnnxCommunityTest {
         float[] actual = (float[]) m.invoke(null, config, Map.of(), inline, null);
         assertArrayEquals(expected, actual);
     }
+
+    @Test
+    void tiedQuantizedModelPrefersExplicitQuantizedLmHeadWhenAvailable() throws Exception {
+        Qwen2Config config = new Qwen2Config(2, 1, 1, 1, 2, 8, 4, 1e-6f, 10_000f, true);
+        float[] embedTokens = new float[]{10f, 11f, 12f, 13f};
+
+        Map<String, String[]> matmulWeightNames = new HashMap<>();
+        matmulWeightNames.put("/some/export/path/output_0", new String[]{
+                "lm_head.MatMul.weight_Q4",
+                "lm_head.MatMul.weight_scales",
+                null
+        });
+
+        Map<String, OnnxModelReader.OnnxTensor> inline = new HashMap<>();
+        inline.put("lm_head.MatMul.weight_Q4", new OnnxModelReader.OnnxTensor(
+                "lm_head.MatMul.weight_Q4",
+                new long[]{2, 1, 1},
+                OnnxModelReader.ONNX_UINT8,
+                new float[0],
+                new byte[]{(byte) 0x98, (byte) 0x76}));
+        inline.put("lm_head.MatMul.weight_scales", new OnnxModelReader.OnnxTensor(
+                "lm_head.MatMul.weight_scales",
+                new long[]{2},
+                OnnxModelReader.ONNX_FLOAT,
+                new float[]{0.5f, 0.25f},
+                new byte[0]));
+
+        OnnxModelReader.OnnxGraph graph = new OnnxModelReader.OnnxGraph(
+                "test", java.util.List.of(), inline, java.util.List.of(), java.util.List.of());
+
+        Method m = Qwen2Weights.class.getDeclaredMethod(
+                "loadLmHeadOrTiedEmbedding",
+                Qwen2Config.class,
+                OnnxModelReader.OnnxGraph.class,
+                Map.class,
+                Map.class,
+                Map.class,
+                java.nio.MappedByteBuffer.class,
+                boolean.class,
+                float[].class);
+        m.setAccessible(true);
+
+        Object result = m.invoke(null, config, graph, matmulWeightNames,
+                Map.of(), inline, null, true, embedTokens);
+
+        assertTrue(result instanceof Qwen2Weights.QuantizedWeightMatrix,
+                "Explicit quantized lm_head should win over tied dense embedding");
+    }
+
 }
