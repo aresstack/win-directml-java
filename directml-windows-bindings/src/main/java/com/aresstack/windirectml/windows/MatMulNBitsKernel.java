@@ -2261,7 +2261,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         if (weightBuf != null) DxgiBindings.release(weightBuf);
 
         arena.close();
-        log.debug("MatMulNBitsKernel closed [{}, {}] — shared buffers retained for JVM lifetime", N, K);
+        log.trace("MatMulNBitsKernel closed [{}, {}] — shared buffers retained for JVM lifetime", N, K);
     }
 
     /**

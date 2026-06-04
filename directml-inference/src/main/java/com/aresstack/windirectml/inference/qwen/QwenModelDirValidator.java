@@ -95,7 +95,8 @@ public final class QwenModelDirValidator {
             return "Invalid Qwen ONNX filename: " + ex.getMessage();
         }
 
-        if (!Files.exists(dir.resolve(safeModelFile))) {
+        Path modelFile = dir.resolve(safeModelFile);
+        if (!Files.exists(modelFile)) {
             return "Qwen model directory is missing " + safeModelFile + " (looked in " + dir + ")";
         }
         if (requiresExternalDataFile(safeModelFile)
@@ -103,6 +104,13 @@ public final class QwenModelDirValidator {
                 && !Files.exists(dir.resolve(DATA_FILE_ALT))) {
             return "Qwen model directory is missing " + DATA_FILE_PRIMARY
                     + " (or " + DATA_FILE_ALT + ") (looked in " + dir + ")";
+        }
+        try {
+            if (Files.size(modelFile) == 0L) {
+                return "Unsupported Qwen ONNX format: " + safeModelFile + " is empty";
+            }
+        } catch (java.io.IOException e) {
+            return "Unsupported Qwen ONNX format: cannot inspect " + safeModelFile + " (" + e.getMessage() + ")";
         }
         return null;
     }

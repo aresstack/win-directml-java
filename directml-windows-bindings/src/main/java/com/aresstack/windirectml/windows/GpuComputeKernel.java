@@ -291,7 +291,7 @@ public final class GpuComputeKernel implements AutoCloseable {
         if (pipelineState != null) DxgiBindings.release(pipelineState);
         if (rootSignature != null) DxgiBindings.release(rootSignature);
         arena.close();
-        log.debug("GpuComputeKernel '{}' closed", name);
+        log.trace("GpuComputeKernel '{}' closed", name);
     }
 }
 

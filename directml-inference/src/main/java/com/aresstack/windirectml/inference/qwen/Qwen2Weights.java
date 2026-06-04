@@ -179,9 +179,113 @@ public final class Qwen2Weights implements AutoCloseable {
     }
 
     /**
+     * Compact embedding table abstraction. The common Qwen ONNX export stores
+     * embeddings as FLOAT16; keeping them as FP16 and expanding only the
+     * requested rows cuts Java-heap residency for embeddings roughly in half
+     * compared with the old eager float[] conversion.
+     */
+    public interface EmbeddingTable {
+        int rows();
+
+        int cols();
+
+        void copyRow(int row, float[] dest, int destOffset);
+
+        long estimatedHostBytes();
+
+        float[] materializeFloatArray();
+    }
+
+    public record FloatEmbeddingTable(float[] data, int rows, int cols) implements EmbeddingTable {
+        @Override
+        public void copyRow(int row, float[] dest, int destOffset) {
+            System.arraycopy(data, row * cols, dest, destOffset, cols);
+        }
+
+        @Override
+        public long estimatedHostBytes() {
+            return (long) data.length * Float.BYTES;
+        }
+
+        @Override
+        public float[] materializeFloatArray() {
+            return data;
+        }
+    }
+
+    public record RawFp16EmbeddingTable(byte[] data, int rows, int cols) implements EmbeddingTable {
+        @Override
+        public void copyRow(int row, float[] dest, int destOffset) {
+            int src = row * cols * Short.BYTES;
+            for (int i = 0; i < cols; i++) {
+                int p = src + i * Short.BYTES;
+                short bits = (short) ((data[p] & 0xFF) | ((data[p + 1] & 0xFF) << 8));
+                dest[destOffset + i] = fp16ToFp32(bits);
+            }
+        }
+
+        @Override
+        public long estimatedHostBytes() {
+            return data.length;
+        }
+
+        @Override
+        public float[] materializeFloatArray() {
+            float[] out = new float[rows * cols];
+            for (int r = 0; r < rows; r++) {
+                copyRow(r, out, r * cols);
+            }
+            return out;
+        }
+    }
+
+    public record MappedFp16EmbeddingTable(MappedByteBuffer data, long offset, int rows,
+                                           int cols) implements EmbeddingTable {
+        @Override
+        public void copyRow(int row, float[] dest, int destOffset) {
+            int src = Math.toIntExact(offset + (long) row * cols * Short.BYTES);
+            for (int i = 0; i < cols; i++) {
+                dest[destOffset + i] = fp16ToFp32(data.getShort(src + i * Short.BYTES));
+            }
+        }
+
+        @Override
+        public long estimatedHostBytes() {
+            return 0L;
+        }
+
+        @Override
+        public float[] materializeFloatArray() {
+            float[] out = new float[rows * cols];
+            for (int r = 0; r < rows; r++) {
+                copyRow(r, out, r * cols);
+            }
+            return out;
+        }
+    }
+
+    /**
+     * Placeholder installed after GPU upload to drop heavyweight host-side
+     * projection arrays. Any later CPU fallback that reaches this object is a
+     * programming/configuration error and should fail loudly instead of silently
+     * producing nonsense.
+     */
+    public record ReleasedWeightMatrix(String name, int N, int K) implements WeightMatrix {
+        @Override
+        public void matvec(float[] x, float[] y) {
+            throw new IllegalStateException("Host weight storage has been released for " + name);
+        }
+
+        @Override
+        public void matmul(float[] x, float[] y, int seqLen) {
+            throw new IllegalStateException("Host weight storage has been released for " + name);
+        }
+    }
+
+    /**
      * Abstraction over INT4 or FP16 weight matrix.
      */
-    public sealed interface WeightMatrix permits QuantizedWeightMatrix, DenseWeightMatrix {
+    public sealed interface WeightMatrix permits QuantizedWeightMatrix, DenseWeightMatrix, ReleasedWeightMatrix {
         void matvec(float[] x, float[] y);
 
         void matmul(float[] x, float[] y, int seqLen);
@@ -271,9 +375,10 @@ public final class Qwen2Weights implements AutoCloseable {
     private final MappedByteBuffer externalData;
 
     /**
-     * Token embedding: float32 [vocabSize, hiddenSize], converted from fp16.
+     * Token embedding table [vocabSize, hiddenSize]. Kept compact when the
+     * source tensor is FP16 so Java does not need a permanent 500+ MB float[].
      */
-    public final float[] embedTokens;
+    public final EmbeddingTable embedTokens;
 
     /**
      * Per-layer weights, indexed 0..numHiddenLayers-1.
@@ -288,7 +393,7 @@ public final class Qwen2Weights implements AutoCloseable {
     /**
      * LM head projection.
      */
-    public final WeightMatrix lmHead;
+    public WeightMatrix lmHead;
 
     // ── External-data tensor metadata ────────────────────────────────────
 
@@ -300,7 +405,7 @@ public final class Qwen2Weights implements AutoCloseable {
 
     private Qwen2Weights(Qwen2Config config, RandomAccessFile raf, FileChannel channel,
                          MappedByteBuffer externalData,
-                         float[] embedTokens, LayerWeights[] layers,
+                         EmbeddingTable embedTokens, LayerWeights[] layers,
                          float[] finalNormWeight, WeightMatrix lmHead) {
         this.config = config;
         this.raf = raf;
@@ -380,8 +485,9 @@ public final class Qwen2Weights implements AutoCloseable {
             log.info("Model format: {}", isQuantized ? "INT4 quantized (MatMulNBits)" : "dense FLOAT16/FLOAT");
 
             // ── Embedding ────────────────────────────────────────────────
-            float[] embedTokens = loadEmbedding(config, externalRefs, inlineTensors, extData);
-            log.info("Loaded embedding: [{}, {}]", config.vocabSize(), config.hiddenSize());
+            EmbeddingTable embedTokens = loadEmbedding(config, externalRefs, inlineTensors, extData);
+            log.info("Loaded embedding: [{}, {}] (hostStorage={})",
+                    config.vocabSize(), config.hiddenSize(), formatBytes(embedTokens.estimatedHostBytes()));
 
             // ── Layers ───────────────────────────────────────────────────
             LayerWeights[] layerWeights = new LayerWeights[config.numHiddenLayers()];
@@ -426,19 +532,52 @@ public final class Qwen2Weights implements AutoCloseable {
 
     // ── Embedding loading ────────────────────────────────────────────────
 
-    private static float[] loadEmbedding(Qwen2Config config,
-                                         Map<String, ExternalTensorRef> externalRefs,
-                                         Map<String, OnnxTensor> inlineTensors,
-                                         MappedByteBuffer extData) throws IOException {
-        // Try common Qwen embedding weight names
-        float[] data = loadOptionalTensorWithAlternatives(
-                List.of("model.embed_tokens.weight", "embed_tokens.weight"),
-                externalRefs, inlineTensors, extData
-        );
-        if (data == null) {
-            throw new IOException("Embedding weight not found. Expected 'model.embed_tokens.weight' in ONNX external data.");
+    private static EmbeddingTable loadEmbedding(Qwen2Config config,
+                                                Map<String, ExternalTensorRef> externalRefs,
+                                                Map<String, OnnxTensor> inlineTensors,
+                                                MappedByteBuffer extData) throws IOException {
+        for (String name : List.of("model.embed_tokens.weight", "embed_tokens.weight")) {
+            EmbeddingTable table = resolveEmbeddingTable(name, config, externalRefs, inlineTensors, extData);
+            if (table != null) {
+                return table;
+            }
         }
-        return data;
+        throw new IOException("Embedding weight not found. Expected 'model.embed_tokens.weight' in ONNX data.");
+    }
+
+    private static EmbeddingTable resolveEmbeddingTable(String tensorName, Qwen2Config config,
+                                                        Map<String, ExternalTensorRef> externalRefs,
+                                                        Map<String, OnnxTensor> inlineTensors,
+                                                        MappedByteBuffer extData) throws IOException {
+        int rows = config.vocabSize();
+        int cols = config.hiddenSize();
+        ExternalTensorRef ref = externalRefs.get(tensorName);
+        if (ref != null) {
+            validateMatrixShape(tensorName, ref.dims, rows, cols);
+            if (ref.dataType == OnnxModelReader.ONNX_FLOAT16) {
+                if (extData == null) {
+                    throw new IOException("External tensor data is unavailable for " + tensorName);
+                }
+                log.info("Using mmap-backed FP16 embedding table for {}", tensorName);
+                return new MappedFp16EmbeddingTable(extData, ref.offset, rows, cols);
+            }
+            if (ref.dataType == OnnxModelReader.ONNX_FLOAT) {
+                return new FloatEmbeddingTable(readFloatTensorAsFloat32(extData, ref, tensorName), rows, cols);
+            }
+            throw new IOException("Unsupported embedding tensor type for " + tensorName + ": "
+                    + onnxTypeName(ref.dataType) + " (" + ref.dataType + ")");
+        }
+
+        OnnxTensor inline = inlineTensors.get(tensorName);
+        if (!hasInlineData(inline)) {
+            return null;
+        }
+        validateMatrixShape(tensorName, inline.dims(), rows, cols);
+        if (inline.dataType() == OnnxModelReader.ONNX_FLOAT16 && inline.rawBytes().length > 0) {
+            log.info("Using compact FP16 embedding table for {}", tensorName);
+            return new RawFp16EmbeddingTable(inline.rawBytes(), rows, cols);
+        }
+        return new FloatEmbeddingTable(readInlineTensorAsFloat32(inline, tensorName), rows, cols);
     }
 
     // ── Per-layer loading ────────────────────────────────────────────────
@@ -1003,6 +1142,7 @@ public final class Qwen2Weights implements AutoCloseable {
 
     // ── LM Head loading ──────────────────────────────────────────────────
 
+    @SuppressWarnings("unused") // kept for tests and older reflective callers
     private static WeightMatrix loadLmHeadOrTiedEmbedding(Qwen2Config config, OnnxGraph graph,
                                                           Map<String, String[]> matmulWeightNames,
                                                           Map<String, ExternalTensorRef> externalRefs,
@@ -1010,6 +1150,18 @@ public final class Qwen2Weights implements AutoCloseable {
                                                           MappedByteBuffer extData,
                                                           boolean isQuantized,
                                                           float[] embedTokens) throws IOException {
+        return loadLmHeadOrTiedEmbedding(config, graph, matmulWeightNames,
+                externalRefs, inlineTensors, extData, isQuantized,
+                new FloatEmbeddingTable(embedTokens, config.vocabSize(), config.hiddenSize()));
+    }
+
+    private static WeightMatrix loadLmHeadOrTiedEmbedding(Qwen2Config config, OnnxGraph graph,
+                                                          Map<String, String[]> matmulWeightNames,
+                                                          Map<String, ExternalTensorRef> externalRefs,
+                                                          Map<String, OnnxTensor> inlineTensors,
+                                                          MappedByteBuffer extData,
+                                                          boolean isQuantized,
+                                                          EmbeddingTable embedTokens) throws IOException {
         boolean preferExplicitQuantizedLmHead = isQuantized && Boolean.parseBoolean(
                 System.getProperty("qwen.tiedLmHead.preferExplicitQuantized", "true"));
         if (preferExplicitQuantizedLmHead) {
@@ -1053,7 +1205,7 @@ public final class Qwen2Weights implements AutoCloseable {
 
     private static WeightMatrix createTiedLmHead(Qwen2Config config,
                                                  boolean isQuantized,
-                                                 float[] embedTokens) {
+                                                 EmbeddingTable embedTokens) {
         boolean quantizeTiedLmHead = isQuantized && Boolean.parseBoolean(
                 System.getProperty("qwen.tiedLmHead.quantize", "false"));
         if (quantizeTiedLmHead) {
@@ -1062,7 +1214,7 @@ public final class Qwen2Weights implements AutoCloseable {
                 log.info("Using tied lm_head as runtime INT4: quantizing embed_tokens [{}, {}] with blockSize={}",
                         config.vocabSize(), config.hiddenSize(), blockSize);
                 QuantizedWeight quantized = quantizeDenseRowsToUInt4(
-                        embedTokens, config.vocabSize(), config.hiddenSize(), blockSize);
+                        embedTokens.materializeFloatArray(), config.vocabSize(), config.hiddenSize(), blockSize);
                 return new QuantizedWeightMatrix(quantized);
             }
             log.warn("Cannot runtime-quantize tied lm_head because hidden size {} is not block-aligned; using dense embedding",
@@ -1071,7 +1223,7 @@ public final class Qwen2Weights implements AutoCloseable {
 
         log.info("Using tied lm_head (tie_word_embeddings=true): reusing embed_tokens [{}, {}]",
                 config.vocabSize(), config.hiddenSize());
-        return new DenseWeightMatrix(new DenseWeight(embedTokens, config.vocabSize(), config.hiddenSize()));
+        return new DenseWeightMatrix(new DenseWeight(embedTokens.materializeFloatArray(), config.vocabSize(), config.hiddenSize()));
     }
 
     private static int chooseTiedLmHeadBlockSize(int hiddenSize) {
@@ -1465,6 +1617,70 @@ public final class Qwen2Weights implements AutoCloseable {
         } else {
             return Float.intBitsToFloat((s << 31) | ((e - 15 + 127) << 23) | (m << 13));
         }
+    }
+
+    public void copyEmbedding(int tokenId, float[] dest, int destOffset) {
+        embedTokens.copyRow(tokenId, dest, destOffset);
+    }
+
+    /**
+     * Drop large host-side projection matrices after they have been uploaded to
+     * D3D12 resources. Norms/biases/embeddings stay resident because prefill and
+     * token lookup still need them on the Java side.
+     */
+    public long releaseGpuUploadedProjectionStorage(boolean includeLmHead) {
+        long released = 0L;
+        for (int i = 0; i < layers.length; i++) {
+            LayerWeights lw = layers[i];
+            released += estimatedBytes(lw.qProj());
+            released += estimatedBytes(lw.kProj());
+            released += estimatedBytes(lw.vProj());
+            released += estimatedBytes(lw.oProj());
+            released += estimatedBytes(lw.gateProj());
+            released += estimatedBytes(lw.upProj());
+            released += estimatedBytes(lw.downProj());
+            layers[i] = new LayerWeights(
+                    lw.inputNormWeight(),
+                    new ReleasedWeightMatrix("layer." + i + ".q_proj", lw.qProj().N(), lw.qProj().K()),
+                    new ReleasedWeightMatrix("layer." + i + ".k_proj", lw.kProj().N(), lw.kProj().K()),
+                    new ReleasedWeightMatrix("layer." + i + ".v_proj", lw.vProj().N(), lw.vProj().K()),
+                    new ReleasedWeightMatrix("layer." + i + ".o_proj", lw.oProj().N(), lw.oProj().K()),
+                    lw.postNormWeight(),
+                    new ReleasedWeightMatrix("layer." + i + ".gate_proj", lw.gateProj().N(), lw.gateProj().K()),
+                    new ReleasedWeightMatrix("layer." + i + ".up_proj", lw.upProj().N(), lw.upProj().K()),
+                    new ReleasedWeightMatrix("layer." + i + ".down_proj", lw.downProj().N(), lw.downProj().K()),
+                    lw.qBias(), lw.kBias(), lw.vBias());
+        }
+        if (includeLmHead && !(lmHead instanceof ReleasedWeightMatrix)) {
+            released += estimatedBytes(lmHead);
+            lmHead = new ReleasedWeightMatrix("lm_head", lmHead.N(), lmHead.K());
+        }
+        if (released > 0) {
+            log.info("Released host-side uploaded Qwen projection weights: {}", formatBytes(released));
+        }
+        return released;
+    }
+
+    private static long estimatedBytes(WeightMatrix matrix) {
+        if (matrix instanceof QuantizedWeightMatrix q) {
+            QuantizedWeight inner = q.inner();
+            return (long) inner.qWeight().length
+                    + (long) inner.scales().length * Float.BYTES
+                    + (long) inner.zeroPoints().length;
+        }
+        if (matrix instanceof DenseWeightMatrix d) {
+            return (long) d.inner().data().length * Float.BYTES;
+        }
+        return 0L;
+    }
+
+    static String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        double kib = bytes / 1024.0;
+        if (kib < 1024) return String.format(Locale.ROOT, "%.1f KiB", kib);
+        double mib = kib / 1024.0;
+        if (mib < 1024) return String.format(Locale.ROOT, "%.1f MiB", mib);
+        return String.format(Locale.ROOT, "%.2f GiB", mib / 1024.0);
     }
 
     // ── ONNX external data metadata parsing ──────────────────────────────

@@ -218,6 +218,7 @@ public class QwenInferenceEngine implements InferenceEngine {
                                     gpuKernels.getGpuLayers(), config.numHiddenLayers(),
                                     gpuKernels.hasLmHead(), gpuPipeline.isMlpBatchEnabled(),
                                     attnFlag);
+                            releaseHostWeightsIfFullyOffloaded();
                         } catch (Exception pe) {
                             log.warn("GPU pipeline V2.0 failed, using V1 per-kernel dispatch: {}",
                                     pe.getMessage());
@@ -225,6 +226,7 @@ public class QwenInferenceEngine implements InferenceEngine {
                             log.info("GPU acceleration: {}/{} layers on GPU (V1), lmHead={}",
                                     gpuKernels.getGpuLayers(), config.numHiddenLayers(),
                                     gpuKernels.hasLmHead());
+                            releaseHostWeightsIfFullyOffloaded();
                         }
                     } else {
                         log.warn("DirectML device not available, falling back to CPU");
@@ -340,6 +342,23 @@ public class QwenInferenceEngine implements InferenceEngine {
         weights = null;
         tokenizer = null;
         config = null;
+    }
+
+    private void releaseHostWeightsIfFullyOffloaded() {
+        boolean enabled = Boolean.parseBoolean(
+                System.getProperty("qwen.heapLight.releaseUploadedWeights", "true"));
+        if (!enabled || weights == null || gpuKernels == null) {
+            return;
+        }
+        if (gpuKernels.getGpuLayers() != config.numHiddenLayers()) {
+            log.info("Heap-light host weight release skipped: only {}/{} layers are on GPU",
+                    gpuKernels.getGpuLayers(), config.numHiddenLayers());
+            return;
+        }
+        long released = weights.releaseGpuUploadedProjectionStorage(gpuKernels.hasLmHead());
+        if (released > 0) {
+            log.info("Heap-light mode active: Java keeps embeddings/norms/biases only; uploaded projections are GPU-resident handles");
+        }
     }
 
     /**

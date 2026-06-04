@@ -421,7 +421,7 @@ public final class Qwen2Runtime {
         for (int s = 0; s < seqLen; s++) {
             int tokenId = tokenIds[s];
             if (tokenId >= 0 && tokenId < config.vocabSize()) {
-                System.arraycopy(weights.embedTokens, tokenId * hidden, hiddenStates, s * hidden, hidden);
+                weights.copyEmbedding(tokenId, hiddenStates, s * hidden);
             }
         }
 
@@ -527,7 +527,7 @@ public final class Qwen2Runtime {
 
         // Embedding lookup → decBuf
         if (tokenId >= 0 && tokenId < config.vocabSize()) {
-            System.arraycopy(weights.embedTokens, tokenId * hidden, decBuf, 0, hidden);
+            weights.copyEmbedding(tokenId, decBuf, 0);
         } else {
             Arrays.fill(decBuf, 0);
         }
