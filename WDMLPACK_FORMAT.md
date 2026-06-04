@@ -2,7 +2,7 @@
 
 `*.wdmlpack` is the internal runtime package boundary for the Windows DirectML/WARP runtime.
 
-The current v23 implementation supports two compatible package modes:
+The current v24 implementation supports two compatible package modes and adds cache hardening:
 
 ```text
 mode=manifest-only, payloadIncluded=false
@@ -11,7 +11,7 @@ mode=manifest-only, payloadIncluded=false
   tensor payload still delegates to the source ONNX
 
 mode=payload, payloadIncluded=true
-  v23 native payload mode
+  v23/v24 native payload mode
   package contains tensor payload bytes
   runtime reconstructs the TensorCatalog and minimal Qwen graph from the package
   ONNX parsing is no longer needed on the package startup path
@@ -28,7 +28,7 @@ First start / no package:
   → model_q4f16.wdmlpack (header + JSON manifest + tensor payload)
   → normal v20/v22 load for this run
 
-Next start / v23 package exists:
+Next start / v24 package exists:
   model_q4f16.wdmlpack
   → QwenWdmlPackModelSource
   → mmap package
@@ -37,8 +37,9 @@ Next start / v23 package exists:
   → no ONNX graph parse
 ```
 
-Existing v22 `manifest-only` packages are still accepted. When such a package is loaded and auto-create is enabled, the
-compiler upgrades it to a payload package for the next start.
+Existing v22/v23 packages without the v24 cache contract are treated as stale. They are deleted and rebuilt from ONNX
+when the source ONNX is available. Manifest-only packages with a valid v24 cache contract can still act as a
+compatibility front door and can be upgraded to a payload package.
 
 ## Why this exists
 
@@ -101,13 +102,13 @@ Disable auto-creation with:
 -Dwindirectml.wdmlpack.autoCreate=false
 ```
 
-Payload packages are written by default in v23:
+Payload packages are written by default:
 
 ```text
 -Dwindirectml.wdmlpack.payload=true
 ```
 
-Force v22-style manifest-only packages with:
+Force manifest-only packages with:
 
 ```text
 -Dwindirectml.wdmlpack.payload=false
@@ -141,6 +142,10 @@ The manifest stores:
 - runtimeLoadable=true
 - runtimeLoadMode
 - source metadata for import provenance
+- v24 cache contract:
+  - schema=qwen-wdmlpack-cache-v24
+  - compilerVersion=24
+  - source fingerprint based on file name, size, modified time and file key when available
 - Qwen architecture metadata
 - operator counts
 - minimal runtime graph:
@@ -153,12 +158,22 @@ The manifest stores:
   - dims
   - original storage kind
   - byte length
-  - payloadOffset / payloadLength for v23 payload packages
+  - payloadOffset / payloadLength for payload packages
   - source offset for external ONNX data when available
 ```
 
+## Cache hardening
+
+v24 rejects stale or incompatible packages before they can influence runtime loading. A package is considered stale when
+the cache contract is missing, the compiler version does not match, or the source fingerprint no longer matches an
+available ONNX source. Invalid packages are deleted and the loader falls back to ONNX so a fresh package can be
+generated.
+
+Writes are atomic: the compiler writes a unique temporary file, forces it to disk, then renames it into place. Directory
+fsync is attempted best-effort where the platform permits it.
+
 ## Current scope
 
-v23 stores the tensor payload in the package and removes ONNX graph parsing on the package startup path. It does not yet
-prepack every weight into final backend-specific D3D12 upload layout. That is a later optimization layer on top of the
-same package boundary.
+v24 stores tensor payload in the package, removes ONNX graph parsing on the package startup path, and hardens cache
+invalidation/recovery. It does not yet prepack every weight into final backend-specific D3D12 upload layout. That is a
+later optimization layer on top of the same package boundary.

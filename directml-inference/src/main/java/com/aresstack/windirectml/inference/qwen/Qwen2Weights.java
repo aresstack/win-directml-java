@@ -453,7 +453,23 @@ public final class Qwen2Weights implements AutoCloseable {
 
         log.info("Loading Qwen model through import layer: format={}, source={}",
                 modelSource.format(), modelSource.location());
-        QwenModelImport imported = modelSource.load();
+        QwenModelImport imported;
+        try {
+            imported = modelSource.load();
+        } catch (IOException | RuntimeException packageError) {
+            if (!packageLoaded) {
+                throw packageError;
+            }
+            log.warn("Could not load Qwen wdmlpack cache {}; deleting it and falling back to ONNX: {}",
+                    packagePath, packageError.toString());
+            log.debug("wdmlpack load failure", packageError);
+            QwenWdmlPackCompiler.deletePackageQuietly(packagePath, packageError.getMessage());
+            modelSource = new QwenOnnxModelSource(modelDir, safeModelFileName);
+            packageLoaded = false;
+            log.info("Loading Qwen model through import layer: format={}, source={}",
+                    modelSource.format(), modelSource.location());
+            imported = modelSource.load();
+        }
         OnnxGraph graph = imported.graph();
         Map<String, ExternalTensorRef> externalRefs = imported.externalRefs();
         Map<String, OnnxTensor> inlineTensors = imported.inlineTensors();

@@ -174,8 +174,8 @@ public final class WdmlPackWriter {
         if (parent != null) {
             Files.createDirectories(parent);
         }
-        Path tmp = output.resolveSibling(output.getFileName() + ".tmp");
-        Files.deleteIfExists(tmp);
+        Path tmp = output.resolveSibling(output.getFileName() + "."
+                + ProcessHandle.current().pid() + "." + System.nanoTime() + ".tmp");
         try (FileChannel channel = FileChannel.open(tmp,
                 StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.READ)) {
             ByteBuffer header = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN);
@@ -207,13 +207,34 @@ public final class WdmlPackWriter {
                 }
                 writeZeroPadding(channel, payloadOffset + payloadLength - channel.position());
             }
+            channel.force(true);
+        } catch (IOException | RuntimeException e) {
+            try {
+                Files.deleteIfExists(tmp);
+            } catch (IOException cleanupError) {
+                e.addSuppressed(cleanupError);
+            }
+            throw e;
         }
         try {
             Files.move(tmp, output, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException atomicMoveNotSupported) {
             Files.move(tmp, output, StandardCopyOption.REPLACE_EXISTING);
         }
+        forceDirectory(parent);
         return output;
+    }
+
+    private static void forceDirectory(Path directory) {
+        if (directory == null) {
+            return;
+        }
+        try (FileChannel dir = FileChannel.open(directory, StandardOpenOption.READ)) {
+            dir.force(true);
+        } catch (IOException | RuntimeException ignored) {
+            // Best effort only. Some platforms, especially Windows, do not allow
+            // opening directories as FileChannels. The data file itself was forced.
+        }
     }
 
     private static Map<String, Object> readManifest(MappedByteBuffer mapped, Header header, long fileSize) throws IOException {

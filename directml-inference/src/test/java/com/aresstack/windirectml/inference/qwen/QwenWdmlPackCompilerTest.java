@@ -54,10 +54,17 @@ class QwenWdmlPackCompilerTest {
         assertEquals(896, model.get("hiddenSize"));
         assertEquals(151936, model.get("vocabSize"));
 
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> cache = (Map<String, Object>) manifest.get("cache");
+        assertEquals(QwenWdmlPackCompiler.CACHE_SCHEMA, cache.get("schema"));
+        assertEquals(QwenWdmlPackCompiler.COMPILER_VERSION, cache.get("compilerVersion"));
+
         @SuppressWarnings("unchecked")
         Map<String, Object> source = (Map<String, Object>) manifest.get("source");
         assertEquals("onnx", source.get("format"));
         assertEquals(1L, source.get("matMulNBitsNodes"));
+        assertTrue(((String) source.get("fingerprint")).contains("model_q4f16.onnx"));
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> tensors = (List<Map<String, Object>>) manifest.get("tensors");

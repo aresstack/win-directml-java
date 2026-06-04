@@ -20,7 +20,7 @@ class QwenWdmlPackModelSourceTest {
     @Test
     void rejectsPackageWhenSourceOnnxIsMissingBeforeDelegatingToOnnxParser() throws Exception {
         Path pack = tempDir.resolve("model_q4f16.wdmlpack");
-        WdmlPackWriter.writeManifestOnly(pack, validManifest("model_q4f16.onnx", 1234L));
+        WdmlPackWriter.writeManifestOnly(pack, validManifest(tempDir, "model_q4f16.onnx", 1234L));
 
         QwenWdmlPackModelSource source = new QwenWdmlPackModelSource(
                 tempDir, pack, "model_q4f16.onnx", config());
@@ -34,7 +34,7 @@ class QwenWdmlPackModelSourceTest {
         Path onnx = tempDir.resolve("model_q4f16.onnx");
         Files.write(onnx, new byte[]{1, 2, 3});
         Path pack = tempDir.resolve("model_q4f16.wdmlpack");
-        Map<String, Object> manifest = validManifest("model_q4f16.onnx", Files.size(onnx));
+        Map<String, Object> manifest = validManifest(tempDir, "model_q4f16.onnx", Files.size(onnx));
         @SuppressWarnings("unchecked")
         Map<String, Object> model = (Map<String, Object>) manifest.get("model");
         model.put("hiddenSize", 999);
@@ -50,7 +50,7 @@ class QwenWdmlPackModelSourceTest {
     @Test
     void loadsPayloadPackageWithoutSourceOnnx() throws Exception {
         Path pack = tempDir.resolve("model_q4f16.wdmlpack");
-        Map<String, Object> manifest = validManifest("model_q4f16.onnx", -1L);
+        Map<String, Object> manifest = validManifest(tempDir, "model_q4f16.onnx", -1L);
         manifest.put("mode", "payload");
         manifest.put("payloadIncluded", true);
         manifest.put("runtimeLoadMode", "wdmlpack-native-payload");
@@ -89,7 +89,40 @@ class QwenWdmlPackModelSourceTest {
         assertEquals(9, imported.inlineTensors().get("tiny.weight_Q4").rawDataBuffer().get(0));
     }
 
-    private static Map<String, Object> validManifest(String sourceFileName, long sizeBytes) {
+
+    @Test
+    void rejectsLegacyPackageWithoutV24CacheContract() throws Exception {
+        Path onnx = tempDir.resolve("model_q4f16.onnx");
+        Files.write(onnx, new byte[]{1, 2, 3});
+        Path pack = tempDir.resolve("model_q4f16.wdmlpack");
+        Map<String, Object> manifest = validManifest(tempDir, "model_q4f16.onnx", Files.size(onnx));
+        manifest.remove("cache");
+        WdmlPackWriter.writeManifestOnly(pack, manifest);
+
+        QwenWdmlPackModelSource source = new QwenWdmlPackModelSource(
+                tempDir, pack, "model_q4f16.onnx", config());
+
+        IOException ex = assertThrows(IOException.class, source::load);
+        assertTrue(ex.getMessage().contains("cache contract"));
+    }
+
+    @Test
+    void rejectsPackageWhenSourceFingerprintChanged() throws Exception {
+        Path onnx = tempDir.resolve("model_q4f16.onnx");
+        Files.write(onnx, new byte[]{1, 2, 3});
+        Path pack = tempDir.resolve("model_q4f16.wdmlpack");
+        Map<String, Object> manifest = validManifest(tempDir, "model_q4f16.onnx", Files.size(onnx));
+        WdmlPackWriter.writeManifestOnly(pack, manifest);
+        Files.write(onnx, new byte[]{1, 2, 3, 4});
+
+        QwenWdmlPackModelSource source = new QwenWdmlPackModelSource(
+                tempDir, pack, "model_q4f16.onnx", config());
+
+        IOException ex = assertThrows(IOException.class, source::load);
+        assertTrue(ex.getMessage().contains("fingerprint mismatch"));
+    }
+
+    private static Map<String, Object> validManifest(Path modelDir, String sourceFileName, long sizeBytes) throws Exception {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wdmlpack");
         root.put("version", WdmlPackWriter.VERSION);
@@ -98,12 +131,25 @@ class QwenWdmlPackModelSourceTest {
         root.put("runtimeLoadable", true);
         root.put("runtimeLoadMode", "wdmlpack-frontdoor-onnx-payload");
 
+        Path sourcePath = modelDir.resolve(sourceFileName);
+        long modifiedMillis = Files.exists(sourcePath) ? Files.getLastModifiedTime(sourcePath).toMillis() : -1L;
+        String fileKey = QwenWdmlPackCompiler.readFileKey(sourcePath);
+
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("format", "onnx");
         source.put("fileName", sourceFileName);
         source.put("relativePath", sourceFileName);
         source.put("sizeBytes", sizeBytes);
+        source.put("lastModifiedMillis", modifiedMillis);
+        source.put("fileKey", fileKey);
+        source.put("fingerprint", QwenWdmlPackCompiler.sourceFingerprint(sourcePath, sizeBytes, modifiedMillis, fileKey));
         root.put("source", source);
+
+        Map<String, Object> cache = new LinkedHashMap<>();
+        cache.put("schema", QwenWdmlPackCompiler.CACHE_SCHEMA);
+        cache.put("compiler", "QwenWdmlPackCompiler");
+        cache.put("compilerVersion", QwenWdmlPackCompiler.COMPILER_VERSION);
+        root.put("cache", cache);
 
         Map<String, Object> model = new LinkedHashMap<>();
         model.put("architecture", "qwen2");

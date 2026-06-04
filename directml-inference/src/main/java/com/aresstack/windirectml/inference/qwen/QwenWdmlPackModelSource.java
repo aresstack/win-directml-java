@@ -30,7 +30,7 @@ import java.util.Objects;
  * Runtime-facing Qwen source backed by a {@code .wdmlpack} package.
  *
  * <p>v22 manifest-only packages remain a compatibility front door and delegate
- * payloads to ONNX. v23 payload packages reconstruct the tensor catalog and the
+ * payloads to ONNX. v24 payload packages reconstruct the tensor catalog and the
  * minimal Qwen runtime graph directly from the package, so ONNX parsing is no
  * longer needed on the hot startup path.</p>
  */
@@ -66,6 +66,8 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         Map<String, Object> manifest = WdmlPackWriter.readManifest(packagePath);
         validateRoot(manifest, header);
         validateModel(manifest);
+        validateCacheContract(manifest);
+        validateSourceFingerprintIfPresent(manifest);
 
         boolean payloadIncluded = Boolean.TRUE.equals(manifest.get("payloadIncluded"));
         log.info("Loading Qwen runtime package: {} (mode={}, payloadIncluded={})",
@@ -101,7 +103,7 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
             Map<String, OnnxTensor> inlineTensors = loadPayloadTensors(manifest, header, mapped, fileSize);
             OnnxGraph graph = loadRuntimeGraph(manifest, inlineTensors);
             TensorCatalog catalog = buildCatalog(manifest);
-            log.info("wdmlpack v23 native payload: mapped {} tensors from package payload ({})",
+            log.info("wdmlpack native payload: mapped {} tensors from package payload ({})",
                     inlineTensors.size(), QwenWdmlPackCompiler.formatBytes(header.payloadLength()));
             return new QwenModelImport("wdmlpack-payload", packagePath, graph, Map.of(), inlineTensors, catalog);
         }
@@ -142,6 +144,57 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         assertModelInt(model, "headDim", config.headDim());
         assertModelInt(model, "vocabSize", config.vocabSize());
         assertModelInt(model, "intermediateSize", config.intermediateSize());
+    }
+
+    @SuppressWarnings("unchecked")
+    private void validateCacheContract(Map<String, Object> manifest) throws IOException {
+        Object cacheObj = manifest.get("cache");
+        if (!(cacheObj instanceof Map<?, ?> cacheRaw)) {
+            throw new IOException("Stale wdmlpack cache: missing v24 cache contract");
+        }
+        Map<String, Object> cache = (Map<String, Object>) cacheRaw;
+        String schema = stringValue(cache.get("schema"));
+        if (!QwenWdmlPackCompiler.CACHE_SCHEMA.equals(schema)) {
+            throw new IOException("Stale wdmlpack cache schema: " + schema
+                    + " (expected " + QwenWdmlPackCompiler.CACHE_SCHEMA + ")");
+        }
+        int compilerVersion = intValue(cache.get("compilerVersion"), -1);
+        if (compilerVersion != QwenWdmlPackCompiler.COMPILER_VERSION) {
+            throw new IOException("Stale wdmlpack compiler version: " + compilerVersion
+                    + " (expected " + QwenWdmlPackCompiler.COMPILER_VERSION + ")");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void validateSourceFingerprintIfPresent(Map<String, Object> manifest) throws IOException {
+        Object sourceObj = manifest.get("source");
+        if (!(sourceObj instanceof Map<?, ?> sourceRaw)) {
+            throw new IOException("Invalid wdmlpack: missing source metadata");
+        }
+        Map<String, Object> source = (Map<String, Object>) sourceRaw;
+        String expectedFingerprint = stringValue(source.get("fingerprint"));
+        if (expectedFingerprint.isBlank()) {
+            throw new IOException("Stale wdmlpack cache: missing source fingerprint");
+        }
+        Path sourceOnnx = resolveSourceOnnx(manifest);
+        if (!Files.exists(sourceOnnx)) {
+            // Payload packages can be portable and do not need the source ONNX once the
+            // tensor payload is included. Manifest-only packages are checked later before
+            // delegating to ONNX.
+            if (Boolean.TRUE.equals(manifest.get("payloadIncluded"))) {
+                return;
+            }
+            throw new IOException("wdmlpack source ONNX is missing: " + sourceOnnx);
+        }
+        long actualSize = Files.size(sourceOnnx);
+        long actualMtime = Files.getLastModifiedTime(sourceOnnx).toMillis();
+        String actualFileKey = QwenWdmlPackCompiler.readFileKey(sourceOnnx);
+        String actualFingerprint = QwenWdmlPackCompiler.sourceFingerprint(
+                sourceOnnx, actualSize, actualMtime, actualFileKey);
+        if (!expectedFingerprint.equals(actualFingerprint)) {
+            throw new IOException("Stale wdmlpack cache: source fingerprint mismatch for "
+                    + sourceOnnx.getFileName());
+        }
     }
 
     @SuppressWarnings("unchecked")

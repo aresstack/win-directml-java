@@ -15,6 +15,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -26,8 +27,8 @@ import java.util.Map;
 /**
  * Qwen-specific compiler front-end for the internal {@code .wdmlpack} format.
  *
- * <p>v23 can write a payload-carrying package. Existing v22 manifest-only
- * packages remain accepted as a compatibility front door and delegate tensor
+ * <p>v24 writes payload-carrying packages with cache metadata. Manifest-only
+ * packages remain supported as a compatibility front door and delegate tensor
  * payloads back to ONNX.</p>
  */
 final class QwenWdmlPackCompiler {
@@ -39,6 +40,10 @@ final class QwenWdmlPackCompiler {
     static final String PROP_LOAD = "windirectml.wdmlpack.load";
     static final String PROP_OUTPUT = "windirectml.wdmlpack.output";
     static final String PROP_PAYLOAD = "windirectml.wdmlpack.payload";
+
+    static final String CACHE_SCHEMA = "qwen-wdmlpack-cache-v24";
+    static final int COMPILER_VERSION = 24;
+
 
     private QwenWdmlPackCompiler() {
     }
@@ -113,7 +118,7 @@ final class QwenWdmlPackCompiler {
         root.put("payloadIncluded", false);
         root.put("runtimeLoadable", true);
         root.put("runtimeLoadMode", "wdmlpack-frontdoor-onnx-payload");
-        root.put("note", "v22/v23 compatibility manifest: Qwen runtime can start from this package, while tensor payload delegates to the source ONNX.");
+        root.put("note", "v24 compatibility manifest: Qwen runtime can start from this package, while tensor payload delegates to the source ONNX.");
         root.put("tensors", buildTensorDirectory(imported, null));
         return root;
     }
@@ -130,7 +135,7 @@ final class QwenWdmlPackCompiler {
         root.put("runtimeLoadMode", "wdmlpack-native-payload");
         root.put("payloadAlignment", WdmlPackWriter.PAYLOAD_ALIGNMENT);
         root.put("payloadBytes", payloadPlan.payloadLength());
-        root.put("note", "v23 payload package: Qwen runtime can reconstruct the tensor catalog and minimal graph without parsing ONNX.");
+        root.put("note", "v24 payload package: Qwen runtime can reconstruct the tensor catalog and minimal graph without parsing ONNX.");
         root.put("runtimeGraph", buildRuntimeGraph(imported.graph().nodes()));
         root.put("tensors", buildTensorDirectory(imported, payloadPlan.offsets()));
         return root;
@@ -150,7 +155,13 @@ final class QwenWdmlPackCompiler {
         sourceInfo.put("format", imported.sourceFormat());
         sourceInfo.put("fileName", source.getFileName().toString());
         sourceInfo.put("relativePath", safeRelativize(modelDir, source));
-        sourceInfo.put("sizeBytes", Files.exists(source) ? Files.size(source) : -1L);
+        long sourceSize = Files.exists(source) ? Files.size(source) : -1L;
+        long sourceModifiedMillis = Files.exists(source) ? Files.getLastModifiedTime(source).toMillis() : -1L;
+        String sourceFileKey = readFileKey(source);
+        sourceInfo.put("sizeBytes", sourceSize);
+        sourceInfo.put("lastModifiedMillis", sourceModifiedMillis);
+        sourceInfo.put("fileKey", sourceFileKey);
+        sourceInfo.put("fingerprint", sourceFingerprint(source, sourceSize, sourceModifiedMillis, sourceFileKey));
         sourceInfo.put("graphName", imported.graph().name());
         sourceInfo.put("graphNodes", imported.graph().nodes().size());
         sourceInfo.put("initializers", imported.graph().initializers().size());
@@ -181,6 +192,14 @@ final class QwenWdmlPackCompiler {
         catalog.put("externalBytes", imported.tensorCatalog().externalBytes());
         catalog.put("metadataOnlyCount", imported.tensorCatalog().metadataOnlyCount());
         root.put("tensorCatalog", catalog);
+
+        Map<String, Object> cache = new LinkedHashMap<>();
+        cache.put("schema", CACHE_SCHEMA);
+        cache.put("compiler", "QwenWdmlPackCompiler");
+        cache.put("compilerVersion", COMPILER_VERSION);
+        cache.put("payloadDefault", Boolean.parseBoolean(System.getProperty(PROP_PAYLOAD, "true")));
+        cache.put("createdBy", "win-directml-java");
+        root.put("cache", cache);
 
         root.put("operatorCatalog", buildOperatorCatalog(imported.graph().nodes()));
         return root;
@@ -342,6 +361,37 @@ final class QwenWdmlPackCompiler {
             case 10 -> "FLOAT16";
             default -> "ONNX_TYPE_" + dataType;
         };
+    }
+
+    static String sourceFingerprint(Path source, long sizeBytes, long lastModifiedMillis, String fileKey) {
+        String normalizedName = source == null || source.getFileName() == null ? "" : source.getFileName().toString();
+        return normalizedName + "|" + sizeBytes + "|" + lastModifiedMillis + "|"
+                + (fileKey == null ? "" : fileKey);
+    }
+
+    static String readFileKey(Path file) {
+        if (file == null || !Files.exists(file)) {
+            return "";
+        }
+        try {
+            Object key = Files.readAttributes(file, BasicFileAttributes.class).fileKey();
+            return key == null ? "" : key.toString();
+        } catch (IOException | RuntimeException ignored) {
+            return "";
+        }
+    }
+
+    static void deletePackageQuietly(Path packagePath, String reason) {
+        if (packagePath == null) {
+            return;
+        }
+        try {
+            if (Files.deleteIfExists(packagePath)) {
+                log.warn("Deleted stale or invalid Qwen wdmlpack cache {}: {}", packagePath, reason);
+            }
+        } catch (IOException deleteError) {
+            log.warn("Could not delete stale Qwen wdmlpack cache {}: {}", packagePath, deleteError.toString());
+        }
     }
 
     private static String safeRelativize(Path root, Path file) {
