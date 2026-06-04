@@ -177,3 +177,25 @@ fsync is attempted best-effort where the platform permits it.
 v24 stores tensor payload in the package, removes ONNX graph parsing on the package startup path, and hardens cache
 invalidation/recovery. It does not yet prepack every weight into final backend-specific D3D12 upload layout. That is a
 later optimization layer on top of the same package boundary.
+
+## v25 SafeTensors import-only packages
+
+v25 introduces SafeTensors as an import format, not as a direct runtime format.
+A package compiled from raw SafeTensors metadata/payload must declare:
+
+```json
+"source": {"format": "safetensors"},
+"runtimeLoadable": false,
+"runtimeLoadMode": "import-only-tensor-catalog"
+```
+
+This prevents the Qwen runtime from accidentally treating a raw HF SafeTensors
+layout as if it were the internal DirectML/WARP layout. The intended later flow
+is:
+
+```text
+SafeTensors + config.json
+-> TensorCatalog
+-> Qwen WeightPacker / layout compiler
+-> runtime-loadable .wdmlpack
+```

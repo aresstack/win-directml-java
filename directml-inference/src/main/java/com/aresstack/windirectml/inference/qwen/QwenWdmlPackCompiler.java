@@ -102,11 +102,34 @@ final class QwenWdmlPackCompiler {
         if (explicit != null && !explicit.isBlank()) {
             return Path.of(explicit).toAbsolutePath().normalize();
         }
-        String normalized = QwenModelDirValidator.normalizeModelFileName(modelFileName);
+        String normalized = normalizePackageSourceName(modelFileName);
         String base = normalized.endsWith(".onnx")
                 ? normalized.substring(0, normalized.length() - ".onnx".length())
-                : normalized;
+                : (normalized.endsWith(".safetensors")
+                ? normalized.substring(0, normalized.length() - ".safetensors".length())
+                : normalized);
         return modelDir.resolve(base + ".wdmlpack").toAbsolutePath().normalize();
+    }
+
+    private static String normalizePackageSourceName(String modelFileName) {
+        if (modelFileName == null || modelFileName.isBlank()) {
+            return QwenModelDirValidator.DEFAULT_MODEL_FILE;
+        }
+        String normalized = modelFileName.replace('\\', '/');
+        int slash = normalized.lastIndexOf('/');
+        if (slash >= 0) {
+            normalized = normalized.substring(slash + 1);
+        }
+        if (normalized.isBlank() || normalized.contains("..")) {
+            throw new IllegalArgumentException("Invalid model file name: " + modelFileName);
+        }
+        if (normalized.endsWith(".onnx")) {
+            return QwenModelDirValidator.normalizeModelFileName(normalized);
+        }
+        if (normalized.endsWith(".safetensors")) {
+            return normalized;
+        }
+        return QwenModelDirValidator.normalizeModelFileName(normalized);
     }
 
     static Map<String, Object> buildManifest(QwenModelImport imported,
@@ -116,9 +139,12 @@ final class QwenWdmlPackCompiler {
         Map<String, Object> root = buildBaseManifest(imported, config, modelDir, modelFileName);
         root.put("mode", "manifest-only");
         root.put("payloadIncluded", false);
-        root.put("runtimeLoadable", true);
-        root.put("runtimeLoadMode", "wdmlpack-frontdoor-onnx-payload");
-        root.put("note", "v24 compatibility manifest: Qwen runtime can start from this package, while tensor payload delegates to the source ONNX.");
+        boolean runtimeLoadable = isCurrentRuntimeLoadable(imported);
+        root.put("runtimeLoadable", runtimeLoadable);
+        root.put("runtimeLoadMode", runtimeLoadable ? "wdmlpack-frontdoor-onnx-payload" : "import-only-tensor-catalog");
+        root.put("note", runtimeLoadable
+                ? "v24 compatibility manifest: Qwen runtime can start from this package, while tensor payload delegates to the source ONNX."
+                : "v25 import-only manifest: source tensors are cataloged for a later Qwen layout compiler and are not directly runtime-loadable yet.");
         root.put("tensors", buildTensorDirectory(imported, null));
         return root;
     }
@@ -131,11 +157,14 @@ final class QwenWdmlPackCompiler {
         Map<String, Object> root = buildBaseManifest(imported, config, modelDir, modelFileName);
         root.put("mode", "payload");
         root.put("payloadIncluded", true);
-        root.put("runtimeLoadable", true);
-        root.put("runtimeLoadMode", "wdmlpack-native-payload");
+        boolean runtimeLoadable = isCurrentRuntimeLoadable(imported);
+        root.put("runtimeLoadable", runtimeLoadable);
+        root.put("runtimeLoadMode", runtimeLoadable ? "wdmlpack-native-payload" : "import-only-tensor-catalog");
         root.put("payloadAlignment", WdmlPackWriter.PAYLOAD_ALIGNMENT);
         root.put("payloadBytes", payloadPlan.payloadLength());
-        root.put("note", "v24 payload package: Qwen runtime can reconstruct the tensor catalog and minimal graph without parsing ONNX.");
+        root.put("note", runtimeLoadable
+                ? "v24 payload package: Qwen runtime can reconstruct the tensor catalog and minimal graph without parsing ONNX."
+                : "v25 SafeTensors payload package: tensors are mmap-packaged for compiler inspection, but raw SafeTensors layout still requires a Qwen layout compiler before runtime loading.");
         root.put("runtimeGraph", buildRuntimeGraph(imported.graph().nodes()));
         root.put("tensors", buildTensorDirectory(imported, payloadPlan.offsets()));
         return root;
@@ -155,8 +184,8 @@ final class QwenWdmlPackCompiler {
         sourceInfo.put("format", imported.sourceFormat());
         sourceInfo.put("fileName", source.getFileName().toString());
         sourceInfo.put("relativePath", safeRelativize(modelDir, source));
-        long sourceSize = Files.exists(source) ? Files.size(source) : -1L;
-        long sourceModifiedMillis = Files.exists(source) ? Files.getLastModifiedTime(source).toMillis() : -1L;
+        long sourceSize = safeSourceSize(source);
+        long sourceModifiedMillis = safeLastModifiedMillis(source);
         String sourceFileKey = readFileKey(source);
         sourceInfo.put("sizeBytes", sourceSize);
         sourceInfo.put("lastModifiedMillis", sourceModifiedMillis);
@@ -168,11 +197,12 @@ final class QwenWdmlPackCompiler {
         sourceInfo.put("matMulNBitsNodes", imported.graph().nodes().stream()
                 .filter(n -> "MatMulNBits".equals(n.opType()))
                 .count());
+        sourceInfo.put("safeTensorsSource", "safetensors".equals(imported.sourceFormat()));
         root.put("source", sourceInfo);
 
         Map<String, Object> model = new LinkedHashMap<>();
         model.put("architecture", "qwen2");
-        model.put("modelFile", QwenModelDirValidator.normalizeModelFileName(modelFileName));
+        model.put("modelFile", normalizePackageSourceName(modelFileName));
         model.put("hiddenSize", config.hiddenSize());
         model.put("numHiddenLayers", config.numHiddenLayers());
         model.put("numAttentionHeads", config.numAttentionHeads());
@@ -203,6 +233,11 @@ final class QwenWdmlPackCompiler {
 
         root.put("operatorCatalog", buildOperatorCatalog(imported.graph().nodes()));
         return root;
+    }
+
+    private static boolean isCurrentRuntimeLoadable(QwenModelImport imported) {
+        String format = imported.sourceFormat();
+        return format != null && (format.startsWith("onnx") || format.startsWith("wdmlpack"));
     }
 
     private static PayloadPlan planPayload(QwenModelImport imported) throws IOException {
@@ -359,8 +394,25 @@ final class QwenWdmlPackCompiler {
             case 6 -> "INT32";
             case 7 -> "INT64";
             case 10 -> "FLOAT16";
+            case 16 -> "BFLOAT16";
             default -> "ONNX_TYPE_" + dataType;
         };
+    }
+
+    private static long safeSourceSize(Path source) {
+        try {
+            return source != null && Files.isRegularFile(source) ? Files.size(source) : -1L;
+        } catch (IOException | RuntimeException e) {
+            return -1L;
+        }
+    }
+
+    private static long safeLastModifiedMillis(Path source) {
+        try {
+            return source != null && Files.exists(source) ? Files.getLastModifiedTime(source).toMillis() : -1L;
+        } catch (IOException | RuntimeException e) {
+            return -1L;
+        }
     }
 
     static String sourceFingerprint(Path source, long sizeBytes, long lastModifiedMillis, String fileKey) {

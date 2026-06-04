@@ -67,6 +67,7 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         validateRoot(manifest, header);
         validateModel(manifest);
         validateCacheContract(manifest);
+        validateRuntimeLoadable(manifest);
         validateSourceFingerprintIfPresent(manifest);
 
         boolean payloadIncluded = Boolean.TRUE.equals(manifest.get("payloadIncluded"));
@@ -162,6 +163,14 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         if (compilerVersion != QwenWdmlPackCompiler.COMPILER_VERSION) {
             throw new IOException("Stale wdmlpack compiler version: " + compilerVersion
                     + " (expected " + QwenWdmlPackCompiler.COMPILER_VERSION + ")");
+        }
+    }
+
+    private void validateRuntimeLoadable(Map<String, Object> manifest) throws IOException {
+        Object value = manifest.get("runtimeLoadable");
+        if (Boolean.FALSE.equals(value)) {
+            throw new IOException("wdmlpack package is import-only and not runtime-loadable yet: "
+                    + manifest.get("runtimeLoadMode"));
         }
     }
 
