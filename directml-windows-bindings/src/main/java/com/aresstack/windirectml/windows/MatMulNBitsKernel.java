@@ -1737,16 +1737,20 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      *
      * @param xBatch   input rows packed row-major, length {@code >= M * K}
      * @param outBatch output rows packed row-major, length {@code >= M * N}
-     * @param M        number of rows in this batch (must be {@code 1..MAX_BATCH_M})
+     * @param M        number of rows in this batch; values above {@link #MAX_BATCH_M} are split into chunks
      */
     public void matmulBatch(float[] xBatch, float[] outBatch, int M) {
         if (!prepared) throw new IllegalStateException("Kernel not prepared");
-        if (M < 1 || M > MAX_BATCH_M) throw new IllegalArgumentException(
+        if (M < 1) throw new IllegalArgumentException(
                 "M out of range [1, " + MAX_BATCH_M + "]: " + M);
         if (xBatch.length < (long) M * K) throw new IllegalArgumentException(
                 "xBatch too short: " + xBatch.length + " < " + ((long) M * K));
         if (outBatch.length < (long) M * N) throw new IllegalArgumentException(
                 "outBatch too short: " + outBatch.length + " < " + ((long) M * N));
+        if (M > MAX_BATCH_M) {
+            matmulBatchChunked(xBatch, outBatch, M);
+            return;
+        }
 
         // If batch scratch allocation previously failed, fall back to per-row matvec.
         // This avoids GPU OOM on tight-VRAM Intel iGPUs while keeping the INT4 path
@@ -1852,6 +1856,30 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             throw new RuntimeException("MatMulNBitsKernel.matmulBatch failed", e);
         } catch (Throwable t) {
             throw new RuntimeException("MatMulNBitsKernel.matmulBatch failed", t);
+        }
+    }
+
+    /**
+     * Compute a long prefill batch by splitting it into bounded GPU batches.
+     * <p>
+     * The shared batch scratch buffers are intentionally capped at
+     * {@link #MAX_BATCH_M} to avoid GPU memory spikes on WARP/iGPU systems.
+     * Long prompts can still be supported by running several bounded batches
+     * back-to-back. This keeps the existing memory cap while removing the
+     * artificial 256-token prompt limit from the Workbench summarizer.
+     */
+    private void matmulBatchChunked(float[] xBatch, float[] outBatch, int M) {
+        log.info("matmulBatch: splitting long batch M={} into chunks of <={} for [{},{}]",
+                M, MAX_BATCH_M, N, K);
+        float[] chunkIn = new float[MAX_BATCH_M * K];
+        float[] chunkOut = new float[MAX_BATCH_M * N];
+        int offsetRows = 0;
+        while (offsetRows < M) {
+            int rows = Math.min(MAX_BATCH_M, M - offsetRows);
+            System.arraycopy(xBatch, offsetRows * K, chunkIn, 0, rows * K);
+            matmulBatch(chunkIn, chunkOut, rows);
+            System.arraycopy(chunkOut, 0, outBatch, offsetRows * N, rows * N);
+            offsetRows += rows;
         }
     }
 

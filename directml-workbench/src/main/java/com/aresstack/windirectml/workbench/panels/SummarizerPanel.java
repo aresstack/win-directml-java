@@ -70,7 +70,7 @@ public final class SummarizerPanel extends JPanel {
         inputPanel.add(new JScrollPane(inputArea), BorderLayout.CENTER);
 
         var runControls = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        runControls.add(new JLabel("Max tokens:"));
+        runControls.add(new JLabel("Max output tokens:"));
         maxTokensSpinner = new JSpinner(new SpinnerNumberModel(256, 32, 2048, 32));
         runControls.add(maxTokensSpinner);
         var runBtn = new JButton("Generate / Summarize");
