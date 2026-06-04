@@ -113,20 +113,14 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private static final int WARP_PARALLEL_INT4_MATVEC_ROWS32 = 32;
 
     /**
-     * ROWS=32 is kept away from lm_head by default: benchmarking showed that
-     * the explicit Q4 lm_head performs best with the lean ROWS=16/64-thread
-     * shader.  A separate gate-up window lets us benchmark ROWS=32 only for
-     * the large fused Qwen gate_up matrix (N = 2 * intermediate = 9728)
-     * without perturbing lm_head or the smaller qkv/o/down projections.
+     * ROWS=32 is now opt-in only. The ROWS=32 benchmark did not beat the
+     * ROWS=16 kernel on WARP for Qwen lm_head; the default path stays on
+     * ROWS=16 and uses a leaner 64-thread group. Override with
+     * -Ddirectml.int4.warpLmHeadRows32.minN=... to benchmark ROWS=32 again,
+     * or keep directml.int4.warpLmHeadRows32.disabled=true to force ROWS=16.
      */
     private static final int WARP_LMHEAD_ROWS32_MIN_N =
             Integer.getInteger("directml.int4.warpLmHeadRows32.minN", Integer.MAX_VALUE);
-    private static final boolean WARP_GATEUP_ROWS32_ENABLED =
-            !Boolean.getBoolean("directml.int4.warpGateUpRows32.disabled");
-    private static final int WARP_GATEUP_ROWS32_MIN_N =
-            Integer.getInteger("directml.int4.warpGateUpRows32.minN", 8192);
-    private static final int WARP_GATEUP_ROWS32_MAX_N =
-            Integer.getInteger("directml.int4.warpGateUpRows32.maxN", 32767);
     private long[] int4UavAddrs;           // pre-cached GPU VAs: [X, QW, Scales, ZP, Y]
     private int[] int4Constants;           // pre-cached constants: [N, K, blockSize]
 
@@ -946,19 +940,6 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
     private static int selectWarpParallelRows(int n, boolean useWarpParallel) {
         if (!useWarpParallel) return 1;
-
-        // Benchmark window for the fused Qwen gate_up projection.  This matrix
-        // is large enough (N=9728) that halving the row-tile dispatch count may
-        // beat the extra per-thread register pressure, while lm_head remains on
-        // the proven ROWS=16 path.
-        if (WARP_GATEUP_ROWS32_ENABLED
-                && n >= WARP_GATEUP_ROWS32_MIN_N
-                && n <= WARP_GATEUP_ROWS32_MAX_N) {
-            return WARP_PARALLEL_INT4_MATVEC_ROWS32;
-        }
-
-        // Optional manual lm_head experiment.  Default minN is Integer.MAX_VALUE,
-        // because ROWS=32 was slower than ROWS=16 for Qwen's explicit Q4 lm_head.
         if (!Boolean.getBoolean("directml.int4.warpLmHeadRows32.disabled")
                 && n >= WARP_LMHEAD_ROWS32_MIN_N) {
             return WARP_PARALLEL_INT4_MATVEC_ROWS32;
