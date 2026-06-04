@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.qwen;
 
+import com.aresstack.windirectml.inference.model.SourceFingerprint;
 import com.aresstack.windirectml.inference.model.TensorEntry;
 import com.aresstack.windirectml.inference.model.TensorStorageKind;
 import com.aresstack.windirectml.inference.model.WdmlPackWriter;
@@ -15,7 +16,6 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -184,13 +184,11 @@ final class QwenWdmlPackCompiler {
         sourceInfo.put("format", imported.sourceFormat());
         sourceInfo.put("fileName", source.getFileName().toString());
         sourceInfo.put("relativePath", safeRelativize(modelDir, source));
-        long sourceSize = safeSourceSize(source);
-        long sourceModifiedMillis = safeLastModifiedMillis(source);
-        String sourceFileKey = readFileKey(source);
-        sourceInfo.put("sizeBytes", sourceSize);
-        sourceInfo.put("lastModifiedMillis", sourceModifiedMillis);
-        sourceInfo.put("fileKey", sourceFileKey);
-        sourceInfo.put("fingerprint", sourceFingerprint(source, sourceSize, sourceModifiedMillis, sourceFileKey));
+        SourceFingerprint fingerprint = SourceFingerprint.read(source);
+        sourceInfo.put("sizeBytes", fingerprint.sizeBytes());
+        sourceInfo.put("lastModifiedMillis", fingerprint.lastModifiedMillis());
+        sourceInfo.put("fileKey", fingerprint.fileKey());
+        sourceInfo.put("fingerprint", fingerprint.value());
         sourceInfo.put("graphName", imported.graph().name());
         sourceInfo.put("graphNodes", imported.graph().nodes().size());
         sourceInfo.put("initializers", imported.graph().initializers().size());
@@ -399,38 +397,12 @@ final class QwenWdmlPackCompiler {
         };
     }
 
-    private static long safeSourceSize(Path source) {
-        try {
-            return source != null && Files.isRegularFile(source) ? Files.size(source) : -1L;
-        } catch (IOException | RuntimeException e) {
-            return -1L;
-        }
-    }
-
-    private static long safeLastModifiedMillis(Path source) {
-        try {
-            return source != null && Files.exists(source) ? Files.getLastModifiedTime(source).toMillis() : -1L;
-        } catch (IOException | RuntimeException e) {
-            return -1L;
-        }
-    }
-
     static String sourceFingerprint(Path source, long sizeBytes, long lastModifiedMillis, String fileKey) {
-        String normalizedName = source == null || source.getFileName() == null ? "" : source.getFileName().toString();
-        return normalizedName + "|" + sizeBytes + "|" + lastModifiedMillis + "|"
-                + (fileKey == null ? "" : fileKey);
+        return SourceFingerprint.value(source, sizeBytes, lastModifiedMillis, fileKey);
     }
 
     static String readFileKey(Path file) {
-        if (file == null || !Files.exists(file)) {
-            return "";
-        }
-        try {
-            Object key = Files.readAttributes(file, BasicFileAttributes.class).fileKey();
-            return key == null ? "" : key.toString();
-        } catch (IOException | RuntimeException ignored) {
-            return "";
-        }
+        return SourceFingerprint.readFileKey(file);
     }
 
     static void deletePackageQuietly(Path packagePath, String reason) {

@@ -1,10 +1,9 @@
 package com.aresstack.windirectml.inference.qwen;
 
 import com.aresstack.windirectml.inference.model.ModelSource;
+import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
+import com.aresstack.windirectml.inference.model.RuntimeTensor;
 import com.aresstack.windirectml.inference.model.TensorCatalog;
-import com.aresstack.windirectml.inference.model.TensorEntry;
-import com.aresstack.windirectml.inference.model.TensorStorageKind;
-import com.aresstack.windirectml.inference.model.WdmlPackWriter;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
@@ -12,13 +11,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.MappedByteBuffer;
-import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,10 +24,10 @@ import java.util.Objects;
 /**
  * Runtime-facing Qwen source backed by a {@code .wdmlpack} package.
  *
- * <p>v22 manifest-only packages remain a compatibility front door and delegate
- * payloads to ONNX. v24 payload packages reconstruct the tensor catalog and the
- * minimal Qwen runtime graph directly from the package, so ONNX parsing is no
- * longer needed on the hot startup path.</p>
+ * <p>Model-family specific validation stays here. Generic package reading,
+ * manifest access, payload mapping, source fingerprint validation, and tensor
+ * catalog reconstruction are handled by {@link RuntimeModelPackage} so T5 and
+ * later model families can reuse the same runtime package seam.</p>
  */
 final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
 
@@ -62,26 +57,24 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
 
     @Override
     public QwenModelImport load() throws IOException {
-        WdmlPackWriter.Header header = WdmlPackWriter.readHeader(packagePath);
-        Map<String, Object> manifest = WdmlPackWriter.readManifest(packagePath);
-        validateRoot(manifest, header);
-        validateModel(manifest);
-        validateCacheContract(manifest);
-        validateRuntimeLoadable(manifest);
-        validateSourceFingerprintIfPresent(manifest);
+        RuntimeModelPackage modelPackage = RuntimeModelPackage.open(packagePath);
+        validateModel(modelPackage);
+        validateCacheContract(modelPackage);
+        modelPackage.validateRuntimeLoadable();
+        validateSourceFingerprintIfPresent(modelPackage);
 
-        boolean payloadIncluded = Boolean.TRUE.equals(manifest.get("payloadIncluded"));
+        boolean payloadIncluded = modelPackage.payloadIncluded();
         log.info("Loading Qwen runtime package: {} (mode={}, payloadIncluded={})",
-                packagePath.getFileName(), manifest.get("mode"), payloadIncluded);
+                packagePath.getFileName(), modelPackage.manifest().get("mode"), payloadIncluded);
         if (payloadIncluded) {
-            return loadNativePayload(manifest, header);
+            return loadNativePayload(modelPackage);
         }
-        return loadManifestOnlyDelegate(manifest);
+        return loadManifestOnlyDelegate(modelPackage);
     }
 
-    private QwenModelImport loadManifestOnlyDelegate(Map<String, Object> manifest) throws IOException {
-        Path sourceOnnx = resolveSourceOnnx(manifest);
-        validateSource(manifest, sourceOnnx);
+    private QwenModelImport loadManifestOnlyDelegate(RuntimeModelPackage modelPackage) throws IOException {
+        Path sourceOnnx = modelPackage.resolveSourcePath(modelDir, requestedModelFileName);
+        modelPackage.validateSourceSize(sourceOnnx);
         log.info("wdmlpack v22 front door: using package manifest, tensor payload source={}",
                 sourceOnnx.getFileName());
 
@@ -91,49 +84,19 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
                 imported.externalRefs(), imported.inlineTensors(), imported.tensorCatalog());
     }
 
-    private QwenModelImport loadNativePayload(Map<String, Object> manifest,
-                                              WdmlPackWriter.Header header) throws IOException {
-        long fileSize = Files.size(packagePath);
-        if (fileSize > Integer.MAX_VALUE) {
-            throw new IOException("wdmlpack package is too large for the current mmap reader: " + packagePath
-                    + " (" + fileSize + " bytes)");
-        }
-        try (FileChannel channel = FileChannel.open(packagePath, StandardOpenOption.READ)) {
-            MappedByteBuffer mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
-            mapped.order(ByteOrder.LITTLE_ENDIAN);
-            Map<String, OnnxTensor> inlineTensors = loadPayloadTensors(manifest, header, mapped, fileSize);
-            OnnxGraph graph = loadRuntimeGraph(manifest, inlineTensors);
-            TensorCatalog catalog = buildCatalog(manifest);
-            log.info("wdmlpack native payload: mapped {} tensors from package payload ({})",
-                    inlineTensors.size(), QwenWdmlPackCompiler.formatBytes(header.payloadLength()));
-            return new QwenModelImport("wdmlpack-payload", packagePath, graph, Map.of(), inlineTensors, catalog);
-        }
-    }
-
-    private void validateRoot(Map<String, Object> manifest, WdmlPackWriter.Header header) throws IOException {
-        if (!"wdmlpack".equals(manifest.get("format"))) {
-            throw new IOException("Invalid wdmlpack manifest format: " + manifest.get("format"));
-        }
-        int version = intValue(manifest.get("version"), -1);
-        if (version != WdmlPackWriter.VERSION) {
-            throw new IOException("Unsupported wdmlpack manifest version: " + version);
-        }
-        boolean payloadIncluded = Boolean.TRUE.equals(manifest.get("payloadIncluded"));
-        if (payloadIncluded && !header.payloadIncluded()) {
-            throw new IOException("wdmlpack manifest says payloadIncluded=true but the container header has no payload");
-        }
-        if (!payloadIncluded && header.payloadIncluded()) {
-            throw new IOException("wdmlpack container has payload but manifest says payloadIncluded=false");
-        }
+    private QwenModelImport loadNativePayload(RuntimeModelPackage modelPackage) throws IOException {
+        Map<String, RuntimeTensor> runtimeTensors = modelPackage.mapPayloadTensors();
+        Map<String, OnnxTensor> inlineTensors = adaptRuntimeTensors(runtimeTensors);
+        OnnxGraph graph = loadRuntimeGraph(modelPackage.manifest(), inlineTensors);
+        TensorCatalog catalog = modelPackage.buildTensorCatalog();
+        log.info("wdmlpack native payload: mapped {} tensors from package payload ({})",
+                inlineTensors.size(), QwenWdmlPackCompiler.formatBytes(modelPackage.header().payloadLength()));
+        return new QwenModelImport("wdmlpack-payload", packagePath, graph, Map.of(), inlineTensors, catalog);
     }
 
     @SuppressWarnings("unchecked")
-    private void validateModel(Map<String, Object> manifest) throws IOException {
-        Object modelObj = manifest.get("model");
-        if (!(modelObj instanceof Map<?, ?> modelRaw)) {
-            throw new IOException("Invalid wdmlpack: missing model metadata");
-        }
-        Map<String, Object> model = (Map<String, Object>) modelRaw;
+    private void validateModel(RuntimeModelPackage modelPackage) throws IOException {
+        Map<String, Object> model = modelPackage.requireMap("model");
         String architecture = String.valueOf(model.get("architecture")).toLowerCase(Locale.ROOT);
         if (!"qwen2".equals(architecture)) {
             throw new IOException("Unsupported wdmlpack architecture: " + model.get("architecture"));
@@ -147,139 +110,45 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         assertModelInt(model, "intermediateSize", config.intermediateSize());
     }
 
-    @SuppressWarnings("unchecked")
-    private void validateCacheContract(Map<String, Object> manifest) throws IOException {
-        Object cacheObj = manifest.get("cache");
-        if (!(cacheObj instanceof Map<?, ?> cacheRaw)) {
+    private void validateCacheContract(RuntimeModelPackage modelPackage) throws IOException {
+        Object cacheObj = modelPackage.manifest().get("cache");
+        if (!(cacheObj instanceof Map<?, ?>)) {
             throw new IOException("Stale wdmlpack cache: missing v24 cache contract");
         }
-        Map<String, Object> cache = (Map<String, Object>) cacheRaw;
-        String schema = stringValue(cache.get("schema"));
+        Map<String, Object> cache = modelPackage.requireMap("cache");
+        String schema = RuntimeModelPackage.stringValue(cache.get("schema"));
         if (!QwenWdmlPackCompiler.CACHE_SCHEMA.equals(schema)) {
             throw new IOException("Stale wdmlpack cache schema: " + schema
                     + " (expected " + QwenWdmlPackCompiler.CACHE_SCHEMA + ")");
         }
-        int compilerVersion = intValue(cache.get("compilerVersion"), -1);
+        int compilerVersion = RuntimeModelPackage.intValue(cache.get("compilerVersion"), -1);
         if (compilerVersion != QwenWdmlPackCompiler.COMPILER_VERSION) {
             throw new IOException("Stale wdmlpack compiler version: " + compilerVersion
                     + " (expected " + QwenWdmlPackCompiler.COMPILER_VERSION + ")");
         }
     }
 
-    private void validateRuntimeLoadable(Map<String, Object> manifest) throws IOException {
-        Object value = manifest.get("runtimeLoadable");
-        if (Boolean.FALSE.equals(value)) {
-            throw new IOException("wdmlpack package is import-only and not runtime-loadable yet: "
-                    + manifest.get("runtimeLoadMode"));
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private void validateSourceFingerprintIfPresent(Map<String, Object> manifest) throws IOException {
-        Object sourceObj = manifest.get("source");
-        if (!(sourceObj instanceof Map<?, ?> sourceRaw)) {
-            throw new IOException("Invalid wdmlpack: missing source metadata");
-        }
-        Map<String, Object> source = (Map<String, Object>) sourceRaw;
-        String expectedFingerprint = stringValue(source.get("fingerprint"));
-        if (expectedFingerprint.isBlank()) {
-            throw new IOException("Stale wdmlpack cache: missing source fingerprint");
-        }
-        Path sourceOnnx = resolveSourceOnnx(manifest);
+    private void validateSourceFingerprintIfPresent(RuntimeModelPackage modelPackage) throws IOException {
+        Path sourceOnnx = modelPackage.resolveSourcePath(modelDir, requestedModelFileName);
         if (!Files.exists(sourceOnnx)) {
-            // Payload packages can be portable and do not need the source ONNX once the
-            // tensor payload is included. Manifest-only packages are checked later before
-            // delegating to ONNX.
-            if (Boolean.TRUE.equals(manifest.get("payloadIncluded"))) {
+            if (modelPackage.payloadIncluded()) {
                 return;
             }
             throw new IOException("wdmlpack source ONNX is missing: " + sourceOnnx);
         }
-        long actualSize = Files.size(sourceOnnx);
-        long actualMtime = Files.getLastModifiedTime(sourceOnnx).toMillis();
-        String actualFileKey = QwenWdmlPackCompiler.readFileKey(sourceOnnx);
-        String actualFingerprint = QwenWdmlPackCompiler.sourceFingerprint(
-                sourceOnnx, actualSize, actualMtime, actualFileKey);
-        if (!expectedFingerprint.equals(actualFingerprint)) {
-            throw new IOException("Stale wdmlpack cache: source fingerprint mismatch for "
-                    + sourceOnnx.getFileName());
-        }
+        modelPackage.validateSourceFingerprint(sourceOnnx);
     }
 
-    @SuppressWarnings("unchecked")
-    private Path resolveSourceOnnx(Map<String, Object> manifest) throws IOException {
-        Object sourceObj = manifest.get("source");
-        if (!(sourceObj instanceof Map<?, ?> sourceRaw)) {
-            throw new IOException("Invalid wdmlpack: missing source metadata");
-        }
-        Map<String, Object> source = (Map<String, Object>) sourceRaw;
-        String relativePath = stringValue(source.get("relativePath"));
-        String fileName = stringValue(source.get("fileName"));
-        String candidate = !relativePath.isBlank() ? relativePath : (!fileName.isBlank() ? fileName : requestedModelFileName);
-        Path resolved = modelDir.resolve(candidate).toAbsolutePath().normalize();
-        if (!resolved.startsWith(modelDir.toAbsolutePath().normalize())) {
-            throw new IOException("Invalid wdmlpack source path escapes model directory: " + candidate);
-        }
-        return resolved;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void validateSource(Map<String, Object> manifest, Path sourceOnnx) throws IOException {
-        if (!Files.isRegularFile(sourceOnnx)) {
-            throw new IOException("wdmlpack source ONNX is missing: " + sourceOnnx);
-        }
-        Object sourceObj = manifest.get("source");
-        if (sourceObj instanceof Map<?, ?> sourceRaw) {
-            Map<String, Object> source = (Map<String, Object>) sourceRaw;
-            long expectedSize = longValue(source.get("sizeBytes"), -1L);
-            long actualSize = Files.size(sourceOnnx);
-            if (expectedSize >= 0 && expectedSize != actualSize) {
-                throw new IOException("wdmlpack source ONNX size mismatch for " + sourceOnnx.getFileName()
-                        + ": manifest=" + expectedSize + ", actual=" + actualSize);
-            }
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, OnnxTensor> loadPayloadTensors(Map<String, Object> manifest,
-                                                       WdmlPackWriter.Header header,
-                                                       MappedByteBuffer mapped,
-                                                       long fileSize) throws IOException {
-        Object tensorsObj = manifest.get("tensors");
-        if (!(tensorsObj instanceof List<?> tensorsRaw)) {
-            throw new IOException("Invalid wdmlpack payload: missing tensor directory");
-        }
+    private Map<String, OnnxTensor> adaptRuntimeTensors(Map<String, RuntimeTensor> runtimeTensors) {
         Map<String, OnnxTensor> tensors = new LinkedHashMap<>();
-        for (Object item : tensorsRaw) {
-            if (!(item instanceof Map<?, ?> tensorRaw)) {
-                continue;
-            }
-            Map<String, Object> tensor = (Map<String, Object>) tensorRaw;
-            String name = stringValue(tensor.get("name"));
-            int dataType = intValue(tensor.get("dataType"), 0);
-            long[] dims = dimsValue(tensor.get("dims"));
-            long byteLength = longValue(tensor.get("byteLength"), 0L);
-            long payloadOffset = longValue(tensor.get("payloadOffset"), -1L);
-            long payloadLength = longValue(tensor.get("payloadLength"), byteLength);
-            if (name.isBlank()) {
-                continue;
-            }
-            if (payloadOffset >= 0 && payloadLength > 0) {
-                long absoluteStart = header.payloadOffset() + payloadOffset;
-                long absoluteEnd = absoluteStart + payloadLength;
-                if (absoluteStart < header.payloadOffset() || absoluteEnd < absoluteStart
-                        || absoluteEnd > header.payloadOffset() + header.payloadLength()
-                        || absoluteEnd > fileSize || payloadLength > Integer.MAX_VALUE) {
-                    throw new IOException("Invalid wdmlpack tensor payload range for " + name
-                            + ": offset=" + payloadOffset + ", length=" + payloadLength);
-                }
-                ByteBuffer slice = mapped.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
-                slice.position(Math.toIntExact(absoluteStart));
-                slice.limit(Math.toIntExact(absoluteEnd));
-                ByteBuffer raw = slice.slice().order(ByteOrder.LITTLE_ENDIAN);
-                tensors.put(name, new OnnxTensor(name, dims, dataType, new float[0], new byte[0], raw, (int) payloadLength));
+        for (RuntimeTensor tensor : runtimeTensors.values()) {
+            if (tensor.hasPayload()) {
+                tensors.put(tensor.name(), new OnnxTensor(tensor.name(), tensor.dims(), tensor.dataType(),
+                        new float[0], new byte[0], tensor.rawDataBuffer().order(ByteOrder.LITTLE_ENDIAN),
+                        tensor.rawByteLength()));
             } else {
-                tensors.put(name, new OnnxTensor(name, dims, dataType, new float[0], new byte[0]));
+                tensors.put(tensor.name(), new OnnxTensor(tensor.name(), tensor.dims(), tensor.dataType(),
+                        new float[0], new byte[0]));
             }
         }
         return tensors;
@@ -290,16 +159,16 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         List<OnnxNode> nodes = new ArrayList<>();
         Object runtimeGraphObj = manifest.get("runtimeGraph");
         if (runtimeGraphObj instanceof Map<?, ?> graphRaw) {
-            Object nodesObj = ((Map<String, Object>) graphRaw).get("nodes");
+            Object nodesObj = RuntimeModelPackage.castMap(graphRaw).get("nodes");
             if (nodesObj instanceof List<?> nodeList) {
                 for (Object item : nodeList) {
                     if (!(item instanceof Map<?, ?> nodeRaw)) {
                         continue;
                     }
-                    Map<String, Object> node = (Map<String, Object>) nodeRaw;
-                    String opType = stringValue(node.get("opType"));
-                    List<String> inputs = stringList(node.get("inputs"));
-                    List<String> outputs = stringList(node.get("outputs"));
+                    Map<String, Object> node = RuntimeModelPackage.castMap(nodeRaw);
+                    String opType = RuntimeModelPackage.stringValue(node.get("opType"));
+                    List<String> inputs = RuntimeModelPackage.stringList(node.get("inputs"));
+                    List<String> outputs = RuntimeModelPackage.stringList(node.get("outputs"));
                     if (!opType.isBlank()) {
                         nodes.add(new OnnxNode(opType, inputs, outputs, Map.of()));
                     }
@@ -309,103 +178,17 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         String graphName = "wdmlpack_graph";
         Object sourceObj = manifest.get("source");
         if (sourceObj instanceof Map<?, ?> sourceRaw) {
-            graphName = stringValue(((Map<String, Object>) sourceRaw).get("graphName"));
+            graphName = RuntimeModelPackage.stringValue(RuntimeModelPackage.castMap(sourceRaw).get("graphName"));
             if (graphName.isBlank()) graphName = "wdmlpack_graph";
         }
         return new OnnxGraph(graphName, nodes, initializers, List.of(), List.of());
     }
 
-    @SuppressWarnings("unchecked")
-    private TensorCatalog buildCatalog(Map<String, Object> manifest) throws IOException {
-        Object tensorsObj = manifest.get("tensors");
-        if (!(tensorsObj instanceof List<?> tensorsRaw)) {
-            throw new IOException("Invalid wdmlpack payload: missing tensor directory");
-        }
-        List<TensorEntry> entries = new ArrayList<>();
-        for (Object item : tensorsRaw) {
-            if (!(item instanceof Map<?, ?> tensorRaw)) {
-                continue;
-            }
-            Map<String, Object> tensor = (Map<String, Object>) tensorRaw;
-            String name = stringValue(tensor.get("name"));
-            if (name.isBlank()) {
-                continue;
-            }
-            int dataType = intValue(tensor.get("dataType"), 0);
-            long[] dims = dimsValue(tensor.get("dims"));
-            long byteLength = longValue(tensor.get("byteLength"), 0L);
-            long payloadOffset = longValue(tensor.get("payloadOffset"), -1L);
-            TensorStorageKind kind = payloadOffset >= 0 && byteLength > 0
-                    ? TensorStorageKind.INLINE
-                    : TensorStorageKind.METADATA_ONLY;
-            entries.add(new TensorEntry(name, dataType, dims, kind, byteLength));
-        }
-        return new TensorCatalog(entries);
-    }
-
     private static void assertModelInt(Map<String, Object> model, String key, int expected) throws IOException {
-        int actual = intValue(model.get(key), Integer.MIN_VALUE);
+        int actual = RuntimeModelPackage.intValue(model.get(key), Integer.MIN_VALUE);
         if (actual != expected) {
             throw new IOException("wdmlpack model metadata mismatch for " + key
                     + ": manifest=" + actual + ", config=" + expected);
         }
-    }
-
-    private static int intValue(Object value, int defaultValue) {
-        if (value instanceof Number n) return n.intValue();
-        if (value instanceof String s && !s.isBlank()) {
-            try {
-                return Integer.parseInt(s);
-            } catch (NumberFormatException ignored) {
-                return defaultValue;
-            }
-        }
-        return defaultValue;
-    }
-
-    private static long longValue(Object value, long defaultValue) {
-        if (value instanceof Number n) return n.longValue();
-        if (value instanceof String s && !s.isBlank()) {
-            try {
-                return Long.parseLong(s);
-            } catch (NumberFormatException ignored) {
-                return defaultValue;
-            }
-        }
-        return defaultValue;
-    }
-
-    private static String stringValue(Object value) {
-        return value instanceof String s ? s : "";
-    }
-
-    private static List<String> stringList(Object value) {
-        if (!(value instanceof List<?> list)) {
-            return List.of();
-        }
-        List<String> out = new ArrayList<>(list.size());
-        for (Object item : list) {
-            out.add(String.valueOf(item));
-        }
-        return out;
-    }
-
-    private static long[] dimsValue(Object value) {
-        if (!(value instanceof List<?> list)) {
-            return new long[0];
-        }
-        long[] dims = new long[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            Object item = list.get(i);
-            if (item instanceof Number n) dims[i] = n.longValue();
-            else if (item instanceof String s && !s.isBlank()) {
-                try {
-                    dims[i] = Long.parseLong(s);
-                } catch (NumberFormatException ignored) {
-                    dims[i] = 0L;
-                }
-            }
-        }
-        return dims;
     }
 }
