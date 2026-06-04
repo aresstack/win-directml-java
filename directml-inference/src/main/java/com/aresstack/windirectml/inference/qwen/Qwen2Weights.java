@@ -239,13 +239,13 @@ public final class Qwen2Weights implements AutoCloseable {
         }
     }
 
-    public record MappedFp16EmbeddingTable(MappedByteBuffer data, long offset, int rows,
-                                           int cols) implements EmbeddingTable {
+    public record MappedFp16EmbeddingTable(ByteBuffer data, long offset, int rows, int cols) implements EmbeddingTable {
         @Override
         public void copyRow(int row, float[] dest, int destOffset) {
+            ByteBuffer srcBuf = data.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
             int src = Math.toIntExact(offset + (long) row * cols * Short.BYTES);
             for (int i = 0; i < cols; i++) {
-                dest[destOffset + i] = fp16ToFp32(data.getShort(src + i * Short.BYTES));
+                dest[destOffset + i] = fp16ToFp32(srcBuf.getShort(src + i * Short.BYTES));
             }
         }
 
@@ -542,7 +542,62 @@ public final class Qwen2Weights implements AutoCloseable {
                 return table;
             }
         }
+
+        // v20 heap-light: large inline FP16 tensors may be backed by an mmap slice.
+        // Some ONNX exports place huge raw_data fields before the TensorProto name,
+        // and the lightweight parser can then lose the initializer key while still
+        // retaining the tensor payload. Recover by matching the only FP16 matrix
+        // with the exact embedding shape. This keeps the mmap-backed path without
+        // falling back to a 260 MiB byte[] copy.
+        EmbeddingTable byShape = findInlineEmbeddingByShape(config, inlineTensors);
+        if (byShape != null) {
+            return byShape;
+        }
+
         throw new IOException("Embedding weight not found. Expected 'model.embed_tokens.weight' in ONNX data.");
+    }
+
+    private static EmbeddingTable findInlineEmbeddingByShape(Qwen2Config config,
+                                                             Map<String, OnnxTensor> inlineTensors) throws IOException {
+        int rows = config.vocabSize();
+        int cols = config.hiddenSize();
+        List<OnnxTensor> candidates = inlineTensors.entrySet().stream()
+                .map(Map.Entry::getValue)
+                .filter(t -> t != null
+                        && t.dataType() == OnnxModelReader.ONNX_FLOAT16
+                        && t.rawByteLength() > 0
+                        && t.dims().length == 2
+                        && t.dims()[0] == rows
+                        && t.dims()[1] == cols)
+                .toList();
+
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        if (candidates.size() > 1) {
+            String names = inlineTensors.entrySet().stream()
+                    .filter(e -> candidates.contains(e.getValue()))
+                    .map(Map.Entry::getKey)
+                    .toList()
+                    .toString();
+            throw new IOException("Ambiguous inline FP16 embedding candidates with shape ["
+                    + rows + ", " + cols + "]: " + names);
+        }
+
+        OnnxTensor tensor = candidates.get(0);
+        String recoveredName = inlineTensors.entrySet().stream()
+                .filter(e -> e.getValue() == tensor)
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse("<unknown>");
+        if (tensor.rawBytes().length > 0) {
+            log.warn("Embedding tensor name lookup failed; recovered inline FP16 embedding by shape "
+                    + "[{}, {}] from '{}' using compact host storage", rows, cols, recoveredName);
+            return new RawFp16EmbeddingTable(tensor.rawBytes(), rows, cols);
+        }
+        log.warn("Embedding tensor name lookup failed; recovered mmap-backed inline FP16 embedding "
+                + "by shape [{}, {}] from '{}'", rows, cols, recoveredName);
+        return new MappedFp16EmbeddingTable(tensor.rawDataBuffer(), 0L, rows, cols);
     }
 
     private static EmbeddingTable resolveEmbeddingTable(String tensorName, Qwen2Config config,
@@ -573,9 +628,13 @@ public final class Qwen2Weights implements AutoCloseable {
             return null;
         }
         validateMatrixShape(tensorName, inline.dims(), rows, cols);
-        if (inline.dataType() == OnnxModelReader.ONNX_FLOAT16 && inline.rawBytes().length > 0) {
-            log.info("Using compact FP16 embedding table for {}", tensorName);
-            return new RawFp16EmbeddingTable(inline.rawBytes(), rows, cols);
+        if (inline.dataType() == OnnxModelReader.ONNX_FLOAT16 && inline.rawByteLength() > 0) {
+            if (inline.rawBytes().length > 0) {
+                log.info("Using compact FP16 embedding table for {}", tensorName);
+                return new RawFp16EmbeddingTable(inline.rawBytes(), rows, cols);
+            }
+            log.info("Using mmap-backed inline FP16 embedding table for {}", tensorName);
+            return new MappedFp16EmbeddingTable(inline.rawDataBuffer(), 0L, rows, cols);
         }
         return new FloatEmbeddingTable(readInlineTensorAsFloat32(inline, tensorName), rows, cols);
     }
@@ -1462,8 +1521,8 @@ public final class Qwen2Weights implements AutoCloseable {
             return new RawTensorData(readBytes(extData, ref.offset, (int) ref.length), ref.dims, ref.dataType);
         }
         OnnxTensor inline = inlineTensors.get(tensorName);
-        if (inline != null && inline.rawBytes().length > 0) {
-            return new RawTensorData(inline.rawBytes(), inline.dims(), inline.dataType());
+        if (inline != null && inline.rawByteLength() > 0) {
+            return new RawTensorData(inline.rawBytesOrCopy(), inline.dims(), inline.dataType());
         }
         return null;
     }
@@ -1491,17 +1550,17 @@ public final class Qwen2Weights implements AutoCloseable {
             if (tensor.data().length > 0) {
                 return tensor.data();
             }
-            if (tensor.rawBytes().length > 0) {
-                ByteBuffer bb = ByteBuffer.wrap(tensor.rawBytes()).order(ByteOrder.LITTLE_ENDIAN);
-                float[] result = new float[tensor.rawBytes().length / 4];
+            if (tensor.rawByteLength() > 0) {
+                ByteBuffer bb = tensor.rawDataBuffer().order(ByteOrder.LITTLE_ENDIAN);
+                float[] result = new float[tensor.rawByteLength() / 4];
                 for (int i = 0; i < result.length; i++) {
                     result[i] = bb.getFloat();
                 }
                 return result;
             }
-        } else if (tensor.dataType() == OnnxModelReader.ONNX_FLOAT16 && tensor.rawBytes().length > 0) {
-            ByteBuffer bb = ByteBuffer.wrap(tensor.rawBytes()).order(ByteOrder.LITTLE_ENDIAN);
-            float[] result = new float[tensor.rawBytes().length / 2];
+        } else if (tensor.dataType() == OnnxModelReader.ONNX_FLOAT16 && tensor.rawByteLength() > 0) {
+            ByteBuffer bb = tensor.rawDataBuffer().order(ByteOrder.LITTLE_ENDIAN);
+            float[] result = new float[tensor.rawByteLength() / 2];
             for (int i = 0; i < result.length; i++) {
                 result[i] = fp16ToFp32(bb.getShort());
             }
@@ -1552,7 +1611,7 @@ public final class Qwen2Weights implements AutoCloseable {
     }
 
     private static boolean hasInlineData(OnnxTensor tensor) {
-        return tensor != null && (tensor.data().length > 0 || tensor.rawBytes().length > 0);
+        return tensor != null && (tensor.data().length > 0 || tensor.rawByteLength() > 0);
     }
 
     // ── FP16 reading ─────────────────────────────────────────────────────

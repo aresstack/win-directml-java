@@ -73,7 +73,7 @@ final class QwenOnnxModelSource implements ModelSource<QwenModelImport> {
                 continue;
             }
             OnnxTensor tensor = entry.getValue();
-            long rawBytes = tensor.rawBytes() != null ? tensor.rawBytes().length : 0L;
+            long rawBytes = tensor.rawByteLength();
             long floatBytes = tensor.data() != null ? (long) tensor.data().length * Float.BYTES : 0L;
             long bytes = rawBytes > 0 ? rawBytes : floatBytes;
             TensorStorageKind kind = bytes > 0 ? TensorStorageKind.INLINE : TensorStorageKind.METADATA_ONLY;
