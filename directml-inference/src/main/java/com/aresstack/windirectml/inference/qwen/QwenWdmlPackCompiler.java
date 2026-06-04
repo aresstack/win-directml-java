@@ -43,6 +43,7 @@ final class QwenWdmlPackCompiler {
 
     static final String CACHE_SCHEMA = "qwen-wdmlpack-cache-v24";
     static final int COMPILER_VERSION = 24;
+    static final int SAFETENSORS_LAYOUT_COMPILER_VERSION = 26;
 
 
     private QwenWdmlPackCompiler() {
@@ -139,12 +140,12 @@ final class QwenWdmlPackCompiler {
         Map<String, Object> root = buildBaseManifest(imported, config, modelDir, modelFileName);
         root.put("mode", "manifest-only");
         root.put("payloadIncluded", false);
-        boolean runtimeLoadable = isCurrentRuntimeLoadable(imported);
+        boolean runtimeLoadable = isManifestRuntimeLoadable(imported);
         root.put("runtimeLoadable", runtimeLoadable);
         root.put("runtimeLoadMode", runtimeLoadable ? "wdmlpack-frontdoor-onnx-payload" : "import-only-tensor-catalog");
         root.put("note", runtimeLoadable
                 ? "v24 compatibility manifest: Qwen runtime can start from this package, while tensor payload delegates to the source ONNX."
-                : "v25 import-only manifest: source tensors are cataloged for a later Qwen layout compiler and are not directly runtime-loadable yet.");
+                : "v26 import-only manifest: source tensors are cataloged; SafeTensors payload packages become runtime-loadable only when the Qwen layout compiler validates a complete dense layout.");
         root.put("tensors", buildTensorDirectory(imported, null));
         return root;
     }
@@ -157,15 +158,17 @@ final class QwenWdmlPackCompiler {
         Map<String, Object> root = buildBaseManifest(imported, config, modelDir, modelFileName);
         root.put("mode", "payload");
         root.put("payloadIncluded", true);
-        boolean runtimeLoadable = isCurrentRuntimeLoadable(imported);
+        QwenSafeTensorsLayoutCompiler.LayoutAnalysis safeTensorsLayout = safeTensorsLayout(imported, config);
+        boolean runtimeLoadable = isPayloadRuntimeLoadable(imported, safeTensorsLayout);
         root.put("runtimeLoadable", runtimeLoadable);
-        root.put("runtimeLoadMode", runtimeLoadable ? "wdmlpack-native-payload" : "import-only-tensor-catalog");
+        root.put("runtimeLoadMode", runtimeLoadMode(imported, runtimeLoadable, safeTensorsLayout));
         root.put("payloadAlignment", WdmlPackWriter.PAYLOAD_ALIGNMENT);
         root.put("payloadBytes", payloadPlan.payloadLength());
-        root.put("note", runtimeLoadable
-                ? "v24 payload package: Qwen runtime can reconstruct the tensor catalog and minimal graph without parsing ONNX."
-                : "v25 SafeTensors payload package: tensors are mmap-packaged for compiler inspection, but raw SafeTensors layout still requires a Qwen layout compiler before runtime loading.");
+        root.put("note", payloadNote(imported, runtimeLoadable, safeTensorsLayout));
         root.put("runtimeGraph", buildRuntimeGraph(imported.graph().nodes()));
+        if (safeTensorsLayout != null) {
+            root.put("qwenLayout", safeTensorsLayout.toManifest());
+        }
         root.put("tensors", buildTensorDirectory(imported, payloadPlan.offsets()));
         return root;
     }
@@ -230,12 +233,58 @@ final class QwenWdmlPackCompiler {
         root.put("cache", cache);
 
         root.put("operatorCatalog", buildOperatorCatalog(imported.graph().nodes()));
+        QwenSafeTensorsLayoutCompiler.LayoutAnalysis layout = safeTensorsLayout(imported, config);
+        if (layout != null) {
+            root.put("qwenLayout", layout.toManifest());
+        }
         return root;
     }
 
-    private static boolean isCurrentRuntimeLoadable(QwenModelImport imported) {
+    private static boolean isManifestRuntimeLoadable(QwenModelImport imported) {
         String format = imported.sourceFormat();
         return format != null && (format.startsWith("onnx") || format.startsWith("wdmlpack"));
+    }
+
+    private static boolean isPayloadRuntimeLoadable(QwenModelImport imported,
+                                                    QwenSafeTensorsLayoutCompiler.LayoutAnalysis safeTensorsLayout) {
+        String format = imported.sourceFormat();
+        if (format != null && (format.startsWith("onnx") || format.startsWith("wdmlpack"))) {
+            return true;
+        }
+        return safeTensorsLayout != null && safeTensorsLayout.runtimeLoadable();
+    }
+
+    private static String runtimeLoadMode(QwenModelImport imported,
+                                          boolean runtimeLoadable,
+                                          QwenSafeTensorsLayoutCompiler.LayoutAnalysis safeTensorsLayout) {
+        if (!runtimeLoadable) {
+            return safeTensorsLayout != null ? safeTensorsLayout.runtimeLoadMode() : "import-only-tensor-catalog";
+        }
+        if (safeTensorsLayout != null) {
+            return safeTensorsLayout.runtimeLoadMode();
+        }
+        return "wdmlpack-native-payload";
+    }
+
+    private static String payloadNote(QwenModelImport imported,
+                                      boolean runtimeLoadable,
+                                      QwenSafeTensorsLayoutCompiler.LayoutAnalysis safeTensorsLayout) {
+        if (safeTensorsLayout != null) {
+            if (runtimeLoadable) {
+                return "v26 SafeTensors payload package: Qwen HF dense tensor layout was validated and can be opened through the wdmlpack runtime front door. This path is dense and not yet INT4/prepacked.";
+            }
+            return "v26 SafeTensors payload package: tensors are mmap-packaged and layout-analyzed, but the package is not runtime-loadable because required tensors are missing, shapes mismatch, or dtype conversion is still needed.";
+        }
+        return runtimeLoadable
+                ? "v24 payload package: Qwen runtime can reconstruct the tensor catalog and minimal graph without parsing ONNX."
+                : "Import-only payload package: tensors are cataloged for a later model-family layout compiler.";
+    }
+
+    private static QwenSafeTensorsLayoutCompiler.LayoutAnalysis safeTensorsLayout(QwenModelImport imported,
+                                                                                  Qwen2Config config) {
+        return "safetensors".equals(imported.sourceFormat())
+                ? QwenSafeTensorsLayoutCompiler.analyze(imported, config)
+                : null;
     }
 
     private static PayloadPlan planPayload(QwenModelImport imported) throws IOException {
