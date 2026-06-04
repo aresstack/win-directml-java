@@ -94,6 +94,23 @@ final class QwenWdmlPackCompiler {
         }
     }
 
+    static void compileToPackage(QwenModelImport imported,
+                                 Qwen2Config config,
+                                 Path modelDir,
+                                 String modelFileName,
+                                 Path output,
+                                 boolean writePayload) throws IOException {
+        Path normalizedOutput = output.toAbsolutePath().normalize();
+        if (writePayload) {
+            PayloadPlan payloadPlan = planPayload(imported);
+            Map<String, Object> manifest = buildPayloadManifest(imported, config, modelDir, modelFileName, payloadPlan);
+            WdmlPackWriter.writeWithPayload(normalizedOutput, manifest, payloadPlan.entries(), payloadPlan.payloadLength());
+            return;
+        }
+        Map<String, Object> manifest = buildManifest(imported, config, modelDir, modelFileName);
+        WdmlPackWriter.writeManifestOnly(normalizedOutput, manifest);
+    }
+
     static boolean shouldLoadPackage() {
         return Boolean.parseBoolean(System.getProperty(PROP_LOAD, "true"));
     }
