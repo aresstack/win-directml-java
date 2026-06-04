@@ -47,6 +47,48 @@ class QwenWdmlPackModelSourceTest {
         assertTrue(ex.getMessage().contains("hiddenSize"));
     }
 
+    @Test
+    void loadsPayloadPackageWithoutSourceOnnx() throws Exception {
+        Path pack = tempDir.resolve("model_q4f16.wdmlpack");
+        Map<String, Object> manifest = validManifest("model_q4f16.onnx", -1L);
+        manifest.put("mode", "payload");
+        manifest.put("payloadIncluded", true);
+        manifest.put("runtimeLoadMode", "wdmlpack-native-payload");
+
+        Map<String, Object> runtimeGraph = new LinkedHashMap<>();
+        runtimeGraph.put("nodes", java.util.List.of(Map.of(
+                "opType", "MatMulNBits",
+                "inputs", java.util.List.of("x", "tiny.weight_Q4", "tiny.scales"),
+                "outputs", java.util.List.of("tiny.out")
+        )));
+        manifest.put("runtimeGraph", runtimeGraph);
+        manifest.put("tensors", java.util.List.of(Map.of(
+                "name", "tiny.weight_Q4",
+                "dataType", 2,
+                "dims", java.util.List.of(1L, 1L, 4L),
+                "storageKind", "INLINE",
+                "byteLength", 4L,
+                "payloadOffset", 0L,
+                "payloadLength", 4L
+        )));
+
+        WdmlPackWriter.writeWithPayload(pack, manifest, java.util.List.of(
+                new WdmlPackWriter.PayloadEntry("tiny.weight_Q4", 0L, 4L,
+                        channel -> channel.write(java.nio.ByteBuffer.wrap(new byte[]{9, 8, 7, 6})))
+        ), 4L);
+
+        QwenWdmlPackModelSource source = new QwenWdmlPackModelSource(
+                tempDir, pack, "model_q4f16.onnx", config());
+
+        QwenModelImport imported = source.load();
+        assertEquals("wdmlpack-payload", imported.sourceFormat());
+        assertEquals(pack.toAbsolutePath().normalize(), imported.modelPath());
+        assertEquals(1, imported.graph().nodes().size());
+        assertTrue(imported.externalRefs().isEmpty());
+        assertEquals(4, imported.inlineTensors().get("tiny.weight_Q4").rawByteLength());
+        assertEquals(9, imported.inlineTensors().get("tiny.weight_Q4").rawDataBuffer().get(0));
+    }
+
     private static Map<String, Object> validManifest(String sourceFileName, long sizeBytes) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wdmlpack");

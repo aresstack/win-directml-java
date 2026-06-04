@@ -1,13 +1,27 @@
 package com.aresstack.windirectml.inference.qwen;
 
 import com.aresstack.windirectml.inference.model.ModelSource;
+import com.aresstack.windirectml.inference.model.TensorCatalog;
+import com.aresstack.windirectml.inference.model.TensorEntry;
+import com.aresstack.windirectml.inference.model.TensorStorageKind;
 import com.aresstack.windirectml.inference.model.WdmlPackWriter;
+import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
+import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
+import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -15,12 +29,10 @@ import java.util.Objects;
 /**
  * Runtime-facing Qwen source backed by a {@code .wdmlpack} package.
  *
- * <p>v22 deliberately treats the package as the runtime front door while the
- * tensor payload still lives in the original ONNX file referenced by the
- * manifest. That gives us the load boundary and package validation without
- * risking the already validated v20 mmap/heap-light tensor path. A later
- * package version can replace the delegate with a native payload reader while
- * keeping this source contract unchanged.</p>
+ * <p>v22 manifest-only packages remain a compatibility front door and delegate
+ * payloads to ONNX. v23 payload packages reconstruct the tensor catalog and the
+ * minimal Qwen runtime graph directly from the package, so ONNX parsing is no
+ * longer needed on the hot startup path.</p>
  */
 final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
 
@@ -50,24 +62,52 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
 
     @Override
     public QwenModelImport load() throws IOException {
+        WdmlPackWriter.Header header = WdmlPackWriter.readHeader(packagePath);
         Map<String, Object> manifest = WdmlPackWriter.readManifest(packagePath);
-        validateRoot(manifest);
+        validateRoot(manifest, header);
         validateModel(manifest);
+
+        boolean payloadIncluded = Boolean.TRUE.equals(manifest.get("payloadIncluded"));
+        log.info("Loading Qwen runtime package: {} (mode={}, payloadIncluded={})",
+                packagePath.getFileName(), manifest.get("mode"), payloadIncluded);
+        if (payloadIncluded) {
+            return loadNativePayload(manifest, header);
+        }
+        return loadManifestOnlyDelegate(manifest);
+    }
+
+    private QwenModelImport loadManifestOnlyDelegate(Map<String, Object> manifest) throws IOException {
         Path sourceOnnx = resolveSourceOnnx(manifest);
         validateSource(manifest, sourceOnnx);
-
-        log.info("Loading Qwen runtime package: {} (mode={}, payloadIncluded={})",
-                packagePath.getFileName(), manifest.get("mode"), manifest.get("payloadIncluded"));
         log.info("wdmlpack v22 front door: using package manifest, tensor payload source={}",
                 sourceOnnx.getFileName());
 
         QwenOnnxModelSource delegate = new QwenOnnxModelSource(sourceOnnx.getParent(), sourceOnnx.getFileName().toString());
         QwenModelImport imported = delegate.load();
-        return new QwenModelImport(format(), imported.modelPath(), imported.graph(),
+        return new QwenModelImport("wdmlpack-manifest", imported.modelPath(), imported.graph(),
                 imported.externalRefs(), imported.inlineTensors(), imported.tensorCatalog());
     }
 
-    private void validateRoot(Map<String, Object> manifest) throws IOException {
+    private QwenModelImport loadNativePayload(Map<String, Object> manifest,
+                                              WdmlPackWriter.Header header) throws IOException {
+        long fileSize = Files.size(packagePath);
+        if (fileSize > Integer.MAX_VALUE) {
+            throw new IOException("wdmlpack package is too large for the current mmap reader: " + packagePath
+                    + " (" + fileSize + " bytes)");
+        }
+        try (FileChannel channel = FileChannel.open(packagePath, StandardOpenOption.READ)) {
+            MappedByteBuffer mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
+            mapped.order(ByteOrder.LITTLE_ENDIAN);
+            Map<String, OnnxTensor> inlineTensors = loadPayloadTensors(manifest, header, mapped, fileSize);
+            OnnxGraph graph = loadRuntimeGraph(manifest, inlineTensors);
+            TensorCatalog catalog = buildCatalog(manifest);
+            log.info("wdmlpack v23 native payload: mapped {} tensors from package payload ({})",
+                    inlineTensors.size(), QwenWdmlPackCompiler.formatBytes(header.payloadLength()));
+            return new QwenModelImport("wdmlpack-payload", packagePath, graph, Map.of(), inlineTensors, catalog);
+        }
+    }
+
+    private void validateRoot(Map<String, Object> manifest, WdmlPackWriter.Header header) throws IOException {
         if (!"wdmlpack".equals(manifest.get("format"))) {
             throw new IOException("Invalid wdmlpack manifest format: " + manifest.get("format"));
         }
@@ -75,8 +115,12 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         if (version != WdmlPackWriter.VERSION) {
             throw new IOException("Unsupported wdmlpack manifest version: " + version);
         }
-        if (!Boolean.FALSE.equals(manifest.get("payloadIncluded"))) {
-            throw new IOException("This runtime only supports v22 manifest-only wdmlpack payloads for now");
+        boolean payloadIncluded = Boolean.TRUE.equals(manifest.get("payloadIncluded"));
+        if (payloadIncluded && !header.payloadIncluded()) {
+            throw new IOException("wdmlpack manifest says payloadIncluded=true but the container header has no payload");
+        }
+        if (!payloadIncluded && header.payloadIncluded()) {
+            throw new IOException("wdmlpack container has payload but manifest says payloadIncluded=false");
         }
     }
 
@@ -134,6 +178,109 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private Map<String, OnnxTensor> loadPayloadTensors(Map<String, Object> manifest,
+                                                       WdmlPackWriter.Header header,
+                                                       MappedByteBuffer mapped,
+                                                       long fileSize) throws IOException {
+        Object tensorsObj = manifest.get("tensors");
+        if (!(tensorsObj instanceof List<?> tensorsRaw)) {
+            throw new IOException("Invalid wdmlpack payload: missing tensor directory");
+        }
+        Map<String, OnnxTensor> tensors = new LinkedHashMap<>();
+        for (Object item : tensorsRaw) {
+            if (!(item instanceof Map<?, ?> tensorRaw)) {
+                continue;
+            }
+            Map<String, Object> tensor = (Map<String, Object>) tensorRaw;
+            String name = stringValue(tensor.get("name"));
+            int dataType = intValue(tensor.get("dataType"), 0);
+            long[] dims = dimsValue(tensor.get("dims"));
+            long byteLength = longValue(tensor.get("byteLength"), 0L);
+            long payloadOffset = longValue(tensor.get("payloadOffset"), -1L);
+            long payloadLength = longValue(tensor.get("payloadLength"), byteLength);
+            if (name.isBlank()) {
+                continue;
+            }
+            if (payloadOffset >= 0 && payloadLength > 0) {
+                long absoluteStart = header.payloadOffset() + payloadOffset;
+                long absoluteEnd = absoluteStart + payloadLength;
+                if (absoluteStart < header.payloadOffset() || absoluteEnd < absoluteStart
+                        || absoluteEnd > header.payloadOffset() + header.payloadLength()
+                        || absoluteEnd > fileSize || payloadLength > Integer.MAX_VALUE) {
+                    throw new IOException("Invalid wdmlpack tensor payload range for " + name
+                            + ": offset=" + payloadOffset + ", length=" + payloadLength);
+                }
+                ByteBuffer slice = mapped.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
+                slice.position(Math.toIntExact(absoluteStart));
+                slice.limit(Math.toIntExact(absoluteEnd));
+                ByteBuffer raw = slice.slice().order(ByteOrder.LITTLE_ENDIAN);
+                tensors.put(name, new OnnxTensor(name, dims, dataType, new float[0], new byte[0], raw, (int) payloadLength));
+            } else {
+                tensors.put(name, new OnnxTensor(name, dims, dataType, new float[0], new byte[0]));
+            }
+        }
+        return tensors;
+    }
+
+    @SuppressWarnings("unchecked")
+    private OnnxGraph loadRuntimeGraph(Map<String, Object> manifest, Map<String, OnnxTensor> initializers) {
+        List<OnnxNode> nodes = new ArrayList<>();
+        Object runtimeGraphObj = manifest.get("runtimeGraph");
+        if (runtimeGraphObj instanceof Map<?, ?> graphRaw) {
+            Object nodesObj = ((Map<String, Object>) graphRaw).get("nodes");
+            if (nodesObj instanceof List<?> nodeList) {
+                for (Object item : nodeList) {
+                    if (!(item instanceof Map<?, ?> nodeRaw)) {
+                        continue;
+                    }
+                    Map<String, Object> node = (Map<String, Object>) nodeRaw;
+                    String opType = stringValue(node.get("opType"));
+                    List<String> inputs = stringList(node.get("inputs"));
+                    List<String> outputs = stringList(node.get("outputs"));
+                    if (!opType.isBlank()) {
+                        nodes.add(new OnnxNode(opType, inputs, outputs, Map.of()));
+                    }
+                }
+            }
+        }
+        String graphName = "wdmlpack_graph";
+        Object sourceObj = manifest.get("source");
+        if (sourceObj instanceof Map<?, ?> sourceRaw) {
+            graphName = stringValue(((Map<String, Object>) sourceRaw).get("graphName"));
+            if (graphName.isBlank()) graphName = "wdmlpack_graph";
+        }
+        return new OnnxGraph(graphName, nodes, initializers, List.of(), List.of());
+    }
+
+    @SuppressWarnings("unchecked")
+    private TensorCatalog buildCatalog(Map<String, Object> manifest) throws IOException {
+        Object tensorsObj = manifest.get("tensors");
+        if (!(tensorsObj instanceof List<?> tensorsRaw)) {
+            throw new IOException("Invalid wdmlpack payload: missing tensor directory");
+        }
+        List<TensorEntry> entries = new ArrayList<>();
+        for (Object item : tensorsRaw) {
+            if (!(item instanceof Map<?, ?> tensorRaw)) {
+                continue;
+            }
+            Map<String, Object> tensor = (Map<String, Object>) tensorRaw;
+            String name = stringValue(tensor.get("name"));
+            if (name.isBlank()) {
+                continue;
+            }
+            int dataType = intValue(tensor.get("dataType"), 0);
+            long[] dims = dimsValue(tensor.get("dims"));
+            long byteLength = longValue(tensor.get("byteLength"), 0L);
+            long payloadOffset = longValue(tensor.get("payloadOffset"), -1L);
+            TensorStorageKind kind = payloadOffset >= 0 && byteLength > 0
+                    ? TensorStorageKind.INLINE
+                    : TensorStorageKind.METADATA_ONLY;
+            entries.add(new TensorEntry(name, dataType, dims, kind, byteLength));
+        }
+        return new TensorCatalog(entries);
+    }
+
     private static void assertModelInt(Map<String, Object> model, String key, int expected) throws IOException {
         int actual = intValue(model.get(key), Integer.MIN_VALUE);
         if (actual != expected) {
@@ -168,5 +315,35 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
 
     private static String stringValue(Object value) {
         return value instanceof String s ? s : "";
+    }
+
+    private static List<String> stringList(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>(list.size());
+        for (Object item : list) {
+            out.add(String.valueOf(item));
+        }
+        return out;
+    }
+
+    private static long[] dimsValue(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return new long[0];
+        }
+        long[] dims = new long[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            Object item = list.get(i);
+            if (item instanceof Number n) dims[i] = n.longValue();
+            else if (item instanceof String s && !s.isBlank()) {
+                try {
+                    dims[i] = Long.parseLong(s);
+                } catch (NumberFormatException ignored) {
+                    dims[i] = 0L;
+                }
+            }
+        }
+        return dims;
     }
 }

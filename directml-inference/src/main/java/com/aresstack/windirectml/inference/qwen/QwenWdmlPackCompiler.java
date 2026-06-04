@@ -1,14 +1,20 @@
 package com.aresstack.windirectml.inference.qwen;
 
 import com.aresstack.windirectml.inference.model.TensorEntry;
+import com.aresstack.windirectml.inference.model.TensorStorageKind;
 import com.aresstack.windirectml.inference.model.WdmlPackWriter;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
+import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -20,9 +26,9 @@ import java.util.Map;
 /**
  * Qwen-specific compiler front-end for the internal {@code .wdmlpack} format.
  *
- * <p>v21 writes only the package manifest and tensor directory metadata. The
- * runtime continues to use the ONNX-backed import path until the payload format
- * is wired in a later release.</p>
+ * <p>v23 can write a payload-carrying package. Existing v22 manifest-only
+ * packages remain accepted as a compatibility front door and delegate tensor
+ * payloads back to ONNX.</p>
  */
 final class QwenWdmlPackCompiler {
 
@@ -32,6 +38,7 @@ final class QwenWdmlPackCompiler {
     static final String PROP_AUTO_CREATE = "windirectml.wdmlpack.autoCreate";
     static final String PROP_LOAD = "windirectml.wdmlpack.load";
     static final String PROP_OUTPUT = "windirectml.wdmlpack.output";
+    static final String PROP_PAYLOAD = "windirectml.wdmlpack.payload";
 
     private QwenWdmlPackCompiler() {
     }
@@ -41,7 +48,7 @@ final class QwenWdmlPackCompiler {
                                          Path modelDir,
                                          String modelFileName) {
         if (Boolean.getBoolean(PROP_WRITE_MANIFEST)) {
-            writeManifest(imported, config, modelDir, modelFileName, true);
+            writePackage(imported, config, modelDir, modelFileName, true);
         }
     }
 
@@ -50,26 +57,34 @@ final class QwenWdmlPackCompiler {
                                                  Path modelDir,
                                                  String modelFileName) {
         if (Boolean.parseBoolean(System.getProperty(PROP_AUTO_CREATE, "true"))) {
-            writeManifest(imported, config, modelDir, modelFileName, false);
+            writePackage(imported, config, modelDir, modelFileName, false);
         }
     }
 
-    private static void writeManifest(QwenModelImport imported,
-                                      Qwen2Config config,
-                                      Path modelDir,
-                                      String modelFileName,
-                                      boolean explicitRequest) {
+    private static void writePackage(QwenModelImport imported,
+                                     Qwen2Config config,
+                                     Path modelDir,
+                                     String modelFileName,
+                                     boolean explicitRequest) {
         try {
             Path output = resolveOutputPath(modelDir, modelFileName);
-            Map<String, Object> manifest = buildManifest(imported, config, modelDir, modelFileName);
-            WdmlPackWriter.writeManifestOnly(output, manifest);
-            log.info("Wrote manifest-only Qwen wdmlpack{}: {}", explicitRequest ? "" : " cache", output);
+            boolean writePayload = Boolean.parseBoolean(System.getProperty(PROP_PAYLOAD, "true"));
+            if (writePayload) {
+                PayloadPlan payloadPlan = planPayload(imported);
+                Map<String, Object> manifest = buildPayloadManifest(imported, config, modelDir, modelFileName, payloadPlan);
+                WdmlPackWriter.writeWithPayload(output, manifest, payloadPlan.entries(), payloadPlan.payloadLength());
+                log.info("Wrote payload-included Qwen wdmlpack{}: {} (payload={})",
+                        explicitRequest ? "" : " cache", output, formatBytes(payloadPlan.payloadLength()));
+            } else {
+                Map<String, Object> manifest = buildManifest(imported, config, modelDir, modelFileName);
+                WdmlPackWriter.writeManifestOnly(output, manifest);
+                log.info("Wrote manifest-only Qwen wdmlpack{}: {}", explicitRequest ? "" : " cache", output);
+            }
         } catch (Exception e) {
             // Package creation is intentionally opportunistic. It must never break
             // the already validated ONNX/WARP inference path.
-            log.warn("Could not write optional Qwen wdmlpack manifest; continuing with ONNX runtime path: {}",
-                    e.toString());
-            log.debug("wdmlpack manifest write failure", e);
+            log.warn("Could not write optional Qwen wdmlpack; continuing with current runtime path: {}", e.toString());
+            log.debug("wdmlpack write failure", e);
         }
     }
 
@@ -93,15 +108,42 @@ final class QwenWdmlPackCompiler {
                                              Qwen2Config config,
                                              Path modelDir,
                                              String modelFileName) throws IOException {
-        Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wdmlpack");
-        root.put("version", WdmlPackWriter.VERSION);
-        root.put("createdAt", Instant.now().toString());
+        Map<String, Object> root = buildBaseManifest(imported, config, modelDir, modelFileName);
         root.put("mode", "manifest-only");
         root.put("payloadIncluded", false);
         root.put("runtimeLoadable", true);
         root.put("runtimeLoadMode", "wdmlpack-frontdoor-onnx-payload");
-        root.put("note", "v22 manifest package: Qwen runtime can start from this package, while tensor payload still delegates to the source ONNX until native payloads are added.");
+        root.put("note", "v22/v23 compatibility manifest: Qwen runtime can start from this package, while tensor payload delegates to the source ONNX.");
+        root.put("tensors", buildTensorDirectory(imported, null));
+        return root;
+    }
+
+    static Map<String, Object> buildPayloadManifest(QwenModelImport imported,
+                                                    Qwen2Config config,
+                                                    Path modelDir,
+                                                    String modelFileName,
+                                                    PayloadPlan payloadPlan) throws IOException {
+        Map<String, Object> root = buildBaseManifest(imported, config, modelDir, modelFileName);
+        root.put("mode", "payload");
+        root.put("payloadIncluded", true);
+        root.put("runtimeLoadable", true);
+        root.put("runtimeLoadMode", "wdmlpack-native-payload");
+        root.put("payloadAlignment", WdmlPackWriter.PAYLOAD_ALIGNMENT);
+        root.put("payloadBytes", payloadPlan.payloadLength());
+        root.put("note", "v23 payload package: Qwen runtime can reconstruct the tensor catalog and minimal graph without parsing ONNX.");
+        root.put("runtimeGraph", buildRuntimeGraph(imported.graph().nodes()));
+        root.put("tensors", buildTensorDirectory(imported, payloadPlan.offsets()));
+        return root;
+    }
+
+    private static Map<String, Object> buildBaseManifest(QwenModelImport imported,
+                                                         Qwen2Config config,
+                                                         Path modelDir,
+                                                         String modelFileName) throws IOException {
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("format", "wdmlpack");
+        root.put("version", WdmlPackWriter.VERSION);
+        root.put("createdAt", Instant.now().toString());
 
         Path source = imported.modelPath();
         Map<String, Object> sourceInfo = new LinkedHashMap<>();
@@ -141,11 +183,93 @@ final class QwenWdmlPackCompiler {
         root.put("tensorCatalog", catalog);
 
         root.put("operatorCatalog", buildOperatorCatalog(imported.graph().nodes()));
-        root.put("tensors", buildTensorDirectory(imported));
         return root;
     }
 
-    private static List<Map<String, Object>> buildTensorDirectory(QwenModelImport imported) {
+    private static PayloadPlan planPayload(QwenModelImport imported) throws IOException {
+        List<TensorEntry> entries = new ArrayList<>(imported.tensorCatalog().entries().values());
+        entries.sort(Comparator.comparing(TensorEntry::name));
+        Map<String, Long> offsets = new LinkedHashMap<>();
+        List<WdmlPackWriter.PayloadEntry> payloadEntries = new ArrayList<>();
+        long cursor = 0;
+        for (TensorEntry entry : entries) {
+            TensorPayload payload = resolvePayload(entry, imported);
+            if (payload == null || payload.length() <= 0) {
+                offsets.put(entry.name(), -1L);
+                continue;
+            }
+            cursor = WdmlPackWriter.align(cursor, 64);
+            long relativeOffset = cursor;
+            offsets.put(entry.name(), relativeOffset);
+            payloadEntries.add(new WdmlPackWriter.PayloadEntry(entry.name(), relativeOffset, payload.length(), payload.writer()));
+            cursor += payload.length();
+        }
+        return new PayloadPlan(offsets, payloadEntries, cursor);
+    }
+
+    private static TensorPayload resolvePayload(TensorEntry entry, QwenModelImport imported) throws IOException {
+        OnnxTensor inline = imported.inlineTensors().get(entry.name());
+        if (inline != null) {
+            if (inline.rawByteLength() > 0) {
+                ByteBuffer raw = inline.rawDataBuffer().order(ByteOrder.LITTLE_ENDIAN);
+                return new TensorPayload(inline.rawByteLength(), channel -> writeBuffer(channel, raw));
+            }
+            if (inline.data() != null && inline.data().length > 0) {
+                float[] data = inline.data();
+                long length = (long) data.length * Float.BYTES;
+                return new TensorPayload(length, channel -> writeFloatArray(channel, data));
+            }
+        }
+
+        Qwen2Weights.ExternalTensorRef external = imported.externalRefs().get(entry.name());
+        if (external != null) {
+            Path dataPath = QwenModelDirValidator.resolveExternalDataPath(imported.modelPath().getParent());
+            return new TensorPayload(external.length(), channel -> copyFileRegion(dataPath, external.offset(), external.length(), channel));
+        }
+        return null;
+    }
+
+    private static void writeBuffer(FileChannel channel, ByteBuffer source) throws IOException {
+        ByteBuffer duplicate = source.asReadOnlyBuffer();
+        duplicate.position(0);
+        while (duplicate.hasRemaining()) {
+            channel.write(duplicate);
+        }
+    }
+
+    private static void writeFloatArray(FileChannel channel, float[] data) throws IOException {
+        ByteBuffer buffer = ByteBuffer.allocate(Math.min(1024 * 1024, Math.max(Float.BYTES, data.length * Float.BYTES)))
+                .order(ByteOrder.LITTLE_ENDIAN);
+        for (float value : data) {
+            if (buffer.remaining() < Float.BYTES) {
+                buffer.flip();
+                while (buffer.hasRemaining()) channel.write(buffer);
+                buffer.clear();
+            }
+            buffer.putFloat(value);
+        }
+        buffer.flip();
+        while (buffer.hasRemaining()) channel.write(buffer);
+    }
+
+    private static void copyFileRegion(Path source, long offset, long length, FileChannel target) throws IOException {
+        try (FileChannel input = FileChannel.open(source, StandardOpenOption.READ)) {
+            long copied = 0;
+            while (copied < length) {
+                long n = input.transferTo(offset + copied, length - copied, target);
+                if (n <= 0) {
+                    ByteBuffer fallback = ByteBuffer.allocate((int) Math.min(1024 * 1024, length - copied));
+                    input.read(fallback, offset + copied);
+                    fallback.flip();
+                    n = target.write(fallback);
+                    if (n <= 0) throw new IOException("Could not copy payload region from " + source);
+                }
+                copied += n;
+            }
+        }
+    }
+
+    private static List<Map<String, Object>> buildTensorDirectory(QwenModelImport imported, Map<String, Long> payloadOffsets) {
         List<TensorEntry> entries = new ArrayList<>(imported.tensorCatalog().entries().values());
         entries.sort(Comparator.comparing(TensorEntry::name));
         List<Map<String, Object>> tensors = new ArrayList<>(entries.size());
@@ -157,7 +281,9 @@ final class QwenWdmlPackCompiler {
             tensor.put("dims", toList(entry.dims()));
             tensor.put("storageKind", entry.storageKind().name());
             tensor.put("byteLength", entry.byteLength());
-            tensor.put("payloadOffset", -1L); // v22 manifest-only; native tensor payload starts in a later package version
+            long payloadOffset = payloadOffsets != null ? payloadOffsets.getOrDefault(entry.name(), -1L) : -1L;
+            tensor.put("payloadOffset", payloadOffset);
+            tensor.put("payloadLength", payloadOffset >= 0 ? entry.byteLength() : 0L);
 
             Qwen2Weights.ExternalTensorRef external = imported.externalRefs().get(entry.name());
             if (external != null) {
@@ -167,6 +293,23 @@ final class QwenWdmlPackCompiler {
             tensors.add(tensor);
         }
         return tensors;
+    }
+
+    private static Map<String, Object> buildRuntimeGraph(List<OnnxNode> nodes) {
+        Map<String, Object> graph = new LinkedHashMap<>();
+        List<Map<String, Object>> runtimeNodes = new ArrayList<>();
+        for (OnnxNode node : nodes) {
+            if ("MatMulNBits".equals(node.opType()) || "Add".equals(node.opType())) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("opType", node.opType());
+                item.put("inputs", node.inputs());
+                item.put("outputs", node.outputs());
+                runtimeNodes.add(item);
+            }
+        }
+        graph.put("nodes", runtimeNodes);
+        graph.put("note", "Minimal Qwen runtime graph; enough for MatMulNBits projection mapping and connected Add biases.");
+        return graph;
     }
 
     private static Map<String, Object> buildOperatorCatalog(List<OnnxNode> nodes) {
@@ -218,5 +361,13 @@ final class QwenWdmlPackCompiler {
         if (mb < 1024) return String.format(Locale.ROOT, "%.1f MiB", mb);
         double gb = mb / 1024.0;
         return String.format(Locale.ROOT, "%.2f GiB", gb);
+    }
+
+    record PayloadPlan(Map<String, Long> offsets,
+                       List<WdmlPackWriter.PayloadEntry> entries,
+                       long payloadLength) {
+    }
+
+    private record TensorPayload(long length, WdmlPackWriter.PayloadWriter writer) {
     }
 }

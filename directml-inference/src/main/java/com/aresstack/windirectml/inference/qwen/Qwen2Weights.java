@@ -458,9 +458,12 @@ public final class Qwen2Weights implements AutoCloseable {
         Map<String, ExternalTensorRef> externalRefs = imported.externalRefs();
         Map<String, OnnxTensor> inlineTensors = imported.inlineTensors();
         log.info("Qwen tensor catalog: {}", imported.tensorCatalog().summary());
-        if (!packageLoaded) {
+        if (!packageLoaded || "wdmlpack-manifest".equals(imported.sourceFormat())) {
             QwenWdmlPackCompiler.writeManifestIfAutoCreateEnabled(imported, config, modelDir, safeModelFileName);
             QwenWdmlPackCompiler.writeManifestIfRequested(imported, config, modelDir, safeModelFileName);
+            if (packageLoaded) {
+                log.info("Qwen wdmlpack manifest package accepted and upgraded for next start: {}", packagePath);
+            }
         } else {
             log.info("Qwen wdmlpack package accepted: {}", packagePath);
         }
@@ -478,7 +481,10 @@ public final class Qwen2Weights implements AutoCloseable {
                 extData = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
                 extData.order(ByteOrder.LITTLE_ENDIAN);
             } else {
-                log.info("No external ONNX tensor data references found; using inline initializers from {}", safeModelFileName);
+                String sourceDescription = imported.sourceFormat().startsWith("wdmlpack")
+                        ? packagePath.getFileName().toString()
+                        : safeModelFileName;
+                log.info("No external tensor data references found; using inline initializers from {}", sourceDescription);
             }
 
             // Map MatMulNBits outputs to weight tensor names

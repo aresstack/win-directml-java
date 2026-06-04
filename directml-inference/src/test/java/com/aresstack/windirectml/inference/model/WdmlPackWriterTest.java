@@ -39,6 +39,36 @@ class WdmlPackWriterTest {
     }
 
     @Test
+    void writesAndReadsPayloadPackageHeader() throws Exception {
+        Path pack = tempDir.resolve("model-payload.wdmlpack");
+        Map<String, Object> manifest = new LinkedHashMap<>();
+        manifest.put("format", "wdmlpack");
+        manifest.put("version", WdmlPackWriter.VERSION);
+        manifest.put("mode", "payload");
+        manifest.put("payloadIncluded", true);
+        manifest.put("tensors", List.of(Map.of(
+                "name", "tiny",
+                "dataType", 2,
+                "byteLength", 4L,
+                "payloadOffset", 0L,
+                "payloadLength", 4L)));
+
+        WdmlPackWriter.writeWithPayload(pack, manifest, List.of(
+                new WdmlPackWriter.PayloadEntry("tiny", 0L, 4L, channel -> channel.write(java.nio.ByteBuffer.wrap(new byte[]{1, 2, 3, 4})))
+        ), 4L);
+
+        WdmlPackWriter.Header header = WdmlPackWriter.readHeader(pack);
+        assertFalse(header.manifestOnly());
+        assertTrue(header.payloadIncluded());
+        assertEquals(4L, header.payloadLength());
+        assertEquals(0L, header.payloadOffset() % WdmlPackWriter.PAYLOAD_ALIGNMENT);
+
+        Map<String, Object> read = WdmlPackWriter.readManifest(pack);
+        assertEquals("payload", read.get("mode"));
+        assertEquals(true, read.get("payloadIncluded"));
+    }
+
+    @Test
     void rejectsInvalidMagic() throws Exception {
         Path file = tempDir.resolve("broken.wdmlpack");
         Files.write(file, new byte[WdmlPackWriter.HEADER_SIZE]);
