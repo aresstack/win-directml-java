@@ -29,6 +29,8 @@ final class QwenWdmlPackCompiler {
     private static final Logger log = LoggerFactory.getLogger(QwenWdmlPackCompiler.class);
 
     static final String PROP_WRITE_MANIFEST = "windirectml.wdmlpack.writeManifest";
+    static final String PROP_AUTO_CREATE = "windirectml.wdmlpack.autoCreate";
+    static final String PROP_LOAD = "windirectml.wdmlpack.load";
     static final String PROP_OUTPUT = "windirectml.wdmlpack.output";
 
     private QwenWdmlPackCompiler() {
@@ -38,21 +40,41 @@ final class QwenWdmlPackCompiler {
                                          Qwen2Config config,
                                          Path modelDir,
                                          String modelFileName) {
-        if (!Boolean.getBoolean(PROP_WRITE_MANIFEST)) {
-            return;
+        if (Boolean.getBoolean(PROP_WRITE_MANIFEST)) {
+            writeManifest(imported, config, modelDir, modelFileName, true);
         }
+    }
+
+    static void writeManifestIfAutoCreateEnabled(QwenModelImport imported,
+                                                 Qwen2Config config,
+                                                 Path modelDir,
+                                                 String modelFileName) {
+        if (Boolean.parseBoolean(System.getProperty(PROP_AUTO_CREATE, "true"))) {
+            writeManifest(imported, config, modelDir, modelFileName, false);
+        }
+    }
+
+    private static void writeManifest(QwenModelImport imported,
+                                      Qwen2Config config,
+                                      Path modelDir,
+                                      String modelFileName,
+                                      boolean explicitRequest) {
         try {
             Path output = resolveOutputPath(modelDir, modelFileName);
             Map<String, Object> manifest = buildManifest(imported, config, modelDir, modelFileName);
             WdmlPackWriter.writeManifestOnly(output, manifest);
-            log.info("Wrote manifest-only Qwen wdmlpack: {}", output);
+            log.info("Wrote manifest-only Qwen wdmlpack{}: {}", explicitRequest ? "" : " cache", output);
         } catch (Exception e) {
-            // v21 pack creation is intentionally optional. It must never break
+            // Package creation is intentionally opportunistic. It must never break
             // the already validated ONNX/WARP inference path.
             log.warn("Could not write optional Qwen wdmlpack manifest; continuing with ONNX runtime path: {}",
                     e.toString());
             log.debug("wdmlpack manifest write failure", e);
         }
+    }
+
+    static boolean shouldLoadPackage() {
+        return Boolean.parseBoolean(System.getProperty(PROP_LOAD, "true"));
     }
 
     static Path resolveOutputPath(Path modelDir, String modelFileName) {
@@ -77,7 +99,9 @@ final class QwenWdmlPackCompiler {
         root.put("createdAt", Instant.now().toString());
         root.put("mode", "manifest-only");
         root.put("payloadIncluded", false);
-        root.put("note", "v21 skeleton package: runtime still loads ONNX; tensor payload copy is planned for v22.");
+        root.put("runtimeLoadable", true);
+        root.put("runtimeLoadMode", "wdmlpack-frontdoor-onnx-payload");
+        root.put("note", "v22 manifest package: Qwen runtime can start from this package, while tensor payload still delegates to the source ONNX until native payloads are added.");
 
         Path source = imported.modelPath();
         Map<String, Object> sourceInfo = new LinkedHashMap<>();
@@ -133,7 +157,7 @@ final class QwenWdmlPackCompiler {
             tensor.put("dims", toList(entry.dims()));
             tensor.put("storageKind", entry.storageKind().name());
             tensor.put("byteLength", entry.byteLength());
-            tensor.put("payloadOffset", -1L); // v21 manifest-only; real payload starts in v22
+            tensor.put("payloadOffset", -1L); // v22 manifest-only; native tensor payload starts in a later package version
 
             Qwen2Weights.ExternalTensorRef external = imported.externalRefs().get(entry.name());
             if (external != null) {

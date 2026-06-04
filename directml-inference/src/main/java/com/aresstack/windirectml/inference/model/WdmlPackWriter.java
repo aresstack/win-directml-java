@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -85,34 +87,50 @@ public final class WdmlPackWriter {
     }
 
     /**
-     * Reads the JSON manifest from a v1 package. Intended for tests and tools.
+     * Reads the JSON manifest from a v1 package. Intended for tests, tools and
+     * the v22 runtime package front door. The package is memory-mapped so this
+     * stays consistent with the runtime loading policy and avoids whole-file
+     * {@code byte[]} reads.
      */
     public static Map<String, Object> readManifest(Path pack) throws IOException {
         Objects.requireNonNull(pack, "pack");
-        byte[] all = Files.readAllBytes(pack);
-        if (all.length < HEADER_SIZE) {
-            throw new IOException("Invalid wdmlpack: file is smaller than header: " + pack);
+        try (FileChannel channel = FileChannel.open(pack, StandardOpenOption.READ)) {
+            long fileSize = channel.size();
+            if (fileSize < HEADER_SIZE) {
+                throw new IOException("Invalid wdmlpack: file is smaller than header: " + pack);
+            }
+            if (fileSize > Integer.MAX_VALUE) {
+                throw new IOException("Invalid wdmlpack: manifest-only package is unexpectedly large: " + pack
+                        + " (" + fileSize + " bytes)");
+            }
+            MappedByteBuffer mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
+            mapped.order(ByteOrder.LITTLE_ENDIAN);
+            ByteBuffer header = mapped.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
+            header.limit(HEADER_SIZE);
+            byte[] magic = new byte[8];
+            header.get(magic);
+            String magicText = new String(magic, StandardCharsets.US_ASCII);
+            if (!MAGIC.equals(magicText)) {
+                throw new IOException("Invalid wdmlpack magic: " + magicText);
+            }
+            int version = header.getInt();
+            if (version != VERSION) {
+                throw new IOException("Unsupported wdmlpack version: " + version);
+            }
+            header.getInt(); // flags
+            long manifestOffset = header.getLong();
+            long manifestLength = header.getLong();
+            if (manifestOffset < HEADER_SIZE || manifestLength < 0 || manifestOffset + manifestLength > fileSize) {
+                throw new IOException("Invalid wdmlpack manifest range: offset=" + manifestOffset
+                        + ", length=" + manifestLength + ", fileSize=" + fileSize);
+            }
+            ByteBuffer manifestBuffer = mapped.asReadOnlyBuffer();
+            manifestBuffer.position(Math.toIntExact(manifestOffset));
+            manifestBuffer.limit(Math.toIntExact(manifestOffset + manifestLength));
+            byte[] json = new byte[Math.toIntExact(manifestLength)];
+            manifestBuffer.get(json);
+            return MAPPER.readValue(json, new TypeReference<>() {
+            });
         }
-        ByteBuffer header = ByteBuffer.wrap(all, 0, HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN);
-        byte[] magic = new byte[8];
-        header.get(magic);
-        String magicText = new String(magic, StandardCharsets.US_ASCII);
-        if (!MAGIC.equals(magicText)) {
-            throw new IOException("Invalid wdmlpack magic: " + magicText);
-        }
-        int version = header.getInt();
-        if (version != VERSION) {
-            throw new IOException("Unsupported wdmlpack version: " + version);
-        }
-        header.getInt(); // flags
-        long manifestOffset = header.getLong();
-        long manifestLength = header.getLong();
-        if (manifestOffset < HEADER_SIZE || manifestLength < 0 || manifestOffset + manifestLength > all.length) {
-            throw new IOException("Invalid wdmlpack manifest range: offset=" + manifestOffset
-                    + ", length=" + manifestLength + ", fileSize=" + all.length);
-        }
-        String json = new String(all, Math.toIntExact(manifestOffset), Math.toIntExact(manifestLength), StandardCharsets.UTF_8);
-        return MAPPER.readValue(json, new TypeReference<>() {
-        });
     }
 }

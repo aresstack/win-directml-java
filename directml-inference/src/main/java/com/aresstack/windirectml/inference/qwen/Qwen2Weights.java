@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.qwen;
 
+import com.aresstack.windirectml.inference.model.ModelSource;
 import com.aresstack.windirectml.windows.OnnxModelReader;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
@@ -440,17 +441,29 @@ public final class Qwen2Weights implements AutoCloseable {
      */
     public static Qwen2Weights load(Path modelDir, Qwen2Config config, String modelFileName) throws IOException {
         String safeModelFileName = QwenModelDirValidator.normalizeModelFileName(modelFileName);
-        QwenOnnxModelSource modelSource = new QwenOnnxModelSource(modelDir, safeModelFileName);
-        Path onnxPath = modelSource.location();
+        Path packagePath = QwenWdmlPackCompiler.resolveOutputPath(modelDir, safeModelFileName);
+        boolean packageLoaded = false;
+        ModelSource<QwenModelImport> modelSource;
+        if (QwenWdmlPackCompiler.shouldLoadPackage() && Files.isRegularFile(packagePath)) {
+            modelSource = new QwenWdmlPackModelSource(modelDir, packagePath, safeModelFileName, config);
+            packageLoaded = true;
+        } else {
+            modelSource = new QwenOnnxModelSource(modelDir, safeModelFileName);
+        }
 
         log.info("Loading Qwen model through import layer: format={}, source={}",
-                modelSource.format(), onnxPath);
+                modelSource.format(), modelSource.location());
         QwenModelImport imported = modelSource.load();
         OnnxGraph graph = imported.graph();
         Map<String, ExternalTensorRef> externalRefs = imported.externalRefs();
         Map<String, OnnxTensor> inlineTensors = imported.inlineTensors();
         log.info("Qwen tensor catalog: {}", imported.tensorCatalog().summary());
-        QwenWdmlPackCompiler.writeManifestIfRequested(imported, config, modelDir, safeModelFileName);
+        if (!packageLoaded) {
+            QwenWdmlPackCompiler.writeManifestIfAutoCreateEnabled(imported, config, modelDir, safeModelFileName);
+            QwenWdmlPackCompiler.writeManifestIfRequested(imported, config, modelDir, safeModelFileName);
+        } else {
+            log.info("Qwen wdmlpack package accepted: {}", packagePath);
+        }
 
         RandomAccessFile raf = null;
         FileChannel channel = null;
