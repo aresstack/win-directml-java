@@ -276,7 +276,7 @@ public final class SummarizerPanel extends JPanel {
     }
 
     private void validateQwenModelFiles(Path modelDir, String modelFileName) {
-        String missing = QwenModelDirValidator.describeMissingModelFile(modelDir, modelFileName);
+        String missing = QwenModelDirValidator.describeMissingRequiredFiles(modelDir, modelFileName);
         if (missing != null) {
             throw new IllegalStateException(missing + ". Download the selected Qwen model first from the Download tab.");
         }

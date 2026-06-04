@@ -47,6 +47,35 @@ public final class QwenModelDirValidator {
     }
 
     public static String describeMissingModelFile(Path dir, String modelFileName) {
+        String missing = describeMissingRequiredFiles(dir, modelFileName);
+        if (missing != null) {
+            return missing;
+        }
+
+        String safeModelFile;
+        try {
+            safeModelFile = normalizeModelFileName(modelFileName);
+        } catch (IllegalArgumentException ex) {
+            return "Invalid Qwen ONNX filename: " + ex.getMessage();
+        }
+
+        String unsupportedFormat = Qwen2Weights.describeUnsupportedFormat(dir, safeModelFile);
+        if (unsupportedFormat != null) {
+            return unsupportedFormat;
+        }
+        return null;
+    }
+
+    /**
+     * Fast validation used on the UI/runtime hot startup path.
+     *
+     * <p>This intentionally checks only required files and filename shape. Full
+     * ONNX layout validation happens during the single model import in
+     * {@link Qwen2Weights#load(Path, Qwen2Config, String)}. Keeping the heavy
+     * format check out of this method avoids parsing the same 500+ MiB ONNX
+     * file multiple times before model load.</p>
+     */
+    public static String describeMissingRequiredFiles(Path dir, String modelFileName) {
         if (dir == null) {
             return "Qwen model directory is null";
         }
@@ -74,11 +103,6 @@ public final class QwenModelDirValidator {
                 && !Files.exists(dir.resolve(DATA_FILE_ALT))) {
             return "Qwen model directory is missing " + DATA_FILE_PRIMARY
                     + " (or " + DATA_FILE_ALT + ") (looked in " + dir + ")";
-        }
-
-        String unsupportedFormat = Qwen2Weights.describeUnsupportedFormat(dir, safeModelFile);
-        if (unsupportedFormat != null) {
-            return unsupportedFormat;
         }
         return null;
     }

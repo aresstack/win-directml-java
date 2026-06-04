@@ -135,7 +135,7 @@ public class QwenInferenceEngine implements InferenceEngine {
         log.info("QwenInferenceEngine initializing from {} using {}", modelDir, modelFileName);
 
         // Validate model directory
-        String missing = QwenModelDirValidator.describeMissingModelFile(modelDir, modelFileName);
+        String missing = QwenModelDirValidator.describeMissingRequiredFiles(modelDir, modelFileName);
         if (missing != null) {
             throw new InferenceException("Cannot initialize Qwen engine: " + missing);
         }

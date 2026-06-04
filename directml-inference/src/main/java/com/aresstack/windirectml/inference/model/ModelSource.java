@@ -19,13 +19,9 @@ public interface ModelSource<T> {
      */
     String format();
 
-    /**
-     * The primary file or directory backing this source.
-     */
+    /** The primary file or directory backing this source. */
     Path location();
 
-    /**
-     * Load and validate source metadata into a model-specific import result.
-     */
+    /** Load and validate source metadata into a model-specific import result. */
     T load() throws IOException;
 }

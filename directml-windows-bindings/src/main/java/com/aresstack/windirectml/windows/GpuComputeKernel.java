@@ -5,6 +5,8 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Generic D3D12 compute shader kernel.
@@ -17,6 +19,20 @@ import java.lang.invoke.MethodHandle;
 public final class GpuComputeKernel implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(GpuComputeKernel.class);
+
+    /**
+     * D3DCompile is expensive on WARP startup and many Qwen INT4 kernels use
+     * the exact same HLSL source. Cache compiled DXBC bytes process-wide; each
+     * GpuComputeKernel still creates its own root signature and PSO for now.
+     */
+    private static final ConcurrentMap<ShaderKey, byte[]> SHADER_BYTECODE_CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<RootSignatureKey, byte[]> ROOT_SIGNATURE_BYTECODE_CACHE = new ConcurrentHashMap<>();
+
+    private record ShaderKey(String source, String entryPoint, String target) {
+    }
+
+    private record RootSignatureKey(int numUavs, int num32BitConsts) {
+    }
 
     private final String name;
     private final Arena arena;
@@ -71,16 +87,20 @@ public final class GpuComputeKernel implements AutoCloseable {
 
         var dev = wb.getD3d12Device();
 
-        // ── 1. Compile HLSL → DXBC ───────────────────────────────────
-        MemorySegment shaderBlob = D3DCompilerBindings.compileShader(hlslSource, "CSMain", "cs_5_0", arena);
-        MemorySegment shaderPtr = D3DCompilerBindings.blobGetBufferPointer(shaderBlob);
-        long shaderSize = D3DCompilerBindings.blobGetBufferSize(shaderBlob);
-        log.debug("Compiled compute shader '{}': {} bytes", name, shaderSize);
+        // ── 1. Compile HLSL → DXBC (cached across equal sources) ───────
+        byte[] shaderBytecode = cachedShaderBytecode(hlslSource, "CSMain", "cs_5_0", name);
+        MemorySegment shaderData = arena.allocate(shaderBytecode.length, 8);
+        shaderData.copyFrom(MemorySegment.ofArray(shaderBytecode));
+        MemorySegment shaderPtr = shaderData;
+        long shaderSize = shaderBytecode.length;
+        log.debug("Using compute shader bytecode '{}': {} bytes", name, shaderSize);
 
-        // ── 2. Serialize + create root signature ──────────────────────
-        MemorySegment rootSigBlob = D3DCompilerBindings.serializeRootSignature(numUavs, num32BitConsts, arena);
-        MemorySegment rootSigPtr = D3DCompilerBindings.blobGetBufferPointer(rootSigBlob);
-        long rootSigSize = D3DCompilerBindings.blobGetBufferSize(rootSigBlob);
+        // ── 2. Serialize + create root signature (serialized bytes cached) ─
+        byte[] rootSigBytecode = cachedRootSignatureBytecode(numUavs, num32BitConsts, name);
+        MemorySegment rootSigData = arena.allocate(rootSigBytecode.length, 8);
+        rootSigData.copyFrom(MemorySegment.ofArray(rootSigBytecode));
+        MemorySegment rootSigPtr = rootSigData;
+        long rootSigSize = rootSigBytecode.length;
 
         try {
             MemorySegment riid = ComIID.allocateGuid(arena, ComIID.IID_ID3D12RootSignature_BYTES);
@@ -127,10 +147,6 @@ public final class GpuComputeKernel implements AutoCloseable {
             throw new WindowsNativeException("CreateComputePSO failed", t);
         }
 
-        // Release shader blobs (bytecode is copied into PSO)
-        DxgiBindings.release(shaderBlob);
-        DxgiBindings.release(rootSigBlob);
-
         // ── 4. Pre-cache MethodHandles for the command list ───────────
         mhSetPipelineState = DxgiBindings.vtableMethod(cmdListForMH, CMDLIST_SET_PIPELINE_STATE,
                 FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.ADDRESS));
@@ -150,6 +166,83 @@ public final class GpuComputeKernel implements AutoCloseable {
                         ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
 
         log.info("GpuComputeKernel '{}' ready (groupSize={})", name, groupSizeX);
+    }
+
+    private static byte[] cachedShaderBytecode(String hlslSource, String entryPoint,
+                                               String target, String kernelName)
+            throws WindowsNativeException {
+        ShaderKey key = new ShaderKey(hlslSource, entryPoint, target);
+        byte[] cached = SHADER_BYTECODE_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (SHADER_BYTECODE_CACHE) {
+            cached = SHADER_BYTECODE_CACHE.get(key);
+            if (cached != null) {
+                return cached;
+            }
+            byte[] compiled = compileShaderBytecode(hlslSource, entryPoint, target);
+            SHADER_BYTECODE_CACHE.put(key, compiled);
+            log.info("Compiled compute shader bytecode '{}' once: {} bytes (cacheSize={})",
+                    kernelName, compiled.length, SHADER_BYTECODE_CACHE.size());
+            return compiled;
+        }
+    }
+
+    private static byte[] cachedRootSignatureBytecode(int numUavs, int num32BitConsts,
+                                                      String kernelName)
+            throws WindowsNativeException {
+        RootSignatureKey key = new RootSignatureKey(numUavs, num32BitConsts);
+        byte[] cached = ROOT_SIGNATURE_BYTECODE_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (ROOT_SIGNATURE_BYTECODE_CACHE) {
+            cached = ROOT_SIGNATURE_BYTECODE_CACHE.get(key);
+            if (cached != null) {
+                return cached;
+            }
+            byte[] serialized = serializeRootSignatureBytecode(numUavs, num32BitConsts);
+            ROOT_SIGNATURE_BYTECODE_CACHE.put(key, serialized);
+            log.info("Serialized root signature for '{}' once: uavs={}, constants={}, {} bytes (cacheSize={})",
+                    kernelName, numUavs, num32BitConsts, serialized.length,
+                    ROOT_SIGNATURE_BYTECODE_CACHE.size());
+            return serialized;
+        }
+    }
+
+    private static byte[] compileShaderBytecode(String hlslSource, String entryPoint,
+                                                String target) throws WindowsNativeException {
+        MemorySegment blob = MemorySegment.NULL;
+        try (Arena temp = Arena.ofConfined()) {
+            blob = D3DCompilerBindings.compileShader(hlslSource, entryPoint, target, temp);
+            return copyBlobToByteArray(blob);
+        } finally {
+            if (!blob.equals(MemorySegment.NULL)) {
+                DxgiBindings.release(blob);
+            }
+        }
+    }
+
+    private static byte[] serializeRootSignatureBytecode(int numUavs, int num32BitConsts)
+            throws WindowsNativeException {
+        MemorySegment blob = MemorySegment.NULL;
+        try (Arena temp = Arena.ofConfined()) {
+            blob = D3DCompilerBindings.serializeRootSignature(numUavs, num32BitConsts, temp);
+            return copyBlobToByteArray(blob);
+        } finally {
+            if (!blob.equals(MemorySegment.NULL)) {
+                DxgiBindings.release(blob);
+            }
+        }
+    }
+
+    private static byte[] copyBlobToByteArray(MemorySegment blob) {
+        MemorySegment ptr = D3DCompilerBindings.blobGetBufferPointer(blob);
+        int size = Math.toIntExact(D3DCompilerBindings.blobGetBufferSize(blob));
+        byte[] bytes = new byte[size];
+        MemorySegment.ofArray(bytes).copyFrom(ptr.reinterpret(size));
+        return bytes;
     }
 
     /**
