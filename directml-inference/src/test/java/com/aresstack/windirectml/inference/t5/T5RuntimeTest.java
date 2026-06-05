@@ -35,14 +35,38 @@ class T5RuntimeTest {
     }
 
     @Test
-    void generateThrowsClearUnsupportedRuntimeException() {
-        T5RuntimePackage runtimePackage = T5RuntimePackage.fromMetadata(T5PackageMetadata.from(T5TestFixtures.tinyConfig(false)));
+    void loadsPayloadBackedWeightsFromCompiledPackage() throws Exception {
+        Path modelDir = createModelDir(T5TestFixtures.tinyConfig(false));
+        Path output = tempDir.resolve("runtime-loadable-weights.wdmlpack");
+        T5WdmlPackCompiler.compile(new T5CompileOptions(modelDir, output, false, false));
+
+        T5RuntimePackage runtimePackage = T5RuntimePackage.open(output);
+        T5Weights weights = runtimePackage.weights();
+
+        assertTrue(runtimePackage.payloadIncluded());
+        assertTrue(runtimePackage.weightsLoadable());
+        assertFalse(runtimePackage.runtimeLoadable());
+        assertEquals(27, weights.tensorCount());
+        assertTrue(weights.payloadBytes() > 0);
+        assertArrayEquals(new long[]{6, 4}, weights.sharedEmbedding().dims());
+        assertSame(weights.sharedEmbedding(), weights.lmHead());
+        assertArrayEquals(new long[]{4, 4}, weights.encoderSelfAttention(0, "q").dims());
+        assertArrayEquals(new long[]{4, 4}, weights.decoderCrossAttention(0, "o").dims());
+    }
+
+    @Test
+    void runtimeLoadsWeightsButGenerationIsStillUnsupported() throws Exception {
+        Path modelDir = createModelDir(T5TestFixtures.tinyConfig(false));
+        Path output = tempDir.resolve("runtime-shell.wdmlpack");
+        T5WdmlPackCompiler.compile(new T5CompileOptions(modelDir, output, false, false));
+        T5RuntimePackage runtimePackage = T5RuntimePackage.open(output);
         T5Runtime runtime = T5Runtime.load(runtimePackage);
 
         T5UnsupportedRuntimeException error = assertThrows(T5UnsupportedRuntimeException.class,
                 () -> runtime.generate(T5RuntimeRequest.greedy(new int[]{1, 2}, 4, T5TestFixtures.tinyConfig(false).specialTokens())));
 
         assertEquals(T5Runtime.UNSUPPORTED_MESSAGE, error.getMessage());
+        assertEquals(27, runtime.weights().tensorCount());
     }
 
     private Path writePack(String family, String architecture) throws Exception {
@@ -53,10 +77,18 @@ class T5RuntimeTest {
         manifest.put("modelFamily", family);
         manifest.put("architecture", architecture);
         manifest.put("runtimeLoadable", false);
+        manifest.put("weightsLoadable", false);
         manifest.put("payloadIncluded", false);
         manifest.put("runtimeLoadMode", "not-implemented");
         manifest.put("t5", T5PackageMetadata.from(T5TestFixtures.tinyConfig(false)).toManifest());
         WdmlPackWriter.writeManifestOnly(pack, manifest);
         return pack;
+    }
+
+    private Path createModelDir(T5Config config) throws Exception {
+        Path modelDir = tempDir.resolve("model-" + System.nanoTime());
+        T5TestFixtures.writeConfig(modelDir, config);
+        T5TestFixtures.writeSafeTensors(modelDir, T5TestFixtures.completeDenseT5Tensors(config));
+        return modelDir;
     }
 }

@@ -6,7 +6,7 @@ import java.nio.file.Path;
 import java.util.Objects;
 
 /**
- * Compiles a Hugging Face T5/CodeT5 SafeTensors directory into a manifest-only wdmlpack.
+ * Compiles a Hugging Face T5/CodeT5 SafeTensors directory into a payload-backed wdmlpack.
  */
 public final class T5WdmlPackCompiler {
     private T5WdmlPackCompiler() {
@@ -29,7 +29,7 @@ public final class T5WdmlPackCompiler {
         if (Files.exists(output) && !options.force()) {
             throw new IOException("T5 wdmlpack already exists; pass --force to replace it: " + output);
         }
-        new T5WdmlPackManifestWriter().writeManifestOnly(output, modelDir, imported, config, layout);
+        new T5WdmlPackManifestWriter().writeWithPayload(output, modelDir, imported, config, layout);
         return new T5CompileResult(output, true, layout, T5RuntimePackage.open(output));
     }
 

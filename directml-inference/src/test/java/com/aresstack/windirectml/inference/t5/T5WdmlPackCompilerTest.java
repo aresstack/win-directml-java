@@ -16,7 +16,7 @@ class T5WdmlPackCompilerTest {
     Path tempDir;
 
     @Test
-    void writesManifestOnlyPackage() throws Exception {
+    void writesPayloadBackedPackage() throws Exception {
         Path modelDir = createModelDir(T5TestFixtures.tinyConfig(false));
         Path output = tempDir.resolve("t5.wdmlpack");
 
@@ -25,11 +25,12 @@ class T5WdmlPackCompilerTest {
 
         assertTrue(result.written());
         assertTrue(Files.isRegularFile(output));
-        assertTrue(WdmlPackWriter.readHeader(output).manifestOnly());
+        assertFalse(WdmlPackWriter.readHeader(output).manifestOnly());
+        assertTrue(WdmlPackWriter.readHeader(output).payloadIncluded());
     }
 
     @Test
-    void marksPackageAsNotRuntimeLoadable() throws Exception {
+    void marksPackageAsWeightsLoadableButGenerationNotRuntimeLoadable() throws Exception {
         Path modelDir = createModelDir(T5TestFixtures.tinyConfig(false));
         Path output = tempDir.resolve("t5.wdmlpack");
 
@@ -37,8 +38,9 @@ class T5WdmlPackCompilerTest {
         Map<String, Object> manifest = WdmlPackWriter.readManifest(output);
 
         assertEquals(false, manifest.get("runtimeLoadable"));
-        assertEquals(false, manifest.get("payloadIncluded"));
-        assertEquals("not-implemented", manifest.get("runtimeLoadMode"));
+        assertEquals(true, manifest.get("payloadIncluded"));
+        assertEquals(true, manifest.get("weightsLoadable"));
+        assertEquals("t5-weights-loaded-runtime-not-implemented", manifest.get("runtimeLoadMode"));
     }
 
     @Test
