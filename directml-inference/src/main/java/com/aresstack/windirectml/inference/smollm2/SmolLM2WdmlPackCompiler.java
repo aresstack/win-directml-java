@@ -1,0 +1,70 @@
+package com.aresstack.windirectml.inference.smollm2;
+
+import com.aresstack.windirectml.inference.model.SourceTensorCatalog;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Objects;
+
+/**
+ * Compile-time SmolLM2 analyzer and manifest-only package writer.
+ */
+public final class SmolLM2WdmlPackCompiler {
+
+    private final SmolLM2LayoutValidator layoutValidator;
+    private final SmolLM2WdmlPackManifestWriter manifestWriter;
+
+    public SmolLM2WdmlPackCompiler() {
+        this(new SmolLM2LayoutValidator(), new SmolLM2WdmlPackManifestWriter());
+    }
+
+    SmolLM2WdmlPackCompiler(SmolLM2LayoutValidator layoutValidator,
+                            SmolLM2WdmlPackManifestWriter manifestWriter) {
+        this.layoutValidator = Objects.requireNonNull(layoutValidator, "layoutValidator");
+        this.manifestWriter = Objects.requireNonNull(manifestWriter, "manifestWriter");
+    }
+
+    public SmolLM2CompileReport analyze(SmolLM2CompileOptions options) throws IOException {
+        SmolLM2ModelDirectory modelDirectory = new SmolLM2ModelDirectory(options.modelDir());
+        SmolLM2Config config = modelDirectory.readConfig();
+        validateSupported(config);
+        SourceTensorCatalog catalog = modelDirectory.readTensorCatalog();
+        SmolLM2LayoutReport layoutReport = layoutValidator.validate(config, catalog);
+        return new SmolLM2CompileReport(resolveOutput(options), true, false, false,
+                SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED, config, layoutReport);
+    }
+
+    public SmolLM2CompileReport compile(SmolLM2CompileOptions options) throws IOException {
+        SmolLM2CompileReport report = analyze(options);
+        Path output = report.output();
+        if (Files.exists(output) && !options.force()) {
+            throw new IOException("output already exists: " + output + " (use --force to overwrite)");
+        }
+        if (!options.dryRun()) {
+            manifestWriter.writeManifestOnly(output, report.config(), report.layoutReport());
+        }
+        return new SmolLM2CompileReport(output, options.dryRun(), false, false,
+                SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED, report.config(), report.layoutReport());
+    }
+
+    private static void validateSupported(SmolLM2Config config) throws IOException {
+        SmolLM2ModelFamily family = new SmolLM2ModelFamily();
+        if (!family.supports(config)) {
+            throw new IOException("unsupported model_type or architecture for SmolLM2: model_type="
+                    + config.modelType() + ", architectures=" + config.architectures());
+        }
+        try {
+            family.architecture(config);
+        } catch (IllegalArgumentException e) {
+            throw new IOException("unsupported SmolLM2 architecture: " + e.getMessage(), e);
+        }
+    }
+
+    private static Path resolveOutput(SmolLM2CompileOptions options) {
+        if (options.output() != null) {
+            return options.output();
+        }
+        return options.modelDir().resolve("model.wdmlpack").toAbsolutePath().normalize();
+    }
+}
