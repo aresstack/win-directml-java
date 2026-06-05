@@ -63,6 +63,8 @@ class T5RuntimeTest {
         T5Runtime runtime = T5Runtime.load(runtimePackage);
 
         assertEquals("reference", runtime.executionMode());
+        assertSame(runtime.encoderPipeline(), runtime.encoderRunner());
+        assertEquals("reference-encoder", runtime.encoderRunner().executionMode());
 
         T5RuntimeResult result = runtime.generate(T5RuntimeRequest.greedy(
                 new int[]{1, 2}, 2, T5TestFixtures.tinyConfig(false).specialTokens()));

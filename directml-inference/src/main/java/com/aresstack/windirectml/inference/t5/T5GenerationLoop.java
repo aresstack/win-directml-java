@@ -12,37 +12,37 @@ import java.util.Objects;
  * runtime logic.</p>
  */
 public final class T5GenerationLoop {
-    private final T5EncoderPipeline encoderPipeline;
+    private final T5EncoderRunner encoderRunner;
     private final T5DecoderPipeline decoderPipeline;
     private final T5LogitProjector logitProjector;
     private final T5TokenSelector tokenSelector;
 
-    private T5GenerationLoop(T5EncoderPipeline encoderPipeline,
+    private T5GenerationLoop(T5EncoderRunner encoderRunner,
                              T5DecoderPipeline decoderPipeline,
                              T5LogitProjector logitProjector,
                              T5TokenSelector tokenSelector) {
-        this.encoderPipeline = Objects.requireNonNull(encoderPipeline, "encoderPipeline");
+        this.encoderRunner = Objects.requireNonNull(encoderRunner, "encoderRunner");
         this.decoderPipeline = Objects.requireNonNull(decoderPipeline, "decoderPipeline");
         this.logitProjector = Objects.requireNonNull(logitProjector, "logitProjector");
         this.tokenSelector = Objects.requireNonNull(tokenSelector, "tokenSelector");
     }
 
-    public static T5GenerationLoop greedy(T5EncoderPipeline encoderPipeline,
+    public static T5GenerationLoop greedy(T5EncoderRunner encoderRunner,
                                           T5DecoderPipeline decoderPipeline,
                                           T5Weights weights) {
-        return greedy(encoderPipeline, decoderPipeline, T5LmHead.from(weights));
+        return greedy(encoderRunner, decoderPipeline, T5LmHead.from(weights));
     }
 
-    public static T5GenerationLoop greedy(T5EncoderPipeline encoderPipeline,
+    public static T5GenerationLoop greedy(T5EncoderRunner encoderRunner,
                                           T5DecoderPipeline decoderPipeline,
                                           T5LogitProjector logitProjector) {
-        return new T5GenerationLoop(encoderPipeline, decoderPipeline, logitProjector, T5TokenSelector.greedy());
+        return new T5GenerationLoop(encoderRunner, decoderPipeline, logitProjector, T5TokenSelector.greedy());
     }
 
     public T5RuntimeResult generate(T5RuntimeRequest request) {
         Objects.requireNonNull(request, "request");
         requireGreedyRequest(request);
-        T5EncoderOutput encoderOutput = encoderPipeline.encode(request.inputTokenIds());
+        T5EncoderOutput encoderOutput = encoderRunner.encode(request.inputTokenIds());
         int[] generated = new int[request.maxNewTokens()];
         int generatedTokens = 0;
         int decoderTokenId = request.decoderStartTokenId();

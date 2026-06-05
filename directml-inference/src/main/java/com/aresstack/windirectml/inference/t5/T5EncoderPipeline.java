@@ -10,7 +10,7 @@ import java.util.Objects;
  * <p>Use this implementation to validate package loading, tensor roles, and
  * seq2seq encoder semantics before replacing the math with WARP kernels.</p>
  */
-public final class T5EncoderPipeline {
+public final class T5EncoderPipeline implements T5EncoderRunner {
     private final T5PackageMetadata metadata;
     private final T5Weights weights;
     private final T5TensorData sharedEmbedding;
@@ -45,10 +45,12 @@ public final class T5EncoderPipeline {
         return new T5EncoderPipeline(metadata, weights, sharedEmbedding, blocks, finalLayerNorm);
     }
 
+    @Override
     public T5EncoderOutput encode(int[] inputTokenIds) {
         return encode(inputTokenIds, null);
     }
 
+    @Override
     public T5EncoderOutput encode(int[] inputTokenIds, boolean[] attentionMask) {
         validateInput(inputTokenIds);
         boolean[] mask = normalizeMask(inputTokenIds, attentionMask);
@@ -65,6 +67,12 @@ public final class T5EncoderPipeline {
     public T5Weights weights() {
         return weights;
     }
+
+    @Override
+    public String executionMode() {
+        return "reference-encoder";
+    }
+
 
     private float[] embed(int[] inputTokenIds, boolean[] mask) {
         int sequenceLength = inputTokenIds.length;
