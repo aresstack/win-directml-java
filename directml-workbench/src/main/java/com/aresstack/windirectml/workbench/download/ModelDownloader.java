@@ -2,6 +2,7 @@ package com.aresstack.windirectml.workbench.download;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -9,6 +10,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.List;
 import java.util.function.Consumer;
@@ -29,6 +31,8 @@ public final class ModelDownloader {
     private static final List<String> OPTIONAL_FILES = List.of(
             "vocab.txt", "special_tokens_map.json", "tokenizer_config.json"
     );
+
+    private static final int DOWNLOAD_BUFFER_SIZE = 1024 * 1024;
 
     /**
      * Required files for Phi-3 ONNX decoder model.
@@ -57,6 +61,49 @@ public final class ModelDownloader {
 
     private ModelDownloader() {
     }
+
+    /**
+     * Receives byte-level download progress for the currently processed file.
+     */
+    @FunctionalInterface
+    public interface ProgressListener {
+        void onProgress(ProgressEvent event);
+    }
+
+    /**
+     * Byte-level progress event for one file inside a model manifest.
+     */
+    public record ProgressEvent(
+            String localFilename,
+            int fileIndex,
+            int totalFiles,
+            long bytesRead,
+            long totalBytes,
+            boolean completed,
+            boolean skipped
+    ) {
+        public double fileFraction() {
+            if (skipped || completed) {
+                return 1.0d;
+            }
+            if (totalBytes <= 0L) {
+                return 0.0d;
+            }
+            return Math.max(0.0d, Math.min(1.0d, bytesRead / (double) totalBytes));
+        }
+
+        public int aggregatePercent() {
+            if (totalFiles <= 0) {
+                return 100;
+            }
+            double completedFiles = Math.max(0, fileIndex) + fileFraction();
+            return (int) Math.round(Math.max(0.0d, Math.min(100.0d,
+                    (completedFiles * 100.0d) / totalFiles)));
+        }
+    }
+
+    private static final ProgressListener NO_PROGRESS = event -> {
+    };
 
     /**
      * Download embedding model files from Hugging Face (safetensors layout).
@@ -98,14 +145,20 @@ public final class ModelDownloader {
                 .build();
 
         String pathPrefix = repoSubdir != null ? repoSubdir + "/" : "";
+        int totalFiles = requiredFiles.size() + (optionalFiles == null ? 0 : optionalFiles.size());
+        int index = 0;
 
         for (String file : requiredFiles) {
-            downloadFile(client, repo, pathPrefix + file, file, targetDir, force, logger, true);
+            String url = HF_BASE_URL + "/" + repo + "/resolve/main/" + pathPrefix + file;
+            downloadFileFromUrl(client, url, file, targetDir, force, logger, true,
+                    index++, totalFiles, NO_PROGRESS);
         }
 
         if (optionalFiles != null) {
             for (String file : optionalFiles) {
-                downloadFile(client, repo, pathPrefix + file, file, targetDir, force, logger, false);
+                String url = HF_BASE_URL + "/" + repo + "/resolve/main/" + pathPrefix + file;
+                downloadFileFromUrl(client, url, file, targetDir, force, logger, false,
+                        index++, totalFiles, NO_PROGRESS);
             }
         }
     }
@@ -151,12 +204,28 @@ public final class ModelDownloader {
      * (which may have been overridden by the user) and the local filename.
      *
      * @param manifest  the download manifest with effective URLs
-     * @param targetDir local directory to save model files into
+     * @param targetDir local directory to save files into
      * @param force     if true, overwrite existing files
      * @param logger    callback for progress messages
      */
     public static void downloadFromManifest(ModelDownloadManifest manifest, Path targetDir,
                                             boolean force, Consumer<String> logger)
+            throws IOException, InterruptedException {
+        downloadFromManifest(manifest, targetDir, force, logger, NO_PROGRESS);
+    }
+
+    /**
+     * Download model files using a {@link ModelDownloadManifest} and report byte progress.
+     *
+     * @param manifest         the download manifest with effective URLs
+     * @param targetDir        local directory to save files into
+     * @param force            if true, overwrite existing files
+     * @param logger           callback for progress messages
+     * @param progressListener byte-level progress callback for each manifest file
+     */
+    public static void downloadFromManifest(ModelDownloadManifest manifest, Path targetDir,
+                                            boolean force, Consumer<String> logger,
+                                            ProgressListener progressListener)
             throws IOException, InterruptedException {
         Files.createDirectories(targetDir);
 
@@ -165,71 +234,35 @@ public final class ModelDownloader {
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
 
-        for (ModelFileDescriptor desc : manifest.files()) {
+        ProgressListener listener = progressListener == null ? NO_PROGRESS : progressListener;
+        int totalFiles = manifest.files().size();
+        for (int i = 0; i < totalFiles; i++) {
+            ModelFileDescriptor desc = manifest.files().get(i);
             downloadFileFromUrl(client, desc.currentUrl(), desc.localFilename(),
-                    targetDir, force, logger, desc.required());
-        }
-    }
-
-    private static void downloadFile(HttpClient client, String repo,
-                                     String remotePath, String localFilename,
-                                     Path targetDir, boolean force,
-                                     Consumer<String> logger, boolean required)
-            throws IOException, InterruptedException {
-
-        Path target = targetDir.resolve(localFilename);
-
-        if (Files.exists(target) && !force) {
-            logger.accept("  Skipping (exists): " + localFilename);
-            return;
-        }
-
-        String url = HF_BASE_URL + "/" + repo + "/resolve/main/" + remotePath;
-        logger.accept("  Downloading: " + localFilename + " ...");
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofMinutes(30))
-                .GET()
-                .build();
-
-        HttpResponse<InputStream> response = client.send(request,
-                HttpResponse.BodyHandlers.ofInputStream());
-
-        if (response.statusCode() == 200) {
-            try (InputStream in = response.body()) {
-                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
-            }
-            long sizeKb = Files.size(target) / 1024;
-            logger.accept("  Downloaded: " + localFilename + " (" + sizeKb + " KB)");
-        } else if (response.statusCode() == 404 && !required) {
-            logger.accept("  Optional file not found (skipped): " + localFilename);
-        } else {
-            String msg = "HTTP " + response.statusCode() + " for " + localFilename
-                    + " (url: " + url + ")";
-            if (required) {
-                throw new IOException(msg);
-            } else {
-                logger.accept("  Warning: " + msg);
-            }
+                    targetDir, force, logger, desc.required(), i, totalFiles, listener);
         }
     }
 
     private static void downloadFileFromUrl(HttpClient client, String url,
                                             String localFilename, Path targetDir,
                                             boolean force, Consumer<String> logger,
-                                            boolean required)
+                                            boolean required, int fileIndex,
+                                            int totalFiles, ProgressListener progressListener)
             throws IOException, InterruptedException {
 
         Path target = targetDir.resolve(localFilename);
 
         if (Files.exists(target) && !force) {
             logger.accept("  Skipping (exists): " + localFilename);
+            progressListener.onProgress(new ProgressEvent(localFilename, fileIndex, totalFiles,
+                    Files.size(target), Files.size(target), true, true));
             return;
         }
 
         String sanitizedUrl = sanitizeUrl(url, localFilename, required, logger);
         if (sanitizedUrl == null) {
+            progressListener.onProgress(new ProgressEvent(localFilename, fileIndex, totalFiles,
+                    0L, 0L, true, true));
             return;
         }
 
@@ -245,13 +278,17 @@ public final class ModelDownloader {
                 HttpResponse.BodyHandlers.ofInputStream());
 
         if (response.statusCode() == 200) {
-            try (InputStream in = response.body()) {
-                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            long totalBytes = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
+            progressListener.onProgress(new ProgressEvent(localFilename, fileIndex, totalFiles,
+                    0L, totalBytes, false, false));
+            copyBodyWithProgress(response.body(), target, localFilename, totalBytes,
+                    fileIndex, totalFiles, progressListener);
             long sizeKb = Files.size(target) / 1024;
             logger.accept("  Downloaded: " + localFilename + " (" + sizeKb + " KB)");
         } else if (response.statusCode() == 404 && !required) {
             logger.accept("  Optional file not found (skipped): " + localFilename);
+            progressListener.onProgress(new ProgressEvent(localFilename, fileIndex, totalFiles,
+                    0L, 0L, true, true));
         } else {
             String msg = "HTTP " + response.statusCode() + " for " + localFilename
                     + " (url: " + sanitizedUrl + ")";
@@ -259,8 +296,45 @@ public final class ModelDownloader {
                 throw new IOException(msg);
             } else {
                 logger.accept("  Warning: " + msg);
+                progressListener.onProgress(new ProgressEvent(localFilename, fileIndex, totalFiles,
+                        0L, 0L, true, true));
             }
         }
+    }
+
+    private static void copyBodyWithProgress(InputStream body, Path target,
+                                             String localFilename, long totalBytes,
+                                             int fileIndex, int totalFiles,
+                                             ProgressListener progressListener)
+            throws IOException {
+        Path parent = target.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        Path partial = target.resolveSibling(target.getFileName() + ".part");
+        long bytesRead = 0L;
+        try (InputStream in = body;
+             OutputStream out = Files.newOutputStream(partial,
+                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+            byte[] buffer = new byte[DOWNLOAD_BUFFER_SIZE];
+            int read;
+            while ((read = in.read(buffer)) >= 0) {
+                if (read == 0) {
+                    continue;
+                }
+                out.write(buffer, 0, read);
+                bytesRead += read;
+                progressListener.onProgress(new ProgressEvent(localFilename, fileIndex, totalFiles,
+                        bytesRead, totalBytes, false, false));
+            }
+        } catch (IOException ex) {
+            Files.deleteIfExists(partial);
+            throw ex;
+        }
+        Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING);
+        long finalTotalBytes = totalBytes > 0L ? totalBytes : bytesRead;
+        progressListener.onProgress(new ProgressEvent(localFilename, fileIndex, totalFiles,
+                bytesRead, finalTotalBytes, true, false));
     }
 
     private static String sanitizeUrl(String url, String localFilename, boolean required,

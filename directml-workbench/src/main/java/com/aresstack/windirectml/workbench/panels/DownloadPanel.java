@@ -274,7 +274,7 @@ public final class DownloadPanel extends JPanel {
         progressBar.setStringPainted(true);
         progressBar.setString("Idle");
         progressBar.setValue(0);
-        progressBar.setPreferredSize(new Dimension(160, 24));
+        progressBar.setPreferredSize(new Dimension(300, 24));
         return progressBar;
     }
 
@@ -425,13 +425,9 @@ public final class DownloadPanel extends JPanel {
                 DownloadProgressTracker progressTracker = new DownloadProgressTracker(manifest.files().size());
                 publish(DownloadUiEvent.progress(0, "0%"));
                 try {
-                    ModelDownloader.downloadFromManifest(manifest, targetDir, force, message -> {
-                        publish(DownloadUiEvent.message(message));
-                        Integer percent = progressTracker.update(message);
-                        if (percent != null) {
-                            publish(DownloadUiEvent.progress(percent, percent + "%"));
-                        }
-                    });
+                    ModelDownloader.downloadFromManifest(manifest, targetDir, force,
+                            message -> publish(DownloadUiEvent.message(message)),
+                            event -> publish(progressTracker.update(event)));
                     publish(DownloadUiEvent.progress(100, "Done"));
                     return true;
                 } catch (Exception ex) {
@@ -506,38 +502,55 @@ public final class DownloadPanel extends JPanel {
 
     private static final class DownloadProgressTracker {
         private final int totalFiles;
-        private int completedFiles;
+        private int lastPercent;
 
         DownloadProgressTracker(int totalFiles) {
             this.totalFiles = Math.max(0, totalFiles);
-            this.completedFiles = 0;
+            this.lastPercent = 0;
         }
 
-        Integer update(String message) {
-            if (message == null) {
-                return null;
+        DownloadUiEvent update(ModelDownloader.ProgressEvent event) {
+            if (event == null) {
+                return DownloadUiEvent.progress(lastPercent, lastPercent + "%");
             }
-            String trimmed = message.trim();
-            if (isCompletedFileMessage(trimmed)) {
-                completedFiles = Math.min(totalFiles, completedFiles + 1);
-                return percent();
-            }
-            return null;
+            lastPercent = event.aggregatePercent();
+            return DownloadUiEvent.progress(lastPercent, progressText(event, lastPercent));
         }
 
         int percent() {
-            if (totalFiles == 0) {
-                return 100;
-            }
-            return Math.round((completedFiles * 100.0f) / totalFiles);
+            return totalFiles == 0 ? 100 : lastPercent;
         }
 
-        private static boolean isCompletedFileMessage(String message) {
-            return message.startsWith("Downloaded:")
-                    || message.startsWith("Skipping (exists):")
-                    || message.startsWith("Optional file not found (skipped):")
-                    || message.startsWith("Optional file URL is blank (skipped):")
-                    || message.startsWith("Warning: HTTP");
+        private static String progressText(ModelDownloader.ProgressEvent event, int percent) {
+            if (event.skipped()) {
+                return percent + "% skipped " + event.localFilename();
+            }
+            if (event.completed()) {
+                return percent + "% done " + event.localFilename();
+            }
+            if (event.totalBytes() > 0L) {
+                int filePercent = (int) Math.round(Math.max(0.0d, Math.min(100.0d,
+                        (event.bytesRead() * 100.0d) / event.totalBytes())));
+                return percent + "% " + event.localFilename() + " "
+                        + filePercent + "% (" + formatBytes(event.bytesRead())
+                        + " / " + formatBytes(event.totalBytes()) + ")";
+            }
+            return percent + "% " + event.localFilename() + " " + formatBytes(event.bytesRead());
+        }
+
+        private static String formatBytes(long bytes) {
+            if (bytes < 1024L) {
+                return bytes + " B";
+            }
+            double kib = bytes / 1024.0d;
+            if (kib < 1024.0d) {
+                return String.format(java.util.Locale.ROOT, "%.1f KiB", kib);
+            }
+            double mib = kib / 1024.0d;
+            if (mib < 1024.0d) {
+                return String.format(java.util.Locale.ROOT, "%.1f MiB", mib);
+            }
+            return String.format(java.util.Locale.ROOT, "%.2f GiB", mib / 1024.0d);
         }
     }
 
