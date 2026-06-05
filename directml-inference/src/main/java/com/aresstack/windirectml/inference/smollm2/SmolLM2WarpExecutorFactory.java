@@ -12,21 +12,36 @@ import java.lang.reflect.Constructor;
 public final class SmolLM2WarpExecutorFactory {
 
     public static final String EXECUTOR_CLASS_PROPERTY = "windirectml.smollm2.warp.executorClass";
+    public static final String EXECUTOR_MODE_PROPERTY = "windirectml.smollm2.warp.executorMode";
+
+    private static final String EXECUTOR_MODE_PROBE = "probe";
+    private static final String EXECUTOR_MODE_NONE = "none";
 
     private SmolLM2WarpExecutorFactory() {
     }
 
     /**
-     * Create the configured WARP executor or return an explicit unsupported executor.
+     * Create the configured WARP executor or return the built-in DirectML/WARP probe executor.
      */
     public static SmolLM2WarpExecutor createDefaultExecutor() {
         String executorClassName = System.getProperty(EXECUTOR_CLASS_PROPERTY, "").trim();
-        if (executorClassName.isEmpty()) {
+        if (!executorClassName.isEmpty()) {
+            return createConfiguredExecutor(executorClassName);
+        }
+
+        String executorMode = System.getProperty(EXECUTOR_MODE_PROPERTY, EXECUTOR_MODE_PROBE).trim();
+        if (EXECUTOR_MODE_NONE.equalsIgnoreCase(executorMode)) {
             return new SmolLM2UnsupportedWarpExecutor("No SmolLM2 WARP executor is configured. Set -D"
                     + EXECUTOR_CLASS_PROPERTY
-                    + "=<executor-class> after adding a native SmolLM2 WARP executor to the classpath.");
+                    + "=<executor-class> after adding a native SmolLM2 WARP executor to the classpath, "
+                    + "or leave -D" + EXECUTOR_MODE_PROPERTY + "=probe enabled to run the built-in DirectML readiness probe.");
         }
-        return createConfiguredExecutor(executorClassName);
+        if (executorMode.isEmpty() || EXECUTOR_MODE_PROBE.equalsIgnoreCase(executorMode)) {
+            return new SmolLM2DirectMlWarpExecutor();
+        }
+        return new SmolLM2UnsupportedWarpExecutor("Unsupported SmolLM2 WARP executor mode: " + executorMode
+                + ". Supported values: probe, none. Use -D" + EXECUTOR_CLASS_PROPERTY
+                + "=<executor-class> for a custom native executor.");
     }
 
     private static SmolLM2WarpExecutor createConfiguredExecutor(String executorClassName) {
