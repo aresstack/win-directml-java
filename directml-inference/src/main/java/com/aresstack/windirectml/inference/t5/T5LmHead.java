@@ -8,7 +8,7 @@ import java.util.Objects;
  * <p>This class exists only for the v38 correctness path. Production T5
  * execution must project logits through WARP instead of Java arrays.</p>
  */
-public final class T5LmHead {
+public final class T5LmHead implements T5LogitProjector {
     private final T5TensorData lmHeadWeight;
 
     private T5LmHead(T5TensorData lmHeadWeight) {
@@ -23,6 +23,7 @@ public final class T5LmHead {
         return new T5LmHead(T5TensorData.from(weights.lmHead()));
     }
 
+    @Override
     public float[] logits(float[] decoderHiddenState) {
         Objects.requireNonNull(decoderHiddenState, "decoderHiddenState");
         if (decoderHiddenState.length != lmHeadWeight.dim(1)) {
@@ -32,6 +33,7 @@ public final class T5LmHead {
         return T5ReferenceMath.dense(decoderHiddenState, lmHeadWeight);
     }
 
+    @Override
     public int vocabularySize() {
         return lmHeadWeight.dim(0);
     }

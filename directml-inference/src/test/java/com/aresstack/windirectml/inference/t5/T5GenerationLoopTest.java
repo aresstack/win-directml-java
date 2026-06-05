@@ -46,6 +46,32 @@ class T5GenerationLoopTest {
     }
 
     @Test
+    void acceptsCustomLogitProjector() throws Exception {
+        T5Config config = T5TestFixtures.untiedConfig();
+        T5Runtime runtime = runtime(config, tensorsThatPreferEos(config));
+        T5GenerationLoop loop = T5GenerationLoop.greedy(runtime.encoderPipeline(), runtime.decoderPipeline(),
+                new T5LogitProjector() {
+                    @Override
+                    public float[] logits(float[] decoderHiddenState) {
+                        float[] logits = new float[config.vocabSize()];
+                        logits[config.eosTokenId()] = 42.0f;
+                        return logits;
+                    }
+
+                    @Override
+                    public int vocabularySize() {
+                        return config.vocabSize();
+                    }
+                });
+        T5RuntimeRequest request = T5RuntimeRequest.greedy(new int[]{1, 2}, 4, config.specialTokens());
+
+        T5RuntimeResult result = loop.generate(request);
+
+        assertEquals(T5RuntimeResult.FinishReason.stop_token, result.finishReason());
+        assertArrayEquals(new int[]{config.eosTokenId()}, result.outputTokenIds());
+    }
+
+    @Test
     void rejectsSamplingOptionsInReferenceGeneration() throws Exception {
         T5Config config = T5TestFixtures.untiedConfig();
         T5Runtime runtime = runtime(config, tensorsThatPreferEos(config));

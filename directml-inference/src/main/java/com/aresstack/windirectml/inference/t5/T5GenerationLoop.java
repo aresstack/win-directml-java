@@ -4,31 +4,39 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * Reference T5 generation loop for v38.
+ * T5 generation loop.
  *
- * <p>This loop validates the encoder/decoder/LM-head orchestration before WARP
- * kernels replace the Java reference math.</p>
+ * <p>The loop owns the seq2seq orchestration and delegates vocabulary projection
+ * to a {@link T5LogitProjector}. This lets the reference path and the first
+ * WARP-backed LM-head bridge share one token loop without copying decoder-only
+ * runtime logic.</p>
  */
 public final class T5GenerationLoop {
     private final T5EncoderPipeline encoderPipeline;
     private final T5DecoderPipeline decoderPipeline;
-    private final T5LmHead lmHead;
+    private final T5LogitProjector logitProjector;
     private final T5TokenSelector tokenSelector;
 
     private T5GenerationLoop(T5EncoderPipeline encoderPipeline,
                              T5DecoderPipeline decoderPipeline,
-                             T5LmHead lmHead,
+                             T5LogitProjector logitProjector,
                              T5TokenSelector tokenSelector) {
         this.encoderPipeline = Objects.requireNonNull(encoderPipeline, "encoderPipeline");
         this.decoderPipeline = Objects.requireNonNull(decoderPipeline, "decoderPipeline");
-        this.lmHead = Objects.requireNonNull(lmHead, "lmHead");
+        this.logitProjector = Objects.requireNonNull(logitProjector, "logitProjector");
         this.tokenSelector = Objects.requireNonNull(tokenSelector, "tokenSelector");
     }
 
     public static T5GenerationLoop greedy(T5EncoderPipeline encoderPipeline,
                                           T5DecoderPipeline decoderPipeline,
                                           T5Weights weights) {
-        return new T5GenerationLoop(encoderPipeline, decoderPipeline, T5LmHead.from(weights), T5TokenSelector.greedy());
+        return greedy(encoderPipeline, decoderPipeline, T5LmHead.from(weights));
+    }
+
+    public static T5GenerationLoop greedy(T5EncoderPipeline encoderPipeline,
+                                          T5DecoderPipeline decoderPipeline,
+                                          T5LogitProjector logitProjector) {
+        return new T5GenerationLoop(encoderPipeline, decoderPipeline, logitProjector, T5TokenSelector.greedy());
     }
 
     public T5RuntimeResult generate(T5RuntimeRequest request) {
@@ -41,7 +49,7 @@ public final class T5GenerationLoop {
         T5DecoderCache cache = T5DecoderCache.empty();
         for (int step = 0; step < request.maxNewTokens(); step++) {
             T5DecoderState state = decoderPipeline.decodeStep(decoderTokenId, encoderOutput, cache);
-            float[] logits = lmHead.logits(state.lastHiddenState());
+            float[] logits = logitProjector.logits(state.lastHiddenState());
             int nextTokenId = tokenSelector.select(logits);
             generated[generatedTokens] = nextTokenId;
             generatedTokens++;
