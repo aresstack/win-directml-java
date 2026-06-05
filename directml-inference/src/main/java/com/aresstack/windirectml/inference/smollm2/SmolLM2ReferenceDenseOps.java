@@ -119,14 +119,6 @@ final class SmolLM2ReferenceDenseOps {
     }
 
     private static float fastSilu(float value) {
-        if (value >= 10.0f) {
-            return value;
-        }
-        if (value <= -10.0f) {
-            return 0.0f;
-        }
-        int bits = (int) (-value * 12102203.161561485f + 1065353216.0f);
-        float expNeg = Float.intBitsToFloat(bits < 0 ? 0 : bits);
-        return value / (1.0f + expNeg);
+        return value / (1.0f + (float) Math.exp(-value));
     }
 }
