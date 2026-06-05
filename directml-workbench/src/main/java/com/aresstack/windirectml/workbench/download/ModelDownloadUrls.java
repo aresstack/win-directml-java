@@ -15,6 +15,13 @@ public final class ModelDownloadUrls {
     public static final String QWEN_SAFETENSORS_REPO = "Qwen/Qwen2.5-Coder-0.5B-Instruct";
     public static final String QWEN_SAFETENSORS_LOCAL_DIR = "qwen2.5-coder-0.5b-safetensors";
 
+    public static final String SMOLLM2_135M_REPO = "HuggingFaceTB/SmolLM2-135M-Instruct";
+    public static final String SMOLLM2_135M_LOCAL_DIR = "smollm2-135m-instruct";
+    public static final String SMOLLM2_360M_REPO = "HuggingFaceTB/SmolLM2-360M-Instruct";
+    public static final String SMOLLM2_360M_LOCAL_DIR = "smollm2-360m-instruct";
+    public static final String CODET5_SMALL_REPO = "Salesforce/codet5-small";
+    public static final String CODET5_SMALL_LOCAL_DIR = "codet5-small";
+
     private ModelDownloadUrls() {
     }
 
@@ -85,6 +92,35 @@ public final class ModelDownloadUrls {
     }
 
     /**
+     * Creates a complete download manifest for SmolLM2-135M-Instruct.
+     */
+    public static ModelDownloadManifest manifestForSmolLm2_135M() {
+        return manifestForLlamaStyleSafeTensors(SMOLLM2_135M_REPO, SMOLLM2_135M_LOCAL_DIR);
+    }
+
+    /**
+     * Creates a complete download manifest for SmolLM2-360M-Instruct.
+     */
+    public static ModelDownloadManifest manifestForSmolLm2_360M() {
+        return manifestForLlamaStyleSafeTensors(SMOLLM2_360M_REPO, SMOLLM2_360M_LOCAL_DIR);
+    }
+
+    /**
+     * Creates a complete download manifest for Salesforce CodeT5-small.
+     */
+    public static ModelDownloadManifest manifestForCodeT5Small() {
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "pytorch_model.bin", true);
+        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "config.json", true);
+        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "vocab.json", true);
+        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "merges.txt", true);
+        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "tokenizer_config.json", true);
+        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "special_tokens_map.json", true);
+        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "added_tokens.json", false);
+        return new ModelDownloadManifest(CODET5_SMALL_REPO, CODET5_SMALL_LOCAL_DIR, List.copyOf(descriptors));
+    }
+
+    /**
      * Creates a small manifest containing only the selected Qwen ONNX model URL.
      */
     public static ModelDownloadManifest modelFileManifestForQwen(QwenModelDownloadConfig config) {
@@ -152,6 +188,33 @@ public final class ModelDownloadUrls {
     }
 
     /**
+     * Returns download URLs for SmolLM2-135M-Instruct.
+     */
+    public static List<String> forSmolLm2_135M() {
+        return manifestForSmolLm2_135M().files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+    /**
+     * Returns download URLs for SmolLM2-360M-Instruct.
+     */
+    public static List<String> forSmolLm2_360M() {
+        return manifestForSmolLm2_360M().files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+    /**
+     * Returns download URLs for CodeT5-small.
+     */
+    public static List<String> forCodeT5Small() {
+        return manifestForCodeT5Small().files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+    /**
      * Returns only the selected Qwen ONNX file URL.
      */
     public static String selectedQwenModelUrl(QwenModelDownloadConfig config) {
@@ -163,6 +226,19 @@ public final class ModelDownloadUrls {
      */
     public static String selectedQwenSafeTensorsModelUrl() {
         return buildUrl(QWEN_SAFETENSORS_REPO, "model.safetensors");
+    }
+
+    private static ModelDownloadManifest manifestForLlamaStyleSafeTensors(String repo, String localDirName) {
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        addRootDescriptor(descriptors, repo, "model.safetensors", true);
+        addRootDescriptor(descriptors, repo, "config.json", true);
+        addRootDescriptor(descriptors, repo, "tokenizer.json", true);
+        addRootDescriptor(descriptors, repo, "tokenizer_config.json", true);
+        addRootDescriptor(descriptors, repo, "special_tokens_map.json", true);
+        addRootDescriptor(descriptors, repo, "generation_config.json", false);
+        addRootDescriptor(descriptors, repo, "merges.txt", false);
+        addRootDescriptor(descriptors, repo, "vocab.json", false);
+        return new ModelDownloadManifest(repo, localDirName, List.copyOf(descriptors));
     }
 
     private static void addQwenModelDescriptors(List<ModelFileDescriptor> descriptors,

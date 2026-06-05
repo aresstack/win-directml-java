@@ -74,6 +74,12 @@ public final class DownloadPanel extends JPanel {
         addEmbeddingRow(buttons, "Download Reranker (ms-marco-MiniLM-L-12-v2)",
                 "cross-encoder/ms-marco-MiniLM-L-12-v2", "cross-encoder-ms-marco-MiniLM-L-12-v2");
         addPhi3Row(buttons);
+        addManifestRow(buttons, "Download SmolLM2 135M Instruct (Summarizer planned)",
+                ModelDownloadUrls.manifestForSmolLm2_135M());
+        addManifestRow(buttons, "Download SmolLM2 360M Instruct (Summarizer planned)",
+                ModelDownloadUrls.manifestForSmolLm2_360M());
+        addManifestRow(buttons, "Download CodeT5 small (T5 Summarizer planned)",
+                ModelDownloadUrls.manifestForCodeT5Small());
 
         forceCheckbox = new JCheckBox("Force re-download (overwrite existing)");
 
@@ -113,6 +119,19 @@ public final class DownloadPanel extends JPanel {
 
         buttons.add(createConfigButton(modelId));
         buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(manifest.localDirName())));
+    }
+
+    private void addManifestRow(JPanel buttons, String label, ModelDownloadManifest manifest) {
+        ModelDownloadManifest effectiveManifest = overrideStore.applyOverrides(manifest);
+        manifests.put(effectiveManifest.modelId(), effectiveManifest);
+        String modelId = effectiveManifest.modelId();
+
+        JButton downloadBtn = new JButton(label);
+        downloadBtn.addActionListener(e -> startManifestDownload(modelId));
+        buttons.add(downloadBtn);
+
+        buttons.add(createConfigButton(modelId));
+        buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(effectiveManifest.localDirName())));
     }
 
     private JPanel createQwenPanel() {

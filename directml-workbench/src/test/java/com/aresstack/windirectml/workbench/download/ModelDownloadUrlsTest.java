@@ -144,4 +144,43 @@ class ModelDownloadUrlsTest {
         // Optional file is absent
         assertFalse(urls.stream().anyMatch(u -> u.endsWith("/added_tokens.json")));
     }
+
+    @Test
+    void smollm2ManifestsContainSafeTensorsAndTokenizerFiles() {
+        var manifest135 = ModelDownloadUrls.manifestForSmolLm2_135M();
+        var urls135 = manifest135.files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+        var manifest360 = ModelDownloadUrls.manifestForSmolLm2_360M();
+        var urls360 = manifest360.files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+
+        assertEquals(ModelDownloadUrls.SMOLLM2_135M_LOCAL_DIR, manifest135.localDirName());
+        assertEquals(ModelDownloadUrls.SMOLLM2_360M_LOCAL_DIR, manifest360.localDirName());
+        assertTrue(urls135.contains("https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/model.safetensors"));
+        assertTrue(urls135.contains("https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/tokenizer.json"));
+        assertTrue(urls135.contains("https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/merges.txt"));
+        assertTrue(urls135.contains("https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/vocab.json"));
+        assertTrue(urls360.contains("https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct/resolve/main/model.safetensors"));
+        assertTrue(urls360.contains("https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct/resolve/main/config.json"));
+    }
+
+    @Test
+    void codeT5SmallManifestContainsSeq2SeqCheckpointAndTokenizerFiles() {
+        var manifest = ModelDownloadUrls.manifestForCodeT5Small();
+        var urls = manifest.files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+
+        assertEquals(ModelDownloadUrls.CODET5_SMALL_LOCAL_DIR, manifest.localDirName());
+        assertEquals("Salesforce/codet5-small", manifest.modelId());
+        assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/pytorch_model.bin"));
+        assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/config.json"));
+        assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/vocab.json"));
+        assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/merges.txt"));
+        assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/tokenizer_config.json"));
+        assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/special_tokens_map.json"));
+    }
+
 }
