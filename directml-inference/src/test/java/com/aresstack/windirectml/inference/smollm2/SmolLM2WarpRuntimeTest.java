@@ -19,6 +19,8 @@ class SmolLM2WarpRuntimeTest {
             assertFalse(runtime.executable());
             assertTrue(runtime.status().reason().contains(SmolLM2WarpExecutorFactory.EXECUTOR_CLASS_PROPERTY));
             assertFalse(runtime.plan().bufferPlan().entries().isEmpty());
+            assertFalse(runtime.uploadManifest().weightEntries().isEmpty());
+            assertEquals(runtime.plan().bufferPlan().totalWeightBytes(), runtime.uploadManifest().totalUploadBytes());
 
             SmolLM2RuntimeUnsupportedException exception = assertThrows(SmolLM2RuntimeUnsupportedException.class,
                     () -> runtime.generateTokenIds(new SmolLM2TokenRuntimeRequest(List.of(0), 1, null)));
@@ -36,7 +38,7 @@ class SmolLM2WarpRuntimeTest {
 
     @Test
     void explicitWarpRuntimeUsesInjectedExecutorWhenAvailable() throws Exception {
-        SmolLM2WarpExecutor executor = new ImmediateTokenWarpExecutor();
+        ImmediateTokenWarpExecutor executor = new ImmediateTokenWarpExecutor();
 
         try (SmolLM2Runtime runtime = SmolLM2Runtime.loadWarp(createExecutablePackage(), null, 16, executor)) {
             SmolLM2TokenRuntimeResult result = runtime.generateTokenIds(
@@ -47,7 +49,9 @@ class SmolLM2WarpRuntimeTest {
             assertEquals(List.of(4, 5, 7), result.fullTokenIds());
             assertEquals("length", result.finishReason());
             assertTrue(runtime.warpExecutionStatus().orElseThrow().executable());
+            assertFalse(executor.closed());
         }
+        assertTrue(executor.closed());
     }
 
     @Test
@@ -82,6 +86,14 @@ class SmolLM2WarpRuntimeTest {
 
     private static final class ImmediateTokenWarpExecutor implements SmolLM2WarpExecutor {
 
+        private SmolLM2WarpSession session;
+
+        @Override
+        public SmolLM2WarpSession openSession(SmolLM2Weights weights, SmolLM2WarpRuntimePlan plan) {
+            session = SmolLM2WarpExecutor.super.openSession(weights, plan);
+            return session;
+        }
+
         @Override
         public SmolLM2WarpExecutionStatus inspect(SmolLM2WarpRuntimePlan plan) {
             return new SmolLM2WarpExecutionStatus(true, "warp", "test executor is available", List.of());
@@ -98,6 +110,10 @@ class SmolLM2WarpRuntimeTest {
                     1,
                     "length",
                     request.maxNewTokens());
+        }
+
+        boolean closed() {
+            return session != null && session.closed();
         }
     }
 }

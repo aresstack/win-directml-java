@@ -6,6 +6,13 @@ package com.aresstack.windirectml.inference.smollm2;
 public interface SmolLM2WarpExecutor {
 
     /**
+     * Open a prepared execution session for the runtime plan.
+     */
+    default SmolLM2WarpSession openSession(SmolLM2Weights weights, SmolLM2WarpRuntimePlan plan) {
+        return new SmolLM2ExecutorBackedWarpSession(this, weights, plan);
+    }
+
+    /**
      * Report whether this executor can run the prepared plan on the current machine.
      */
     SmolLM2WarpExecutionStatus inspect(SmolLM2WarpRuntimePlan plan);
