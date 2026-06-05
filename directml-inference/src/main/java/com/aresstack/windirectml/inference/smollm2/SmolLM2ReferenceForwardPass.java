@@ -79,8 +79,9 @@ public final class SmolLM2ReferenceForwardPass {
             throw new IllegalArgumentException("KV cache contains more tokens than the supplied sequence");
         }
         float[] logits = null;
+        int lastPosition = tokenIds.size() - 1;
         for (int position = startPosition; position < tokenIds.size(); position++) {
-            logits = logitsForToken(tokenIds.get(position), position, kvCache);
+            logits = logitsForToken(tokenIds.get(position), position, kvCache, position == lastPosition);
         }
         if (logits == null) {
             logits = logitsForLastToken(tokenIds);
@@ -88,7 +89,7 @@ public final class SmolLM2ReferenceForwardPass {
         return logits;
     }
 
-    private float[] logitsForToken(int tokenId, int position, SmolLM2ReferenceKvCache kvCache) {
+    private float[] logitsForToken(int tokenId, int position, SmolLM2ReferenceKvCache kvCache, boolean projectLogits) {
         if (tokenId < 0 || tokenId >= config.vocabSize()) {
             throw new IllegalArgumentException("tokenId out of vocabulary range: " + tokenId);
         }
@@ -104,6 +105,9 @@ public final class SmolLM2ReferenceForwardPass {
         }
         for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
             hidden = runLayerStep(hidden, layers.get(layerIndex), kvCache.layer(layerIndex), position);
+        }
+        if (!projectLogits) {
+            return null;
         }
         float[] normalized = hidden.clone();
         long finalNormStart = System.nanoTime();
