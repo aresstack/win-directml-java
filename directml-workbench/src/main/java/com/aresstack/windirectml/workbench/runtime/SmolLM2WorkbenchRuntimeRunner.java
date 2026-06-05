@@ -9,6 +9,7 @@ import com.aresstack.windirectml.inference.smollm2.SmolLM2RuntimePackage;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2RuntimeRequest;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2RuntimeResult;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2WarpExecutionStatus;
+import com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2WarpRuntime;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2Tokenizer;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2WdmlPackCompiler;
@@ -58,7 +59,8 @@ public final class SmolLM2WorkbenchRuntimeRunner {
 
         SmolLM2RuntimePackage runtimePackage = SmolLM2RuntimePackage.open(packagePath);
         SmolLM2Tokenizer tokenizer = SmolLM2Tokenizer.load(tokenizerPath);
-        Optional<SmolLM2WarpExecutionStatus> warpStatus = inspectWarpStatusIfRequested(runtimePackage, safeBackend);
+        Optional<SmolLM2WarpReadinessReport> warpReadiness = inspectWarpReadinessIfRequested(runtimePackage, safeBackend);
+        Optional<SmolLM2WarpExecutionStatus> warpStatus = warpReadiness.map(SmolLM2WorkbenchRuntimeRunner::toExecutionStatus);
         try (SmolLM2Runtime runtime = loadRuntime(runtimePackage, tokenizer, safeBackend, warpStatus)) {
             SmolLM2RuntimeResult result = runtime.generate(new SmolLM2RuntimeRequest(
                     prompt,
@@ -74,7 +76,8 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     fallbackReason(safeBackend, runtime.runtimeMode(), effectiveWarpStatus),
                     warnings(effectiveWarpStatus),
                     packagePath,
-                    result.diagnostics());
+                    result.diagnostics(),
+                    warpReadiness);
         }
     }
 
@@ -94,18 +97,26 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         return SmolLM2Runtime.loadReference(runtimePackage, tokenizer);
     }
 
-    private Optional<SmolLM2WarpExecutionStatus> inspectWarpStatusIfRequested(SmolLM2RuntimePackage runtimePackage,
-                                                                              Backend requestedBackend) {
+    private Optional<SmolLM2WarpReadinessReport> inspectWarpReadinessIfRequested(SmolLM2RuntimePackage runtimePackage,
+                                                                                   Backend requestedBackend) {
         if (requestedBackend == Backend.CPU) {
             return Optional.empty();
         }
         if (requestedBackend == Backend.AUTO || isWarpLike(requestedBackend)) {
             try (SmolLM2WarpRuntime warpRuntime = SmolLM2WarpRuntime.prepare(
                     runtimePackage, runtimePackage.config().maxPositionEmbeddings())) {
-                return Optional.of(warpRuntime.status());
+                return Optional.of(SmolLM2WarpReadinessReport.fromRuntime(warpRuntime));
             }
         }
         return Optional.empty();
+    }
+
+    private static SmolLM2WarpExecutionStatus toExecutionStatus(SmolLM2WarpReadinessReport report) {
+        return new SmolLM2WarpExecutionStatus(
+                report.executable(),
+                report.runtimeMode(),
+                report.reason(),
+                report.warnings());
     }
 
     private static boolean isWarpLike(Backend backend) {
@@ -192,7 +203,8 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                          String fallbackReason,
                          List<String> runtimeWarnings,
                          Path packagePath,
-                         SmolLM2GenerationDiagnostics diagnostics) {
+                         SmolLM2GenerationDiagnostics diagnostics,
+                         Optional<SmolLM2WarpReadinessReport> warpReadinessReport) {
         public Result {
             text = text == null ? "" : text;
             finishReason = finishReason == null ? "" : finishReason;
@@ -202,6 +214,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
             runtimeWarnings = runtimeWarnings == null ? List.of() : List.copyOf(runtimeWarnings);
             packagePath = Objects.requireNonNull(packagePath, "packagePath");
             diagnostics = Objects.requireNonNull(diagnostics, "diagnostics");
+            warpReadinessReport = warpReadinessReport == null ? Optional.empty() : warpReadinessReport;
         }
     }
 }

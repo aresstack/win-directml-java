@@ -163,7 +163,8 @@ public final class SummarizerPanel extends JPanel {
         if (qwenTestModel) {
             appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
         } else if (smolLm2Model) {
-            appendResult("  NOTE: SmolLM2 currently uses the Java reference runtime. First use compiles SafeTensors to model.wdmlpack.");
+            appendResult("  NOTE: SmolLM2 uses the Java reference runtime unless a native WARP executor is configured.");
+            appendResult("  NOTE: First use compiles SafeTensors to model.wdmlpack.");
         } else if (isT5Model(selectedModel)) {
             appendResult("  NOTE: T5-family models use the seq2seq runtime package path (.wdmlpack or SafeTensors auto-compile).");
         }
@@ -228,6 +229,7 @@ public final class SummarizerPanel extends JPanel {
         for (String warning : result.runtimeWarnings()) {
             appendResult("Runtime warning: " + warning);
         }
+        result.warpReadinessReport().ifPresent(this::appendSmolLm2WarpReadiness);
         appendResult("Runtime package: " + result.packagePath().getFileName());
         appendResult("");
         appendResult("OUTPUT:");
@@ -247,6 +249,19 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
+
+
+    private void appendSmolLm2WarpReadiness(com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport report) {
+        appendResult("WARP readiness: " + (report.executable() ? "executable" : "prepared, not executable"));
+        appendResult("  Weight tensors: " + report.weightTensorCount()
+                + ", upload: " + com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport.formatBytes(report.totalUploadBytes()));
+        appendResult("  KV cache: " + com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport.formatBytes(report.totalKvCacheBytes())
+                + ", scratch: " + com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport.formatBytes(report.totalScratchBytes()));
+        appendResult("  Kernel steps: " + report.kernelStepCount() + ", alignment: " + report.alignmentBytes() + " bytes");
+        if (report.preparedButNotExecutable()) {
+            appendResult("  Native executor missing; prepared upload/session metadata is available for the next WARP implementation step.");
+        }
+    }
 
     private void runT5Generation(Path modelDir, String text, int maxTokens, String selectedModel)
             throws InferenceException {
