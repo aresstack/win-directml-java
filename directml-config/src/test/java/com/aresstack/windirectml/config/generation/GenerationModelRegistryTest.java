@@ -43,6 +43,33 @@ class GenerationModelRegistryTest {
         }
     }
 
+
+    @Test
+    void registryContainsSmolLm2ModelsAsPlanned() {
+        String[] smolIds = {
+                "HuggingFaceTB/SmolLM2-135M-Instruct",
+                "HuggingFaceTB/SmolLM2-360M-Instruct"
+        };
+        for (String id : smolIds) {
+            GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId(id);
+            assertNotNull(entry, "registry must contain " + id);
+            assertEquals(GenerationModelRegistry.Architecture.CAUSAL_LM, entry.architecture());
+            assertEquals(GenerationModelRegistry.Status.PLANNED, entry.status());
+            assertFalse(entry.isRunnable(), id + " must not be advertised as runnable yet");
+        }
+    }
+
+    @Test
+    void registryContainsCodeT5AsPlannedSeq2Seq() {
+        GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId("Salesforce/codet5-small");
+
+        assertNotNull(entry);
+        assertEquals(GenerationModelRegistry.Architecture.SEQ2SEQ, entry.architecture());
+        assertEquals(GenerationModelRegistry.Status.PLANNED, entry.status());
+        assertEquals(ChatTemplate.RAW, entry.chatTemplate());
+        assertFalse(entry.isRunnable());
+    }
+
     @Test
     void noQwenModelIsRunnable() {
         List<GenerationModelRegistry.Entry> runnable = GenerationModelRegistry.runnableEntries();
@@ -88,10 +115,9 @@ class GenerationModelRegistryTest {
             assertEquals(GenerationModelRegistry.Architecture.CAUSAL_LM, e.architecture());
         }
 
-        // No seq2seq entries yet
         List<GenerationModelRegistry.Entry> seq2seq =
                 GenerationModelRegistry.entriesByArchitecture(GenerationModelRegistry.Architecture.SEQ2SEQ);
-        assertTrue(seq2seq.isEmpty());
+        assertFalse(seq2seq.isEmpty(), "T5/CodeT5 family should now be visible as planned metadata");
     }
 
     @Test

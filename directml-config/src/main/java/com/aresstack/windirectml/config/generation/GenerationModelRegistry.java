@@ -241,6 +241,48 @@ public final class GenerationModelRegistry {
                         "model/Qwen/Qwen2.5-Coder-3B-Instruct"),
                 "Largest planned Qwen2.5-Coder variant for local deployment."));
 
+
+        // --- SmolLM2: compact decoder-only families for workstation summarization ---
+        entries.add(new Entry(
+                "HuggingFaceTB/SmolLM2-135M-Instruct",
+                Architecture.CAUSAL_LM,
+                "Hugging Face TB",
+                "135M",
+                ChatTemplate.UNKNOWN,
+                Status.PLANNED,
+                Arrays.asList(
+                        "model/smollm2-135m-instruct",
+                        "model/HuggingFaceTB/SmolLM2-135M-Instruct"),
+                "Very small decoder-only candidate for simple local summaries. "
+                        + "Workbench metadata is available; runtime implementation is pending."));
+
+        entries.add(new Entry(
+                "HuggingFaceTB/SmolLM2-360M-Instruct",
+                Architecture.CAUSAL_LM,
+                "Hugging Face TB",
+                "360M",
+                ChatTemplate.UNKNOWN,
+                Status.PLANNED,
+                Arrays.asList(
+                        "model/smollm2-360m-instruct",
+                        "model/HuggingFaceTB/SmolLM2-360M-Instruct"),
+                "Small decoder-only candidate and likely best sub-0.5B fallback. "
+                        + "Workbench metadata is available; runtime implementation is pending."));
+
+        // --- T5/CodeT5: encoder-decoder family for future summarization/code tasks ---
+        entries.add(new Entry(
+                "Salesforce/codet5-small",
+                Architecture.SEQ2SEQ,
+                "Salesforce",
+                "60M",
+                ChatTemplate.RAW,
+                Status.PLANNED,
+                Arrays.asList(
+                        "model/codet5-small",
+                        "model/Salesforce/codet5-small"),
+                "T5-style encoder-decoder candidate. Family metadata and package shell exist; "
+                        + "real T5 inference is pending."));
+
         ENTRIES = Collections.unmodifiableList(entries);
 
         Map<String, Entry> byKey = new LinkedHashMap<String, Entry>();

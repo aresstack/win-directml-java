@@ -2,6 +2,7 @@ package com.aresstack.windirectml.workbench;
 
 import com.aresstack.windirectml.runtime.facade.Backend;
 import com.aresstack.windirectml.workbench.download.DownloadOverrideStore;
+import com.aresstack.windirectml.workbench.download.QwenDownloadSource;
 import com.aresstack.windirectml.workbench.download.QwenOnnxModelVariant;
 
 import java.nio.file.Path;
@@ -11,12 +12,13 @@ import java.nio.file.Path;
  */
 public final class WorkbenchModel {
 
-    private volatile Backend backend = Backend.AUTO;
+    private volatile Backend backend = Backend.WARP;
     private volatile Path modelRoot = DownloadOverrideStore.defaultModelRoot();
     private volatile String embeddingModel = "all-MiniLM-L6-v2";
     private volatile String rerankerModel = "cross-encoder-ms-marco-MiniLM-L-6-v2";
     private volatile String summarizerModel = "microsoft/Phi-3-mini-4k-instruct-onnx";
     private volatile String qwenModelFile = QwenOnnxModelVariant.Q4F16.modelFileName();
+    private volatile QwenDownloadSource qwenDownloadSource = QwenDownloadSource.ONNX;
 
     public Backend getBackend() {
         return backend;
@@ -65,4 +67,13 @@ public final class WorkbenchModel {
     public void setQwenModelFile(String qwenModelFile) {
         this.qwenModelFile = QwenOnnxModelVariant.fromModelFileName(qwenModelFile).modelFileName();
     }
+
+    public QwenDownloadSource getQwenDownloadSource() {
+        return qwenDownloadSource;
+    }
+
+    public void setQwenDownloadSource(QwenDownloadSource qwenDownloadSource) {
+        this.qwenDownloadSource = qwenDownloadSource == null ? QwenDownloadSource.ONNX : qwenDownloadSource;
+    }
+
 }

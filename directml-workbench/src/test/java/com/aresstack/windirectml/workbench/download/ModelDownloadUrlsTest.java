@@ -69,6 +69,22 @@ class ModelDownloadUrlsTest {
         }
     }
 
+
+    @Test
+    void qwenSafeTensorsManifestUsesCanonicalRepoRootFiles() {
+        var manifest = ModelDownloadUrls.manifestForQwenSafeTensors();
+        var urls = manifest.files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+
+        assertEquals(ModelDownloadUrls.QWEN_SAFETENSORS_LOCAL_DIR, manifest.localDirName());
+        assertTrue(urls.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct/resolve/main/model.safetensors"));
+        assertTrue(urls.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct/resolve/main/config.json"));
+        assertTrue(urls.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct/resolve/main/tokenizer.json"));
+        assertEquals("https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct/resolve/main/model.safetensors",
+                ModelDownloadUrls.selectedQwenSafeTensorsModelUrl());
+    }
+
     /**
      * Regression: copied Qwen URLs must exactly match the remote paths used by the downloader.
      * If someone updates the config remote paths but forgets URL generation, this test fails.

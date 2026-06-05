@@ -99,7 +99,7 @@ class WorkbenchSmokeTest {
     @Test
     void workbenchModelDefaults() {
         var model = new WorkbenchModel();
-        assertEquals(com.aresstack.windirectml.runtime.facade.Backend.AUTO, model.getBackend());
+        assertEquals(com.aresstack.windirectml.runtime.facade.Backend.WARP, model.getBackend());
         // Model root now defaults to %APPDATA%/.directml/model (or $HOME/.directml/model)
         assertTrue(model.getModelRoot().toString().endsWith(".directml" + java.io.File.separator + "model")
                         || model.getModelRoot().toString().endsWith(".directml/model"),
@@ -107,5 +107,7 @@ class WorkbenchSmokeTest {
         assertEquals("all-MiniLM-L6-v2", model.getEmbeddingModel());
         assertEquals("cross-encoder-ms-marco-MiniLM-L-6-v2", model.getRerankerModel());
         assertEquals("microsoft/Phi-3-mini-4k-instruct-onnx", model.getSummarizerModel());
+        assertEquals(com.aresstack.windirectml.workbench.download.QwenDownloadSource.ONNX,
+                model.getQwenDownloadSource());
     }
 }

@@ -1,11 +1,13 @@
 package com.aresstack.windirectml.workbench.panels;
 
+import com.aresstack.windirectml.inference.qwen.QwenWdmlPackCompileTool;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.download.DownloadFolderOpener;
 import com.aresstack.windirectml.workbench.download.DownloadOverrideStore;
 import com.aresstack.windirectml.workbench.download.ModelDownloadManifest;
 import com.aresstack.windirectml.workbench.download.ModelDownloadUrls;
 import com.aresstack.windirectml.workbench.download.ModelDownloader;
+import com.aresstack.windirectml.workbench.download.QwenDownloadSource;
 import com.aresstack.windirectml.workbench.download.QwenModelDownloadConfig;
 import com.aresstack.windirectml.workbench.download.QwenOnnxModelVariant;
 
@@ -46,6 +48,7 @@ public final class DownloadPanel extends JPanel {
     private final DownloadOverrideStore overrideStore;
     private final Map<String, ModelDownloadManifest> manifests = new HashMap<String, ModelDownloadManifest>();
 
+    private JComboBox<QwenDownloadSource> qwenSourceSelector;
     private JComboBox<QwenOnnxModelVariant> qwenVariantSelector;
     private JTextField qwenSelectedUrlField;
     private JCheckBox downloadAllQwenVariantsCheckbox;
@@ -114,25 +117,36 @@ public final class DownloadPanel extends JPanel {
 
     private JPanel createQwenPanel() {
         JPanel panel = new JPanel(new BorderLayout(4, 4));
-        panel.setBorder(BorderFactory.createTitledBorder("Qwen2.5-Coder 0.5B ONNX"));
+        panel.setBorder(BorderFactory.createTitledBorder("Qwen2.5-Coder 0.5B"));
 
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-        controls.add(new JLabel("Quantisierung:"));
+        controls.add(new JLabel("Quelle:"));
 
+        qwenSourceSelector = new JComboBox<QwenDownloadSource>(QwenDownloadSource.values());
+        qwenSourceSelector.setSelectedItem(model.getQwenDownloadSource());
+        qwenSourceSelector.addActionListener(e -> updateSelectedQwenSource());
+        controls.add(qwenSourceSelector);
+
+        controls.add(new JLabel("ONNX-Variante:"));
         qwenVariantSelector = new JComboBox<QwenOnnxModelVariant>(QwenOnnxModelVariant.values());
         qwenVariantSelector.setSelectedItem(QwenOnnxModelVariant.fromModelFileName(model.getQwenModelFile()));
-        qwenVariantSelector.addActionListener(e -> updateSelectedQwenVariant());
+        qwenVariantSelector.addActionListener(e -> updateSelectedQwenSource());
         controls.add(qwenVariantSelector);
 
         JButton downloadBtn = new JButton("Download selected Qwen");
         downloadBtn.addActionListener(e -> startQwenDownload());
         controls.add(downloadBtn);
 
+        JButton compileBtn = new JButton("Compile SafeTensors → wdmlpack");
+        compileBtn.setToolTipText("Compile downloaded Qwen SafeTensors into the selected runtime package name.");
+        compileBtn.addActionListener(e -> startQwenSafeTensorsCompile());
+        controls.add(compileBtn);
+
         downloadAllQwenVariantsCheckbox = new JCheckBox("alle ONNX-Varianten herunterladen");
         downloadAllQwenVariantsCheckbox.setToolTipText("Nur aktivieren, wenn alle Qwen-ONNX-Dateien vorab geladen werden sollen.");
         controls.add(downloadAllQwenVariantsCheckbox);
 
-        controls.add(createOpenFolderButton(() -> model.getModelRoot().resolve(QwenModelDownloadConfig.LOCAL_DIR_NAME)));
+        controls.add(createOpenFolderButton(this::selectedQwenTargetDir));
         panel.add(controls, BorderLayout.NORTH);
 
         JPanel urlPanel = new JPanel(new BorderLayout(4, 4));
@@ -145,17 +159,45 @@ public final class DownloadPanel extends JPanel {
         urlPanel.add(copyButton, BorderLayout.EAST);
         panel.add(urlPanel, BorderLayout.SOUTH);
 
-        updateSelectedQwenVariant();
+        updateSelectedQwenSource();
         return panel;
     }
 
-    private void updateSelectedQwenVariant() {
+    private void updateSelectedQwenSource() {
+        QwenDownloadSource source = selectedQwenSource();
+        model.setQwenDownloadSource(source);
         QwenOnnxModelVariant variant = selectedQwenVariant();
         model.setQwenModelFile(variant.modelFileName());
-        QwenModelDownloadConfig config = QwenModelDownloadConfig.forVariant(variant);
-        if (qwenSelectedUrlField != null) {
-            qwenSelectedUrlField.setText(ModelDownloadUrls.selectedQwenModelUrl(config));
+
+        boolean onnx = source == QwenDownloadSource.ONNX;
+        if (qwenVariantSelector != null) {
+            qwenVariantSelector.setEnabled(onnx);
         }
+        if (downloadAllQwenVariantsCheckbox != null) {
+            downloadAllQwenVariantsCheckbox.setEnabled(onnx);
+            if (!onnx) {
+                downloadAllQwenVariantsCheckbox.setSelected(false);
+            }
+        }
+        if (qwenSelectedUrlField != null) {
+            if (onnx) {
+                QwenModelDownloadConfig config = QwenModelDownloadConfig.forVariant(variant);
+                qwenSelectedUrlField.setText(ModelDownloadUrls.selectedQwenModelUrl(config));
+            } else {
+                qwenSelectedUrlField.setText(ModelDownloadUrls.selectedQwenSafeTensorsModelUrl());
+            }
+        }
+    }
+
+    private QwenDownloadSource selectedQwenSource() {
+        if (qwenSourceSelector == null) {
+            return model.getQwenDownloadSource();
+        }
+        Object selected = qwenSourceSelector.getSelectedItem();
+        if (selected instanceof QwenDownloadSource source) {
+            return source;
+        }
+        return QwenDownloadSource.ONNX;
     }
 
     private QwenOnnxModelVariant selectedQwenVariant() {
@@ -237,12 +279,19 @@ public final class DownloadPanel extends JPanel {
     }
 
     private void startQwenDownload() {
+        QwenDownloadSource source = selectedQwenSource();
         QwenOnnxModelVariant variant = selectedQwenVariant();
+        model.setQwenDownloadSource(source);
         model.setQwenModelFile(variant.modelFileName());
 
         ModelDownloadManifest manifest;
         String label;
-        if (downloadAllQwenVariantsCheckbox != null && downloadAllQwenVariantsCheckbox.isSelected()) {
+        if (source == QwenDownloadSource.SAFETENSORS) {
+            manifest = ModelDownloadUrls.manifestForQwenSafeTensors();
+            label = manifest.modelId() + " (SafeTensors)";
+            appendLog("Selected Qwen SafeTensors URL: " + ModelDownloadUrls.selectedQwenSafeTensorsModelUrl());
+            appendLog("Runtime package target after compile: " + selectedQwenRuntimePackagePath());
+        } else if (downloadAllQwenVariantsCheckbox != null && downloadAllQwenVariantsCheckbox.isSelected()) {
             manifest = ModelDownloadUrls.manifestForAllQwenVariants();
             label = manifest.modelId() + " (all ONNX variants)";
             appendLog("Selected Qwen file for runtime remains: " + variant.modelFileName());
@@ -253,6 +302,64 @@ public final class DownloadPanel extends JPanel {
             appendLog("Selected Qwen URL: " + ModelDownloadUrls.selectedQwenModelUrl(config));
         }
         startDownload(manifest, label);
+    }
+
+    private void startQwenSafeTensorsCompile() {
+        Path targetDir = selectedQwenTargetDir();
+        Path output = selectedQwenRuntimePackagePath();
+        appendLog("Compiling Qwen SafeTensors: " + targetDir + " -> " + output);
+
+        new SwingWorker<Boolean, String>() {
+            @Override
+            protected Boolean doInBackground() {
+                try {
+                    QwenWdmlPackCompileTool.CompileResult result =
+                            QwenWdmlPackCompileTool.compileSafeTensorsDirectory(
+                                    new QwenWdmlPackCompileTool.CompileOptions(
+                                            targetDir, output, true, false, false, true));
+                    publish("  runtimeLoadable=" + result.runtimeLoadable()
+                            + ", mode=" + result.runtimeLoadMode()
+                            + ", tensors=" + result.tensorCount());
+                    publish("  Wrote: " + result.output());
+                    return true;
+                } catch (Exception ex) {
+                    publish("ERROR: " + ex.getMessage());
+                    return false;
+                }
+            }
+
+            @Override
+            protected void process(java.util.List<String> chunks) {
+                for (String msg : chunks) {
+                    appendLog(msg);
+                }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    appendLog(get() ? "Qwen SafeTensors compile finished."
+                            : "Qwen SafeTensors compile ended with errors.");
+                } catch (Exception ex) {
+                    appendLog("Qwen SafeTensors compile ended with errors: " + ex.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    private Path selectedQwenTargetDir() {
+        if (selectedQwenSource() == QwenDownloadSource.SAFETENSORS) {
+            return model.getModelRoot().resolve(ModelDownloadUrls.QWEN_SAFETENSORS_LOCAL_DIR);
+        }
+        return model.getModelRoot().resolve(QwenModelDownloadConfig.LOCAL_DIR_NAME);
+    }
+
+    private Path selectedQwenRuntimePackagePath() {
+        String modelFile = model.getQwenModelFile();
+        String base = modelFile.endsWith(".onnx")
+                ? modelFile.substring(0, modelFile.length() - ".onnx".length())
+                : modelFile;
+        return selectedQwenTargetDir().resolve(base + ".wdmlpack");
     }
 
     private void startDownload(ModelDownloadManifest manifest, String label) {

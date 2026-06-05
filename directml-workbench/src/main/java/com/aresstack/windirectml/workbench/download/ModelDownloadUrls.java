@@ -12,6 +12,8 @@ import java.util.List;
 public final class ModelDownloadUrls {
 
     private static final String HF_BASE_URL = "https://huggingface.co";
+    public static final String QWEN_SAFETENSORS_REPO = "Qwen/Qwen2.5-Coder-0.5B-Instruct";
+    public static final String QWEN_SAFETENSORS_LOCAL_DIR = "qwen2.5-coder-0.5b-safetensors";
 
     private ModelDownloadUrls() {
     }
@@ -63,6 +65,23 @@ public final class ModelDownloadUrls {
         addQwenModelDescriptors(descriptors, config);
         addQwenRootDescriptors(descriptors, config);
         return new ModelDownloadManifest(config.localDirName(), config.localDirName(), List.copyOf(descriptors));
+    }
+
+    /**
+     * Creates a complete download manifest for the canonical Qwen dense SafeTensors repository.
+     */
+    public static ModelDownloadManifest manifestForQwenSafeTensors() {
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "model.safetensors", true);
+        addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "config.json", true);
+        addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "tokenizer.json", true);
+        addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "tokenizer_config.json", true);
+        addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "special_tokens_map.json", true);
+        addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "generation_config.json", false);
+        addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "merges.txt", false);
+        addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "vocab.json", false);
+        return new ModelDownloadManifest(QWEN_SAFETENSORS_LOCAL_DIR, QWEN_SAFETENSORS_LOCAL_DIR,
+                List.copyOf(descriptors));
     }
 
     /**
@@ -139,6 +158,13 @@ public final class ModelDownloadUrls {
         return buildUrl(config.repo(), config.remoteModelPath());
     }
 
+    /**
+     * Returns the canonical Qwen dense SafeTensors model URL.
+     */
+    public static String selectedQwenSafeTensorsModelUrl() {
+        return buildUrl(QWEN_SAFETENSORS_REPO, "model.safetensors");
+    }
+
     private static void addQwenModelDescriptors(List<ModelFileDescriptor> descriptors,
                                                 QwenModelDownloadConfig config) {
         addQwenDescriptor(descriptors, config.modelFile(), true,
@@ -157,6 +183,12 @@ public final class ModelDownloadUrls {
         for (String file : config.optionalFiles()) {
             addQwenDescriptor(descriptors, file, false, file, file, config.repo());
         }
+    }
+
+    private static void addRootDescriptor(List<ModelFileDescriptor> descriptors, String repo,
+                                          String fileName, boolean required) {
+        String url = buildUrl(repo, fileName);
+        descriptors.add(new ModelFileDescriptor(fileName, required, url, url, fileName));
     }
 
     private static void addQwenDescriptor(List<ModelFileDescriptor> descriptors, String displayName,

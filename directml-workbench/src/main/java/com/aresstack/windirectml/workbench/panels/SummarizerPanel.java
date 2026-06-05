@@ -91,7 +91,7 @@ public final class SummarizerPanel extends JPanel {
 
     private String[] buildSummarizerModelOptions() {
         List<String> options = new ArrayList<>();
-        for (GenerationModelRegistry.Entry entry : GenerationModelRegistry.runnableEntries()) {
+        for (GenerationModelRegistry.Entry entry : GenerationModelRegistry.entries()) {
             options.add(entry.modelId());
         }
         Entry qwen = GenerationModelRegistry.findByModelId(QWEN05_MODEL_ID);
@@ -146,8 +146,9 @@ public final class SummarizerPanel extends JPanel {
                 return;
             }
             if (entry.status() == GenerationModelRegistry.Status.PLANNED && !qwenTestModel) {
-                appendResult("ERROR: Model '" + selectedModel + "' is not yet implemented.");
-                appendResult("  Status: planned. Runtime support is in progress.");
+                appendResult("ERROR: Model '" + selectedModel + "' is selectable but not executable yet.");
+                appendResult("  Status: planned. Runtime support is in progress for family "
+                        + entry.architecture().token() + ".");
                 return;
             }
         }
@@ -156,7 +157,7 @@ public final class SummarizerPanel extends JPanel {
         appendResult("Loading generation model: " + selectedModel
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
         if (qwenTestModel) {
-            appendResult("  NOTE: Qwen GPU acceleration depends on the selected backend (see Config tab).");
+            appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
         }
 
         new SwingWorker<Void, Void>() {
@@ -181,10 +182,7 @@ public final class SummarizerPanel extends JPanel {
 
     private void runPhi3Summarizer(Path modelDir, String text, int maxTokens) throws Exception {
         validatePhi3ModelFiles(modelDir);
-        // Phi3 has no hybrid prefill/decode split — map HYBRID to AUTO so the
-        // user's backend choice doesn't crash this engine. HYBRID is Qwen-specific.
-        String rawBackend = model.getBackend().name().toLowerCase();
-        String backend = "hybrid".equals(rawBackend) ? "auto" : rawBackend;
+        String backend = model.getBackend().name().toLowerCase();
         long start = System.nanoTime();
         try (var summarizer = new Phi3Summarizer(modelDir, maxTokens, backend)) {
             appendResult("Initializing model...");

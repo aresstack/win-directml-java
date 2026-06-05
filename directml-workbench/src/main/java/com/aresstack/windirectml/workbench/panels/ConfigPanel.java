@@ -42,7 +42,7 @@ public final class ConfigPanel extends JPanel {
         gbc.gridy = row;
         gbc.weightx = 0;
         form.add(new JLabel("Backend:"), gbc);
-        backendCombo = new JComboBox<>(Backend.values());
+        backendCombo = new JComboBox<>(new Backend[]{Backend.WARP, Backend.AUTO});
         backendCombo.setSelectedItem(model.getBackend());
         backendCombo.addActionListener(e -> model.setBackend((Backend) backendCombo.getSelectedItem()));
         gbc.gridx = 1;
@@ -117,7 +117,7 @@ public final class ConfigPanel extends JPanel {
         gbc.gridy = row;
         gbc.weightx = 0;
         form.add(new JLabel("Summarizer Model:"), gbc);
-        var summarizerOptions = GenerationModelRegistry.runnableEntries()
+        var summarizerOptions = GenerationModelRegistry.entries()
                 .stream().map(GenerationModelRegistry.Entry::modelId).toArray(String[]::new);
         summarizerModelCombo = new JComboBox<>(summarizerOptions);
         summarizerModelCombo.setSelectedItem(model.getSummarizerModel());
