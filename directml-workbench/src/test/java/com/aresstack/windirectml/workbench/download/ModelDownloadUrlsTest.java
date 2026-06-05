@@ -192,7 +192,7 @@ class ModelDownloadUrlsTest {
     }
 
     @Test
-    void codeT5SmallManifestContainsSeq2SeqCheckpointAndTokenizerFiles() {
+    void codeT5SmallManifestContainsMetadataAndTokenizerFilesOnly() {
         var manifest = ModelDownloadUrls.manifestForCodeT5Small();
         var urls = manifest.files().stream()
                 .map(ModelFileDescriptor::defaultUrl)
@@ -200,7 +200,7 @@ class ModelDownloadUrlsTest {
 
         assertEquals(ModelDownloadUrls.CODET5_SMALL_LOCAL_DIR, manifest.localDirName());
         assertEquals("Salesforce/codet5-small", manifest.modelId());
-        assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/pytorch_model.bin"));
+        assertFalse(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/pytorch_model.bin"));
         assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/config.json"));
         assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/vocab.json"));
         assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/merges.txt"));

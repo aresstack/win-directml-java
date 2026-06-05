@@ -12,7 +12,7 @@ public final class T5WdmlPackCompiler {
     private T5WdmlPackCompiler() {
     }
 
-    static T5CompileResult compile(T5CompileOptions options) throws IOException {
+    public static T5CompileResult compile(T5CompileOptions options) throws IOException {
         Objects.requireNonNull(options, "options");
         Path modelDir = options.modelDir().toAbsolutePath().normalize();
         if (!Files.isDirectory(modelDir)) {
@@ -33,7 +33,7 @@ public final class T5WdmlPackCompiler {
         return new T5CompileResult(output, true, layout, T5RuntimePackage.open(output));
     }
 
-    record T5CompileResult(Path output,
+    public record T5CompileResult(Path output,
                            boolean written,
                            T5LayoutManifest layout,
                            T5RuntimePackage runtimePackage) {

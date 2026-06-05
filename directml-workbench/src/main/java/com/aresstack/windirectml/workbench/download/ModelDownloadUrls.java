@@ -128,11 +128,15 @@ public final class ModelDownloadUrls {
     }
 
     /**
-     * Creates a complete download manifest for Salesforce CodeT5-small.
+     * Creates a download manifest for Salesforce CodeT5-small metadata and tokenizer files.
+     *
+     * <p>The upstream repository publishes its weights as {@code pytorch_model.bin}, which is a
+     * pickle-backed PyTorch checkpoint. IronMind deliberately does not download or execute that
+     * checkpoint on hardened runtime systems. Put {@code model.safetensors} or a precompiled
+     * {@code model_t5.wdmlpack} into the target directory before running the model.</p>
      */
     public static ModelDownloadManifest manifestForCodeT5Small() {
         ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
-        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "pytorch_model.bin", true);
         addRootDescriptor(descriptors, CODET5_SMALL_REPO, "config.json", true);
         addRootDescriptor(descriptors, CODET5_SMALL_REPO, "vocab.json", true);
         addRootDescriptor(descriptors, CODET5_SMALL_REPO, "merges.txt", true);

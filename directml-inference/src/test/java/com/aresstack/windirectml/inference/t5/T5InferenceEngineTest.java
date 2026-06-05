@@ -28,6 +28,19 @@ class T5InferenceEngineTest {
     }
 
     @Test
+    void describesUnsupportedPyTorchCheckpointAsConversionRequirement() throws Exception {
+        CodeT5TokenizerTest.writeTokenizerFiles(tempDir);
+        T5TestFixtures.writeConfig(tempDir, T5TestFixtures.tinyConfig(false));
+        Files.write(tempDir.resolve("pytorch_model.bin"), new byte[]{1, 2, 3});
+
+        String missing = T5InferenceEngine.describeMissingModelFile(tempDir);
+
+        assertNotNull(missing);
+        assertTrue(missing.contains("unsupported PyTorch checkpoint"));
+        assertTrue(missing.contains(T5InferenceEngine.DEFAULT_PACKAGE_NAME));
+    }
+
+    @Test
     void initializesFromSafeTensorsByCompilingWdmlPackOnFirstUse() throws Exception {
         T5Config config = T5TestFixtures.tinyConfig(false);
         CodeT5TokenizerTest.writeTokenizerFiles(tempDir);

@@ -1,6 +1,9 @@
 package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.inference.qwen.QwenWdmlPackCompileTool;
+import com.aresstack.windirectml.inference.t5.T5CompileOptions;
+import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
+import com.aresstack.windirectml.inference.t5.T5WdmlPackCompiler;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.download.DownloadFolderOpener;
 import com.aresstack.windirectml.workbench.download.DownloadOverrideStore;
@@ -85,8 +88,7 @@ public final class DownloadPanel extends JPanel {
                 ModelDownloadUrls.manifestForSmolLm2_135M());
         addManifestRow(buttons, "Download SmolLM2 360M Instruct (Summarizer planned)",
                 ModelDownloadUrls.manifestForSmolLm2_360M());
-        addManifestRow(buttons, "Download CodeT5 small (T5 Summarizer planned)",
-                ModelDownloadUrls.manifestForCodeT5Small());
+        addCodeT5Row(buttons);
 
         forceCheckbox = new JCheckBox("Force re-download (overwrite existing)");
 
@@ -142,6 +144,26 @@ public final class DownloadPanel extends JPanel {
         buttons.add(registerProgressBar(effectiveManifest));
         buttons.add(createConfigButton(modelId));
         buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(effectiveManifest.localDirName())));
+    }
+
+    private void addCodeT5Row(JPanel buttons) {
+        ModelDownloadManifest manifest = overrideStore.applyOverrides(ModelDownloadUrls.manifestForCodeT5Small());
+        manifests.put(manifest.modelId(), manifest);
+        String modelId = manifest.modelId();
+
+        JButton downloadBtn = new JButton("Download CodeT5 small metadata/tokenizer");
+        downloadBtn.setToolTipText("Downloads config and tokenizer files. Weights must be model.safetensors or model_t5.wdmlpack.");
+        downloadBtn.addActionListener(e -> startManifestDownload(modelId));
+        buttons.add(downloadBtn);
+
+        buttons.add(registerProgressBar(manifest));
+
+        JButton compileButton = new JButton("Compile CodeT5 SafeTensors → wdmlpack");
+        compileButton.setToolTipText("Compile model.safetensors into model_t5.wdmlpack after placing SafeTensors in the CodeT5 folder.");
+        compileButton.addActionListener(e -> startCodeT5SafeTensorsCompile());
+        buttons.add(compileButton);
+
+        buttons.add(createOpenFolderButton(this::selectedCodeT5TargetDir));
     }
 
     private JPanel createQwenPanel() {
@@ -410,6 +432,76 @@ public final class DownloadPanel extends JPanel {
                 ? modelFile.substring(0, modelFile.length() - ".onnx".length())
                 : modelFile;
         return selectedQwenTargetDir().resolve(base + ".wdmlpack");
+    }
+
+    private void startCodeT5SafeTensorsCompile() {
+        Path targetDir = selectedCodeT5TargetDir();
+        Path output = selectedCodeT5RuntimePackagePath();
+        appendLog("Compiling CodeT5 SafeTensors: " + targetDir + " -> " + output);
+
+        new SwingWorker<Boolean, String>() {
+            @Override
+            protected Boolean doInBackground() {
+                try {
+                    if (!hasSafeTensors(targetDir)) {
+                        publish("ERROR: No CodeT5 .safetensors file found in " + targetDir);
+                        if (java.nio.file.Files.isRegularFile(targetDir.resolve("pytorch_model.bin"))) {
+                            publish("  Found pytorch_model.bin, but this checkpoint is pickle-backed and is not compiled on hardened runtime systems.");
+                        }
+                        publish("  Convert Salesforce/codet5-small outside the runtime environment to model.safetensors, or place a precompiled "
+                                + T5InferenceEngine.DEFAULT_PACKAGE_NAME + " in this folder.");
+                        return false;
+                    }
+                    T5WdmlPackCompiler.T5CompileResult result = T5WdmlPackCompiler.compile(
+                            new T5CompileOptions(targetDir, output, false, true));
+                    publish("  wrote=" + result.written()
+                            + ", output=" + result.output()
+                            + ", weightsLoadable=" + result.runtimePackage().weightsLoadable()
+                            + ", runtimeLoadable=" + result.runtimePackage().runtimeLoadable()
+                            + ", mode=" + result.runtimePackage().manifest().get("runtimeLoadMode"));
+                    return true;
+                } catch (Exception ex) {
+                    publish("ERROR: " + ex.getMessage());
+                    return false;
+                }
+            }
+
+            @Override
+            protected void process(java.util.List<String> chunks) {
+                for (String msg : chunks) {
+                    appendLog(msg);
+                }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    appendLog(get() ? "CodeT5 SafeTensors compile finished."
+                            : "CodeT5 SafeTensors compile ended with errors.");
+                } catch (Exception ex) {
+                    appendLog("CodeT5 SafeTensors compile ended with errors: " + ex.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    private static boolean hasSafeTensors(Path directory) throws java.io.IOException {
+        if (!java.nio.file.Files.isDirectory(directory)) {
+            return false;
+        }
+        try (java.util.stream.Stream<Path> stream = java.nio.file.Files.list(directory)) {
+            return stream
+                    .filter(java.nio.file.Files::isRegularFile)
+                    .anyMatch(path -> path.getFileName().toString().endsWith(".safetensors"));
+        }
+    }
+
+    private Path selectedCodeT5TargetDir() {
+        return model.getModelRoot().resolve(ModelDownloadUrls.CODET5_SMALL_LOCAL_DIR);
+    }
+
+    private Path selectedCodeT5RuntimePackagePath() {
+        return selectedCodeT5TargetDir().resolve(T5InferenceEngine.DEFAULT_PACKAGE_NAME);
     }
 
     private void startDownload(ModelDownloadManifest manifest, String label) {
