@@ -224,4 +224,21 @@ class ModelDownloadUrlsTest {
         assertFalse(urls.contains("https://huggingface.co/google-t5/t5-small/resolve/main/pytorch_model.bin"));
     }
 
+    @Test
+    void googleFlanT5SmallManifestContainsSafeTensorsAndTokenizerJson() {
+        var manifest = ModelDownloadUrls.manifestForGoogleFlanT5Small();
+        var urls = manifest.files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+
+        assertEquals(ModelDownloadUrls.GOOGLE_FLAN_T5_SMALL_LOCAL_DIR, manifest.localDirName());
+        assertEquals("google/flan-t5-small", manifest.modelId());
+        assertTrue(urls.contains("https://huggingface.co/google/flan-t5-small/resolve/main/model.safetensors"));
+        assertTrue(urls.contains("https://huggingface.co/google/flan-t5-small/resolve/main/config.json"));
+        assertTrue(urls.contains("https://huggingface.co/google/flan-t5-small/resolve/main/tokenizer.json"));
+        assertTrue(urls.contains("https://huggingface.co/google/flan-t5-small/resolve/main/spiece.model"));
+        assertTrue(urls.contains("https://huggingface.co/google/flan-t5-small/resolve/main/tokenizer_config.json"));
+        assertFalse(urls.contains("https://huggingface.co/google/flan-t5-small/resolve/main/pytorch_model.bin"));
+    }
+
 }

@@ -22,7 +22,8 @@ final class T5PromptTemplate {
         if (hasKnownTaskPrefix(text)) {
             return text;
         }
-        if (modelId.contains("google-t5") || modelId.contains("/t5-small") || modelId.equals("t5-small")) {
+        if (modelId.contains("flan-t5") || modelId.contains("google-t5")
+                || modelId.contains("/t5-small") || modelId.equals("t5-small")) {
             return "summarize: " + text;
         }
         if (modelId.contains("codet5")) {

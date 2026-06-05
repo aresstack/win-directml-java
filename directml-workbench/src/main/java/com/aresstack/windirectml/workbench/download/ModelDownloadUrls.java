@@ -27,6 +27,8 @@ public final class ModelDownloadUrls {
     public static final String CODET5_SMALL_LOCAL_DIR = "codet5-small";
     public static final String GOOGLE_T5_SMALL_REPO = "google-t5/t5-small";
     public static final String GOOGLE_T5_SMALL_LOCAL_DIR = "t5-small";
+    public static final String GOOGLE_FLAN_T5_SMALL_REPO = "google/flan-t5-small";
+    public static final String GOOGLE_FLAN_T5_SMALL_LOCAL_DIR = "flan-t5-small";
 
     private ModelDownloadUrls() {
     }
@@ -168,6 +170,25 @@ public final class ModelDownloadUrls {
     }
 
     /**
+     * Creates a complete download manifest for google/flan-t5-small.
+     *
+     * <p>This is the preferred upstream T5-family summarizer smoke model because it
+     * is instruction-tuned and publishes {@code model.safetensors} directly.</p>
+     */
+    public static ModelDownloadManifest manifestForGoogleFlanT5Small() {
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        addRootDescriptor(descriptors, GOOGLE_FLAN_T5_SMALL_REPO, "model.safetensors", true);
+        addRootDescriptor(descriptors, GOOGLE_FLAN_T5_SMALL_REPO, "config.json", true);
+        addRootDescriptor(descriptors, GOOGLE_FLAN_T5_SMALL_REPO, "tokenizer.json", true);
+        addRootDescriptor(descriptors, GOOGLE_FLAN_T5_SMALL_REPO, "tokenizer_config.json", true);
+        addRootDescriptor(descriptors, GOOGLE_FLAN_T5_SMALL_REPO, "spiece.model", true);
+        addRootDescriptor(descriptors, GOOGLE_FLAN_T5_SMALL_REPO, "special_tokens_map.json", false);
+        addRootDescriptor(descriptors, GOOGLE_FLAN_T5_SMALL_REPO, "generation_config.json", false);
+        return new ModelDownloadManifest(GOOGLE_FLAN_T5_SMALL_REPO, GOOGLE_FLAN_T5_SMALL_LOCAL_DIR,
+                List.copyOf(descriptors));
+    }
+
+    /**
      * Creates a small manifest containing only the selected Qwen ONNX model URL.
      */
     public static ModelDownloadManifest modelFileManifestForQwen(QwenModelDownloadConfig config) {
@@ -285,6 +306,15 @@ public final class ModelDownloadUrls {
      */
     public static List<String> forGoogleT5Small() {
         return manifestForGoogleT5Small().files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+    /**
+     * Returns download URLs for google/flan-t5-small.
+     */
+    public static List<String> forGoogleFlanT5Small() {
+        return manifestForGoogleFlanT5Small().files().stream()
                 .map(ModelFileDescriptor::defaultUrl)
                 .toList();
     }

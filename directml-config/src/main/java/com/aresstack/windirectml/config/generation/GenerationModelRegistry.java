@@ -296,6 +296,19 @@ public final class GenerationModelRegistry {
                 "Experimental upstream T5-small validation model. Publishes model.safetensors "
                         + "directly and can be compiled into model_t5.wdmlpack from the Workbench."));
 
+        entries.add(new Entry(
+                "google/flan-t5-small",
+                Architecture.SEQ2SEQ,
+                "Google",
+                "80M",
+                ChatTemplate.RAW,
+                Status.EXPERIMENTAL,
+                Arrays.asList(
+                        "model/flan-t5-small",
+                        "model/google/flan-t5-small"),
+                "Experimental instruction-tuned FLAN-T5-small summarizer. Publishes model.safetensors "
+                        + "directly and can be compiled into model_t5.wdmlpack from the Workbench."));
+
         ENTRIES = Collections.unmodifiableList(entries);
 
         Map<String, Entry> byKey = new LinkedHashMap<String, Entry>();

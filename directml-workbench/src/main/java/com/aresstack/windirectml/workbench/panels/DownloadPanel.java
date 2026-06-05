@@ -88,7 +88,10 @@ public final class DownloadPanel extends JPanel {
                 ModelDownloadUrls.manifestForSmolLm2_135M());
         addManifestRow(buttons, "Download SmolLM2 360M Instruct (Summarizer planned)",
                 ModelDownloadUrls.manifestForSmolLm2_360M());
-        addT5Row(buttons, "Download google-t5/t5-small (SafeTensors)",
+        addT5Row(buttons, "Download google/flan-t5-small (SafeTensors)",
+                ModelDownloadUrls.manifestForGoogleFlanT5Small(),
+                "Compile FLAN-T5 small SafeTensors → wdmlpack");
+        addT5Row(buttons, "Download google-t5/t5-small (SafeTensors smoke-test)",
                 ModelDownloadUrls.manifestForGoogleT5Small(),
                 "Compile T5-small SafeTensors → wdmlpack");
         addCodeT5Row(buttons);

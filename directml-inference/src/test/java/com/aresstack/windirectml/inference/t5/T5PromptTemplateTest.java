@@ -17,6 +17,16 @@ class T5PromptTemplateTest {
     }
 
     @Test
+    void addsSummarizePrefixForGoogleFlanT5Small() {
+        InferenceRequest request = InferenceRequest.builder()
+                .modelId("google/flan-t5-small")
+                .userPrompt("public class Demo {}")
+                .build();
+
+        assertEquals("summarize: public class Demo {}", T5PromptTemplate.format(request));
+    }
+
+    @Test
     void keepsExistingTaskPrefix() {
         InferenceRequest request = InferenceRequest.builder()
                 .modelId("google-t5/t5-small")
