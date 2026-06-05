@@ -7,24 +7,24 @@ import java.util.Objects;
 /**
  * WARP/DirectML encoder execution boundary for the T5 family.
  *
- * <p>v40 introduces this boundary before moving individual encoder operators to
- * native execution. The class intentionally keeps the T5 encoder flow separate
- * from decoder-only infrastructure and delegates to the reference encoder until
- * WARP kernels are attached behind the same contract.</p>
+ * <p>This class keeps the T5 encoder flow separate from decoder-only infrastructure
+ * and routes encoder linear projections through WARP/DirectML. Non-linear
+ * operations such as softmax, residual addition, and layer normalization still
+ * use the T5 reference implementation until dedicated native kernels are added.</p>
  */
 public final class T5WarpEncoderPipeline implements T5EncoderRunner, AutoCloseable {
     private final WindowsBindings windowsBindings;
-    private final T5EncoderPipeline referenceEncoder;
+    private final T5EncoderPipeline warpEncoder;
     private boolean closed;
 
-    private T5WarpEncoderPipeline(WindowsBindings windowsBindings, T5EncoderPipeline referenceEncoder) {
+    private T5WarpEncoderPipeline(WindowsBindings windowsBindings, T5EncoderPipeline warpEncoder) {
         this.windowsBindings = Objects.requireNonNull(windowsBindings, "windowsBindings");
-        this.referenceEncoder = Objects.requireNonNull(referenceEncoder, "referenceEncoder");
+        this.warpEncoder = Objects.requireNonNull(warpEncoder, "warpEncoder");
     }
 
     /**
      * Create a T5 encoder runner whose public boundary is ready for WARP-backed
-     * execution while encoder math still uses the correctness path.
+     * execution for encoder linear projections.
      *
      * @param windowsBindings initialized Windows bindings using WARP/AUTO
      * @param weights         payload-backed T5 weights
@@ -33,32 +33,33 @@ public final class T5WarpEncoderPipeline implements T5EncoderRunner, AutoCloseab
     public static T5WarpEncoderPipeline from(WindowsBindings windowsBindings, T5Weights weights) {
         Objects.requireNonNull(windowsBindings, "windowsBindings");
         Objects.requireNonNull(weights, "weights");
-        return new T5WarpEncoderPipeline(windowsBindings, T5EncoderPipeline.from(weights));
+        T5WarpLinearProjectionFactory projectionFactory = new T5WarpLinearProjectionFactory(windowsBindings);
+        return new T5WarpEncoderPipeline(windowsBindings, T5EncoderPipeline.from(weights, projectionFactory));
     }
 
     @Override
     public T5EncoderOutput encode(int[] inputTokenIds) {
         ensureOpen();
-        return referenceEncoder.encode(inputTokenIds);
+        return warpEncoder.encode(inputTokenIds);
     }
 
     @Override
     public T5EncoderOutput encode(int[] inputTokenIds, boolean[] attentionMask) {
         ensureOpen();
-        return referenceEncoder.encode(inputTokenIds, attentionMask);
+        return warpEncoder.encode(inputTokenIds, attentionMask);
     }
 
     @Override
     public String executionMode() {
-        return "warp-encoder-boundary+reference-encoder";
+        return "warp-encoder-linear-projections";
     }
 
     public WindowsBindings windowsBindings() {
         return windowsBindings;
     }
 
-    public T5EncoderPipeline referenceEncoder() {
-        return referenceEncoder;
+    public T5EncoderPipeline warpEncoder() {
+        return warpEncoder;
     }
 
     public boolean isClosed() {
@@ -73,6 +74,9 @@ public final class T5WarpEncoderPipeline implements T5EncoderRunner, AutoCloseab
 
     @Override
     public void close() {
-        closed = true;
+        if (!closed) {
+            closed = true;
+            warpEncoder.close();
+        }
     }
 }

@@ -11,27 +11,36 @@ import java.util.Objects;
  * encoder-decoder cross-attention, and cache API boundaries before replacing
  * the math with WARP kernels.</p>
  */
-public final class T5DecoderPipeline implements T5DecoderRunner {
+public final class T5DecoderPipeline implements T5DecoderRunner, AutoCloseable {
     private final T5PackageMetadata metadata;
     private final T5Weights weights;
     private final T5TensorData sharedEmbedding;
     private final List<T5DecoderBlock> blocks;
     private final T5LayerNorm finalLayerNorm;
+    private final T5LinearProjectionFactory projectionFactory;
 
     private T5DecoderPipeline(T5PackageMetadata metadata,
                               T5Weights weights,
                               T5TensorData sharedEmbedding,
                               List<T5DecoderBlock> blocks,
-                              T5LayerNorm finalLayerNorm) {
+                              T5LayerNorm finalLayerNorm,
+                              T5LinearProjectionFactory projectionFactory) {
         this.metadata = Objects.requireNonNull(metadata, "metadata");
         this.weights = Objects.requireNonNull(weights, "weights");
         this.sharedEmbedding = Objects.requireNonNull(sharedEmbedding, "sharedEmbedding");
         this.blocks = List.copyOf(blocks);
         this.finalLayerNorm = Objects.requireNonNull(finalLayerNorm, "finalLayerNorm");
+        this.projectionFactory = Objects.requireNonNull(projectionFactory, "projectionFactory");
     }
 
     public static T5DecoderPipeline from(T5Weights weights) {
         Objects.requireNonNull(weights, "weights");
+        return from(weights, T5ReferenceLinearProjectionFactory.INSTANCE);
+    }
+
+    public static T5DecoderPipeline from(T5Weights weights, T5LinearProjectionFactory projectionFactory) {
+        Objects.requireNonNull(weights, "weights");
+        Objects.requireNonNull(projectionFactory, "projectionFactory");
         T5PackageMetadata metadata = weights.metadata();
         T5TensorData sharedEmbedding = T5TensorData.from(weights.sharedEmbedding());
         T5TensorData decoderBias = optional(weights, "decoder.relative_attention_bias");
@@ -39,10 +48,10 @@ public final class T5DecoderPipeline implements T5DecoderRunner {
                 decoderBias, metadata.relativeAttentionBuckets(), metadata.relativeAttentionMaxDistance(), metadata.numHeads());
         List<T5DecoderBlock> blocks = new ArrayList<>();
         for (int layer = 0; layer < metadata.decoderLayers(); layer++) {
-            blocks.add(createBlock(weights, metadata, layer, relativePositionBias));
+            blocks.add(createBlock(weights, metadata, layer, relativePositionBias, projectionFactory));
         }
         T5LayerNorm finalLayerNorm = new T5LayerNorm(T5TensorData.from(weights.decoderFinalLayerNorm()), 1e-6f);
-        return new T5DecoderPipeline(metadata, weights, sharedEmbedding, blocks, finalLayerNorm);
+        return new T5DecoderPipeline(metadata, weights, sharedEmbedding, blocks, finalLayerNorm, projectionFactory);
     }
 
     @Override
@@ -94,31 +103,32 @@ public final class T5DecoderPipeline implements T5DecoderRunner {
     private static T5DecoderBlock createBlock(T5Weights weights,
                                               T5PackageMetadata metadata,
                                               int layer,
-                                              T5RelativePositionBias relativePositionBias) {
+                                              T5RelativePositionBias relativePositionBias,
+                                              T5LinearProjectionFactory projectionFactory) {
         T5LayerNorm selfAttentionLayerNorm = new T5LayerNorm(
                 T5TensorData.from(weights.decoderLayerNorm(layer, 0)), 1e-6f);
         T5SelfAttention selfAttention = new T5SelfAttention(metadata,
-                T5TensorData.from(weights.decoderSelfAttention(layer, "q")),
-                T5TensorData.from(weights.decoderSelfAttention(layer, "k")),
-                T5TensorData.from(weights.decoderSelfAttention(layer, "v")),
-                T5TensorData.from(weights.decoderSelfAttention(layer, "o")),
+                projectionFactory.create(T5TensorData.from(weights.decoderSelfAttention(layer, "q"))),
+                projectionFactory.create(T5TensorData.from(weights.decoderSelfAttention(layer, "k"))),
+                projectionFactory.create(T5TensorData.from(weights.decoderSelfAttention(layer, "v"))),
+                projectionFactory.create(T5TensorData.from(weights.decoderSelfAttention(layer, "o"))),
                 relativePositionBias,
                 false,
                 true);
         T5LayerNorm crossAttentionLayerNorm = new T5LayerNorm(
                 T5TensorData.from(weights.decoderLayerNorm(layer, 1)), 1e-6f);
         T5CrossAttention crossAttention = new T5CrossAttention(metadata,
-                T5TensorData.from(weights.decoderCrossAttention(layer, "q")),
-                T5TensorData.from(weights.decoderCrossAttention(layer, "k")),
-                T5TensorData.from(weights.decoderCrossAttention(layer, "v")),
-                T5TensorData.from(weights.decoderCrossAttention(layer, "o")));
+                projectionFactory.create(T5TensorData.from(weights.decoderCrossAttention(layer, "q"))),
+                projectionFactory.create(T5TensorData.from(weights.decoderCrossAttention(layer, "k"))),
+                projectionFactory.create(T5TensorData.from(weights.decoderCrossAttention(layer, "v"))),
+                projectionFactory.create(T5TensorData.from(weights.decoderCrossAttention(layer, "o"))));
         T5LayerNorm feedForwardLayerNorm = new T5LayerNorm(
                 T5TensorData.from(weights.decoderLayerNorm(layer, 2)), 1e-6f);
         T5FeedForward feedForward = new T5FeedForward(metadata,
-                optional(weights, "decoder.layer." + layer + ".ffn.wi"),
-                optional(weights, "decoder.layer." + layer + ".ffn.wi_0"),
-                optional(weights, "decoder.layer." + layer + ".ffn.wi_1"),
-                T5TensorData.from(weights.decoderFeedForward(layer, "wo")));
+                optionalProjection(weights, "decoder.layer." + layer + ".ffn.wi", projectionFactory),
+                optionalProjection(weights, "decoder.layer." + layer + ".ffn.wi_0", projectionFactory),
+                optionalProjection(weights, "decoder.layer." + layer + ".ffn.wi_1", projectionFactory),
+                projectionFactory.create(T5TensorData.from(weights.decoderFeedForward(layer, "wo"))));
         return new T5DecoderBlock(selfAttentionLayerNorm, selfAttention, crossAttentionLayerNorm,
                 crossAttention, feedForwardLayerNorm, feedForward);
     }
@@ -130,10 +140,21 @@ public final class T5DecoderPipeline implements T5DecoderRunner {
         return T5TensorData.from(weights.optional(role));
     }
 
+    private static T5LinearProjection optionalProjection(T5Weights weights, String role,
+                                                         T5LinearProjectionFactory projectionFactory) {
+        T5TensorData tensor = optional(weights, role);
+        return tensor == null ? null : projectionFactory.create(tensor);
+    }
+
     private static boolean[] decoderMask(int length) {
         boolean[] mask = new boolean[length];
         java.util.Arrays.fill(mask, true);
         return mask;
+    }
+
+    @Override
+    public void close() {
+        projectionFactory.close();
     }
 
     private static void validateInput(int[] decoderInputIds) {

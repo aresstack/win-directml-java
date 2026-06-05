@@ -7,12 +7,21 @@ import java.util.Objects;
  */
 public final class T5FeedForward {
     private final T5PackageMetadata metadata;
-    private final T5TensorData wi;
-    private final T5TensorData wi0;
-    private final T5TensorData wi1;
-    private final T5TensorData wo;
+    private final T5LinearProjection wi;
+    private final T5LinearProjection wi0;
+    private final T5LinearProjection wi1;
+    private final T5LinearProjection wo;
 
     public T5FeedForward(T5PackageMetadata metadata, T5TensorData wi, T5TensorData wi0, T5TensorData wi1, T5TensorData wo) {
+        this(metadata,
+                wi == null ? null : T5ReferenceLinearProjection.from(wi),
+                wi0 == null ? null : T5ReferenceLinearProjection.from(wi0),
+                wi1 == null ? null : T5ReferenceLinearProjection.from(wi1),
+                T5ReferenceLinearProjection.from(wo));
+    }
+
+    public T5FeedForward(T5PackageMetadata metadata, T5LinearProjection wi, T5LinearProjection wi0,
+                         T5LinearProjection wi1, T5LinearProjection wo) {
         this.metadata = Objects.requireNonNull(metadata, "metadata");
         this.wi = wi;
         this.wi0 = wi0;
@@ -33,19 +42,19 @@ public final class T5FeedForward {
 
     private float[] applyToken(float[] input) {
         if (isGated()) {
-            float[] gate = T5ReferenceMath.dense(input, wi0);
-            float[] values = T5ReferenceMath.dense(input, wi1);
+            float[] gate = wi0.apply(input);
+            float[] values = wi1.apply(input);
             float[] activated = new float[gate.length];
             for (int i = 0; i < activated.length; i++) {
                 activated[i] = activation(gate[i]) * values[i];
             }
-            return T5ReferenceMath.dense(activated, wo);
+            return wo.apply(activated);
         }
-        float[] inner = T5ReferenceMath.dense(input, wi);
+        float[] inner = wi.apply(input);
         for (int i = 0; i < inner.length; i++) {
             inner[i] = activation(inner[i]);
         }
-        return T5ReferenceMath.dense(inner, wo);
+        return wo.apply(inner);
     }
 
     private boolean isGated() {

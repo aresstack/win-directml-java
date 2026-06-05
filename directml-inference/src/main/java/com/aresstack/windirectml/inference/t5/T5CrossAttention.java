@@ -8,16 +8,28 @@ import java.util.Objects;
  */
 public final class T5CrossAttention {
     private final T5PackageMetadata metadata;
-    private final T5TensorData q;
-    private final T5TensorData k;
-    private final T5TensorData v;
-    private final T5TensorData o;
+    private final T5LinearProjection q;
+    private final T5LinearProjection k;
+    private final T5LinearProjection v;
+    private final T5LinearProjection o;
 
     public T5CrossAttention(T5PackageMetadata metadata,
                             T5TensorData q,
                             T5TensorData k,
                             T5TensorData v,
                             T5TensorData o) {
+        this(metadata,
+                T5ReferenceLinearProjection.from(q),
+                T5ReferenceLinearProjection.from(k),
+                T5ReferenceLinearProjection.from(v),
+                T5ReferenceLinearProjection.from(o));
+    }
+
+    public T5CrossAttention(T5PackageMetadata metadata,
+                            T5LinearProjection q,
+                            T5LinearProjection k,
+                            T5LinearProjection v,
+                            T5LinearProjection o) {
         this.metadata = Objects.requireNonNull(metadata, "metadata");
         this.q = Objects.requireNonNull(q, "q");
         this.k = Objects.requireNonNull(k, "k");
@@ -39,9 +51,9 @@ public final class T5CrossAttention {
         int encoderLength = encoderOutput.inputTokens();
         boolean[] encoderMask = encoderOutput.attentionMask();
         float[] encoderHiddenStates = encoderOutput.hiddenStates();
-        float[] query = T5ReferenceMath.denseSequence(decoderHiddenStates, decoderLength, hiddenSize, q);
-        float[] key = T5ReferenceMath.denseSequence(encoderHiddenStates, encoderLength, hiddenSize, k);
-        float[] value = T5ReferenceMath.denseSequence(encoderHiddenStates, encoderLength, hiddenSize, v);
+        float[] query = q.applySequence(decoderHiddenStates, decoderLength, hiddenSize);
+        float[] key = k.applySequence(encoderHiddenStates, encoderLength, hiddenSize);
+        float[] value = v.applySequence(encoderHiddenStates, encoderLength, hiddenSize);
         float[] context = new float[decoderLength * innerSize];
         for (int token = 0; token < decoderLength; token++) {
             for (int head = 0; head < heads; head++) {
@@ -65,7 +77,7 @@ public final class T5CrossAttention {
                 }
             }
         }
-        return T5ReferenceMath.denseSequence(context, decoderLength, innerSize, o);
+        return o.applySequence(context, decoderLength, innerSize);
     }
 
     private static float dot(float[] query, float[] key, int queryToken, int keyToken, int head, int innerSize, int headDim) {

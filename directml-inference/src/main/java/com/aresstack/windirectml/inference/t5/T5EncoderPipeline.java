@@ -10,27 +10,36 @@ import java.util.Objects;
  * <p>Use this implementation to validate package loading, tensor roles, and
  * seq2seq encoder semantics before replacing the math with WARP kernels.</p>
  */
-public final class T5EncoderPipeline implements T5EncoderRunner {
+public final class T5EncoderPipeline implements T5EncoderRunner, AutoCloseable {
     private final T5PackageMetadata metadata;
     private final T5Weights weights;
     private final T5TensorData sharedEmbedding;
     private final List<T5EncoderBlock> blocks;
     private final T5LayerNorm finalLayerNorm;
+    private final T5LinearProjectionFactory projectionFactory;
 
     private T5EncoderPipeline(T5PackageMetadata metadata,
                               T5Weights weights,
                               T5TensorData sharedEmbedding,
                               List<T5EncoderBlock> blocks,
-                              T5LayerNorm finalLayerNorm) {
+                              T5LayerNorm finalLayerNorm,
+                              T5LinearProjectionFactory projectionFactory) {
         this.metadata = Objects.requireNonNull(metadata, "metadata");
         this.weights = Objects.requireNonNull(weights, "weights");
         this.sharedEmbedding = Objects.requireNonNull(sharedEmbedding, "sharedEmbedding");
         this.blocks = List.copyOf(blocks);
         this.finalLayerNorm = Objects.requireNonNull(finalLayerNorm, "finalLayerNorm");
+        this.projectionFactory = Objects.requireNonNull(projectionFactory, "projectionFactory");
     }
 
     public static T5EncoderPipeline from(T5Weights weights) {
         Objects.requireNonNull(weights, "weights");
+        return from(weights, T5ReferenceLinearProjectionFactory.INSTANCE);
+    }
+
+    public static T5EncoderPipeline from(T5Weights weights, T5LinearProjectionFactory projectionFactory) {
+        Objects.requireNonNull(weights, "weights");
+        Objects.requireNonNull(projectionFactory, "projectionFactory");
         T5PackageMetadata metadata = weights.metadata();
         T5TensorData sharedEmbedding = T5TensorData.from(weights.sharedEmbedding());
         List<T5EncoderBlock> blocks = new ArrayList<>();
@@ -39,10 +48,10 @@ public final class T5EncoderPipeline implements T5EncoderRunner {
         T5RelativePositionBias relativePositionBias = new T5RelativePositionBias(
                 encoderBias, metadata.relativeAttentionBuckets(), metadata.relativeAttentionMaxDistance(), metadata.numHeads());
         for (int layer = 0; layer < metadata.encoderLayers(); layer++) {
-            blocks.add(createBlock(weights, metadata, layer, relativePositionBias));
+            blocks.add(createBlock(weights, metadata, layer, relativePositionBias, projectionFactory));
         }
         T5LayerNorm finalLayerNorm = new T5LayerNorm(T5TensorData.from(weights.encoderFinalLayerNorm()), 1e-6f);
-        return new T5EncoderPipeline(metadata, weights, sharedEmbedding, blocks, finalLayerNorm);
+        return new T5EncoderPipeline(metadata, weights, sharedEmbedding, blocks, finalLayerNorm, projectionFactory);
     }
 
     @Override
@@ -96,22 +105,23 @@ public final class T5EncoderPipeline implements T5EncoderRunner {
     private static T5EncoderBlock createBlock(T5Weights weights,
                                               T5PackageMetadata metadata,
                                               int layer,
-                                              T5RelativePositionBias relativePositionBias) {
+                                              T5RelativePositionBias relativePositionBias,
+                                              T5LinearProjectionFactory projectionFactory) {
         T5LayerNorm attentionLayerNorm = new T5LayerNorm(
                 T5TensorData.from(weights.encoderLayerNorm(layer, 0)), 1e-6f);
         T5SelfAttention selfAttention = new T5SelfAttention(metadata,
-                T5TensorData.from(weights.encoderSelfAttention(layer, "q")),
-                T5TensorData.from(weights.encoderSelfAttention(layer, "k")),
-                T5TensorData.from(weights.encoderSelfAttention(layer, "v")),
-                T5TensorData.from(weights.encoderSelfAttention(layer, "o")),
-                relativePositionBias);
+                projectionFactory.create(T5TensorData.from(weights.encoderSelfAttention(layer, "q"))),
+                projectionFactory.create(T5TensorData.from(weights.encoderSelfAttention(layer, "k"))),
+                projectionFactory.create(T5TensorData.from(weights.encoderSelfAttention(layer, "v"))),
+                projectionFactory.create(T5TensorData.from(weights.encoderSelfAttention(layer, "o"))),
+                relativePositionBias, true, false);
         T5LayerNorm feedForwardLayerNorm = new T5LayerNorm(
                 T5TensorData.from(weights.encoderLayerNorm(layer, 1)), 1e-6f);
         T5FeedForward feedForward = new T5FeedForward(metadata,
-                optional(weights, "encoder.layer." + layer + ".ffn.wi"),
-                optional(weights, "encoder.layer." + layer + ".ffn.wi_0"),
-                optional(weights, "encoder.layer." + layer + ".ffn.wi_1"),
-                T5TensorData.from(weights.encoderFeedForward(layer, "wo")));
+                optionalProjection(weights, "encoder.layer." + layer + ".ffn.wi", projectionFactory),
+                optionalProjection(weights, "encoder.layer." + layer + ".ffn.wi_0", projectionFactory),
+                optionalProjection(weights, "encoder.layer." + layer + ".ffn.wi_1", projectionFactory),
+                projectionFactory.create(T5TensorData.from(weights.encoderFeedForward(layer, "wo"))));
         return new T5EncoderBlock(attentionLayerNorm, selfAttention, feedForwardLayerNorm, feedForward);
     }
 
@@ -123,6 +133,12 @@ public final class T5EncoderPipeline implements T5EncoderRunner {
             return null;
         }
         return T5TensorData.from(weights.optional(role));
+    }
+
+    private static T5LinearProjection optionalProjection(T5Weights weights, String role,
+                                                         T5LinearProjectionFactory projectionFactory) {
+        T5TensorData tensor = optional(weights, role);
+        return tensor == null ? null : projectionFactory.create(tensor);
     }
 
     private boolean[] normalizeMask(int[] inputTokenIds, boolean[] attentionMask) {
@@ -139,6 +155,11 @@ public final class T5EncoderPipeline implements T5EncoderRunner {
             mask[i] = inputTokenIds[i] != pad;
         }
         return mask;
+    }
+
+    @Override
+    public void close() {
+        projectionFactory.close();
     }
 
     private static void validateInput(int[] inputTokenIds) {

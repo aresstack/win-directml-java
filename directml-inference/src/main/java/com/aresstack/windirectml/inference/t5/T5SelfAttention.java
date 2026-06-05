@@ -8,10 +8,10 @@ import java.util.Objects;
  */
 public final class T5SelfAttention {
     private final T5PackageMetadata metadata;
-    private final T5TensorData q;
-    private final T5TensorData k;
-    private final T5TensorData v;
-    private final T5TensorData o;
+    private final T5LinearProjection q;
+    private final T5LinearProjection k;
+    private final T5LinearProjection v;
+    private final T5LinearProjection o;
     private final T5RelativePositionBias relativePositionBias;
     private final boolean bidirectionalRelativeBias;
     private final boolean causalMask;
@@ -22,7 +22,12 @@ public final class T5SelfAttention {
                            T5TensorData v,
                            T5TensorData o,
                            T5RelativePositionBias relativePositionBias) {
-        this(metadata, q, k, v, o, relativePositionBias, true, false);
+        this(metadata,
+                T5ReferenceLinearProjection.from(q),
+                T5ReferenceLinearProjection.from(k),
+                T5ReferenceLinearProjection.from(v),
+                T5ReferenceLinearProjection.from(o),
+                relativePositionBias, true, false);
     }
 
     public T5SelfAttention(T5PackageMetadata metadata,
@@ -30,6 +35,22 @@ public final class T5SelfAttention {
                            T5TensorData k,
                            T5TensorData v,
                            T5TensorData o,
+                           T5RelativePositionBias relativePositionBias,
+                           boolean bidirectionalRelativeBias,
+                           boolean causalMask) {
+        this(metadata,
+                T5ReferenceLinearProjection.from(q),
+                T5ReferenceLinearProjection.from(k),
+                T5ReferenceLinearProjection.from(v),
+                T5ReferenceLinearProjection.from(o),
+                relativePositionBias, bidirectionalRelativeBias, causalMask);
+    }
+
+    public T5SelfAttention(T5PackageMetadata metadata,
+                           T5LinearProjection q,
+                           T5LinearProjection k,
+                           T5LinearProjection v,
+                           T5LinearProjection o,
                            T5RelativePositionBias relativePositionBias,
                            boolean bidirectionalRelativeBias,
                            boolean causalMask) {
@@ -50,9 +71,9 @@ public final class T5SelfAttention {
         int innerSize = heads * headDim;
         validateHidden(hiddenStates, sequenceLength, hiddenSize);
         boolean[] mask = normalizeMask(attentionMask, sequenceLength);
-        float[] query = T5ReferenceMath.denseSequence(hiddenStates, sequenceLength, hiddenSize, q);
-        float[] key = T5ReferenceMath.denseSequence(hiddenStates, sequenceLength, hiddenSize, k);
-        float[] value = T5ReferenceMath.denseSequence(hiddenStates, sequenceLength, hiddenSize, v);
+        float[] query = q.applySequence(hiddenStates, sequenceLength, hiddenSize);
+        float[] key = k.applySequence(hiddenStates, sequenceLength, hiddenSize);
+        float[] value = v.applySequence(hiddenStates, sequenceLength, hiddenSize);
         float[] context = new float[sequenceLength * innerSize];
         for (int token = 0; token < sequenceLength; token++) {
             if (!mask[token]) {
@@ -82,7 +103,7 @@ public final class T5SelfAttention {
                 }
             }
         }
-        float[] projected = T5ReferenceMath.denseSequence(context, sequenceLength, innerSize, o);
+        float[] projected = o.applySequence(context, sequenceLength, innerSize);
         clearMaskedTokens(projected, sequenceLength, hiddenSize, mask);
         return projected;
     }
