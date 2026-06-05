@@ -27,16 +27,20 @@ public final class T5DecoderBlock {
         this.feedForward = Objects.requireNonNull(feedForward, "feedForward");
     }
 
+    public T5CrossAttentionMemory prepareCrossAttentionMemory(T5EncoderOutput encoderOutput) {
+        return crossAttention.prepareMemory(encoderOutput);
+    }
+
     public float[] apply(float[] hiddenStates,
                          int sequenceLength,
                          int hiddenSize,
                          boolean[] decoderAttentionMask,
-                         T5EncoderOutput encoderOutput) {
+                         T5CrossAttentionMemory crossAttentionMemory) {
         float[] normedForSelfAttention = selfAttentionLayerNorm.applySequence(hiddenStates, sequenceLength, hiddenSize);
         float[] selfAttentionOutput = selfAttention.apply(normedForSelfAttention, sequenceLength, decoderAttentionMask);
         float[] afterSelfAttention = T5ReferenceMath.add(hiddenStates, selfAttentionOutput);
         float[] normedForCrossAttention = crossAttentionLayerNorm.applySequence(afterSelfAttention, sequenceLength, hiddenSize);
-        float[] crossAttentionOutput = crossAttention.apply(normedForCrossAttention, sequenceLength, encoderOutput);
+        float[] crossAttentionOutput = crossAttention.apply(normedForCrossAttention, sequenceLength, crossAttentionMemory);
         float[] afterCrossAttention = T5ReferenceMath.add(afterSelfAttention, crossAttentionOutput);
         float[] normedForFeedForward = feedForwardLayerNorm.applySequence(afterCrossAttention, sequenceLength, hiddenSize);
         float[] feedForwardOutput = feedForward.apply(normedForFeedForward, sequenceLength);

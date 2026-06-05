@@ -18,6 +18,7 @@ public final class T5DecoderPipeline implements T5DecoderRunner, AutoCloseable {
     private final List<T5DecoderBlock> blocks;
     private final T5LayerNorm finalLayerNorm;
     private final T5LinearProjectionFactory projectionFactory;
+    private T5CrossAttentionMemorySet crossAttentionMemorySet;
 
     private T5DecoderPipeline(T5PackageMetadata metadata,
                               T5Weights weights,
@@ -67,8 +68,10 @@ public final class T5DecoderPipeline implements T5DecoderRunner, AutoCloseable {
         int sequenceLength = decoderInputIds.length;
         int hiddenSize = metadata.dModel();
         float[] hiddenStates = embed(decoderInputIds);
-        for (T5DecoderBlock block : blocks) {
-            hiddenStates = block.apply(hiddenStates, sequenceLength, hiddenSize, decoderMask, encoderOutput);
+        T5CrossAttentionMemorySet memorySet = crossAttentionMemorySetFor(encoderOutput);
+        for (int layer = 0; layer < blocks.size(); layer++) {
+            hiddenStates = blocks.get(layer).apply(hiddenStates, sequenceLength, hiddenSize,
+                    decoderMask, memorySet.memory(layer));
         }
         hiddenStates = finalLayerNorm.applySequence(hiddenStates, sequenceLength, hiddenSize);
         return new T5DecoderState(sequenceLength, hiddenSize, hiddenStates);
@@ -82,6 +85,20 @@ public final class T5DecoderPipeline implements T5DecoderRunner, AutoCloseable {
 
     public T5Weights weights() {
         return weights;
+    }
+
+    private T5CrossAttentionMemorySet crossAttentionMemorySetFor(T5EncoderOutput encoderOutput) {
+        T5CrossAttentionMemorySet cached = crossAttentionMemorySet;
+        if (cached != null && cached.belongsTo(encoderOutput)) {
+            return cached;
+        }
+        List<T5CrossAttentionMemory> memories = new ArrayList<>();
+        for (T5DecoderBlock block : blocks) {
+            memories.add(block.prepareCrossAttentionMemory(encoderOutput));
+        }
+        T5CrossAttentionMemorySet created = new T5CrossAttentionMemorySet(encoderOutput, memories);
+        crossAttentionMemorySet = created;
+        return created;
     }
 
     private float[] embed(int[] decoderInputIds) {

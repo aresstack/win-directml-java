@@ -37,55 +37,72 @@ public final class T5CrossAttention {
         this.o = Objects.requireNonNull(o, "o");
     }
 
-    public float[] apply(float[] decoderHiddenStates, int decoderLength, T5EncoderOutput encoderOutput) {
+    public T5CrossAttentionMemory prepareMemory(T5EncoderOutput encoderOutput) {
         Objects.requireNonNull(encoderOutput, "encoderOutput");
         int hiddenSize = metadata.dModel();
         int heads = metadata.numHeads();
         int headDim = metadata.dKv();
         int innerSize = heads * headDim;
-        validateHidden(decoderHiddenStates, decoderLength, hiddenSize);
         if (encoderOutput.hiddenSize() != hiddenSize) {
             throw new IllegalArgumentException("Encoder hidden size mismatch: "
                     + encoderOutput.hiddenSize() + " != " + hiddenSize);
         }
         int encoderLength = encoderOutput.inputTokens();
-        boolean[] encoderMask = encoderOutput.attentionMask();
         float[] encoderHiddenStates = encoderOutput.hiddenStates();
-        float[] query = q.applySequence(decoderHiddenStates, decoderLength, hiddenSize);
         float[] key = k.applySequence(encoderHiddenStates, encoderLength, hiddenSize);
         float[] value = v.applySequence(encoderHiddenStates, encoderLength, hiddenSize);
+        return new T5CrossAttentionMemory(encoderLength, innerSize, encoderOutput.attentionMask(), key, value);
+    }
+
+    public float[] apply(float[] decoderHiddenStates, int decoderLength, T5EncoderOutput encoderOutput) {
+        return apply(decoderHiddenStates, decoderLength, prepareMemory(encoderOutput));
+    }
+
+    public float[] apply(float[] decoderHiddenStates, int decoderLength, T5CrossAttentionMemory memory) {
+        Objects.requireNonNull(memory, "memory");
+        int hiddenSize = metadata.dModel();
+        int heads = metadata.numHeads();
+        int headDim = metadata.dKv();
+        int innerSize = heads * headDim;
+        validateHidden(decoderHiddenStates, decoderLength, hiddenSize);
+        if (memory.innerSize() != innerSize) {
+            throw new IllegalArgumentException("Cross-attention memory inner size mismatch: "
+                    + memory.innerSize() + " != " + innerSize);
+        }
+        int encoderLength = memory.encoderLength();
+        float[] query = q.applySequence(decoderHiddenStates, decoderLength, hiddenSize);
         float[] context = new float[decoderLength * innerSize];
         for (int token = 0; token < decoderLength; token++) {
             for (int head = 0; head < heads; head++) {
                 float[] scores = new float[encoderLength];
+                int headOffset = head * headDim;
                 for (int source = 0; source < encoderLength; source++) {
-                    if (!encoderMask[source]) {
+                    if (!memory.attentionEnabled(source)) {
                         scores[source] = -1.0e9f;
                         continue;
                     }
-                    float score = dot(query, key, token, source, head, innerSize, headDim);
+                    float score = dot(query, memory, token, source, headOffset, innerSize, headDim);
                     scores[source] = score;
                 }
                 T5ReferenceMath.softmaxInPlace(scores);
                 for (int dim = 0; dim < headDim; dim++) {
                     float sum = 0.0f;
                     for (int source = 0; source < encoderLength; source++) {
-                        int valueIndex = source * innerSize + head * headDim + dim;
-                        sum += scores[source] * value[valueIndex];
+                        sum += scores[source] * memory.valueAt(source, headOffset, dim);
                     }
-                    context[token * innerSize + head * headDim + dim] = T5ReferenceMath.finite(sum);
+                    context[token * innerSize + headOffset + dim] = T5ReferenceMath.finite(sum);
                 }
             }
         }
         return o.applySequence(context, decoderLength, innerSize);
     }
 
-    private static float dot(float[] query, float[] key, int queryToken, int keyToken, int head, int innerSize, int headDim) {
+    private static float dot(float[] query, T5CrossAttentionMemory memory, int queryToken,
+                             int keyToken, int headOffset, int innerSize, int headDim) {
         float sum = 0.0f;
-        int queryOffset = queryToken * innerSize + head * headDim;
-        int keyOffset = keyToken * innerSize + head * headDim;
+        int queryOffset = queryToken * innerSize + headOffset;
         for (int dim = 0; dim < headDim; dim++) {
-            sum += query[queryOffset + dim] * key[keyOffset + dim];
+            sum += query[queryOffset + dim] * memory.keyAt(keyToken, headOffset, dim);
         }
         return T5ReferenceMath.finite(sum);
     }
