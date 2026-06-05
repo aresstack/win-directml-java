@@ -4,6 +4,8 @@ import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 
+import java.util.stream.IntStream;
+
 /**
  * SIMD helpers for the SmolLM2 Java reference runtime.
  *
@@ -16,6 +18,9 @@ final class SmolLM2ReferenceDenseOps {
     private static final boolean ENABLED;
     private static final VectorSpecies<Float> SPECIES;
     private static final int LANES;
+    private static final boolean PARALLEL_DENSE;
+    private static final int PARALLEL_ROW_THRESHOLD;
+    private static final int PARALLEL_COLUMN_THRESHOLD;
 
     static {
         boolean enabled;
@@ -31,6 +36,12 @@ final class SmolLM2ReferenceDenseOps {
         ENABLED = enabled;
         SPECIES = species;
         LANES = lanes;
+        PARALLEL_DENSE = Boolean.parseBoolean(
+                System.getProperty("windirectml.smollm2.reference.parallelDense", "true"));
+        PARALLEL_ROW_THRESHOLD = Integer.getInteger(
+                "windirectml.smollm2.reference.parallelRowsThreshold", 1024);
+        PARALLEL_COLUMN_THRESHOLD = Integer.getInteger(
+                "windirectml.smollm2.reference.parallelColumnsThreshold", 256);
     }
 
     private SmolLM2ReferenceDenseOps() {
@@ -38,6 +49,10 @@ final class SmolLM2ReferenceDenseOps {
 
     static boolean enabled() {
         return ENABLED;
+    }
+
+    static boolean parallelEnabled() {
+        return PARALLEL_DENSE;
     }
 
     static float dot(float[] left, int leftOffset, float[] right, int rightOffset, int length) {
@@ -68,6 +83,12 @@ final class SmolLM2ReferenceDenseOps {
         if (output.length != rows) {
             throw new IllegalArgumentException("Output height mismatch: expected " + rows + " but got " + output.length);
         }
+        if (shouldUseParallelRows(rows, cols)) {
+            IntStream.range(0, rows)
+                    .parallel()
+                    .forEach(row -> output[row] = dot(matrix, row * cols, input, 0, cols));
+            return;
+        }
         for (int row = 0; row < rows; row++) {
             output[row] = dot(matrix, row * cols, input, 0, cols);
         }
@@ -80,6 +101,13 @@ final class SmolLM2ReferenceDenseOps {
         for (int i = 0; i < gate.length; i++) {
             gate[i] = fastSilu(gate[i]) * up[i];
         }
+    }
+
+    private static boolean shouldUseParallelRows(int rows, int cols) {
+        return PARALLEL_DENSE
+                && rows >= PARALLEL_ROW_THRESHOLD
+                && cols >= PARALLEL_COLUMN_THRESHOLD
+                && Runtime.getRuntime().availableProcessors() > 1;
     }
 
     private static float scalarDot(float[] left, int leftOffset, float[] right, int rightOffset, int length) {
