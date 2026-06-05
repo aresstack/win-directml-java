@@ -1,5 +1,7 @@
 package com.aresstack.windirectml.inference.qwen;
 
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyStopTokenPolicy;
+
 import java.util.List;
 
 /**
@@ -46,6 +48,13 @@ public final class QwenStopTokenPolicy {
      * All token IDs that terminate Qwen generation.
      */
     public static final List<Integer> STOP_TOKEN_IDS = List.of(ENDOFTEXT_ID, IM_END_ID);
+
+    /**
+     * Return this policy through the shared decoder-only abstraction.
+     */
+    public static DecoderOnlyStopTokenPolicy asDecoderOnlyPolicy() {
+        return QwenStopTokenPolicy::shouldStop;
+    }
 
     /**
      * Check whether a token ID should stop generation.

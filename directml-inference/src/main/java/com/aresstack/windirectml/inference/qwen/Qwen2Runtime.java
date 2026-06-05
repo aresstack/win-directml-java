@@ -4,12 +4,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyAttentionLayout;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyGeneratedTokens;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyGreedyTokenSelector;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyRotaryEmbedding;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyTokenTextBuffer;
 import com.aresstack.windirectml.windows.GpuTimestampProfile;
 
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -58,6 +59,7 @@ public final class Qwen2Runtime {
     private final Qwen2Weights weights;
     private final QwenTokenizer tokenizer;
     private final DecoderOnlyAttentionLayout attentionLayout;
+    private final DecoderOnlyGreedyTokenSelector tokenSelector;
     private final QwenGpuKernels gpuKernels;   // null if CPU-only
     private final QwenGpuPipeline gpuPipeline; // null if V1 or CPU-only
     private final boolean useGpuForDecode;     // false in HYBRID mode — GPU only for prefill
@@ -184,6 +186,7 @@ public final class Qwen2Runtime {
         int numHeads = config.numAttentionHeads();
         int kvHeads = config.numKeyValueHeads();
         this.attentionLayout = new DecoderOnlyAttentionLayout(numHeads, kvHeads);
+        this.tokenSelector = new DecoderOnlyGreedyTokenSelector(QwenStopTokenPolicy.asDecoderOnlyPolicy());
         this.kvCacheK = new float[numLayers][kvHeads][];
         this.kvCacheV = new float[numLayers][kvHeads][];
         this.cachedSeqLen = 0;
@@ -302,19 +305,8 @@ public final class Qwen2Runtime {
         log.info("Prefill: {} tokens in {} ms", inputIds.length, String.format("%.1f", profPrefillNs / 1e6));
 
         // ── Decode loop ──────────────────────────────────────────────
-        int[] generatedIds = new int[maxTokens];
-        int generatedCount = 0;
-
-        // Incremental UTF-8 byte accumulator for the streaming delta. The
-        // previous implementation re-decoded `generatedIds.stream().toArray()`
-        // every token — O(N^2) over the whole conversation. With a 200-token
-        // output that meant ~20k redundant HashMap lookups in UNICODE_TO_BYTE
-        // accumulated over the run. Now we decode each new token's bytes once
-        // and append to a ByteArrayOutputStream — O(N) total. The byte buffer
-        // also correctly resolves multi-byte UTF-8 codepoints that span two
-        // tokens (the partial bytes carry across iterations).
-        ByteArrayOutputStream decodedBytes = new ByteArrayOutputStream(256);
-        String previousText = "";
+        DecoderOnlyGeneratedTokens generatedTokens = new DecoderOnlyGeneratedTokens(maxTokens);
+        DecoderOnlyTokenTextBuffer decodedText = new DecoderOnlyTokenTextBuffer(256);
 
         // Periodic profile log so the user can see WHERE time is going during
         // a long decode without waiting for the run to finish.
@@ -324,28 +316,19 @@ public final class Qwen2Runtime {
 
         for (int step = 0; step < maxTokens; step++) {
 
-            // Repetition penalty (cheap, only touches the generatedCount unique ids)
-            if (repetitionPenalty > 1.0f && generatedCount > 0) {
-                applyRepetitionPenalty(logits, generatedIds, generatedCount);
-            }
+            int nextToken = tokenSelector.selectNextToken(logits, generatedTokens, repetitionPenalty);
 
-            int nextToken = argmax(logits);
-
-            if (QwenStopTokenPolicy.shouldStop(nextToken)) {
+            if (tokenSelector.shouldStop(nextToken)) {
                 break;
             }
 
-            generatedIds[generatedCount++] = nextToken;
+            generatedTokens.add(nextToken);
 
             // Incremental decode: decode just this token's bytes and append.
-            byte[] tokBytes = tokenizer.decode(new int[]{nextToken}, true)
-                    .getBytes(StandardCharsets.UTF_8);
-            decodedBytes.write(tokBytes, 0, tokBytes.length);
-            String fullText = decodedBytes.toString(StandardCharsets.UTF_8);
-            String delta = fullText.length() >= previousText.length()
-                    ? fullText.substring(previousText.length())
-                    : "";
-            previousText = fullText;
+            DecoderOnlyTokenTextBuffer.DecoderOnlyTokenText tokenText =
+                    decodedText.appendDecodedTokenText(tokenizer.decode(new int[]{nextToken}, true));
+            String fullText = tokenText.fullText();
+            String delta = tokenText.delta();
 
             if (consumer != null) {
                 consumer.onToken(nextToken, fullText, delta);
@@ -378,7 +361,7 @@ public final class Qwen2Runtime {
                 String.format("%.2f", profSteps / Math.max(1e-9, totalDecodeSec)),
                 lastProfile);
 
-        return previousText;
+        return decodedText.fullText();
     }
 
     public void setRepetitionPenalty(float penalty) {
