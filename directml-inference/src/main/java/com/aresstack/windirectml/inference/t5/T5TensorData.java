@@ -34,6 +34,10 @@ final class T5TensorData {
         return new T5TensorData(tensor.name(), dims, values);
     }
 
+    static T5TensorData reference(String name, long[] dims, float[] values) {
+        return new T5TensorData(name, dims, values.clone());
+    }
+
     String name() {
         return name;
     }

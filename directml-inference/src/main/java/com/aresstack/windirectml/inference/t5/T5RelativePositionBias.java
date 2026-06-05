@@ -20,7 +20,7 @@ public final class T5RelativePositionBias {
         if (bias == null || buckets == 0) {
             return 0.0f;
         }
-        int bucket = bucket(queryPosition - keyPosition, bidirectional);
+        int bucket = bucket(keyPosition - queryPosition, bidirectional);
         int safeHead = Math.floorMod(head, heads);
         if (bias.rank() == 2 && bucket < bias.dim(0) && safeHead < bias.dim(1)) {
             return bias.at(bucket, safeHead);
