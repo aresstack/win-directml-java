@@ -106,7 +106,9 @@ public final class SmolLM2ReferenceForwardPass {
             hidden = runLayerStep(hidden, layers.get(layerIndex), kvCache.layer(layerIndex), position);
         }
         float[] normalized = hidden.clone();
+        long finalNormStart = System.nanoTime();
         DecoderOnlyMath.rmsNorm(normalized, weights.finalNorm().copyValues(), (float) config.rmsNormEps());
+        profile.addFinalNormNanos(System.nanoTime() - finalNormStart);
         return projectToLogits(normalized);
     }
 
@@ -143,12 +145,16 @@ public final class SmolLM2ReferenceForwardPass {
     private float[] runLayerStep(float[] hidden, SmolLM2ReferenceLayerWeights layer,
                                  SmolLM2ReferenceLayerKvCache layerCache, int position) {
         float[] attentionInput = hidden.clone();
+        long attentionNormStart = System.nanoTime();
         DecoderOnlyMath.rmsNorm(attentionInput, layer.inputNorm().copyValues(), (float) config.rmsNormEps());
+        profile.addLayerNormNanos(System.nanoTime() - attentionNormStart);
         float[] attentionOutput = runSelfAttentionStep(attentionInput, layer, layerCache, position);
         float[] afterAttention = add(hidden, attentionOutput);
 
         float[] mlpInput = afterAttention.clone();
+        long mlpNormStart = System.nanoTime();
         DecoderOnlyMath.rmsNorm(mlpInput, layer.postAttentionNorm().copyValues(), (float) config.rmsNormEps());
+        profile.addLayerNormNanos(System.nanoTime() - mlpNormStart);
         float[] mlpOutput = runMlpStep(mlpInput, layer);
         return add(afterAttention, mlpOutput);
     }
@@ -206,9 +212,11 @@ public final class SmolLM2ReferenceForwardPass {
         int numKvHeads = config.effectiveKeyValueHeads();
         int headDim = config.effectiveHeadDim();
 
+        long projectionStart = System.nanoTime();
         float[] query = layer.queryProjection().multiplyVector(input);
         float[] key = layer.keyProjection().multiplyVector(input);
         float[] value = layer.valueProjection().multiplyVector(input);
+        profile.addAttentionProjectionNanos(System.nanoTime() - projectionStart);
         for (int head = 0; head < numHeads; head++) {
             rotaryEmbedding.apply(query, head * headDim, position);
         }
@@ -217,6 +225,7 @@ public final class SmolLM2ReferenceForwardPass {
         }
         layerCache.append(key, value);
 
+        long attentionScoreStart = System.nanoTime();
         float[] context = new float[hiddenSize];
         int sourceCount = layerCache.size();
         for (int queryHead = 0; queryHead < numHeads; queryHead++) {
@@ -235,7 +244,11 @@ public final class SmolLM2ReferenceForwardPass {
                         scores[sourcePosition]);
             }
         }
-        return layer.outputProjection().multiplyVector(context);
+        profile.addAttentionScoreNanos(System.nanoTime() - attentionScoreStart);
+        long outputProjectionStart = System.nanoTime();
+        float[] output = layer.outputProjection().multiplyVector(context);
+        profile.addAttentionOutputProjectionNanos(System.nanoTime() - outputProjectionStart);
+        return output;
     }
 
     private float[][] runMlp(float[][] input, SmolLM2ReferenceLayerWeights layer) {
@@ -247,6 +260,7 @@ public final class SmolLM2ReferenceForwardPass {
     }
 
     private float[] runMlpStep(float[] input, SmolLM2ReferenceLayerWeights layer) {
+        long mlpStart = System.nanoTime();
         float[] gate = layer.gateProjection().multiplyVector(input);
         float[] up = layer.upProjection().multiplyVector(input);
         if (gate.length != up.length) {
@@ -255,7 +269,9 @@ public final class SmolLM2ReferenceForwardPass {
         for (int i = 0; i < gate.length; i++) {
             gate[i] = DecoderOnlyMath.fastSilu(gate[i]) * up[i];
         }
-        return layer.downProjection().multiplyVector(gate);
+        float[] output = layer.downProjection().multiplyVector(gate);
+        profile.addMlpNanos(System.nanoTime() - mlpStart);
+        return output;
     }
 
     private float[] projectToLogits(float[] hidden) {

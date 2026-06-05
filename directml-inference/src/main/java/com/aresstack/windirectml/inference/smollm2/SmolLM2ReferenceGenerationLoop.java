@@ -66,7 +66,8 @@ public final class SmolLM2ReferenceGenerationLoop {
                 decoderStepNanos,
                 forwardPass.profile().lmHeadNanos(),
                 tokenSelectNanos,
-                0L);
+                0L,
+                forwardPass.profile().snapshot());
         return new SmolLM2TokenRuntimeResult(
                 request.inputTokenIds(),
                 toList(generatedTokens),

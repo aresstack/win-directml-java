@@ -250,6 +250,7 @@ public final class SummarizerPanel extends JPanel {
         appendResult("    token select: " + profile.tokenSelectMillis() + " ms");
         appendResult("    detokenize: " + profile.detokenizeMillis() + " ms");
         appendResult("    avg/token runtime: " + profile.averageTokenRuntimeMillis(result.outputTokens()) + " ms");
+        appendSmolLm2ReferenceHotspots(profile);
         appendResult("  Generated token IDs: " + result.diagnostics().generatedTokenIdsPreview(32));
         if (result.diagnostics().immediateEos()) {
             appendResult("  Warning: generation stopped after an immediate EOS token.");
@@ -260,6 +261,22 @@ public final class SummarizerPanel extends JPanel {
     }
 
 
+
+
+    private void appendSmolLm2ReferenceHotspots(SmolLM2GenerationProfile profile) {
+        var hotspots = profile.referenceHotspots();
+        if (hotspots.measuredMillis() == 0L) {
+            return;
+        }
+        appendResult("    reference hotspots:");
+        appendResult("      layer norms: " + hotspots.layerNormMillis() + " ms");
+        appendResult("      attention q/k/v projections: " + hotspots.attentionProjectionMillis() + " ms");
+        appendResult("      attention scores/context: " + hotspots.attentionScoreMillis() + " ms");
+        appendResult("      attention output projection: " + hotspots.attentionOutputProjectionMillis() + " ms");
+        appendResult("      mlp: " + hotspots.mlpMillis() + " ms");
+        appendResult("      final norm: " + hotspots.finalNormMillis() + " ms");
+        appendResult("      lm head: " + hotspots.lmHeadMillis() + " ms");
+    }
 
     private void appendSmolLm2WarpReadiness(com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport report) {
         appendResult("WARP readiness: " + (report.executable() ? "executable" : "prepared, not executable"));

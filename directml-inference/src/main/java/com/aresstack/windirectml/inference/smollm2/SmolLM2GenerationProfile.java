@@ -9,7 +9,8 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
                                        long decoderStepNanos,
                                        long lmHeadNanos,
                                        long tokenSelectNanos,
-                                       long detokenizeNanos) {
+                                       long detokenizeNanos,
+                                       SmolLM2ReferenceHotspotProfile referenceHotspots) {
 
     public SmolLM2GenerationProfile {
         runtimeNanos = nonNegative(runtimeNanos);
@@ -19,10 +20,25 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
         lmHeadNanos = nonNegative(lmHeadNanos);
         tokenSelectNanos = nonNegative(tokenSelectNanos);
         detokenizeNanos = nonNegative(detokenizeNanos);
+        referenceHotspots = referenceHotspots == null
+                ? SmolLM2ReferenceHotspotProfile.empty()
+                : referenceHotspots;
+    }
+
+    public SmolLM2GenerationProfile(long runtimeNanos,
+                                    long tokenizeNanos,
+                                    long prefillNanos,
+                                    long decoderStepNanos,
+                                    long lmHeadNanos,
+                                    long tokenSelectNanos,
+                                    long detokenizeNanos) {
+        this(runtimeNanos, tokenizeNanos, prefillNanos, decoderStepNanos, lmHeadNanos,
+                tokenSelectNanos, detokenizeNanos, SmolLM2ReferenceHotspotProfile.empty());
     }
 
     public static SmolLM2GenerationProfile empty() {
-        return new SmolLM2GenerationProfile(0L, 0L, 0L, 0L, 0L, 0L, 0L);
+        return new SmolLM2GenerationProfile(0L, 0L, 0L, 0L, 0L, 0L, 0L,
+                SmolLM2ReferenceHotspotProfile.empty());
     }
 
     public SmolLM2GenerationProfile withTextTimings(long newRuntimeNanos,
@@ -35,7 +51,8 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
                 decoderStepNanos,
                 lmHeadNanos,
                 tokenSelectNanos,
-                newDetokenizeNanos);
+                newDetokenizeNanos,
+                referenceHotspots);
     }
 
     public long runtimeMillis() {
