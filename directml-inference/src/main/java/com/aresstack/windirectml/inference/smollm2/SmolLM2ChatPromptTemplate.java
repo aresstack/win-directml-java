@@ -27,6 +27,29 @@ public final class SmolLM2ChatPromptTemplate {
         if (looksLikeRenderedChat(userPrompt)) {
             return userPrompt;
         }
+        return renderConversation(userPrompt);
+    }
+
+    public String renderSummarizationPrompt(String sourceText) {
+        Objects.requireNonNull(sourceText, "sourceText");
+        if (looksLikeRenderedChat(sourceText)) {
+            return sourceText;
+        }
+        String taskPrompt = "Aufgabe: Fasse den folgenden Quelltext sachlich und knapp zusammen.\n"
+                + "Regeln:\n"
+                + "- Antworte in derselben Sprache wie der Quelltext.\n"
+                + "- Verwende ausschließlich Informationen aus dem Quelltext.\n"
+                + "- Erfinde keine zusätzlichen Fakten, Übersetzungen, Rollen, Datumsangaben oder Ämter.\n"
+                + "- Übernimm Namen, Orte, Datumsangaben und historische Fakten nur aus dem Quelltext.\n"
+                + "- Wenn der Quelltext deutsch ist, antworte deutsch.\n\n"
+                + "Quelltext:\n<<<\n"
+                + sourceText
+                + "\n>>>\n\n"
+                + "Zusammenfassung:";
+        return renderConversation(taskPrompt);
+    }
+
+    private String renderConversation(String userPrompt) {
         return IM_START + "system\n"
                 + systemPrompt
                 + IM_END + "\n"

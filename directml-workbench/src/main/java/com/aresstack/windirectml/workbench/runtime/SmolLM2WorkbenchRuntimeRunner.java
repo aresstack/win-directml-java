@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.workbench.runtime;
 
+import com.aresstack.windirectml.inference.smollm2.SmolLM2ChatPromptTemplate;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2CompileOptions;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationOptions;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationDiagnostics;
@@ -62,8 +63,9 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         Optional<SmolLM2WarpReadinessReport> warpReadiness = inspectWarpReadinessIfRequested(runtimePackage, safeBackend);
         Optional<SmolLM2WarpExecutionStatus> warpStatus = warpReadiness.map(SmolLM2WorkbenchRuntimeRunner::toExecutionStatus);
         try (SmolLM2Runtime runtime = loadRuntime(runtimePackage, tokenizer, safeBackend, warpStatus)) {
+            String summarizationPrompt = SmolLM2ChatPromptTemplate.defaultInstruct().renderSummarizationPrompt(prompt);
             SmolLM2RuntimeResult result = runtime.generate(new SmolLM2RuntimeRequest(
-                    prompt,
+                    summarizationPrompt,
                     maxTokens,
                     SmolLM2GenerationOptions.greedy()));
             Optional<SmolLM2WarpExecutionStatus> effectiveWarpStatus = runtime.warpExecutionStatus().or(() -> warpStatus);
