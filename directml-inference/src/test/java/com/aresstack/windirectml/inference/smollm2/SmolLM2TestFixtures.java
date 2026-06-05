@@ -65,6 +65,29 @@ final class SmolLM2TestFixtures {
         writeSafeTensors(dir.resolve("model.safetensors"), completeCatalog(config, includeLmHead));
     }
 
+
+    static void writeTokenizerJson(Path file) throws Exception {
+        Map<String, Object> model = new LinkedHashMap<>();
+        Map<String, Integer> vocab = new LinkedHashMap<>();
+        vocab.put("a", 0);
+        vocab.put("b", 1);
+        vocab.put("ab", 2);
+        vocab.put("<|endoftext|>", 3);
+        model.put("type", "BPE");
+        model.put("vocab", vocab);
+        model.put("merges", List.of(List.of("a", "b")));
+
+        Map<String, Object> eosToken = new LinkedHashMap<>();
+        eosToken.put("id", 3);
+        eosToken.put("content", "<|endoftext|>");
+        eosToken.put("special", true);
+
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("model", model);
+        root.put("added_tokens", List.of(eosToken));
+        Files.writeString(file, MAPPER.writeValueAsString(root), StandardCharsets.UTF_8);
+    }
+
     static String configJson(SmolLM2Config config) throws Exception {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("model_type", config.modelType());

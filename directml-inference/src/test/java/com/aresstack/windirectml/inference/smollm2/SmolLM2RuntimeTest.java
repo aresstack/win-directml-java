@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -28,11 +29,31 @@ class SmolLM2RuntimeTest {
     }
 
     @Test
-    void generateThrowsUnsupportedException() throws Exception {
+    void generateRequiresTokenizer() throws Exception {
         try (SmolLM2Runtime runtime = SmolLM2Runtime.load(createRuntimePackage())) {
             SmolLM2RuntimeUnsupportedException exception = assertThrows(SmolLM2RuntimeUnsupportedException.class,
                     () -> runtime.generate(new SmolLM2RuntimeRequest("hello", 4, null)));
-            assertTrue(exception.getMessage().contains("runtime execution is not implemented yet"));
+            assertTrue(exception.getMessage().contains("requires a SmolLM2Tokenizer"));
+        }
+    }
+
+    @Test
+    void generateUsesTokenizerAndReferenceRuntimeWhenWeightsAreAvailable() throws Exception {
+        SmolLM2Config config = SmolLM2TestFixtures.config135(false);
+        SmolLM2TestFixtures.writeModelDirectory(tempDir, config, true);
+        Path packagePath = tempDir.resolve("runtime-with-weights.wdmlpack");
+        new SmolLM2WdmlPackCompiler().compile(new SmolLM2CompileOptions(tempDir, packagePath, false, false));
+        Path tokenizerJson = tempDir.resolve("tokenizer.json");
+        SmolLM2TestFixtures.writeTokenizerJson(tokenizerJson);
+
+        try (SmolLM2Runtime runtime = SmolLM2Runtime.load(
+                SmolLM2RuntimePackage.open(packagePath), SmolLM2Tokenizer.load(tokenizerJson))) {
+            SmolLM2RuntimeResult result = runtime.generate(new SmolLM2RuntimeRequest("a", 1, null));
+
+            assertEquals("a", result.generatedText());
+            assertEquals(List.of(0), result.generatedTokenIds());
+            assertEquals(1, result.tokensGenerated());
+            assertEquals("length", result.finishReason());
         }
     }
 
