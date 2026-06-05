@@ -3,15 +3,16 @@ package com.aresstack.windirectml.inference.qwen;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyAttentionLayout;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyRotaryEmbedding;
 import com.aresstack.windirectml.windows.GpuTimestampProfile;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ForkJoinPool;
 import java.util.stream.IntStream;
 
@@ -56,7 +57,7 @@ public final class Qwen2Runtime {
     private final Qwen2Config config;
     private final Qwen2Weights weights;
     private final QwenTokenizer tokenizer;
-    private final int qHeadsPerKvHead;
+    private final DecoderOnlyAttentionLayout attentionLayout;
     private final QwenGpuKernels gpuKernels;   // null if CPU-only
     private final QwenGpuPipeline gpuPipeline; // null if V1 or CPU-only
     private final boolean useGpuForDecode;     // false in HYBRID mode — GPU only for prefill
@@ -67,9 +68,8 @@ public final class Qwen2Runtime {
     private final float[][][] kvCacheV;
     private int cachedSeqLen;
 
-    // ── Pre-computed RoPE cos/sin tables ─────────────────────────────────
-    private final float[] ropeCosBuf;  // [maxPos * halfDim]
-    private final float[] ropeSinBuf;  // [maxPos * halfDim]
+    // ── Shared decoder-only RoPE support ─────────────────────────────────
+    private final DecoderOnlyRotaryEmbedding rotaryEmbedding;
 
     // ── Pre-allocated decode buffers (seqLen=1) ──────────────────────────
     private final float[] decBuf;         // [hidden] — current hidden state
@@ -183,11 +183,7 @@ public final class Qwen2Runtime {
         int numLayers = config.numHiddenLayers();
         int numHeads = config.numAttentionHeads();
         int kvHeads = config.numKeyValueHeads();
-        if (numHeads % kvHeads != 0) {
-            throw new IllegalArgumentException(
-                    "numAttentionHeads must be divisible by numKeyValueHeads for GQA mapping");
-        }
-        this.qHeadsPerKvHead = numHeads / kvHeads;
+        this.attentionLayout = new DecoderOnlyAttentionLayout(numHeads, kvHeads);
         this.kvCacheK = new float[numLayers][kvHeads][];
         this.kvCacheV = new float[numLayers][kvHeads][];
         this.cachedSeqLen = 0;
@@ -218,21 +214,10 @@ public final class Qwen2Runtime {
         decLogits = new float[config.vocabSize()];
 
         // Pre-compute RoPE tables
-        int halfDim = config.headDim() / 2;
         // Limit pre-computed RoPE table to 4096 positions to cap startup memory
         // (~2 MB for headDim=64). Positions beyond this are computed on-the-fly.
         int ropeMaxPos = Math.min(maxPos, 4096);
-        ropeCosBuf = new float[ropeMaxPos * halfDim];
-        ropeSinBuf = new float[ropeMaxPos * halfDim];
-        double theta = config.ropeTheta();
-        for (int pos = 0; pos < ropeMaxPos; pos++) {
-            for (int i = 0; i < halfDim; i++) {
-                double freq = 1.0 / Math.pow(theta, (2.0 * i) / config.headDim());
-                double angle = pos * freq;
-                ropeCosBuf[pos * halfDim + i] = (float) Math.cos(angle);
-                ropeSinBuf[pos * halfDim + i] = (float) Math.sin(angle);
-            }
-        }
+        rotaryEmbedding = new DecoderOnlyRotaryEmbedding(config.headDim(), config.ropeTheta(), ropeMaxPos);
 
         String modeStr;
         if (!useGpuForDecode && (gpuPipeline != null || gpuKernels != null)) {
@@ -246,7 +231,7 @@ public final class Qwen2Runtime {
             modeStr = "CPU-only";
         }
         log.info("Qwen2Runtime: {} mode, {} layers, {} heads ({}KV), headDim={}, GQA ratio={}:1",
-                modeStr, numLayers, numHeads, kvHeads, config.headDim(), qHeadsPerKvHead);
+                modeStr, numLayers, numHeads, kvHeads, config.headDim(), attentionLayout.qHeadsPerKvHead());
 
         // ── One-shot diagnostic: SIMD / parallelism / heap ──────────────────────────────────
         // The CPU path's per-token cost is dominated by INT4 SIMD matvec
@@ -1055,15 +1040,12 @@ public final class Qwen2Runtime {
     }
 
     static int kvHeadForQueryHead(int queryHead, int qHeadsPerKvHead, int numKvHeads) {
-        int kvHead = queryHead / qHeadsPerKvHead;
-        if (kvHead >= numKvHeads) {
-            throw new IllegalArgumentException("queryHead out of range for configured GQA mapping: " + queryHead);
-        }
-        return kvHead;
+        return new DecoderOnlyAttentionLayout(qHeadsPerKvHead * numKvHeads, numKvHeads)
+                .kvHeadForQueryHead(queryHead);
     }
 
     private int kvHeadForQueryHead(int queryHead) {
-        return kvHeadForQueryHead(queryHead, qHeadsPerKvHead, config.numKeyValueHeads());
+        return attentionLayout.kvHeadForQueryHead(queryHead);
     }
 
     // ── Math utilities ───────────────────────────────────────────────────
@@ -1079,21 +1061,11 @@ public final class Qwen2Runtime {
      * <p>Clamps to exact values for |x| ≥ 10 (sigmoid ≈ 0 or 1 there).
      */
     static float fastSilu(float x) {
-        if (x >= 10.0f) return x;      // sigmoid(10) > 0.9999 → silu ≈ x
-        if (x <= -10.0f) return 0.0f;   // sigmoid(-10) < 0.0001 → silu ≈ 0
-        // exp(-x) via Schraudolph bit-trick:  exp(t) ≈ Float.intBitsToFloat((int)(t·2²³/ln2 + 127·2²³))
-        int bits = (int) (-x * 12102203.161561485f + 1065353216.0f);
-        float expNeg = Float.intBitsToFloat(bits < 0 ? 0 : bits);
-        return x / (1.0f + expNeg);
+        return DecoderOnlyMath.fastSilu(x);
     }
 
     static void rmsNorm(float[] x, float[] weight, float eps) {
-        float sumSq = 0;
-        for (float v : x) sumSq += v * v;
-        float rms = (float) (1.0 / Math.sqrt(sumSq / x.length + eps));
-        for (int i = 0; i < x.length; i++) {
-            x[i] = x[i] * rms * weight[i];
-        }
+        DecoderOnlyMath.rmsNorm(x, weight, eps);
     }
 
     /**
@@ -1119,76 +1091,31 @@ public final class Qwen2Runtime {
     }
 
     private void applyRoPE(float[] vec, int offset, int dim, int pos) {
-        int halfDim = dim / 2;
-        int ropeMaxPos = ropeCosBuf.length / halfDim;
-        if (pos < ropeMaxPos) {
-            // Use pre-computed table
-            for (int i = 0; i < halfDim; i++) {
-                float cos = ropeCosBuf[pos * halfDim + i];
-                float sin = ropeSinBuf[pos * halfDim + i];
-                float x0 = vec[offset + i];
-                float x1 = vec[offset + halfDim + i];
-                vec[offset + i] = x0 * cos - x1 * sin;
-                vec[offset + halfDim + i] = x0 * sin + x1 * cos;
-            }
-        } else {
-            // Compute on the fly for positions beyond pre-computed table
-            double theta = config.ropeTheta();
-            for (int i = 0; i < halfDim; i++) {
-                double freq = 1.0 / Math.pow(theta, (2.0 * i) / dim);
-                double angle = pos * freq;
-                float cos = (float) Math.cos(angle);
-                float sin = (float) Math.sin(angle);
-                float x0 = vec[offset + i];
-                float x1 = vec[offset + halfDim + i];
-                vec[offset + i] = x0 * cos - x1 * sin;
-                vec[offset + halfDim + i] = x0 * sin + x1 * cos;
-            }
+        if (dim != rotaryEmbedding.headDim()) {
+            throw new IllegalArgumentException("RoPE dimension does not match configured headDim: " + dim);
         }
+        rotaryEmbedding.apply(vec, offset, pos);
     }
 
     static void softmax(float[] x, int len) {
-        float max = Float.NEGATIVE_INFINITY;
-        for (int i = 0; i < len; i++) if (x[i] > max) max = x[i];
-        float sum = 0;
-        for (int i = 0; i < len; i++) {
-            x[i] = (float) Math.exp(x[i] - max);
-            sum += x[i];
-        }
-        float invSum = 1.0f / sum;
-        for (int i = 0; i < len; i++) x[i] *= invSum;
+        DecoderOnlyMath.softmax(x, len);
     }
 
     static int argmax(float[] logits) {
-        int maxIdx = 0;
-        float maxVal = logits[0];
-        for (int i = 1; i < logits.length; i++) {
-            if (logits[i] > maxVal) {
-                maxVal = logits[i];
-                maxIdx = i;
-            }
-        }
-        return maxIdx;
+        return DecoderOnlyMath.argmax(logits);
     }
 
     // ── Repetition penalty ───────────────────────────────────────────────
 
     /**
      * Apply a repetition penalty to all previously-generated token logits.
-     * Uses a small {@link HashSet} (typically &lt;= maxTokens, i.e. a few hundred
+     * Uses a small shared decoder-only helper with a small set (typically &lt;= maxTokens, i.e. a few hundred
      * entries) to deduplicate — the previous implementation allocated a fresh
      * {@code boolean[vocabSize]} (= 594 KB for Qwen 0.5B's 151 936-word vocab)
      * per token and burned ~120 MB of GC pressure over a 200-token decode.
      */
     private void applyRepetitionPenalty(float[] logits, int[] generatedIds, int count) {
-        Set<Integer> seen = new HashSet<>(count * 2);
-        for (int i = 0; i < count; i++) {
-            int id = generatedIds[i];
-            if (id < 0 || id >= logits.length) continue;
-            if (!seen.add(id)) continue;
-            float v = logits[id];
-            logits[id] = v > 0 ? v / repetitionPenalty : v * repetitionPenalty;
-        }
+        DecoderOnlyMath.applyRepetitionPenalty(logits, generatedIds, count, repetitionPenalty);
     }
 
     // ── Profiling ────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.qwen;
 
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyKvCacheLayout;
 import com.aresstack.windirectml.windows.D3D12Bindings;
 import com.aresstack.windirectml.windows.DxgiBindings;
 import com.aresstack.windirectml.windows.WindowsBindings;
@@ -49,6 +50,7 @@ public final class QwenGpuKvCache implements AutoCloseable {
     private final int kvHeads;
     private final int headDim;
     private final int maxSeqLen;
+    private final DecoderOnlyKvCacheLayout layout;
     private final long bytesPerLayer;
     private final Arena arena;
 
@@ -82,7 +84,8 @@ public final class QwenGpuKvCache implements AutoCloseable {
         this.kvHeads = kvHeads;
         this.headDim = headDim;
         this.maxSeqLen = maxSeqLen;
-        this.bytesPerLayer = (long) kvHeads * maxSeqLen * headDim * Float.BYTES;
+        this.layout = new DecoderOnlyKvCacheLayout(numLayers, kvHeads, maxSeqLen, headDim);
+        this.bytesPerLayer = layout.bytesPerLayer();
         this.arena = Arena.ofShared();
         this.kBuf = new MemorySegment[numLayers];
         this.vBuf = new MemorySegment[numLayers];
@@ -123,6 +126,10 @@ public final class QwenGpuKvCache implements AutoCloseable {
 
     public int getMaxSeqLen() {
         return maxSeqLen;
+    }
+
+    public DecoderOnlyKvCacheLayout getLayout() {
+        return layout;
     }
 
     /**
@@ -187,10 +194,10 @@ public final class QwenGpuKvCache implements AutoCloseable {
         // [kvHead -> pos -> d]. Tail positions (seqLen .. maxSeqLen-1) stay at 0;
         // the attention shader must clamp its loop at the current pos and never
         // read past it (decode passes pos+1 via root constant).
-        int totalFloats = kvHeads * maxSeqLen * headDim;
+        int totalFloats = Math.toIntExact(layout.bytesPerLayer() / Float.BYTES);
         float[] stagingK = new float[totalFloats];
         float[] stagingV = new float[totalFloats];
-        int validFloats = seqLen * headDim;
+        int validFloats = layout.validPrefixLength(seqLen);
         for (int kvH = 0; kvH < kvHeads; kvH++) {
             int dstOff = kvH * maxSeqLen * headDim;
             // cpuK[kvH] may be larger than seqLen*headDim (allocated for max

@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.qwen;
 
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyConfig;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -49,7 +50,7 @@ public record Qwen2Config(
         @JsonProperty("rms_norm_eps") float rmsNormEps,
         @JsonProperty("rope_theta") float ropeTheta,
         @JsonProperty("tie_word_embeddings") boolean tieWordEmbeddings
-) {
+) implements DecoderOnlyConfig {
     /**
      * Derived: dimension per attention head = hidden_size / num_attention_heads.
      */
