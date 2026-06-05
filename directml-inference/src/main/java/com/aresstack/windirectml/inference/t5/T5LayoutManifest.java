@@ -10,10 +10,12 @@ import java.util.Map;
 record T5LayoutManifest(
         String schema,
         int compilerVersion,
+        String sourceLayout,
         boolean safeTensorsSource,
         boolean complete,
         boolean runtimeLoadable,
         String runtimeLoadMode,
+        String reason,
         int roleCount,
         int tensorCount,
         long payloadBytes,
@@ -22,10 +24,15 @@ record T5LayoutManifest(
         List<String> shapeErrors,
         List<String> unsupportedRuntimeDtypes
 ) {
+    static final String RUNTIME_NOT_IMPLEMENTED_REASON = "T5 runtime is not implemented yet";
+
     static T5LayoutManifest notSafeTensors(String sourceFormat) {
         return new T5LayoutManifest(T5SafeTensorsLayoutCompiler.LAYOUT_SCHEMA,
                 T5SafeTensorsLayoutCompiler.COMPILER_VERSION,
-                false, false, false, "not-safetensors", 0, 0, 0L,
+                "huggingface-t5-dense",
+                false, false, false, "not-safetensors",
+                "source is not SafeTensors: " + sourceFormat,
+                0, 0, 0L,
                 List.of(), List.of("source is not SafeTensors: " + sourceFormat), List.of(), List.of());
     }
 
@@ -33,11 +40,13 @@ record T5LayoutManifest(
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("schema", schema);
         out.put("compilerVersion", compilerVersion);
-        out.put("sourceLayout", "huggingface-t5-dense");
+        out.put("sourceLayout", sourceLayout);
         out.put("safeTensorsSource", safeTensorsSource);
         out.put("complete", complete);
+        out.put("layoutComplete", complete);
         out.put("runtimeLoadable", runtimeLoadable);
         out.put("runtimeLoadMode", runtimeLoadMode);
+        out.put("reason", reason);
         out.put("roleCount", roleCount);
         out.put("tensorCount", tensorCount);
         out.put("payloadBytes", payloadBytes);

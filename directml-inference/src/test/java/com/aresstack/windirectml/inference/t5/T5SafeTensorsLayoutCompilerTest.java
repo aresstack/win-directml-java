@@ -35,14 +35,13 @@ class T5SafeTensorsLayoutCompilerTest {
         assertEquals(T5SafeTensorsLayoutCompiler.LAYOUT_SCHEMA, manifest.schema());
         assertFalse(manifest.complete());
         assertFalse(manifest.runtimeLoadable());
-        assertEquals("t5-safetensors-layout-only", manifest.runtimeLoadMode());
+        assertEquals("not-implemented", manifest.runtimeLoadMode());
         assertTrue(manifest.missingRequired().contains("encoder.final_layer_norm.weight"));
-        assertEquals(2, manifest.roles().size());
-        assertTrue(manifest.roles().stream().anyMatch(role -> "lm_head".equals(role.role()) && role.tied()));
+        assertEquals(1, manifest.roles().size());
     }
 
     @Test
-    void completeCodeT5DenseLayoutBecomesRuntimeLoadable() throws Exception {
+    void completeCodeT5DenseLayoutIsCompleteButNotRuntimeLoadableYet() throws Exception {
         T5Config config = tinyConfig(false);
         Map<String, OnnxTensor> tensors = completeDenseT5Tensors(config);
         T5ModelImport imported = imported(tensors);
@@ -50,8 +49,9 @@ class T5SafeTensorsLayoutCompilerTest {
         T5LayoutManifest manifest = T5SafeTensorsLayoutCompiler.analyze(imported, config);
 
         assertTrue(manifest.complete(), manifest.missingRequired().toString());
-        assertTrue(manifest.runtimeLoadable(), manifest.unsupportedRuntimeDtypes().toString());
-        assertEquals("wdmlpack-native-t5-dense-payload", manifest.runtimeLoadMode());
+        assertFalse(manifest.runtimeLoadable());
+        assertEquals("not-implemented", manifest.runtimeLoadMode());
+        assertEquals(T5LayoutManifest.RUNTIME_NOT_IMPLEMENTED_REASON, manifest.reason());
         assertEquals(27, manifest.roleCount());
         assertTrue(manifest.roles().stream().anyMatch(role -> "lm_head".equals(role.role()) && role.tied()));
         assertTrue(manifest.roles().stream().anyMatch(role ->
@@ -93,10 +93,63 @@ class T5SafeTensorsLayoutCompilerTest {
 
         assertEquals("huggingface-t5-dense", out.get("sourceLayout"));
         assertEquals(T5SafeTensorsLayoutCompiler.COMPILER_VERSION, out.get("compilerVersion"));
-        assertEquals(true, out.get("runtimeLoadable"));
+        assertEquals(false, out.get("runtimeLoadable"));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> roles = (List<Map<String, Object>>) out.get("roles");
         assertEquals(27, roles.size());
+    }
+
+
+    @Test
+    void acceptsGatedFeedForwardLayout() throws Exception {
+        T5Config config = tinyConfig(true);
+        T5LayoutManifest manifest = T5SafeTensorsLayoutCompiler.analyze(imported(completeDenseT5Tensors(config)), config);
+
+        assertTrue(manifest.complete(), manifest.missingRequired().toString());
+        assertFalse(manifest.runtimeLoadable());
+        assertTrue(manifest.roles().stream().anyMatch(role -> "encoder.layer.0.ffn.wi_0".equals(role.role())));
+        assertTrue(manifest.roles().stream().anyMatch(role -> "decoder.layer.0.ffn.wi_1".equals(role.role())));
+    }
+
+    @Test
+    void rejectsMissingLmHeadWhenEmbeddingsAreNotTied() throws Exception {
+        T5Config config = new T5Config(List.of("T5ForConditionalGeneration"), "t5", true,
+                4, 2, 8, 1, 1, 2, 6, 4, 16, 1e-6f,
+                0, 2, 0, false, "relu");
+        Map<String, OnnxTensor> tensors = completeDenseT5Tensors(config);
+        tensors.remove("lm_head.weight");
+
+        T5LayoutManifest manifest = T5SafeTensorsLayoutCompiler.analyze(imported(tensors), config);
+
+        assertFalse(manifest.complete());
+        assertTrue(manifest.missingRequired().contains("lm_head.weight"));
+    }
+
+    @Test
+    void acceptsExplicitLmHeadWhenEmbeddingsAreNotTied() throws Exception {
+        T5Config config = new T5Config(List.of("T5ForConditionalGeneration"), "t5", true,
+                4, 2, 8, 1, 1, 2, 6, 4, 16, 1e-6f,
+                0, 2, 0, false, "relu");
+
+        T5LayoutManifest manifest = T5SafeTensorsLayoutCompiler.analyze(imported(completeDenseT5Tensors(config)), config);
+
+        assertTrue(manifest.complete(), manifest.missingRequired().toString());
+        assertTrue(manifest.roles().stream().anyMatch(role -> "lm_head".equals(role.role()) && !role.tied()));
+    }
+
+    @Test
+    void reportsUnsupportedDtypes() throws Exception {
+        T5Config config = tinyConfig(false);
+        Map<String, OnnxTensor> tensors = completeDenseT5Tensors(config);
+        tensors.put("shared.weight", tensor("shared.weight", OnnxModelReader.ONNX_INT8,
+                config.vocabSize(), config.modelSize()));
+
+        T5LayoutManifest manifest = T5SafeTensorsLayoutCompiler.analyze(imported(tensors), config);
+
+        assertTrue(manifest.complete(), manifest.shapeErrors().toString());
+        assertFalse(manifest.runtimeLoadable());
+        assertEquals(1, manifest.unsupportedRuntimeDtypes().size());
+        assertTrue(manifest.unsupportedRuntimeDtypes().get(0).contains("INT8"));
     }
 
     private T5ModelImport imported(Map<String, OnnxTensor> tensors) throws Exception {
@@ -110,40 +163,7 @@ class T5SafeTensorsLayoutCompilerTest {
     }
 
     private static Map<String, OnnxTensor> completeDenseT5Tensors(T5Config config) {
-        Map<String, OnnxTensor> tensors = new LinkedHashMap<>();
-        add(tensors, "shared.weight", config.vocabSize(), config.modelSize());
-        add(tensors, "encoder.final_layer_norm.weight", config.modelSize());
-        add(tensors, "decoder.final_layer_norm.weight", config.modelSize());
-        add(tensors, "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
-                config.relativeAttentionBuckets(), config.attentionHeads());
-        add(tensors, "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
-                config.relativeAttentionBuckets(), config.attentionHeads());
-
-        addEncoderBlock(tensors, 0, config);
-        addDecoderBlock(tensors, 0, config);
-        return tensors;
-    }
-
-    private static void addEncoderBlock(Map<String, OnnxTensor> tensors, int layer, T5Config config) {
-        add(tensors, "encoder.block." + layer + ".layer.0.layer_norm.weight", config.modelSize());
-        add(tensors, "encoder.block." + layer + ".layer.1.layer_norm.weight", config.modelSize());
-        addAttention(tensors, "encoder.block." + layer + ".layer.0.SelfAttention", config);
-        add(tensors, "encoder.block." + layer + ".layer.1.DenseReluDense.wi.weight",
-                config.feedForwardSize(), config.modelSize());
-        add(tensors, "encoder.block." + layer + ".layer.1.DenseReluDense.wo.weight",
-                config.modelSize(), config.feedForwardSize());
-    }
-
-    private static void addDecoderBlock(Map<String, OnnxTensor> tensors, int layer, T5Config config) {
-        add(tensors, "decoder.block." + layer + ".layer.0.layer_norm.weight", config.modelSize());
-        add(tensors, "decoder.block." + layer + ".layer.1.layer_norm.weight", config.modelSize());
-        add(tensors, "decoder.block." + layer + ".layer.2.layer_norm.weight", config.modelSize());
-        addAttention(tensors, "decoder.block." + layer + ".layer.0.SelfAttention", config);
-        addAttention(tensors, "decoder.block." + layer + ".layer.1.EncDecAttention", config);
-        add(tensors, "decoder.block." + layer + ".layer.2.DenseReluDense.wi.weight",
-                config.feedForwardSize(), config.modelSize());
-        add(tensors, "decoder.block." + layer + ".layer.2.DenseReluDense.wo.weight",
-                config.modelSize(), config.feedForwardSize());
+        return T5TestFixtures.completeDenseT5Tensors(config);
     }
 
     private static void addAttention(Map<String, OnnxTensor> tensors, String prefix, T5Config config) {
@@ -168,6 +188,18 @@ class T5SafeTensorsLayoutCompilerTest {
                 new float[0], new byte[0], payload.asReadOnlyBuffer(), length);
     }
 
+
+    private static OnnxTensor tensor(String name, int dataType, long... dims) {
+        int length = Math.toIntExact(elements(dims) * Short.BYTES);
+        ByteBuffer payload = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < length; i++) {
+            payload.put((byte) (i & 0x7f));
+        }
+        payload.flip();
+        return new OnnxTensor(name, dims, dataType,
+                new float[0], new byte[0], payload.asReadOnlyBuffer(), length);
+    }
+
     private static long elements(long[] dims) {
         long total = 1;
         for (long dim : dims) {
@@ -177,9 +209,6 @@ class T5SafeTensorsLayoutCompilerTest {
     }
 
     private static T5Config tinyConfig(boolean gated) {
-        return new T5Config(List.of("T5ForConditionalGeneration"), "t5", true,
-                4, 2, 8, 1, 1, 2, 6,
-                4, 16, 1e-6f, 0, 2, 0,
-                true, gated ? "gated-gelu" : "relu");
+        return T5TestFixtures.tinyConfig(gated);
     }
 }

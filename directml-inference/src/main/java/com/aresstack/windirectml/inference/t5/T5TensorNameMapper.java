@@ -1,7 +1,5 @@
 package com.aresstack.windirectml.inference.t5;
 
-import java.util.Objects;
-
 /**
  * Maps Hugging Face T5/CodeT5 tensor names to stable IronMind runtime roles.
  *
@@ -13,22 +11,22 @@ final class T5TensorNameMapper {
     private T5TensorNameMapper() {
     }
 
-    static ExpectedTensor sharedEmbedding(T5Config config) {
+    static T5ExpectedTensor sharedEmbedding(T5Config config) {
         return required("shared_embedding", "shared.weight", "shared.embedding.weight",
                 config.vocabSize(), config.modelSize());
     }
 
-    static ExpectedTensor encoderFinalLayerNorm(T5Config config) {
+    static T5ExpectedTensor encoderFinalLayerNorm(T5Config config) {
         return required("encoder.final_layer_norm", "encoder.final_layer_norm.weight",
                 "encoder.final_layer_norm.weight", config.modelSize());
     }
 
-    static ExpectedTensor decoderFinalLayerNorm(T5Config config) {
+    static T5ExpectedTensor decoderFinalLayerNorm(T5Config config) {
         return required("decoder.final_layer_norm", "decoder.final_layer_norm.weight",
                 "decoder.final_layer_norm.weight", config.modelSize());
     }
 
-    static ExpectedTensor encoderSelfAttention(int layer, String projection, T5Config config) {
+    static T5ExpectedTensor encoderSelfAttention(int layer, String projection, T5Config config) {
         long rows = "o".equals(projection) ? config.modelSize() : config.attentionInnerSize();
         long cols = "o".equals(projection) ? config.attentionInnerSize() : config.modelSize();
         return required(role("encoder", layer, "self_attn." + projection),
@@ -36,7 +34,7 @@ final class T5TensorNameMapper {
                 runtimeName("encoder", layer, "self_attn", projection), rows, cols);
     }
 
-    static ExpectedTensor decoderSelfAttention(int layer, String projection, T5Config config) {
+    static T5ExpectedTensor decoderSelfAttention(int layer, String projection, T5Config config) {
         long rows = "o".equals(projection) ? config.modelSize() : config.attentionInnerSize();
         long cols = "o".equals(projection) ? config.attentionInnerSize() : config.modelSize();
         return required(role("decoder", layer, "self_attn." + projection),
@@ -44,7 +42,7 @@ final class T5TensorNameMapper {
                 runtimeName("decoder", layer, "self_attn", projection), rows, cols);
     }
 
-    static ExpectedTensor decoderCrossAttention(int layer, String projection, T5Config config) {
+    static T5ExpectedTensor decoderCrossAttention(int layer, String projection, T5Config config) {
         long rows = "o".equals(projection) ? config.modelSize() : config.attentionInnerSize();
         long cols = "o".equals(projection) ? config.attentionInnerSize() : config.modelSize();
         return required(role("decoder", layer, "cross_attn." + projection),
@@ -52,19 +50,19 @@ final class T5TensorNameMapper {
                 runtimeName("decoder", layer, "cross_attn", projection), rows, cols);
     }
 
-    static ExpectedTensor encoderLayerNorm(int layer, int subLayer, T5Config config) {
+    static T5ExpectedTensor encoderLayerNorm(int layer, int subLayer, T5Config config) {
         return required(role("encoder", layer, "layer_norm." + subLayer),
                 "encoder.block." + layer + ".layer." + subLayer + ".layer_norm.weight",
                 runtimeName("encoder", layer, "layer_norm", Integer.toString(subLayer)), config.modelSize());
     }
 
-    static ExpectedTensor decoderLayerNorm(int layer, int subLayer, T5Config config) {
+    static T5ExpectedTensor decoderLayerNorm(int layer, int subLayer, T5Config config) {
         return required(role("decoder", layer, "layer_norm." + subLayer),
                 "decoder.block." + layer + ".layer." + subLayer + ".layer_norm.weight",
                 runtimeName("decoder", layer, "layer_norm", Integer.toString(subLayer)), config.modelSize());
     }
 
-    static ExpectedTensor encoderFeedForward(int layer, String weight, T5Config config) {
+    static T5ExpectedTensor encoderFeedForward(int layer, String weight, T5Config config) {
         long rows = "wo".equals(weight) ? config.modelSize() : config.feedForwardSize();
         long cols = "wo".equals(weight) ? config.feedForwardSize() : config.modelSize();
         return required(role("encoder", layer, "ffn." + weight),
@@ -72,7 +70,7 @@ final class T5TensorNameMapper {
                 runtimeName("encoder", layer, "ffn", weight), rows, cols);
     }
 
-    static ExpectedTensor decoderFeedForward(int layer, String weight, T5Config config) {
+    static T5ExpectedTensor decoderFeedForward(int layer, String weight, T5Config config) {
         long rows = "wo".equals(weight) ? config.modelSize() : config.feedForwardSize();
         long cols = "wo".equals(weight) ? config.feedForwardSize() : config.modelSize();
         return required(role("decoder", layer, "ffn." + weight),
@@ -80,31 +78,31 @@ final class T5TensorNameMapper {
                 runtimeName("decoder", layer, "ffn", weight), rows, cols);
     }
 
-    static ExpectedTensor encoderRelativeAttentionBias(T5Config config) {
+    static T5ExpectedTensor encoderRelativeAttentionBias(T5Config config) {
         return optional("encoder.relative_attention_bias",
                 "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
                 "encoder.relative_attention_bias.weight",
                 config.relativeAttentionBuckets(), config.attentionHeads());
     }
 
-    static ExpectedTensor decoderRelativeAttentionBias(T5Config config) {
+    static T5ExpectedTensor decoderRelativeAttentionBias(T5Config config) {
         return optional("decoder.relative_attention_bias",
                 "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
                 "decoder.relative_attention_bias.weight",
                 config.relativeAttentionBuckets(), config.attentionHeads());
     }
 
-    static ExpectedTensor lmHead(T5Config config) {
+    static T5ExpectedTensor lmHead(T5Config config) {
         return optional("lm_head", "lm_head.weight", "lm_head.weight",
                 config.vocabSize(), config.modelSize());
     }
 
-    static ExpectedTensor required(String role, String sourceName, String runtimeName, long... dims) {
-        return new ExpectedTensor(role, sourceName, runtimeName, true, dims);
+    static T5ExpectedTensor required(String role, String sourceName, String runtimeName, long... dims) {
+        return new T5ExpectedTensor(role, sourceName, runtimeName, true, dims);
     }
 
-    static ExpectedTensor optional(String role, String sourceName, String runtimeName, long... dims) {
-        return new ExpectedTensor(role, sourceName, runtimeName, false, dims);
+    static T5ExpectedTensor optional(String role, String sourceName, String runtimeName, long... dims) {
+        return new T5ExpectedTensor(role, sourceName, runtimeName, false, dims);
     }
 
     private static String role(String stack, int layer, String part) {
@@ -125,21 +123,4 @@ final class T5TensorNameMapper {
         return Integer.toString(layer);
     }
 
-    record ExpectedTensor(String role,
-                          String sourceName,
-                          String runtimeName,
-                          boolean required,
-                          long[] expectedDims) {
-        ExpectedTensor {
-            Objects.requireNonNull(role, "role");
-            Objects.requireNonNull(sourceName, "sourceName");
-            Objects.requireNonNull(runtimeName, "runtimeName");
-            expectedDims = expectedDims == null ? new long[0] : expectedDims.clone();
-        }
-
-        @Override
-        public long[] expectedDims() {
-            return expectedDims.clone();
-        }
-    }
 }

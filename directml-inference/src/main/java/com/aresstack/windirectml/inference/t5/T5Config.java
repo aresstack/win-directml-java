@@ -55,13 +55,21 @@ public record T5Config(
         if (!encoderDecoder) {
             throw new IOException("T5 config must be encoder-decoder");
         }
-        if (modelType != null && !"t5".equals(modelType)) {
+        if (modelType != null && !modelType.isBlank() && !"t5".equals(modelType)) {
             throw new IOException("Unsupported T5 model_type: " + modelType);
         }
         if (modelSize <= 0 || keyValueSize <= 0 || feedForwardSize <= 0
                 || encoderLayers <= 0 || effectiveDecoderLayers() <= 0
                 || attentionHeads <= 0 || vocabSize <= 0) {
             throw new IOException("T5 config contains non-positive architecture values");
+        }
+        if (relativeAttentionBuckets < 0 || relativeAttentionMaxDistance < 0) {
+            throw new IOException("T5 config contains negative relative attention values");
+        }
+        try {
+            specialTokens().validate();
+        } catch (IllegalArgumentException e) {
+            throw new IOException(e.getMessage(), e);
         }
     }
 
@@ -94,5 +102,17 @@ public record T5Config(
             return false;
         }
         return feedForwardProjection.startsWith("gated-") || feedForwardProjection.contains("gated");
+    }
+
+    public String effectiveFeedForwardProjection() {
+        return feedForwardProjection == null || feedForwardProjection.isBlank() ? "relu" : feedForwardProjection;
+    }
+
+    public T5Architecture architecture() {
+        return T5Architecture.from(this);
+    }
+
+    public T5SpecialTokens specialTokens() {
+        return T5SpecialTokens.from(this);
     }
 }

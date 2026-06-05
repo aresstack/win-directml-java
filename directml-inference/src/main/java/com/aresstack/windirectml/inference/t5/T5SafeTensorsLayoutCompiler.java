@@ -122,7 +122,7 @@ final class T5SafeTensorsLayoutCompiler {
         }
 
         private void lmHead() {
-            T5TensorNameMapper.ExpectedTensor lmHead = T5TensorNameMapper.lmHead(config);
+            T5ExpectedTensor lmHead = T5TensorNameMapper.lmHead(config);
             if (exists(lmHead.sourceName())) {
                 tensor(lmHead);
             } else if (config.usesTiedWordEmbeddings()) {
@@ -137,7 +137,7 @@ final class T5SafeTensorsLayoutCompiler {
             return tensor != null && tensor.rawByteLength() > 0;
         }
 
-        private void tensor(T5TensorNameMapper.ExpectedTensor expected) {
+        private void tensor(T5ExpectedTensor expected) {
             OnnxTensor tensor = tensors.get(expected.sourceName());
             if (tensor == null || tensor.rawByteLength() <= 0) {
                 if (expected.required()) {
@@ -162,12 +162,9 @@ final class T5SafeTensorsLayoutCompiler {
 
         private T5LayoutManifest finish() {
             boolean complete = missingRequired.isEmpty() && shapeErrors.isEmpty();
-            boolean runtimeLoadable = complete && unsupportedRuntimeDtypes.isEmpty();
-            String mode = runtimeLoadable
-                    ? "wdmlpack-native-t5-dense-payload"
-                    : "t5-safetensors-layout-only";
-            return new T5LayoutManifest(LAYOUT_SCHEMA, COMPILER_VERSION, true, complete, runtimeLoadable,
-                    mode, roles.size(), tensors.size(), rolePayloadBytes, List.copyOf(roles),
+            return new T5LayoutManifest(LAYOUT_SCHEMA, COMPILER_VERSION, "huggingface-t5-dense", true, complete, false,
+                    "not-implemented", T5LayoutManifest.RUNTIME_NOT_IMPLEMENTED_REASON,
+                    roles.size(), tensors.size(), rolePayloadBytes, List.copyOf(roles),
                     List.copyOf(missingRequired), List.copyOf(shapeErrors), List.copyOf(unsupportedRuntimeDtypes));
         }
 
