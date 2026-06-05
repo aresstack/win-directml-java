@@ -10,12 +10,16 @@ public final class T5SelfAttentionStep {
     private final T5SelfAttentionMemory memory;
 
     public T5SelfAttentionStep(float[] output, T5SelfAttentionMemory memory) {
-        this.output = Objects.requireNonNull(output, "output").clone();
+        this.output = Objects.requireNonNull(output, "output");
         this.memory = Objects.requireNonNull(memory, "memory");
     }
 
     public float[] output() {
         return output.clone();
+    }
+
+    float[] outputUnsafe() {
+        return output;
     }
 
     public T5SelfAttentionMemory memory() {
