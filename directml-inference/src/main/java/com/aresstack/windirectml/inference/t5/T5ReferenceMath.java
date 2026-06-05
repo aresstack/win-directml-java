@@ -33,6 +33,12 @@ final class T5ReferenceMath {
     }
 
     static float[] dense(float[] input, T5TensorData weight) {
+        float[] result = new float[weight.dim(0)];
+        denseInto(input, weight, result);
+        return result;
+    }
+
+    static void denseInto(float[] input, T5TensorData weight, float[] output) {
         if (weight.rank() != 2) {
             throw new IllegalArgumentException("Dense weight must be rank 2: " + weight.name());
         }
@@ -42,15 +48,17 @@ final class T5ReferenceMath {
             throw new IllegalArgumentException("Dense input length mismatch for " + weight.name()
                     + ": input=" + input.length + ", expected=" + in);
         }
-        float[] result = new float[out];
+        if (output.length < out) {
+            throw new IllegalArgumentException("Dense output buffer too small for " + weight.name()
+                    + ": output=" + output.length + ", expected>=" + out);
+        }
         for (int row = 0; row < out; row++) {
             float sum = 0.0f;
             for (int col = 0; col < in; col++) {
                 sum += sanitize(input[col]) * sanitize(weight.at(row, col));
             }
-            result[row] = finite(sum);
+            output[row] = finite(sum);
         }
-        return result;
     }
 
     static float[] denseSequence(float[] input, int sequenceLength, int inputSize, T5TensorData weight) {

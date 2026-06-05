@@ -25,12 +25,24 @@ public final class T5LmHead implements T5LogitProjector {
 
     @Override
     public float[] logits(float[] decoderHiddenState) {
+        float[] logits = new float[vocabularySize()];
+        logitsInto(decoderHiddenState, logits);
+        return logits;
+    }
+
+    @Override
+    public void logitsInto(float[] decoderHiddenState, float[] outputLogits) {
         Objects.requireNonNull(decoderHiddenState, "decoderHiddenState");
+        Objects.requireNonNull(outputLogits, "outputLogits");
         if (decoderHiddenState.length != lmHeadWeight.dim(1)) {
             throw new IllegalArgumentException("Decoder hidden state length mismatch for T5 LM head: hidden="
                     + decoderHiddenState.length + ", expected=" + lmHeadWeight.dim(1));
         }
-        return T5ReferenceMath.dense(decoderHiddenState, lmHeadWeight);
+        if (outputLogits.length < vocabularySize()) {
+            throw new IllegalArgumentException("T5 LM head output buffer too small: " + outputLogits.length
+                    + " < " + vocabularySize());
+        }
+        T5ReferenceMath.denseInto(decoderHiddenState, lmHeadWeight, outputLogits);
     }
 
     @Override

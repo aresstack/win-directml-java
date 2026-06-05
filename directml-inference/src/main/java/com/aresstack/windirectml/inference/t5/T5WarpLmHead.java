@@ -54,13 +54,25 @@ public final class T5WarpLmHead implements T5LogitProjector, AutoCloseable {
 
     @Override
     public float[] logits(float[] decoderHiddenState) {
+        float[] logits = new float[vocabularySize];
+        logitsInto(decoderHiddenState, logits);
+        return logits;
+    }
+
+    @Override
+    public void logitsInto(float[] decoderHiddenState, float[] outputLogits) {
         ensureOpen();
         Objects.requireNonNull(decoderHiddenState, "decoderHiddenState");
+        Objects.requireNonNull(outputLogits, "outputLogits");
         if (decoderHiddenState.length != hiddenSize) {
             throw new IllegalArgumentException("Decoder hidden state length mismatch for T5 WARP LM head: hidden="
                     + decoderHiddenState.length + ", expected=" + hiddenSize);
         }
-        return kernel.matvec(decoderHiddenState);
+        if (outputLogits.length < vocabularySize) {
+            throw new IllegalArgumentException("T5 WARP LM head output buffer too small: " + outputLogits.length
+                    + " < " + vocabularySize);
+        }
+        kernel.matvec(decoderHiddenState, outputLogits);
     }
 
     @Override

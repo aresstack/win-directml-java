@@ -49,6 +49,7 @@ public final class T5GenerationLoop {
             T5EncoderOutput encoderOutput = encoderRunner.encode(request.inputTokenIds());
             metrics.addEncoderNanos(System.nanoTime() - encoderStart);
             int[] generated = new int[request.maxNewTokens()];
+            float[] logits = new float[logitProjector.vocabularySize()];
             int generatedTokens = 0;
             int decoderTokenId = request.decoderStartTokenId();
             T5DecoderCache cache = T5DecoderCache.empty();
@@ -58,7 +59,7 @@ public final class T5GenerationLoop {
                 metrics.addDecodeNanos(System.nanoTime() - decodeStart);
 
                 long lmHeadStart = System.nanoTime();
-                float[] logits = logitProjector.logits(state.lastHiddenState());
+                logitProjector.logitsInto(state.lastHiddenState(), logits);
                 metrics.addLmHeadNanos(System.nanoTime() - lmHeadStart);
 
                 long tokenSelectionStart = System.nanoTime();
