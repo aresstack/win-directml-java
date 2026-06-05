@@ -13,6 +13,8 @@ public final class T5SelfAttention {
     private final T5TensorData v;
     private final T5TensorData o;
     private final T5RelativePositionBias relativePositionBias;
+    private final boolean bidirectionalRelativeBias;
+    private final boolean causalMask;
 
     public T5SelfAttention(T5PackageMetadata metadata,
                            T5TensorData q,
@@ -20,12 +22,25 @@ public final class T5SelfAttention {
                            T5TensorData v,
                            T5TensorData o,
                            T5RelativePositionBias relativePositionBias) {
+        this(metadata, q, k, v, o, relativePositionBias, true, false);
+    }
+
+    public T5SelfAttention(T5PackageMetadata metadata,
+                           T5TensorData q,
+                           T5TensorData k,
+                           T5TensorData v,
+                           T5TensorData o,
+                           T5RelativePositionBias relativePositionBias,
+                           boolean bidirectionalRelativeBias,
+                           boolean causalMask) {
         this.metadata = Objects.requireNonNull(metadata, "metadata");
         this.q = Objects.requireNonNull(q, "q");
         this.k = Objects.requireNonNull(k, "k");
         this.v = Objects.requireNonNull(v, "v");
         this.o = Objects.requireNonNull(o, "o");
         this.relativePositionBias = relativePositionBias;
+        this.bidirectionalRelativeBias = bidirectionalRelativeBias;
+        this.causalMask = causalMask;
     }
 
     public float[] apply(float[] hiddenStates, int sequenceLength, boolean[] attentionMask) {
@@ -46,14 +61,14 @@ public final class T5SelfAttention {
             for (int head = 0; head < heads; head++) {
                 float[] scores = new float[sequenceLength];
                 for (int source = 0; source < sequenceLength; source++) {
-                    if (!mask[source]) {
+                    if (!mask[source] || (causalMask && source > token)) {
                         scores[source] = -1.0e9f;
                         continue;
                     }
                     float score = dot(query, key, token, source, head, innerSize, headDim);
                     score /= Math.sqrt(headDim);
                     if (relativePositionBias != null) {
-                        score += relativePositionBias.value(head, token, source, true);
+                        score += relativePositionBias.value(head, token, source, bidirectionalRelativeBias);
                     }
                     scores[source] = score;
                 }

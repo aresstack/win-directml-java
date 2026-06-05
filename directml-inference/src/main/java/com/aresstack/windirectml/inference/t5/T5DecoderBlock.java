@@ -1,0 +1,45 @@
+package com.aresstack.windirectml.inference.t5;
+
+import java.util.Objects;
+
+/**
+ * One T5 decoder block in the reference pipeline.
+ */
+public final class T5DecoderBlock {
+    private final T5LayerNorm selfAttentionLayerNorm;
+    private final T5SelfAttention selfAttention;
+    private final T5LayerNorm crossAttentionLayerNorm;
+    private final T5CrossAttention crossAttention;
+    private final T5LayerNorm feedForwardLayerNorm;
+    private final T5FeedForward feedForward;
+
+    public T5DecoderBlock(T5LayerNorm selfAttentionLayerNorm,
+                          T5SelfAttention selfAttention,
+                          T5LayerNorm crossAttentionLayerNorm,
+                          T5CrossAttention crossAttention,
+                          T5LayerNorm feedForwardLayerNorm,
+                          T5FeedForward feedForward) {
+        this.selfAttentionLayerNorm = Objects.requireNonNull(selfAttentionLayerNorm, "selfAttentionLayerNorm");
+        this.selfAttention = Objects.requireNonNull(selfAttention, "selfAttention");
+        this.crossAttentionLayerNorm = Objects.requireNonNull(crossAttentionLayerNorm, "crossAttentionLayerNorm");
+        this.crossAttention = Objects.requireNonNull(crossAttention, "crossAttention");
+        this.feedForwardLayerNorm = Objects.requireNonNull(feedForwardLayerNorm, "feedForwardLayerNorm");
+        this.feedForward = Objects.requireNonNull(feedForward, "feedForward");
+    }
+
+    public float[] apply(float[] hiddenStates,
+                         int sequenceLength,
+                         int hiddenSize,
+                         boolean[] decoderAttentionMask,
+                         T5EncoderOutput encoderOutput) {
+        float[] normedForSelfAttention = selfAttentionLayerNorm.applySequence(hiddenStates, sequenceLength, hiddenSize);
+        float[] selfAttentionOutput = selfAttention.apply(normedForSelfAttention, sequenceLength, decoderAttentionMask);
+        float[] afterSelfAttention = T5ReferenceMath.add(hiddenStates, selfAttentionOutput);
+        float[] normedForCrossAttention = crossAttentionLayerNorm.applySequence(afterSelfAttention, sequenceLength, hiddenSize);
+        float[] crossAttentionOutput = crossAttention.apply(normedForCrossAttention, sequenceLength, encoderOutput);
+        float[] afterCrossAttention = T5ReferenceMath.add(afterSelfAttention, crossAttentionOutput);
+        float[] normedForFeedForward = feedForwardLayerNorm.applySequence(afterCrossAttention, sequenceLength, hiddenSize);
+        float[] feedForwardOutput = feedForward.apply(normedForFeedForward, sequenceLength);
+        return T5ReferenceMath.add(afterCrossAttention, feedForwardOutput);
+    }
+}
