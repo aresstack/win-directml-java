@@ -10,16 +10,12 @@ public final class T5DecoderBlockStep {
     private final T5SelfAttentionMemory selfAttentionMemory;
 
     public T5DecoderBlockStep(float[] hiddenState, T5SelfAttentionMemory selfAttentionMemory) {
-        this.hiddenState = Objects.requireNonNull(hiddenState, "hiddenState");
+        this.hiddenState = Objects.requireNonNull(hiddenState, "hiddenState").clone();
         this.selfAttentionMemory = Objects.requireNonNull(selfAttentionMemory, "selfAttentionMemory");
     }
 
     public float[] hiddenState() {
         return hiddenState.clone();
-    }
-
-    float[] hiddenStateUnsafe() {
-        return hiddenState;
     }
 
     public T5SelfAttentionMemory selfAttentionMemory() {

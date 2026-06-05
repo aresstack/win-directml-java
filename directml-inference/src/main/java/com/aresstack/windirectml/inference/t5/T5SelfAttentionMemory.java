@@ -7,7 +7,7 @@ import java.util.Objects;
  * Cached decoder self-attention key/value memory for one T5 decoder layer.
  */
 public final class T5SelfAttentionMemory {
-    private static final T5SelfAttentionMemory EMPTY = new T5SelfAttentionMemory(0, 0, new float[0], new float[0], false);
+    private static final T5SelfAttentionMemory EMPTY = new T5SelfAttentionMemory(0, 0, new float[0], new float[0]);
 
     private final int sequenceLength;
     private final int innerSize;
@@ -15,10 +15,6 @@ public final class T5SelfAttentionMemory {
     private final float[] value;
 
     private T5SelfAttentionMemory(int sequenceLength, int innerSize, float[] key, float[] value) {
-        this(sequenceLength, innerSize, key, value, true);
-    }
-
-    private T5SelfAttentionMemory(int sequenceLength, int innerSize, float[] key, float[] value, boolean copy) {
         if (sequenceLength < 0) {
             throw new IllegalArgumentException("sequenceLength must not be negative: " + sequenceLength);
         }
@@ -27,8 +23,8 @@ public final class T5SelfAttentionMemory {
         }
         this.sequenceLength = sequenceLength;
         this.innerSize = innerSize;
-        this.key = copy ? Objects.requireNonNull(key, "key").clone() : Objects.requireNonNull(key, "key");
-        this.value = copy ? Objects.requireNonNull(value, "value").clone() : Objects.requireNonNull(value, "value");
+        this.key = Objects.requireNonNull(key, "key").clone();
+        this.value = Objects.requireNonNull(value, "value").clone();
         int expected = sequenceLength * innerSize;
         if (this.key.length != expected) {
             throw new IllegalArgumentException("key length mismatch: " + this.key.length + ", expected=" + expected);
@@ -60,7 +56,7 @@ public final class T5SelfAttentionMemory {
         float[] nextValue = Arrays.copyOf(value, value.length + nextInnerSize);
         System.arraycopy(tokenKey, 0, nextKey, key.length, nextInnerSize);
         System.arraycopy(tokenValue, 0, nextValue, value.length, nextInnerSize);
-        return new T5SelfAttentionMemory(sequenceLength + 1, nextInnerSize, nextKey, nextValue, false);
+        return new T5SelfAttentionMemory(sequenceLength + 1, nextInnerSize, nextKey, nextValue);
     }
 
     public int sequenceLength() {

@@ -98,7 +98,7 @@ public final class T5DecoderPipeline implements T5DecoderRunner, AutoCloseable {
         for (int layer = 0; layer < blocks.size(); layer++) {
             T5DecoderBlockStep step = blocks.get(layer).applyStep(hiddenState, tokenIndex,
                     cache.selfAttentionMemory(layer), memorySet.memory(layer));
-            hiddenState = step.hiddenStateUnsafe();
+            hiddenState = step.hiddenState();
             nextLayerMemories.add(step.selfAttentionMemory());
         }
         float[] finalHiddenState = finalLayerNorm.applySequence(hiddenState, 1, hiddenSize);

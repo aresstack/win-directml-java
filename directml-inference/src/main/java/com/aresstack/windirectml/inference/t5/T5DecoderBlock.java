@@ -55,7 +55,7 @@ public final class T5DecoderBlock {
         float[] normedForSelfAttention = selfAttentionLayerNorm.applySequence(hiddenState, 1, hiddenSize);
         T5SelfAttentionStep selfAttentionStep = selfAttention.applyStep(normedForSelfAttention,
                 tokenIndex, selfAttentionMemory);
-        float[] afterSelfAttention = T5ReferenceMath.add(hiddenState, selfAttentionStep.outputUnsafe());
+        float[] afterSelfAttention = T5ReferenceMath.add(hiddenState, selfAttentionStep.output());
         float[] normedForCrossAttention = crossAttentionLayerNorm.applySequence(afterSelfAttention, 1, hiddenSize);
         float[] crossAttentionOutput = crossAttention.apply(normedForCrossAttention, 1, crossAttentionMemory);
         float[] afterCrossAttention = T5ReferenceMath.add(afterSelfAttention, crossAttentionOutput);
