@@ -259,7 +259,11 @@ public final class SummarizerPanel extends JPanel {
                 + ", scratch: " + com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport.formatBytes(report.totalScratchBytes()));
         appendResult("  Kernel steps: " + report.kernelStepCount() + ", alignment: " + report.alignmentBytes() + " bytes");
         if (report.preparedButNotExecutable()) {
-            appendResult("  Native executor missing; prepared upload/session metadata is available for the next WARP implementation step.");
+            if (report.directMlProbeAvailable()) {
+                appendResult("  DirectML/WARP probe available; kernel execution is the next WARP implementation step.");
+            } else {
+                appendResult("  Native executor missing; prepared upload/session metadata is available for the next WARP implementation step.");
+            }
         }
     }
 

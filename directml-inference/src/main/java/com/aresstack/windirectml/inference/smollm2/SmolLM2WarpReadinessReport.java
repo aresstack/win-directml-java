@@ -68,6 +68,13 @@ public record SmolLM2WarpReadinessReport(boolean executable,
     }
 
     /**
+     * Return true when DirectML/WARP probing reached a real adapter/context but kernels are still missing.
+     */
+    public boolean directMlProbeAvailable() {
+        return reason.contains("DirectML/WARP probe succeeded");
+    }
+
+    /**
      * Return a concise human-readable byte amount.
      */
     public static String formatBytes(long bytes) {

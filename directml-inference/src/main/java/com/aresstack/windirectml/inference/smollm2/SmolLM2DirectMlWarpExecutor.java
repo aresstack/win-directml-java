@@ -6,6 +6,8 @@ import com.aresstack.windirectml.runtime.GpuBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Built-in DirectML/WARP readiness probe for the future SmolLM2 WARP executor.
@@ -17,6 +19,7 @@ import java.util.Objects;
 public final class SmolLM2DirectMlWarpExecutor implements SmolLM2WarpExecutor {
 
     private static final long PROBE_BUFFER_BYTES = 256L;
+    private static final Pattern MEMORY_SEGMENT_ADDRESS_PATTERN = Pattern.compile("address:([0-9]+)");
 
     private final String backend;
 
@@ -39,14 +42,12 @@ public final class SmolLM2DirectMlWarpExecutor implements SmolLM2WarpExecutor {
             context.initialize();
             try (GpuBuffer ignored = context.allocateBuffer(PROBE_BUFFER_BYTES, GpuBuffer.BufferUsage.ACTIVATION)) {
                 String reason = "SmolLM2 DirectML/WARP probe succeeded on "
-                        + context.adapterDescription()
+                        + describeAdapter(context.adapterDescription())
                         + ", but SmolLM2 WARP kernels are not implemented yet.";
-                warnings.add(reason);
                 return new SmolLM2WarpExecutionStatus(false, "warp", reason, warnings);
             }
         } catch (RuntimeException e) {
             String reason = "SmolLM2 DirectML/WARP probe failed for backend=" + backend + ": " + safeMessage(e);
-            warnings.add(reason);
             return new SmolLM2WarpExecutionStatus(false, "warp", reason, warnings);
         }
     }
@@ -60,6 +61,27 @@ public final class SmolLM2DirectMlWarpExecutor implements SmolLM2WarpExecutor {
         Objects.requireNonNull(request, "request");
         throw new SmolLM2RuntimeUnsupportedException(
                 "SmolLM2 DirectML/WARP probe is available, but SmolLM2 WARP kernels are not implemented yet.");
+    }
+
+    private static String describeAdapter(String adapterDescription) {
+        if (adapterDescription == null || adapterDescription.isBlank()) {
+            return "DirectML/WARP adapter";
+        }
+
+        Matcher matcher = MEMORY_SEGMENT_ADDRESS_PATTERN.matcher(adapterDescription);
+        if (!matcher.find()) {
+            return adapterDescription;
+        }
+
+        try {
+            long address = Long.parseUnsignedLong(matcher.group(1));
+            String suffix = adapterDescription.contains("(DirectML)")
+                    ? " (DirectML)"
+                    : adapterDescription.contains("(D3D12 only)") ? " (D3D12 only)" : "";
+            return "DXGI adapter pointer=0x" + Long.toUnsignedString(address, 16) + suffix;
+        } catch (NumberFormatException ignored) {
+            return "DXGI adapter pointer=<unavailable>";
+        }
     }
 
     private static String safeMessage(RuntimeException exception) {
