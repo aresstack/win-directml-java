@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.workbench.WorkbenchModel;
+import com.aresstack.winproxy.PacUrlSource;
 import com.aresstack.winproxy.ProxyConfiguration;
 import com.aresstack.winproxy.ProxyDefaults;
 import com.aresstack.winproxy.ProxyMode;
@@ -11,6 +12,7 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
@@ -111,19 +113,34 @@ public final class ProxyPanel extends JPanel {
         new SwingWorker<ProxyResult, Void>() {
             @Override
             protected ProxyResult doInBackground() {
-                return new WindowsProxyResolver(cfg).resolve(url);
+                return resolveProxyForTest(cfg, url);
             }
 
             @Override
             protected void done() {
                 try {
                     ProxyResult result = get();
-                    append(result.isDirect() ? "Result: DIRECT" : "Result: " + result.getHost() + ":" + result.getPort());
+                    String detail = formatProxyResult(result, cfg.getMode());
+                    append("Result: " + detail);
+                    JOptionPane.showMessageDialog(ProxyPanel.this, detail,
+                            "Proxy Test — " + cfg.getMode(), JOptionPane.INFORMATION_MESSAGE);
                 } catch (Exception ex) {
                     append("ERROR: " + ex.getMessage());
                 }
             }
         }.execute();
+    }
+
+    private ProxyResult resolveProxyForTest(ProxyConfiguration cfg, String url) {
+        if (cfg.getMode() == ProxyMode.PAC_URL) {
+            String explicitPacUrl = trimToNull(cfg.getPacUrl());
+            if (explicitPacUrl != null) {
+                return new WindowsProxyResolver(cfg).resolve(url, PacUrlSource.DIRECT, explicitPacUrl);
+            }
+            String script = nonBlank(cfg.getPacUrlDiscoveryScript(), ProxyDefaults.DEFAULT_PAC_URL_DISCOVERY_SCRIPT);
+            return new WindowsProxyResolver(cfg).resolve(url, PacUrlSource.POWERSHELL, script);
+        }
+        return new WindowsProxyResolver(cfg).resolve(url);
     }
 
     private ProxyConfiguration buildConfiguration() {
@@ -145,6 +162,14 @@ public final class ProxyPanel extends JPanel {
             builder.manualProxyPort(port.intValue());
         }
         return builder.build();
+    }
+
+    private static String formatProxyResult(ProxyResult result, ProxyMode mode) {
+        String reason = mode.name().toLowerCase(java.util.Locale.ROOT) + "-" + result.getReason();
+        if (result.isDirect()) {
+            return "DIRECT (" + reason + ")";
+        }
+        return "/" + result.getHost() + ":" + result.getPort() + " (" + reason + ")";
     }
 
     private ProxyMode selectedMode() {
