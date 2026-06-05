@@ -3,7 +3,13 @@ package com.aresstack.windirectml.inference.t5;
 import java.util.Objects;
 
 /**
- * Reference T5 feed-forward block for dense and gated projections.
+ * T5 feed-forward block for dense and gated projections.
+ *
+ * <p>The implementation is sequence-oriented on purpose. Encoder prefill and
+ * decoder-prefix execution must use {@link T5LinearProjection#applySequence}
+ * so WARP-backed projections can submit one batched matrix multiplication per
+ * projection instead of one dispatch per token. This keeps the reference path
+ * simple and gives the native path a useful batch boundary.</p>
  */
 public final class T5FeedForward {
     private final T5PackageMetadata metadata;
@@ -30,31 +36,44 @@ public final class T5FeedForward {
     }
 
     public float[] apply(float[] hiddenStates, int sequenceLength) {
+        Objects.requireNonNull(hiddenStates, "hiddenStates");
         int hiddenSize = metadata.dModel();
-        float[] result = new float[hiddenStates.length];
-        for (int token = 0; token < sequenceLength; token++) {
-            float[] input = T5ReferenceMath.slice(hiddenStates, token * hiddenSize, hiddenSize);
-            float[] output = applyToken(input);
-            T5ReferenceMath.copyInto(output, result, token * hiddenSize);
+        if (hiddenStates.length != sequenceLength * hiddenSize) {
+            throw new IllegalArgumentException("T5 feed-forward hidden length mismatch: " + hiddenStates.length
+                    + ", expected=" + (sequenceLength * hiddenSize));
         }
-        return result;
+        if (isGated()) {
+            return applyGatedSequence(hiddenStates, sequenceLength, hiddenSize);
+        }
+        return applyDenseSequence(hiddenStates, sequenceLength, hiddenSize);
     }
 
-    private float[] applyToken(float[] input) {
-        if (isGated()) {
-            float[] gate = wi0.apply(input);
-            float[] values = wi1.apply(input);
-            float[] activated = new float[gate.length];
-            for (int i = 0; i < activated.length; i++) {
-                activated[i] = activation(gate[i]) * values[i];
-            }
-            return wo.apply(activated);
+    private float[] applyDenseSequence(float[] hiddenStates, int sequenceLength, int hiddenSize) {
+        if (wi == null) {
+            throw new IllegalStateException("T5 feed-forward dense wi projection is missing");
         }
-        float[] inner = wi.apply(input);
-        for (int i = 0; i < inner.length; i++) {
-            inner[i] = activation(inner[i]);
+        float[] inner = wi.applySequence(hiddenStates, sequenceLength, hiddenSize);
+        activateInPlace(inner);
+        return wo.applySequence(inner, sequenceLength, wi.outputSize());
+    }
+
+    private float[] applyGatedSequence(float[] hiddenStates, int sequenceLength, int hiddenSize) {
+        float[] gate = wi0.applySequence(hiddenStates, sequenceLength, hiddenSize);
+        float[] values = wi1.applySequence(hiddenStates, sequenceLength, hiddenSize);
+        if (gate.length != values.length) {
+            throw new IllegalStateException("T5 gated feed-forward projection size mismatch: gate="
+                    + gate.length + ", values=" + values.length);
         }
-        return wo.apply(inner);
+        for (int i = 0; i < gate.length; i++) {
+            gate[i] = T5ReferenceMath.finite(activation(gate[i]) * values[i]);
+        }
+        return wo.applySequence(gate, sequenceLength, wi0.outputSize());
+    }
+
+    private void activateInPlace(float[] values) {
+        for (int i = 0; i < values.length; i++) {
+            values[i] = activation(values[i]);
+        }
     }
 
     private boolean isGated() {
