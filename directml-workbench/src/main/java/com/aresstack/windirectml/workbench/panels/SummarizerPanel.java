@@ -216,10 +216,18 @@ public final class SummarizerPanel extends JPanel {
     private void runSmolLm2Generation(Path modelDir, String text, int maxTokens) throws Exception {
         long start = System.nanoTime();
         SmolLM2WorkbenchRuntimeRunner runner = new SmolLM2WorkbenchRuntimeRunner(modelDir);
-        appendResult("Initializing SmolLM2 reference runtime from " + modelDir + "...");
-        SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(text, maxTokens);
+        appendResult("Initializing SmolLM2 runtime from " + modelDir
+                + " (requested backend=" + model.getBackend().name().toLowerCase() + ")...");
+        SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(text, maxTokens, model.getBackend());
         appendResult("Model loaded and generated in " + elapsedMs(start) + " ms");
+        appendResult("Requested backend: " + result.requestedBackend());
         appendResult("Runtime mode: " + result.runtimeMode());
+        if (!result.fallbackReason().isBlank()) {
+            appendResult("Runtime fallback: " + result.fallbackReason());
+        }
+        for (String warning : result.runtimeWarnings()) {
+            appendResult("Runtime warning: " + warning);
+        }
         appendResult("Runtime package: " + result.packagePath().getFileName());
         appendResult("");
         appendResult("OUTPUT:");

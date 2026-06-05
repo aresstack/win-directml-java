@@ -4,16 +4,22 @@ import com.aresstack.windirectml.inference.smollm2.SmolLM2CompileOptions;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationOptions;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationDiagnostics;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2Runtime;
+import com.aresstack.windirectml.inference.smollm2.SmolLM2RuntimeMode;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2RuntimePackage;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2RuntimeRequest;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2RuntimeResult;
+import com.aresstack.windirectml.inference.smollm2.SmolLM2WarpExecutionStatus;
+import com.aresstack.windirectml.inference.smollm2.SmolLM2WarpRuntime;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2Tokenizer;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2WdmlPackCompiler;
+import com.aresstack.windirectml.runtime.facade.Backend;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
@@ -42,24 +48,86 @@ public final class SmolLM2WorkbenchRuntimeRunner {
     }
 
     public Result generate(String prompt, int maxTokens) throws IOException {
+        return generate(prompt, maxTokens, Backend.CPU);
+    }
+
+    public Result generate(String prompt, int maxTokens, Backend requestedBackend) throws IOException {
+        Backend safeBackend = requestedBackend == null ? Backend.CPU : requestedBackend;
         Path packagePath = ensureExecutablePackage();
         Path tokenizerPath = requireTokenizer();
 
         SmolLM2RuntimePackage runtimePackage = SmolLM2RuntimePackage.open(packagePath);
         SmolLM2Tokenizer tokenizer = SmolLM2Tokenizer.load(tokenizerPath);
-        try (SmolLM2Runtime runtime = SmolLM2Runtime.load(runtimePackage, tokenizer)) {
+        Optional<SmolLM2WarpExecutionStatus> warpStatus = inspectWarpStatusIfRequested(runtimePackage, safeBackend);
+        try (SmolLM2Runtime runtime = loadRuntime(runtimePackage, tokenizer, safeBackend, warpStatus)) {
             SmolLM2RuntimeResult result = runtime.generate(new SmolLM2RuntimeRequest(
                     prompt,
                     maxTokens,
                     SmolLM2GenerationOptions.greedy()));
+            Optional<SmolLM2WarpExecutionStatus> effectiveWarpStatus = runtime.warpExecutionStatus().or(() -> warpStatus);
             return new Result(
                     result.generatedText(),
                     result.tokensGenerated(),
                     result.finishReason(),
-                    runtimePackage.modelPackage().runtimeLoadMode(),
+                    safeBackend.name().toLowerCase(),
+                    runtime.runtimeMode().name().toLowerCase(),
+                    fallbackReason(safeBackend, runtime.runtimeMode(), effectiveWarpStatus),
+                    warnings(effectiveWarpStatus),
                     packagePath,
                     result.diagnostics());
         }
+    }
+
+    private SmolLM2Runtime loadRuntime(SmolLM2RuntimePackage runtimePackage,
+                                       SmolLM2Tokenizer tokenizer,
+                                       Backend requestedBackend,
+                                       Optional<SmolLM2WarpExecutionStatus> warpStatus) {
+        if (requestedBackend == Backend.CPU) {
+            return SmolLM2Runtime.loadReference(runtimePackage, tokenizer);
+        }
+        if (requestedBackend == Backend.AUTO && warpStatus.map(SmolLM2WarpExecutionStatus::executable).orElse(false)) {
+            return SmolLM2Runtime.loadWarp(runtimePackage, tokenizer, runtimePackage.config().maxPositionEmbeddings());
+        }
+        if (isWarpLike(requestedBackend) && warpStatus.map(SmolLM2WarpExecutionStatus::executable).orElse(false)) {
+            return SmolLM2Runtime.loadWarp(runtimePackage, tokenizer, runtimePackage.config().maxPositionEmbeddings());
+        }
+        return SmolLM2Runtime.loadReference(runtimePackage, tokenizer);
+    }
+
+    private Optional<SmolLM2WarpExecutionStatus> inspectWarpStatusIfRequested(SmolLM2RuntimePackage runtimePackage,
+                                                                              Backend requestedBackend) {
+        if (requestedBackend == Backend.CPU) {
+            return Optional.empty();
+        }
+        if (requestedBackend == Backend.AUTO || isWarpLike(requestedBackend)) {
+            try (SmolLM2WarpRuntime warpRuntime = SmolLM2WarpRuntime.prepare(
+                    runtimePackage, runtimePackage.config().maxPositionEmbeddings())) {
+                return Optional.of(warpRuntime.status());
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static boolean isWarpLike(Backend backend) {
+        return backend == Backend.WARP || backend == Backend.DIRECTML || backend == Backend.HYBRID;
+    }
+
+    private static String fallbackReason(Backend requestedBackend,
+                                         SmolLM2RuntimeMode runtimeMode,
+                                         Optional<SmolLM2WarpExecutionStatus> warpStatus) {
+        if (runtimeMode != SmolLM2RuntimeMode.REFERENCE || requestedBackend == Backend.CPU) {
+            return "";
+        }
+        return warpStatus
+                .filter(SmolLM2WarpExecutionStatus::requiresFallback)
+                .map(status -> requestedBackend.name().toLowerCase()
+                        + " requested, but SmolLM2 native WARP execution is not available yet: "
+                        + status.reason())
+                .orElse("");
+    }
+
+    private static List<String> warnings(Optional<SmolLM2WarpExecutionStatus> warpStatus) {
+        return warpStatus.map(SmolLM2WarpExecutionStatus::warnings).orElseGet(List::of);
     }
 
     private Path ensureExecutablePackage() throws IOException {
@@ -119,13 +187,19 @@ public final class SmolLM2WorkbenchRuntimeRunner {
     public record Result(String text,
                          int outputTokens,
                          String finishReason,
+                         String requestedBackend,
                          String runtimeMode,
+                         String fallbackReason,
+                         List<String> runtimeWarnings,
                          Path packagePath,
                          SmolLM2GenerationDiagnostics diagnostics) {
         public Result {
             text = text == null ? "" : text;
             finishReason = finishReason == null ? "" : finishReason;
+            requestedBackend = requestedBackend == null || requestedBackend.isBlank() ? "cpu" : requestedBackend;
             runtimeMode = runtimeMode == null || runtimeMode.isBlank() ? "reference" : runtimeMode;
+            fallbackReason = fallbackReason == null ? "" : fallbackReason;
+            runtimeWarnings = runtimeWarnings == null ? List.of() : List.copyOf(runtimeWarnings);
             packagePath = Objects.requireNonNull(packagePath, "packagePath");
             diagnostics = Objects.requireNonNull(diagnostics, "diagnostics");
         }
