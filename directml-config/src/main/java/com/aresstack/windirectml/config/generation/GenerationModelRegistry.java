@@ -248,26 +248,26 @@ public final class GenerationModelRegistry {
                 Architecture.CAUSAL_LM,
                 "Hugging Face TB",
                 "135M",
-                ChatTemplate.UNKNOWN,
-                Status.PLANNED,
+                ChatTemplate.RAW,
+                Status.EXPERIMENTAL,
                 Arrays.asList(
                         "model/smollm2-135m-instruct",
                         "model/HuggingFaceTB/SmolLM2-135M-Instruct"),
                 "Very small decoder-only candidate for simple local summaries. "
-                        + "Workbench metadata is available; runtime implementation is pending."));
+                        + "Runs through the SmolLM2 reference runtime from a compiled wdmlpack package."));
 
         entries.add(new Entry(
                 "HuggingFaceTB/SmolLM2-360M-Instruct",
                 Architecture.CAUSAL_LM,
                 "Hugging Face TB",
                 "360M",
-                ChatTemplate.UNKNOWN,
-                Status.PLANNED,
+                ChatTemplate.RAW,
+                Status.EXPERIMENTAL,
                 Arrays.asList(
                         "model/smollm2-360m-instruct",
                         "model/HuggingFaceTB/SmolLM2-360M-Instruct"),
                 "Small decoder-only candidate and likely best sub-0.5B fallback. "
-                        + "Workbench metadata is available; runtime implementation is pending."));
+                        + "Runs through the SmolLM2 reference runtime from a compiled wdmlpack package."));
 
         // --- T5/CodeT5: encoder-decoder family for code explanation and short summaries ---
         entries.add(new Entry(

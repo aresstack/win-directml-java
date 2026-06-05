@@ -13,6 +13,7 @@ import com.aresstack.windirectml.inference.qwen.QwenInferenceEngine;
 import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
 import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
+import com.aresstack.windirectml.workbench.runtime.SmolLM2WorkbenchRuntimeRunner;
 
 import javax.swing.*;
 import java.awt.*;
@@ -31,6 +32,7 @@ import java.util.List;
 public final class SummarizerPanel extends JPanel {
 
     private static final String QWEN05_MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct";
+    private static final String SMOLLM2_MODEL_ID_PREFIX = "HuggingFaceTB/SmolLM2-";
 
     private final WorkbenchModel model;
     private final JTextArea inputArea;
@@ -140,13 +142,14 @@ public final class SummarizerPanel extends JPanel {
         }
 
         boolean qwenTestModel = isQwenTestModel(selectedModel);
+        boolean smolLm2Model = isSmolLm2Model(selectedModel);
         Entry entry = GenerationModelRegistry.findByModelId(selectedModel);
         if (entry != null) {
             if (entry.status() == GenerationModelRegistry.Status.UNSUPPORTED) {
                 appendResult("ERROR: Model '" + selectedModel + "' is unsupported in this runtime.");
                 return;
             }
-            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !qwenTestModel) {
+            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !qwenTestModel && !smolLm2Model) {
                 appendResult("ERROR: Model '" + selectedModel + "' is selectable but not executable yet.");
                 appendResult("  Status: planned. Runtime support is in progress for family "
                         + entry.architecture().token() + ".");
@@ -159,6 +162,8 @@ public final class SummarizerPanel extends JPanel {
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
         if (qwenTestModel) {
             appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
+        } else if (smolLm2Model) {
+            appendResult("  NOTE: SmolLM2 currently uses the Java reference runtime. First use compiles SafeTensors to model.wdmlpack.");
         } else if (isT5Model(selectedModel)) {
             appendResult("  NOTE: CodeT5 uses the T5 seq2seq runtime package path (.wdmlpack or SafeTensors auto-compile).");
         }
@@ -170,6 +175,8 @@ public final class SummarizerPanel extends JPanel {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
                     if (qwenTestModel) {
                         runQwenGeneration(modelDir, text, maxTokens, selectedModel);
+                    } else if (smolLm2Model) {
+                        runSmolLm2Generation(modelDir, text, maxTokens);
                     } else if (isT5Model(selectedModel)) {
                         runT5Generation(modelDir, text, maxTokens, selectedModel);
                     } else {
@@ -204,6 +211,23 @@ public final class SummarizerPanel extends JPanel {
             appendResult("SUMMARY:");
             appendResult(summary.text());
         }
+    }
+
+    private void runSmolLm2Generation(Path modelDir, String text, int maxTokens) throws Exception {
+        long start = System.nanoTime();
+        SmolLM2WorkbenchRuntimeRunner runner = new SmolLM2WorkbenchRuntimeRunner(modelDir);
+        appendResult("Initializing SmolLM2 reference runtime from " + modelDir + "...");
+        SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(text, maxTokens);
+        appendResult("Model loaded and generated in " + elapsedMs(start) + " ms");
+        appendResult("Runtime mode: " + result.runtimeMode());
+        appendResult("Runtime package: " + result.packagePath().getFileName());
+        appendResult("");
+        appendResult("OUTPUT:");
+        appendResult(result.text());
+        appendResult("");
+        appendResult("Generation completed");
+        appendResult("  Output tokens: " + result.outputTokens());
+        appendResult("  Finish reason: " + result.finishReason());
     }
 
 
@@ -330,6 +354,10 @@ public final class SummarizerPanel extends JPanel {
 
     private static boolean isQwenTestModel(String modelId) {
         return QWEN05_MODEL_ID.equals(modelId);
+    }
+
+    private static boolean isSmolLm2Model(String modelId) {
+        return modelId != null && modelId.startsWith(SMOLLM2_MODEL_ID_PREFIX);
     }
 
     private static boolean isT5Model(String modelId) {

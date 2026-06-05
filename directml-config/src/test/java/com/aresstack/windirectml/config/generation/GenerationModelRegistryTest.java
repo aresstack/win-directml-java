@@ -45,7 +45,7 @@ class GenerationModelRegistryTest {
 
 
     @Test
-    void registryContainsSmolLm2ModelsAsPlanned() {
+    void registryContainsSmolLm2ModelsAsExperimental() {
         String[] smolIds = {
                 "HuggingFaceTB/SmolLM2-135M-Instruct",
                 "HuggingFaceTB/SmolLM2-360M-Instruct"
@@ -54,8 +54,9 @@ class GenerationModelRegistryTest {
             GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId(id);
             assertNotNull(entry, "registry must contain " + id);
             assertEquals(GenerationModelRegistry.Architecture.CAUSAL_LM, entry.architecture());
-            assertEquals(GenerationModelRegistry.Status.PLANNED, entry.status());
-            assertFalse(entry.isRunnable(), id + " must not be advertised as runnable yet");
+            assertEquals(GenerationModelRegistry.Status.EXPERIMENTAL, entry.status());
+            assertTrue(entry.isRunnable(), id + " should be advertised as reference-runtime runnable");
+            assertEquals(ChatTemplate.RAW, entry.chatTemplate());
         }
     }
 
