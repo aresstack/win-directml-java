@@ -9,8 +9,7 @@ import java.util.Objects;
 public final class T5CrossAttention {
     private final T5PackageMetadata metadata;
     private final T5LinearProjection q;
-    private final T5LinearProjection k;
-    private final T5LinearProjection v;
+    private final T5CrossAttentionMemoryProjection memoryProjection;
     private final T5LinearProjection o;
 
     public T5CrossAttention(T5PackageMetadata metadata,
@@ -20,8 +19,9 @@ public final class T5CrossAttention {
                             T5TensorData o) {
         this(metadata,
                 T5ReferenceLinearProjection.from(q),
-                T5ReferenceLinearProjection.from(k),
-                T5ReferenceLinearProjection.from(v),
+                new T5SplitCrossAttentionMemoryProjection(
+                        T5ReferenceLinearProjection.from(k),
+                        T5ReferenceLinearProjection.from(v)),
                 T5ReferenceLinearProjection.from(o));
     }
 
@@ -30,10 +30,19 @@ public final class T5CrossAttention {
                             T5LinearProjection k,
                             T5LinearProjection v,
                             T5LinearProjection o) {
+        this(metadata,
+                q,
+                new T5SplitCrossAttentionMemoryProjection(k, v),
+                o);
+    }
+
+    public T5CrossAttention(T5PackageMetadata metadata,
+                            T5LinearProjection q,
+                            T5CrossAttentionMemoryProjection memoryProjection,
+                            T5LinearProjection o) {
         this.metadata = Objects.requireNonNull(metadata, "metadata");
         this.q = Objects.requireNonNull(q, "q");
-        this.k = Objects.requireNonNull(k, "k");
-        this.v = Objects.requireNonNull(v, "v");
+        this.memoryProjection = Objects.requireNonNull(memoryProjection, "memoryProjection");
         this.o = Objects.requireNonNull(o, "o");
     }
 
@@ -49,9 +58,10 @@ public final class T5CrossAttention {
         }
         int encoderLength = encoderOutput.inputTokens();
         float[] encoderHiddenStates = encoderOutput.hiddenStates();
-        float[] key = k.applySequence(encoderHiddenStates, encoderLength, hiddenSize);
-        float[] value = v.applySequence(encoderHiddenStates, encoderLength, hiddenSize);
-        return new T5CrossAttentionMemory(encoderLength, innerSize, encoderOutput.attentionMask(), key, value);
+        T5ProjectedCrossAttentionMemory projected = memoryProjection.applySequence(
+                encoderHiddenStates, encoderLength, hiddenSize);
+        return new T5CrossAttentionMemory(encoderLength, innerSize, encoderOutput.attentionMask(),
+                projected.key(), projected.value());
     }
 
     public float[] apply(float[] decoderHiddenStates, int decoderLength, T5EncoderOutput encoderOutput) {

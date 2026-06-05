@@ -110,9 +110,10 @@ public final class T5EncoderPipeline implements T5EncoderRunner, AutoCloseable {
         T5LayerNorm attentionLayerNorm = new T5LayerNorm(
                 T5TensorData.from(weights.encoderLayerNorm(layer, 0)), 1e-6f);
         T5SelfAttention selfAttention = new T5SelfAttention(metadata,
-                projectionFactory.create(T5TensorData.from(weights.encoderSelfAttention(layer, "q"))),
-                projectionFactory.create(T5TensorData.from(weights.encoderSelfAttention(layer, "k"))),
-                projectionFactory.create(T5TensorData.from(weights.encoderSelfAttention(layer, "v"))),
+                projectionFactory.createSelfAttentionProjection(
+                        T5TensorData.from(weights.encoderSelfAttention(layer, "q")),
+                        T5TensorData.from(weights.encoderSelfAttention(layer, "k")),
+                        T5TensorData.from(weights.encoderSelfAttention(layer, "v"))),
                 projectionFactory.create(T5TensorData.from(weights.encoderSelfAttention(layer, "o"))),
                 relativePositionBias, true, false);
         T5LayerNorm feedForwardLayerNorm = new T5LayerNorm(

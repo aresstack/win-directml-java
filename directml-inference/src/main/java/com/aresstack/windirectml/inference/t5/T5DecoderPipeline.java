@@ -182,9 +182,10 @@ public final class T5DecoderPipeline implements T5DecoderRunner, AutoCloseable {
         T5LayerNorm selfAttentionLayerNorm = new T5LayerNorm(
                 T5TensorData.from(weights.decoderLayerNorm(layer, 0)), 1e-6f);
         T5SelfAttention selfAttention = new T5SelfAttention(metadata,
-                projectionFactory.create(T5TensorData.from(weights.decoderSelfAttention(layer, "q"))),
-                projectionFactory.create(T5TensorData.from(weights.decoderSelfAttention(layer, "k"))),
-                projectionFactory.create(T5TensorData.from(weights.decoderSelfAttention(layer, "v"))),
+                projectionFactory.createSelfAttentionProjection(
+                        T5TensorData.from(weights.decoderSelfAttention(layer, "q")),
+                        T5TensorData.from(weights.decoderSelfAttention(layer, "k")),
+                        T5TensorData.from(weights.decoderSelfAttention(layer, "v"))),
                 projectionFactory.create(T5TensorData.from(weights.decoderSelfAttention(layer, "o"))),
                 relativePositionBias,
                 false,
@@ -193,8 +194,9 @@ public final class T5DecoderPipeline implements T5DecoderRunner, AutoCloseable {
                 T5TensorData.from(weights.decoderLayerNorm(layer, 1)), 1e-6f);
         T5CrossAttention crossAttention = new T5CrossAttention(metadata,
                 projectionFactory.create(T5TensorData.from(weights.decoderCrossAttention(layer, "q"))),
-                projectionFactory.create(T5TensorData.from(weights.decoderCrossAttention(layer, "k"))),
-                projectionFactory.create(T5TensorData.from(weights.decoderCrossAttention(layer, "v"))),
+                projectionFactory.createCrossAttentionMemoryProjection(
+                        T5TensorData.from(weights.decoderCrossAttention(layer, "k")),
+                        T5TensorData.from(weights.decoderCrossAttention(layer, "v"))),
                 projectionFactory.create(T5TensorData.from(weights.decoderCrossAttention(layer, "o"))));
         T5LayerNorm feedForwardLayerNorm = new T5LayerNorm(
                 T5TensorData.from(weights.decoderLayerNorm(layer, 2)), 1e-6f);

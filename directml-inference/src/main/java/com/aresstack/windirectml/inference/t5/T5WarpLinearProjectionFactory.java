@@ -21,6 +21,31 @@ public final class T5WarpLinearProjectionFactory implements T5LinearProjectionFa
     @Override
     public T5LinearProjection create(T5TensorData weight) {
         ensureOpen();
+        return createOwnedProjection(weight);
+    }
+
+    @Override
+    public T5SelfAttentionProjection createSelfAttentionProjection(T5TensorData queryWeight,
+                                                                   T5TensorData keyWeight,
+                                                                   T5TensorData valueWeight) {
+        ensureOpen();
+        String name = queryWeight.name() + "+" + keyWeight.name() + "+" + valueWeight.name();
+        T5TensorData fused = T5FusedSelfAttentionProjection.fuseWeights(name, queryWeight, keyWeight, valueWeight);
+        T5LinearProjection projection = createOwnedProjection(fused);
+        return new T5FusedSelfAttentionProjection(projection, queryWeight.dim(0));
+    }
+
+    @Override
+    public T5CrossAttentionMemoryProjection createCrossAttentionMemoryProjection(T5TensorData keyWeight,
+                                                                                 T5TensorData valueWeight) {
+        ensureOpen();
+        String name = keyWeight.name() + "+" + valueWeight.name();
+        T5TensorData fused = T5FusedCrossAttentionMemoryProjection.fuseWeights(name, keyWeight, valueWeight);
+        T5LinearProjection projection = createOwnedProjection(fused);
+        return new T5FusedCrossAttentionMemoryProjection(projection, keyWeight.dim(0));
+    }
+
+    private T5LinearProjection createOwnedProjection(T5TensorData weight) {
         T5LinearProjection projection = T5WarpLinearProjection.from(windowsBindings, weight);
         projections.add(projection);
         return projection;

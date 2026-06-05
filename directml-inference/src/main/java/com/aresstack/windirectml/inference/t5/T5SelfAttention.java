@@ -8,9 +8,7 @@ import java.util.Objects;
  */
 public final class T5SelfAttention {
     private final T5PackageMetadata metadata;
-    private final T5LinearProjection q;
-    private final T5LinearProjection k;
-    private final T5LinearProjection v;
+    private final T5SelfAttentionProjection qkv;
     private final T5LinearProjection o;
     private final T5RelativePositionBias relativePositionBias;
     private final boolean bidirectionalRelativeBias;
@@ -23,9 +21,10 @@ public final class T5SelfAttention {
                            T5TensorData o,
                            T5RelativePositionBias relativePositionBias) {
         this(metadata,
-                T5ReferenceLinearProjection.from(q),
-                T5ReferenceLinearProjection.from(k),
-                T5ReferenceLinearProjection.from(v),
+                new T5SplitSelfAttentionProjection(
+                        T5ReferenceLinearProjection.from(q),
+                        T5ReferenceLinearProjection.from(k),
+                        T5ReferenceLinearProjection.from(v)),
                 T5ReferenceLinearProjection.from(o),
                 relativePositionBias, true, false);
     }
@@ -39,9 +38,10 @@ public final class T5SelfAttention {
                            boolean bidirectionalRelativeBias,
                            boolean causalMask) {
         this(metadata,
-                T5ReferenceLinearProjection.from(q),
-                T5ReferenceLinearProjection.from(k),
-                T5ReferenceLinearProjection.from(v),
+                new T5SplitSelfAttentionProjection(
+                        T5ReferenceLinearProjection.from(q),
+                        T5ReferenceLinearProjection.from(k),
+                        T5ReferenceLinearProjection.from(v)),
                 T5ReferenceLinearProjection.from(o),
                 relativePositionBias, bidirectionalRelativeBias, causalMask);
     }
@@ -54,10 +54,22 @@ public final class T5SelfAttention {
                            T5RelativePositionBias relativePositionBias,
                            boolean bidirectionalRelativeBias,
                            boolean causalMask) {
+        this(metadata,
+                new T5SplitSelfAttentionProjection(q, k, v),
+                o,
+                relativePositionBias,
+                bidirectionalRelativeBias,
+                causalMask);
+    }
+
+    public T5SelfAttention(T5PackageMetadata metadata,
+                           T5SelfAttentionProjection qkv,
+                           T5LinearProjection o,
+                           T5RelativePositionBias relativePositionBias,
+                           boolean bidirectionalRelativeBias,
+                           boolean causalMask) {
         this.metadata = Objects.requireNonNull(metadata, "metadata");
-        this.q = Objects.requireNonNull(q, "q");
-        this.k = Objects.requireNonNull(k, "k");
-        this.v = Objects.requireNonNull(v, "v");
+        this.qkv = Objects.requireNonNull(qkv, "qkv");
         this.o = Objects.requireNonNull(o, "o");
         this.relativePositionBias = relativePositionBias;
         this.bidirectionalRelativeBias = bidirectionalRelativeBias;
@@ -71,9 +83,10 @@ public final class T5SelfAttention {
         int innerSize = heads * headDim;
         validateHidden(hiddenStates, sequenceLength, hiddenSize);
         boolean[] mask = normalizeMask(attentionMask, sequenceLength);
-        float[] query = q.applySequence(hiddenStates, sequenceLength, hiddenSize);
-        float[] key = k.applySequence(hiddenStates, sequenceLength, hiddenSize);
-        float[] value = v.applySequence(hiddenStates, sequenceLength, hiddenSize);
+        T5ProjectedSelfAttention projected = qkv.applySequence(hiddenStates, sequenceLength, hiddenSize);
+        float[] query = projected.query();
+        float[] key = projected.key();
+        float[] value = projected.value();
         float[] context = new float[sequenceLength * innerSize];
         for (int token = 0; token < sequenceLength; token++) {
             if (!mask[token]) {
@@ -103,9 +116,9 @@ public final class T5SelfAttention {
                 }
             }
         }
-        float[] projected = o.applySequence(context, sequenceLength, innerSize);
-        clearMaskedTokens(projected, sequenceLength, hiddenSize, mask);
-        return projected;
+        float[] output = o.applySequence(context, sequenceLength, innerSize);
+        clearMaskedTokens(output, sequenceLength, hiddenSize, mask);
+        return output;
     }
 
     private static float dot(float[] query, float[] key, int queryToken, int keyToken, int head, int innerSize, int headDim) {
@@ -137,9 +150,10 @@ public final class T5SelfAttention {
             throw new IllegalArgumentException("Self-attention memory inner size mismatch: "
                     + safeMemory.innerSize() + " != " + innerSize);
         }
-        float[] query = q.apply(hiddenState);
-        float[] tokenKey = k.apply(hiddenState);
-        float[] tokenValue = v.apply(hiddenState);
+        T5ProjectedSelfAttention projected = qkv.apply(hiddenState);
+        float[] query = projected.query();
+        float[] tokenKey = projected.key();
+        float[] tokenValue = projected.value();
         T5SelfAttentionMemory memory = safeMemory.append(tokenKey, tokenValue);
         int totalLength = memory.sequenceLength();
         float[] context = new float[innerSize];
