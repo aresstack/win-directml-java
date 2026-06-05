@@ -20,7 +20,9 @@ public final class WorkbenchModel {
     private volatile String summarizerModel = "microsoft/Phi-3-mini-4k-instruct-onnx";
     private volatile String qwenModelFile = QwenOnnxModelVariant.Q4F16.modelFileName();
     private volatile QwenDownloadSource qwenDownloadSource = QwenDownloadSource.ONNX;
-    private volatile ProxyConfiguration proxyConfiguration = ProxyConfiguration.defaults();
+    private volatile ProxyConfiguration proxyConfiguration = ProxyConfiguration.builder()
+            .mode(com.aresstack.winproxy.ProxyMode.REGISTRY)
+            .build();
 
     public Backend getBackend() {
         return backend;
