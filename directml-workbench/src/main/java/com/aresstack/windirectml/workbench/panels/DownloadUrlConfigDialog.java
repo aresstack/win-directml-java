@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.workbench.panels;
 
+import com.aresstack.windirectml.workbench.download.DownloadUrlOpener;
 import com.aresstack.windirectml.workbench.download.ModelDownloadManifest;
 import com.aresstack.windirectml.workbench.download.ModelFileDescriptor;
 
@@ -19,6 +20,7 @@ import java.util.logging.Logger;
  *   <li>Label showing the local filename and required/optional marker</li>
  *   <li>Editable text field containing the download URL</li>
  *   <li>Square icon-only copy button to copy that single URL</li>
+ *   <li>Square icon-only browser button to open that single URL</li>
  * </ul>
  *
  * <p>OK accepts edits; Cancel discards them.
@@ -70,35 +72,27 @@ public final class DownloadUrlConfigDialog extends JDialog {
             filesPanel.add(urlField, gbc);
 
             // Copy button
-            var copyBtn = new JButton("\uD83D\uDCCB");
-            copyBtn.setToolTipText("Copy address");
-            copyBtn.setMargin(new Insets(0, 0, 0, 0));
-            Dimension sq = new Dimension(28, 28);
-            copyBtn.setPreferredSize(sq);
-            copyBtn.setMinimumSize(sq);
-            copyBtn.setMaximumSize(sq);
-            copyBtn.getAccessibleContext().setAccessibleName(
-                    "Copy URL for " + desc.localFilename());
-            copyBtn.getAccessibleContext().setAccessibleDescription(
-                    "Copy download URL for " + desc.localFilename());
             final int fieldIndex = row;
-            copyBtn.addActionListener(e -> {
-                String url = urlFields.get(fieldIndex).getText();
-                var selection = new StringSelection(url);
-                try {
-                    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
-                } catch (HeadlessException | IllegalStateException | SecurityException ex) {
-                    LOG.log(Level.WARNING, "Could not copy URL to clipboard", ex);
-                    JOptionPane.showMessageDialog(this,
-                            "Could not copy URL to clipboard: " + ex.getMessage(),
-                            "Clipboard unavailable",
-                            JOptionPane.WARNING_MESSAGE);
-                }
-            });
+            var copyBtn = createIconButton("\uD83D\uDCCB",
+                    "Copy address",
+                    "Copy URL for " + desc.localFilename(),
+                    "Copy download URL for " + desc.localFilename());
+            copyBtn.addActionListener(e -> copyUrlToClipboard(fieldIndex));
             gbc.gridx = 2;
             gbc.weightx = 0;
             gbc.fill = GridBagConstraints.NONE;
             filesPanel.add(copyBtn, gbc);
+
+            // Open in browser button
+            var browserBtn = createIconButton("\uD83C\uDF10",
+                    "Open address in default browser",
+                    "Open URL for " + desc.localFilename(),
+                    "Open download URL for " + desc.localFilename() + " in the default browser");
+            browserBtn.addActionListener(e -> DownloadUrlOpener.openInBrowser(urlFields.get(fieldIndex).getText(), this));
+            gbc.gridx = 3;
+            gbc.weightx = 0;
+            gbc.fill = GridBagConstraints.NONE;
+            filesPanel.add(browserBtn, gbc);
 
             row++;
         }
@@ -119,6 +113,34 @@ public final class DownloadUrlConfigDialog extends JDialog {
         contentPanel.add(buttonPanel, BorderLayout.SOUTH);
 
         setContentPane(contentPanel);
+    }
+
+
+    private JButton createIconButton(String text, String tooltip, String accessibleName, String accessibleDescription) {
+        var button = new JButton(text);
+        button.setToolTipText(tooltip);
+        button.setMargin(new Insets(0, 0, 0, 0));
+        Dimension sq = new Dimension(28, 28);
+        button.setPreferredSize(sq);
+        button.setMinimumSize(sq);
+        button.setMaximumSize(sq);
+        button.getAccessibleContext().setAccessibleName(accessibleName);
+        button.getAccessibleContext().setAccessibleDescription(accessibleDescription);
+        return button;
+    }
+
+    private void copyUrlToClipboard(int fieldIndex) {
+        String url = urlFields.get(fieldIndex).getText();
+        var selection = new StringSelection(url);
+        try {
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+        } catch (HeadlessException | IllegalStateException | SecurityException ex) {
+            LOG.log(Level.WARNING, "Could not copy URL to clipboard", ex);
+            JOptionPane.showMessageDialog(this,
+                    "Could not copy URL to clipboard: " + ex.getMessage(),
+                    "Clipboard unavailable",
+                    JOptionPane.WARNING_MESSAGE);
+        }
     }
 
     /**
