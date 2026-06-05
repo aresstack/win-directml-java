@@ -33,6 +33,7 @@ public final class T5InferenceEngine implements InferenceEngine {
     private T5RuntimePackage runtimePackage;
     private T5Runtime runtime;
     private WindowsBindings windowsBindings;
+    private T5GenerationMetrics lastGenerationMetrics = T5GenerationMetrics.empty();
     private boolean ready;
 
     public T5InferenceEngine(Path modelDir, int maxTokens) {
@@ -86,13 +87,19 @@ public final class T5InferenceEngine implements InferenceEngine {
         }
         try {
             String prompt = T5PromptTemplate.format(request);
+            long tokenizeStart = System.nanoTime();
             int[] inputTokens = truncate(tokenizer.encode(prompt), maxInputTokens);
+            long tokenizationNanos = System.nanoTime() - tokenizeStart;
             T5RuntimeRequest runtimeRequest = T5RuntimeRequest.greedyText(inputTokens,
                     Math.min(request.getMaxTokens(), maxTokens), runtimePackage.metadata().specialTokens());
             long start = System.nanoTime();
             T5RuntimeResult result = runtime.generate(runtimeRequest);
             long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
+            long detokenizeStart = System.nanoTime();
             String text = tokenizer.decode(result.outputTokenIds());
+            long detokenizationNanos = System.nanoTime() - detokenizeStart;
+            lastGenerationMetrics = result.generationMetrics()
+                    .withTextBoundaryTimings(tokenizationNanos, detokenizationNanos);
             String finishReason = result.finishReason() == T5RuntimeResult.FinishReason.max_tokens
                     ? "max_tokens" : "end_turn";
             return new InferenceResult(text, finishReason,
@@ -135,6 +142,10 @@ public final class T5InferenceEngine implements InferenceEngine {
 
     public String executionMode() {
         return runtime == null ? "not-initialized" : runtime.executionMode();
+    }
+
+    public T5GenerationMetrics lastGenerationMetrics() {
+        return lastGenerationMetrics;
     }
 
     public static String describeMissingModelFile(Path modelDir) {

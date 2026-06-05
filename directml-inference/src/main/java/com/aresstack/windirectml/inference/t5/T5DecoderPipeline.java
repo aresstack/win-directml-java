@@ -147,10 +147,12 @@ public final class T5DecoderPipeline implements T5DecoderRunner, AutoCloseable {
         if (cached != null && cached.belongsTo(encoderOutput)) {
             return cached;
         }
+        long prepareStart = System.nanoTime();
         List<T5CrossAttentionMemory> memories = new ArrayList<>();
         for (T5DecoderBlock block : blocks) {
             memories.add(block.prepareCrossAttentionMemory(encoderOutput));
         }
+        T5GenerationProfiler.recordCrossAttentionPrepareNanos(System.nanoTime() - prepareStart);
         T5CrossAttentionMemorySet created = new T5CrossAttentionMemorySet(encoderOutput, memories);
         crossAttentionMemorySet = created;
         return created;

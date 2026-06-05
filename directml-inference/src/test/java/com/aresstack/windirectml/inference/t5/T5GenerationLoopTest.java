@@ -29,6 +29,10 @@ class T5GenerationLoopTest {
         assertEquals(T5RuntimeResult.FinishReason.stop_token, result.finishReason());
         assertEquals(1, result.generatedTokens());
         assertArrayEquals(new int[]{config.eosTokenId()}, result.outputTokenIds());
+        assertTrue(result.generationMetrics().runtimeNanos() > 0L);
+        assertTrue(result.generationMetrics().encoderNanos() > 0L);
+        assertTrue(result.generationMetrics().decodeNanos() > 0L);
+        assertTrue(result.generationMetrics().lmHeadNanos() > 0L);
     }
 
     @Test

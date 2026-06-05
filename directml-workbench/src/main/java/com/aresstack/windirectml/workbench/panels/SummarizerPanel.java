@@ -293,6 +293,9 @@ public final class SummarizerPanel extends JPanel {
                 appendResult("  Output tokens: " + result.getUsage().completionTokens());
             }
             appendResult("  Finish reason: " + result.getFinishReason());
+            for (String line : engine.lastGenerationMetrics().diagnosticLines()) {
+                appendResult(line);
+            }
         } finally {
             engine.shutdown();
         }

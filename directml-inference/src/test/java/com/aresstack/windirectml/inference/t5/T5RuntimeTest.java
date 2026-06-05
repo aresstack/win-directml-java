@@ -74,6 +74,9 @@ class T5RuntimeTest {
         assertEquals(27, runtime.weights().tensorCount());
         assertEquals(2, result.generatedTokens());
         assertEquals(T5RuntimeResult.FinishReason.max_tokens, result.finishReason());
+        assertTrue(result.generationMetrics().runtimeNanos() > 0L);
+        assertTrue(result.generationMetrics().encoderNanos() > 0L);
+        assertFalse(result.generationMetrics().diagnosticLines().isEmpty());
     }
 
     private Path writePack(String family, String architecture) throws Exception {

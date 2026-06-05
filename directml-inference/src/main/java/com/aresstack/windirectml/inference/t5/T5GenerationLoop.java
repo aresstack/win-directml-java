@@ -42,27 +42,49 @@ public final class T5GenerationLoop {
     public T5RuntimeResult generate(T5RuntimeRequest request) {
         Objects.requireNonNull(request, "request");
         requireGreedyRequest(request);
-        T5EncoderOutput encoderOutput = encoderRunner.encode(request.inputTokenIds());
-        int[] generated = new int[request.maxNewTokens()];
-        int generatedTokens = 0;
-        int decoderTokenId = request.decoderStartTokenId();
-        T5DecoderCache cache = T5DecoderCache.empty();
-        for (int step = 0; step < request.maxNewTokens(); step++) {
-            T5DecoderState state = decoderRunner.decodeStep(decoderTokenId, encoderOutput, cache);
-            float[] logits = logitProjector.logits(state.lastHiddenState());
-            suppressControlTokens(logits, request, step);
-            int nextTokenId = tokenSelector.select(logits);
-            generated[generatedTokens] = nextTokenId;
-            generatedTokens++;
-            cache = cache.append(decoderTokenId, state);
-            if (request.stopTokenPolicy().shouldStop(nextTokenId)) {
-                return new T5RuntimeResult(Arrays.copyOf(generated, generatedTokens),
-                        T5RuntimeResult.FinishReason.stop_token, generatedTokens);
+        T5GenerationMetricsCollector metrics = new T5GenerationMetricsCollector();
+        long runtimeStart = System.nanoTime();
+        try (T5GenerationProfiler.Scope ignored = T5GenerationProfiler.open(metrics)) {
+            long encoderStart = System.nanoTime();
+            T5EncoderOutput encoderOutput = encoderRunner.encode(request.inputTokenIds());
+            metrics.addEncoderNanos(System.nanoTime() - encoderStart);
+            int[] generated = new int[request.maxNewTokens()];
+            int generatedTokens = 0;
+            int decoderTokenId = request.decoderStartTokenId();
+            T5DecoderCache cache = T5DecoderCache.empty();
+            for (int step = 0; step < request.maxNewTokens(); step++) {
+                long decodeStart = System.nanoTime();
+                T5DecoderState state = decoderRunner.decodeStep(decoderTokenId, encoderOutput, cache);
+                metrics.addDecodeNanos(System.nanoTime() - decodeStart);
+
+                long lmHeadStart = System.nanoTime();
+                float[] logits = logitProjector.logits(state.lastHiddenState());
+                metrics.addLmHeadNanos(System.nanoTime() - lmHeadStart);
+
+                long tokenSelectionStart = System.nanoTime();
+                suppressControlTokens(logits, request, step);
+                int nextTokenId = tokenSelector.select(logits);
+                metrics.addTokenSelectionNanos(System.nanoTime() - tokenSelectionStart);
+
+                generated[generatedTokens] = nextTokenId;
+                generatedTokens++;
+                cache = cache.append(decoderTokenId, state);
+                if (request.stopTokenPolicy().shouldStop(nextTokenId)) {
+                    return result(generated, generatedTokens, T5RuntimeResult.FinishReason.stop_token,
+                            metrics, runtimeStart);
+                }
+                decoderTokenId = nextTokenId;
             }
-            decoderTokenId = nextTokenId;
+            return result(generated, generatedTokens, T5RuntimeResult.FinishReason.max_tokens, metrics, runtimeStart);
         }
+    }
+
+    private static T5RuntimeResult result(int[] generated, int generatedTokens,
+                                          T5RuntimeResult.FinishReason finishReason,
+                                          T5GenerationMetricsCollector metrics, long runtimeStart) {
+        T5GenerationMetrics generationMetrics = metrics.finish(System.nanoTime() - runtimeStart, generatedTokens);
         return new T5RuntimeResult(Arrays.copyOf(generated, generatedTokens),
-                T5RuntimeResult.FinishReason.max_tokens, generatedTokens);
+                finishReason, generatedTokens, generationMetrics);
     }
 
     private static void suppressControlTokens(float[] logits, T5RuntimeRequest request, int step) {
