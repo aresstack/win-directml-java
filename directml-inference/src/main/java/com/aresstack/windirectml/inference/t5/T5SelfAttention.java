@@ -1,0 +1,112 @@
+package com.aresstack.windirectml.inference.t5;
+
+import java.util.Arrays;
+import java.util.Objects;
+
+/**
+ * Reference T5 self-attention used to validate encoder tensor layout and math.
+ */
+public final class T5SelfAttention {
+    private final T5PackageMetadata metadata;
+    private final T5TensorData q;
+    private final T5TensorData k;
+    private final T5TensorData v;
+    private final T5TensorData o;
+    private final T5RelativePositionBias relativePositionBias;
+
+    public T5SelfAttention(T5PackageMetadata metadata,
+                           T5TensorData q,
+                           T5TensorData k,
+                           T5TensorData v,
+                           T5TensorData o,
+                           T5RelativePositionBias relativePositionBias) {
+        this.metadata = Objects.requireNonNull(metadata, "metadata");
+        this.q = Objects.requireNonNull(q, "q");
+        this.k = Objects.requireNonNull(k, "k");
+        this.v = Objects.requireNonNull(v, "v");
+        this.o = Objects.requireNonNull(o, "o");
+        this.relativePositionBias = relativePositionBias;
+    }
+
+    public float[] apply(float[] hiddenStates, int sequenceLength, boolean[] attentionMask) {
+        int hiddenSize = metadata.dModel();
+        int heads = metadata.numHeads();
+        int headDim = metadata.dKv();
+        int innerSize = heads * headDim;
+        validateHidden(hiddenStates, sequenceLength, hiddenSize);
+        boolean[] mask = normalizeMask(attentionMask, sequenceLength);
+        float[] query = T5ReferenceMath.denseSequence(hiddenStates, sequenceLength, hiddenSize, q);
+        float[] key = T5ReferenceMath.denseSequence(hiddenStates, sequenceLength, hiddenSize, k);
+        float[] value = T5ReferenceMath.denseSequence(hiddenStates, sequenceLength, hiddenSize, v);
+        float[] context = new float[sequenceLength * innerSize];
+        for (int token = 0; token < sequenceLength; token++) {
+            if (!mask[token]) {
+                continue;
+            }
+            for (int head = 0; head < heads; head++) {
+                float[] scores = new float[sequenceLength];
+                for (int source = 0; source < sequenceLength; source++) {
+                    if (!mask[source]) {
+                        scores[source] = -1.0e9f;
+                        continue;
+                    }
+                    float score = dot(query, key, token, source, head, innerSize, headDim);
+                    score /= Math.sqrt(headDim);
+                    if (relativePositionBias != null) {
+                        score += relativePositionBias.value(head, token, source, true);
+                    }
+                    scores[source] = score;
+                }
+                T5ReferenceMath.softmaxInPlace(scores);
+                for (int dim = 0; dim < headDim; dim++) {
+                    float sum = 0.0f;
+                    for (int source = 0; source < sequenceLength; source++) {
+                        int valueIndex = source * innerSize + head * headDim + dim;
+                        sum += scores[source] * value[valueIndex];
+                    }
+                    context[token * innerSize + head * headDim + dim] = T5ReferenceMath.finite(sum);
+                }
+            }
+        }
+        float[] projected = T5ReferenceMath.denseSequence(context, sequenceLength, innerSize, o);
+        clearMaskedTokens(projected, sequenceLength, hiddenSize, mask);
+        return projected;
+    }
+
+    private static float dot(float[] query, float[] key, int queryToken, int keyToken, int head, int innerSize, int headDim) {
+        float sum = 0.0f;
+        int queryOffset = queryToken * innerSize + head * headDim;
+        int keyOffset = keyToken * innerSize + head * headDim;
+        for (int dim = 0; dim < headDim; dim++) {
+            sum += query[queryOffset + dim] * key[keyOffset + dim];
+        }
+        return T5ReferenceMath.finite(sum);
+    }
+
+    private static boolean[] normalizeMask(boolean[] mask, int sequenceLength) {
+        if (mask == null) {
+            boolean[] all = new boolean[sequenceLength];
+            Arrays.fill(all, true);
+            return all;
+        }
+        if (mask.length != sequenceLength) {
+            throw new IllegalArgumentException("attentionMask length mismatch: " + mask.length + " != " + sequenceLength);
+        }
+        return Arrays.copyOf(mask, mask.length);
+    }
+
+    private static void validateHidden(float[] hiddenStates, int sequenceLength, int hiddenSize) {
+        if (hiddenStates.length != sequenceLength * hiddenSize) {
+            throw new IllegalArgumentException("hiddenStates length mismatch: " + hiddenStates.length
+                    + ", expected=" + (sequenceLength * hiddenSize));
+        }
+    }
+
+    private static void clearMaskedTokens(float[] values, int sequenceLength, int hiddenSize, boolean[] mask) {
+        for (int token = 0; token < sequenceLength; token++) {
+            if (!mask[token]) {
+                Arrays.fill(values, token * hiddenSize, token * hiddenSize + hiddenSize, 0.0f);
+            }
+        }
+    }
+}
