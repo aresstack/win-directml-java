@@ -211,12 +211,13 @@ public final class SummarizerPanel extends JPanel {
             throws InferenceException {
         validateT5ModelFiles(modelDir);
         long start = System.nanoTime();
-        T5InferenceEngine engine = new T5InferenceEngine(modelDir, maxTokens);
+        String backend = model.getBackend().name().toLowerCase();
+        T5InferenceEngine engine = new T5InferenceEngine(modelDir, maxTokens, backend);
         try {
-            appendResult("Initializing T5 runtime package from " + modelDir + "...");
+            appendResult("Initializing T5 runtime package from " + modelDir + " (backend=" + backend + ")...");
             engine.initialize();
             appendResult("Model loaded in " + elapsedMs(start) + " ms");
-            appendResult("Seq2Seq generation running with reference encoder/decoder boundaries.");
+            appendResult("Seq2Seq generation running with " + engine.executionMode() + ".");
             appendResult("");
             appendResult("OUTPUT:");
             long genStart = System.nanoTime();

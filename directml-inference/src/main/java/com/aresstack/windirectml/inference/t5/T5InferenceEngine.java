@@ -4,6 +4,8 @@ import com.aresstack.windirectml.inference.InferenceEngine;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.InferenceRequest;
 import com.aresstack.windirectml.inference.InferenceResult;
+import com.aresstack.windirectml.windows.WindowsBindings;
+import com.aresstack.windirectml.windows.WindowsNativeException;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -26,16 +28,26 @@ public final class T5InferenceEngine implements InferenceEngine {
     private final Path modelDir;
     private final int maxTokens;
     private final int maxInputTokens;
+    private final String backend;
     private CodeT5Tokenizer tokenizer;
     private T5RuntimePackage runtimePackage;
     private T5Runtime runtime;
+    private WindowsBindings windowsBindings;
     private boolean ready;
 
     public T5InferenceEngine(Path modelDir, int maxTokens) {
-        this(modelDir, maxTokens, DEFAULT_MAX_INPUT_TOKENS);
+        this(modelDir, maxTokens, DEFAULT_MAX_INPUT_TOKENS, "reference");
+    }
+
+    public T5InferenceEngine(Path modelDir, int maxTokens, String backend) {
+        this(modelDir, maxTokens, DEFAULT_MAX_INPUT_TOKENS, backend);
     }
 
     public T5InferenceEngine(Path modelDir, int maxTokens, int maxInputTokens) {
+        this(modelDir, maxTokens, maxInputTokens, "reference");
+    }
+
+    public T5InferenceEngine(Path modelDir, int maxTokens, int maxInputTokens, String backend) {
         this.modelDir = Objects.requireNonNull(modelDir, "modelDir").toAbsolutePath().normalize();
         if (maxTokens <= 0) {
             throw new IllegalArgumentException("maxTokens must be positive: " + maxTokens);
@@ -45,6 +57,7 @@ public final class T5InferenceEngine implements InferenceEngine {
         }
         this.maxTokens = maxTokens;
         this.maxInputTokens = maxInputTokens;
+        this.backend = normalizeBackend(backend);
     }
 
     @Override
@@ -57,9 +70,10 @@ public final class T5InferenceEngine implements InferenceEngine {
             tokenizer = CodeT5Tokenizer.load(modelDir);
             Path packagePath = resolveRuntimePackage(modelDir);
             runtimePackage = T5RuntimePackage.open(packagePath);
-            runtime = T5Runtime.load(runtimePackage);
+            runtime = createRuntime(runtimePackage);
             ready = true;
         } catch (IOException | RuntimeException e) {
+            closeWindowsBindingsQuietly();
             throw new InferenceException("Could not initialize T5 runtime: " + e.getMessage(), e);
         }
     }
@@ -101,6 +115,7 @@ public final class T5InferenceEngine implements InferenceEngine {
             runtime.close();
             runtime = null;
         }
+        closeWindowsBindingsQuietly();
         runtimePackage = null;
         tokenizer = null;
     }
@@ -112,6 +127,14 @@ public final class T5InferenceEngine implements InferenceEngine {
 
     public T5RuntimePackage runtimePackage() {
         return runtimePackage;
+    }
+
+    public String backend() {
+        return backend;
+    }
+
+    public String executionMode() {
+        return runtime == null ? "not-initialized" : runtime.executionMode();
     }
 
     public static String describeMissingModelFile(Path modelDir) {
@@ -153,6 +176,62 @@ public final class T5InferenceEngine implements InferenceEngine {
         }
         T5CompileOptions options = new T5CompileOptions(modelDir, modelDir.resolve(DEFAULT_PACKAGE_NAME), false, true);
         return T5WdmlPackCompiler.compile(options).output();
+    }
+
+    private T5Runtime createRuntime(T5RuntimePackage packageToLoad) throws IOException {
+        if ("reference".equals(backend)) {
+            return T5Runtime.load(packageToLoad);
+        }
+        if (!WindowsBindings.isSupported()) {
+            throw new IOException("T5 backend '" + backend + "' requires Windows WARP/AUTO DirectML bindings");
+        }
+        windowsBindings = new WindowsBindings();
+        String nativeBackend = toNativeBackend(backend);
+        try {
+            windowsBindings.init(nativeBackend);
+        } catch (WindowsNativeException e) {
+            throw new IOException("Could not initialize T5 Windows backend '" + nativeBackend + "': "
+                    + e.getMessage(), e);
+        }
+        if (!windowsBindings.hasDirectMl()) {
+            throw new IOException("T5 backend '" + backend + "' did not provide a DirectML device");
+        }
+        return T5Runtime.loadWarp(packageToLoad, windowsBindings);
+    }
+
+    private void closeWindowsBindingsQuietly() {
+        if (windowsBindings != null) {
+            try {
+                windowsBindings.close();
+            } finally {
+                windowsBindings = null;
+            }
+        }
+    }
+
+    private static String normalizeBackend(String value) {
+        String normalized = value == null ? "reference" : value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (normalized.isEmpty()) {
+            return "reference";
+        }
+        if ("cpu".equals(normalized)) {
+            return "reference";
+        }
+        if ("dml".equals(normalized) || "directml".equals(normalized)) {
+            return "auto";
+        }
+        if ("hybrid".equals(normalized)) {
+            return "auto";
+        }
+        if ("reference".equals(normalized) || "warp".equals(normalized) || "auto".equals(normalized)) {
+            return normalized;
+        }
+        throw new IllegalArgumentException("Unsupported T5 backend: " + value
+                + " (expected reference, warp, or auto)");
+    }
+
+    private static String toNativeBackend(String backend) {
+        return "warp".equals(backend) ? "warp" : "auto";
     }
 
     private static Optional<Path> findExistingWdmlPack(Path modelDir) {

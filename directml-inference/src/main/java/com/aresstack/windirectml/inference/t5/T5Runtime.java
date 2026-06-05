@@ -197,6 +197,25 @@ public final class T5Runtime implements AutoCloseable {
                 "warp-encoder-boundary+warp-decoder-boundary+warp-lm-head");
     }
 
+    /**
+     * Load the strongest currently available WARP-backed T5 runtime.
+     *
+     * <p>This method is the default production entry point for the T5 family on
+     * Windows. The encoder and decoder stages are routed through their WARP
+     * boundaries and the vocabulary projection uses the WARP LM-head bridge.
+     * Future patches can replace the boundary implementations with native
+     * operator pipelines without changing callers.</p>
+     *
+     * @param runtimePackage  T5 runtime package
+     * @param windowsBindings initialized Windows bindings using WARP/AUTO
+     * @return T5 runtime using all available WARP execution boundaries
+     * @throws java.io.IOException if package weights cannot be loaded
+     */
+    public static T5Runtime loadWarp(T5RuntimePackage runtimePackage,
+                                     WindowsBindings windowsBindings) throws java.io.IOException {
+        return loadWarpEncoderDecoderAndLmHead(runtimePackage, windowsBindings);
+    }
+
     public T5RuntimeResult generate(T5RuntimeRequest request) {
         Objects.requireNonNull(request, "request");
         ensureOpen();
