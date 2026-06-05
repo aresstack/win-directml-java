@@ -1,0 +1,449 @@
+diff --git a/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5GenerationLoop.java b/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5GenerationLoop.java
+new file mode 100644
+index 0000000..7766eaf
+--- /dev/null
++++ b/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5GenerationLoop.java
+@@ -0,0 +1,69 @@
++package com.aresstack.windirectml.inference.t5;
++
++import java.util.Arrays;
++import java.util.Objects;
++
++/**
++ * Reference T5 generation loop for v38.
++ *
++ * <p>This loop validates the encoder/decoder/LM-head orchestration before WARP
++ * kernels replace the Java reference math.</p>
++ */
++public final class T5GenerationLoop {
++    private final T5EncoderPipeline encoderPipeline;
++    private final T5DecoderPipeline decoderPipeline;
++    private final T5LmHead lmHead;
++    private final T5TokenSelector tokenSelector;
++
++    private T5GenerationLoop(T5EncoderPipeline encoderPipeline,
++                             T5DecoderPipeline decoderPipeline,
++                             T5LmHead lmHead,
++                             T5TokenSelector tokenSelector) {
++        this.encoderPipeline = Objects.requireNonNull(encoderPipeline, "encoderPipeline");
++        this.decoderPipeline = Objects.requireNonNull(decoderPipeline, "decoderPipeline");
++        this.lmHead = Objects.requireNonNull(lmHead, "lmHead");
++        this.tokenSelector = Objects.requireNonNull(tokenSelector, "tokenSelector");
++    }
++
++    public static T5GenerationLoop greedy(T5EncoderPipeline encoderPipeline,
++                                           T5DecoderPipeline decoderPipeline,
++                                           T5Weights weights) {
++        return new T5GenerationLoop(encoderPipeline, decoderPipeline, T5LmHead.from(weights), T5TokenSelector.greedy());
++    }
++
++    public T5RuntimeResult generate(T5RuntimeRequest request) {
++        Objects.requireNonNull(request, "request");
++        requireGreedyRequest(request);
++        T5EncoderOutput encoderOutput = encoderPipeline.encode(request.inputTokenIds());
++        int[] generated = new int[request.maxNewTokens()];
++        int generatedTokens = 0;
++        int decoderTokenId = request.decoderStartTokenId();
++        T5DecoderCache cache = T5DecoderCache.empty();
++        for (int step = 0; step < request.maxNewTokens(); step++) {
++            T5DecoderState state = decoderPipeline.decodeStep(decoderTokenId, encoderOutput, cache);
++            float[] logits = lmHead.logits(state.lastHiddenState());
++            int nextTokenId = tokenSelector.select(logits);
++            generated[generatedTokens] = nextTokenId;
++            generatedTokens++;
++            cache = cache.append(decoderTokenId, state);
++            if (request.stopTokenPolicy().shouldStop(nextTokenId)) {
++                return new T5RuntimeResult(Arrays.copyOf(generated, generatedTokens),
++                        T5RuntimeResult.FinishReason.stop_token, generatedTokens);
++            }
++            decoderTokenId = nextTokenId;
++        }
++        return new T5RuntimeResult(Arrays.copyOf(generated, generatedTokens),
++                T5RuntimeResult.FinishReason.max_tokens, generatedTokens);
++    }
++
++    private static void requireGreedyRequest(T5RuntimeRequest request) {
++        if (request.temperature() != 0.0f) {
++            throw new IllegalArgumentException("T5 reference generation supports greedy decoding only: temperature="
++                    + request.temperature());
++        }
++        if (request.topK() != 0) {
++            throw new IllegalArgumentException("T5 reference generation supports greedy decoding only: topK="
++                    + request.topK());
++        }
++    }
++}
+diff --git a/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5LmHead.java b/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5LmHead.java
+new file mode 100644
+index 0000000..657a554
+--- /dev/null
++++ b/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5LmHead.java
+@@ -0,0 +1,38 @@
++package com.aresstack.windirectml.inference.t5;
++
++import java.util.Objects;
++
++/**
++ * Reference LM head for T5 token generation.
++ *
++ * <p>This class exists only for the v38 correctness path. Production T5
++ * execution must project logits through WARP instead of Java arrays.</p>
++ */
++public final class T5LmHead {
++    private final T5TensorData lmHeadWeight;
++
++    private T5LmHead(T5TensorData lmHeadWeight) {
++        this.lmHeadWeight = Objects.requireNonNull(lmHeadWeight, "lmHeadWeight");
++        if (lmHeadWeight.rank() != 2) {
++            throw new IllegalArgumentException("T5 LM head must be rank 2: " + lmHeadWeight.name());
++        }
++    }
++
++    public static T5LmHead from(T5Weights weights) {
++        Objects.requireNonNull(weights, "weights");
++        return new T5LmHead(T5TensorData.from(weights.lmHead()));
++    }
++
++    public float[] logits(float[] decoderHiddenState) {
++        Objects.requireNonNull(decoderHiddenState, "decoderHiddenState");
++        if (decoderHiddenState.length != lmHeadWeight.dim(1)) {
++            throw new IllegalArgumentException("Decoder hidden state length mismatch for T5 LM head: hidden="
++                    + decoderHiddenState.length + ", expected=" + lmHeadWeight.dim(1));
++        }
++        return T5ReferenceMath.dense(decoderHiddenState, lmHeadWeight);
++    }
++
++    public int vocabularySize() {
++        return lmHeadWeight.dim(0);
++    }
++}
+diff --git a/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5Runtime.java b/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5Runtime.java
+index 100bd6b..725479d 100644
+--- a/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5Runtime.java
++++ b/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5Runtime.java
+@@ -12,6 +12,7 @@ public final class T5Runtime implements AutoCloseable {
+     private final T5Weights weights;
+     private final T5EncoderPipeline encoderPipeline;
+     private final T5DecoderPipeline decoderPipeline;
++    private final T5GenerationLoop generationLoop;
+     private boolean closed;
+ 
+     private T5Runtime(T5RuntimePackage runtimePackage, T5Weights weights) {
+@@ -19,6 +20,7 @@ public final class T5Runtime implements AutoCloseable {
+         this.weights = Objects.requireNonNull(weights, "weights");
+         this.encoderPipeline = T5EncoderPipeline.from(weights);
+         this.decoderPipeline = T5DecoderPipeline.from(weights);
++        this.generationLoop = T5GenerationLoop.greedy(encoderPipeline, decoderPipeline, weights);
+     }
+ 
+     public static T5Runtime load(T5RuntimePackage runtimePackage) throws java.io.IOException {
+@@ -29,7 +31,7 @@ public final class T5Runtime implements AutoCloseable {
+     public T5RuntimeResult generate(T5RuntimeRequest request) {
+         Objects.requireNonNull(request, "request");
+         ensureOpen();
+-        throw new T5UnsupportedRuntimeException(UNSUPPORTED_MESSAGE);
++        return generationLoop.generate(request);
+     }
+ 
+     /**
+@@ -83,6 +85,10 @@ public final class T5Runtime implements AutoCloseable {
+         return decoderPipeline;
+     }
+ 
++    public T5GenerationLoop generationLoop() {
++        return generationLoop;
++    }
++
+     private void ensureOpen() {
+         if (closed) {
+             throw new IllegalStateException("T5 runtime is closed");
+diff --git a/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5StopTokenPolicy.java b/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5StopTokenPolicy.java
+index 3c6d0c6..f25c6ce 100644
+--- a/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5StopTokenPolicy.java
++++ b/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5StopTokenPolicy.java
+@@ -1,24 +1,27 @@
+ package com.aresstack.windirectml.inference.t5;
+ 
++import java.util.Collections;
+ import java.util.HashSet;
+ import java.util.Objects;
+ import java.util.Set;
+ 
+ /**
+- * Token-based stopping policy for the future T5 decoder loop.
++ * Token-based stopping policy for the T5 decoder loop.
+  */
+ public final class T5StopTokenPolicy {
+     private final Set<Integer> stopTokenIds;
+ 
+     private T5StopTokenPolicy(Set<Integer> stopTokenIds) {
+-        this.stopTokenIds = Set.copyOf(Objects.requireNonNull(stopTokenIds, "stopTokenIds"));
++        this.stopTokenIds = Collections.unmodifiableSet(new HashSet<>(Objects.requireNonNull(stopTokenIds, "stopTokenIds")));
+     }
+ 
+     public static T5StopTokenPolicy stopAtEos(int eosTokenId) {
+         if (eosTokenId < 0) {
+             throw new IllegalArgumentException("eosTokenId must not be negative: " + eosTokenId);
+         }
+-        return new T5StopTokenPolicy(Set.of(eosTokenId));
++        Set<Integer> tokens = new HashSet<>();
++        tokens.add(eosTokenId);
++        return new T5StopTokenPolicy(tokens);
+     }
+ 
+     public static T5StopTokenPolicy stopAtAny(Set<Integer> tokenIds) {
+@@ -34,7 +37,7 @@ public final class T5StopTokenPolicy {
+     }
+ 
+     public static T5StopTokenPolicy neverStop() {
+-        return new T5StopTokenPolicy(Set.of());
++        return new T5StopTokenPolicy(Collections.<Integer>emptySet());
+     }
+ 
+     public boolean shouldStop(int tokenId) {
+diff --git a/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5TokenSelector.java b/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5TokenSelector.java
+new file mode 100644
+index 0000000..47bd680
+--- /dev/null
++++ b/directml-inference/src/main/java/com/aresstack/windirectml/inference/t5/T5TokenSelector.java
+@@ -0,0 +1,52 @@
++package com.aresstack.windirectml.inference.t5;
++
++import java.util.Objects;
++
++/**
++ * Selects the next token from decoder logits.
++ */
++public interface T5TokenSelector {
++    int select(float[] logits);
++
++    static T5TokenSelector greedy() {
++        return GreedyT5TokenSelector.INSTANCE;
++    }
++}
++
++final class GreedyT5TokenSelector implements T5TokenSelector {
++    static final GreedyT5TokenSelector INSTANCE = new GreedyT5TokenSelector();
++
++    private GreedyT5TokenSelector() {
++    }
++
++    @Override
++    public int select(float[] logits) {
++        Objects.requireNonNull(logits, "logits");
++        if (logits.length == 0) {
++            throw new IllegalArgumentException("logits must not be empty");
++        }
++        int bestToken = 0;
++        float bestLogit = sanitize(logits[0]);
++        for (int token = 1; token < logits.length; token++) {
++            float logit = sanitize(logits[token]);
++            if (logit > bestLogit) {
++                bestLogit = logit;
++                bestToken = token;
++            }
++        }
++        return bestToken;
++    }
++
++    private static float sanitize(float value) {
++        if (Float.isNaN(value)) {
++            return -Float.MAX_VALUE;
++        }
++        if (value == Float.POSITIVE_INFINITY) {
++            return Float.MAX_VALUE;
++        }
++        if (value == Float.NEGATIVE_INFINITY) {
++            return -Float.MAX_VALUE;
++        }
++        return value;
++    }
++}
+diff --git a/directml-inference/src/test/java/com/aresstack/windirectml/inference/t5/T5GenerationLoopTest.java b/directml-inference/src/test/java/com/aresstack/windirectml/inference/t5/T5GenerationLoopTest.java
+new file mode 100644
+index 0000000..dcd2b32
+--- /dev/null
++++ b/directml-inference/src/test/java/com/aresstack/windirectml/inference/t5/T5GenerationLoopTest.java
+@@ -0,0 +1,154 @@
++package com.aresstack.windirectml.inference.t5;
++
++import com.aresstack.windirectml.windows.OnnxModelReader;
++import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.io.TempDir;
++
++import java.nio.ByteBuffer;
++import java.nio.ByteOrder;
++import java.nio.file.Path;
++import java.util.LinkedHashMap;
++import java.util.Map;
++
++import static org.junit.jupiter.api.Assertions.*;
++
++class T5GenerationLoopTest {
++
++    @TempDir
++    Path tempDir;
++
++    @Test
++    void generatesStopTokenWithGreedyLmHead() throws Exception {
++        T5Config config = T5TestFixtures.untiedConfig();
++        T5Runtime runtime = runtime(config, tensorsThatPreferEos(config));
++        T5RuntimeRequest request = T5RuntimeRequest.greedy(new int[]{1, 2, 3}, 4, config.specialTokens());
++
++        T5RuntimeResult result = runtime.generate(request);
++
++        assertEquals(T5RuntimeResult.FinishReason.stop_token, result.finishReason());
++        assertEquals(1, result.generatedTokens());
++        assertArrayEquals(new int[]{config.eosTokenId()}, result.outputTokenIds());
++    }
++
++    @Test
++    void stopsAtMaxTokensWhenPolicyDoesNotStop() throws Exception {
++        T5Config config = T5TestFixtures.untiedConfig();
++        T5Runtime runtime = runtime(config, tensorsThatPreferEos(config));
++        T5RuntimeRequest request = new T5RuntimeRequest(new int[]{1, 2, 3}, 3,
++                T5StopTokenPolicy.neverStop(), config.decoderStartTokenId(), 0.0f, 0);
++
++        T5RuntimeResult result = runtime.generate(request);
++
++        assertEquals(T5RuntimeResult.FinishReason.max_tokens, result.finishReason());
++        assertEquals(3, result.generatedTokens());
++        assertArrayEquals(new int[]{config.eosTokenId(), config.eosTokenId(), config.eosTokenId()}, result.outputTokenIds());
++    }
++
++    @Test
++    void rejectsSamplingOptionsInReferenceGeneration() throws Exception {
++        T5Config config = T5TestFixtures.untiedConfig();
++        T5Runtime runtime = runtime(config, tensorsThatPreferEos(config));
++        T5RuntimeRequest request = new T5RuntimeRequest(new int[]{1}, 1,
++                T5StopTokenPolicy.neverStop(), config.decoderStartTokenId(), 0.7f, 0);
++
++        Exception error = assertThrows(IllegalArgumentException.class, () -> runtime.generate(request));
++
++        assertTrue(error.getMessage().contains("greedy"));
++    }
++
++    private T5Runtime runtime(T5Config config, Map<String, OnnxTensor> tensors) throws Exception {
++        Path modelDir = tempDir.resolve("model-" + System.nanoTime());
++        T5TestFixtures.writeConfig(modelDir, config);
++        T5TestFixtures.writeSafeTensors(modelDir, tensors);
++        Path output = tempDir.resolve("t5-generation-" + System.nanoTime() + ".wdmlpack");
++        T5WdmlPackCompiler.compile(new T5CompileOptions(modelDir, output, false, false));
++        return T5Runtime.load(T5RuntimePackage.open(output));
++    }
++
++    private static Map<String, OnnxTensor> tensorsThatPreferEos(T5Config config) {
++        Map<String, OnnxTensor> tensors = new LinkedHashMap<>();
++        addEmbedding(tensors, "shared.weight", config.vocabSize(), config.modelSize());
++        addVector(tensors, "encoder.final_layer_norm.weight", config.modelSize(), 1.0f);
++        addVector(tensors, "decoder.final_layer_norm.weight", config.modelSize(), 1.0f);
++        addMatrix(tensors, "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
++                config.relativeAttentionBuckets(), config.attentionHeads(), 0.0f);
++        addMatrix(tensors, "decoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight",
++                config.relativeAttentionBuckets(), config.attentionHeads(), 0.0f);
++        addEncoderBlock(tensors, 0, config);
++        addDecoderBlock(tensors, 0, config);
++        addLmHeadThatPrefersEos(tensors, config);
++        return tensors;
++    }
++
++    private static void addEncoderBlock(Map<String, OnnxTensor> tensors, int layer, T5Config config) {
++        addVector(tensors, "encoder.block." + layer + ".layer.0.layer_norm.weight", config.modelSize(), 1.0f);
++        addVector(tensors, "encoder.block." + layer + ".layer.1.layer_norm.weight", config.modelSize(), 1.0f);
++        addAttention(tensors, "encoder.block." + layer + ".layer.0.SelfAttention", config);
++        addMatrix(tensors, "encoder.block." + layer + ".layer.1.DenseReluDense.wi.weight",
++                config.feedForwardSize(), config.modelSize(), 0.0f);
++        addMatrix(tensors, "encoder.block." + layer + ".layer.1.DenseReluDense.wo.weight",
++                config.modelSize(), config.feedForwardSize(), 0.0f);
++    }
++
++    private static void addDecoderBlock(Map<String, OnnxTensor> tensors, int layer, T5Config config) {
++        addVector(tensors, "decoder.block." + layer + ".layer.0.layer_norm.weight", config.modelSize(), 1.0f);
++        addVector(tensors, "decoder.block." + layer + ".layer.1.layer_norm.weight", config.modelSize(), 1.0f);
++        addVector(tensors, "decoder.block." + layer + ".layer.2.layer_norm.weight", config.modelSize(), 1.0f);
++        addAttention(tensors, "decoder.block." + layer + ".layer.0.SelfAttention", config);
++        addAttention(tensors, "decoder.block." + layer + ".layer.1.EncDecAttention", config);
++        addMatrix(tensors, "decoder.block." + layer + ".layer.2.DenseReluDense.wi.weight",
++                config.feedForwardSize(), config.modelSize(), 0.0f);
++        addMatrix(tensors, "decoder.block." + layer + ".layer.2.DenseReluDense.wo.weight",
++                config.modelSize(), config.feedForwardSize(), 0.0f);
++    }
++
++    private static void addAttention(Map<String, OnnxTensor> tensors, String prefix, T5Config config) {
++        addMatrix(tensors, prefix + ".q.weight", config.attentionInnerSize(), config.modelSize(), 0.0f);
++        addMatrix(tensors, prefix + ".k.weight", config.attentionInnerSize(), config.modelSize(), 0.0f);
++        addMatrix(tensors, prefix + ".v.weight", config.attentionInnerSize(), config.modelSize(), 0.0f);
++        addMatrix(tensors, prefix + ".o.weight", config.modelSize(), config.attentionInnerSize(), 0.0f);
++    }
++
++    private static void addEmbedding(Map<String, OnnxTensor> tensors, String name, int rows, int columns) {
++        float[] values = new float[rows * columns];
++        values[0] = 1.0f;
++        for (int row = 1; row < rows; row++) {
++            values[row * columns] = 0.25f;
++        }
++        tensors.put(name, tensor(name, new long[]{rows, columns}, values));
++    }
++
++    private static void addLmHeadThatPrefersEos(Map<String, OnnxTensor> tensors, T5Config config) {
++        float[] values = new float[config.vocabSize() * config.modelSize()];
++        values[config.eosTokenId() * config.modelSize()] = 10.0f;
++        tensors.put("lm_head.weight", tensor("lm_head.weight",
++                new long[]{config.vocabSize(), config.modelSize()}, values));
++    }
++
++    private static void addMatrix(Map<String, OnnxTensor> tensors, String name, int rows, int columns, float value) {
++        float[] values = new float[rows * columns];
++        for (int i = 0; i < values.length; i++) {
++            values[i] = value;
++        }
++        tensors.put(name, tensor(name, new long[]{rows, columns}, values));
++    }
++
++    private static void addVector(Map<String, OnnxTensor> tensors, String name, int length, float value) {
++        float[] values = new float[length];
++        for (int i = 0; i < values.length; i++) {
++            values[i] = value;
++        }
++        tensors.put(name, tensor(name, new long[]{length}, values));
++    }
++
++    private static OnnxTensor tensor(String name, long[] dims, float[] values) {
++        ByteBuffer raw = ByteBuffer.allocate(values.length * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
++        for (float value : values) {
++            raw.putFloat(value);
++        }
++        raw.flip();
++        return new OnnxTensor(name, dims, OnnxModelReader.ONNX_FLOAT,
++                new float[0], new byte[0], raw.asReadOnlyBuffer(), raw.remaining());
++    }
++}
+diff --git a/directml-inference/src/test/java/com/aresstack/windirectml/inference/t5/T5RuntimeTest.java b/directml-inference/src/test/java/com/aresstack/windirectml/inference/t5/T5RuntimeTest.java
+index 7bfbd21..cd2133d 100644
+--- a/directml-inference/src/test/java/com/aresstack/windirectml/inference/t5/T5RuntimeTest.java
++++ b/directml-inference/src/test/java/com/aresstack/windirectml/inference/t5/T5RuntimeTest.java
+@@ -55,18 +55,19 @@ class T5RuntimeTest {
+     }
+ 
+     @Test
+-    void runtimeLoadsWeightsButGenerationIsStillUnsupported() throws Exception {
++    void runtimeLoadsWeightsAndExposesReferenceGenerationLoop() throws Exception {
+         Path modelDir = createModelDir(T5TestFixtures.tinyConfig(false));
+         Path output = tempDir.resolve("runtime-shell.wdmlpack");
+         T5WdmlPackCompiler.compile(new T5CompileOptions(modelDir, output, false, false));
+         T5RuntimePackage runtimePackage = T5RuntimePackage.open(output);
+         T5Runtime runtime = T5Runtime.load(runtimePackage);
+ 
+-        T5UnsupportedRuntimeException error = assertThrows(T5UnsupportedRuntimeException.class,
+-                () -> runtime.generate(T5RuntimeRequest.greedy(new int[]{1, 2}, 4, T5TestFixtures.tinyConfig(false).specialTokens())));
++        T5RuntimeResult result = runtime.generate(T5RuntimeRequest.greedy(
++                new int[]{1, 2}, 2, T5TestFixtures.tinyConfig(false).specialTokens()));
+ 
+-        assertEquals(T5Runtime.UNSUPPORTED_MESSAGE, error.getMessage());
+         assertEquals(27, runtime.weights().tensorCount());
++        assertEquals(2, result.generatedTokens());
++        assertEquals(T5RuntimeResult.FinishReason.max_tokens, result.finishReason());
+     }
+ 
+     private Path writePack(String family, String architecture) throws Exception {

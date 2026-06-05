@@ -55,18 +55,19 @@ class T5RuntimeTest {
     }
 
     @Test
-    void runtimeLoadsWeightsButGenerationIsStillUnsupported() throws Exception {
+    void runtimeLoadsWeightsAndExposesReferenceGenerationLoop() throws Exception {
         Path modelDir = createModelDir(T5TestFixtures.tinyConfig(false));
         Path output = tempDir.resolve("runtime-shell.wdmlpack");
         T5WdmlPackCompiler.compile(new T5CompileOptions(modelDir, output, false, false));
         T5RuntimePackage runtimePackage = T5RuntimePackage.open(output);
         T5Runtime runtime = T5Runtime.load(runtimePackage);
 
-        T5UnsupportedRuntimeException error = assertThrows(T5UnsupportedRuntimeException.class,
-                () -> runtime.generate(T5RuntimeRequest.greedy(new int[]{1, 2}, 4, T5TestFixtures.tinyConfig(false).specialTokens())));
+        T5RuntimeResult result = runtime.generate(T5RuntimeRequest.greedy(
+                new int[]{1, 2}, 2, T5TestFixtures.tinyConfig(false).specialTokens()));
 
-        assertEquals(T5Runtime.UNSUPPORTED_MESSAGE, error.getMessage());
         assertEquals(27, runtime.weights().tensorCount());
+        assertEquals(2, result.generatedTokens());
+        assertEquals(T5RuntimeResult.FinishReason.max_tokens, result.finishReason());
     }
 
     private Path writePack(String family, String architecture) throws Exception {

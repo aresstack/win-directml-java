@@ -12,6 +12,7 @@ public final class T5Runtime implements AutoCloseable {
     private final T5Weights weights;
     private final T5EncoderPipeline encoderPipeline;
     private final T5DecoderPipeline decoderPipeline;
+    private final T5GenerationLoop generationLoop;
     private boolean closed;
 
     private T5Runtime(T5RuntimePackage runtimePackage, T5Weights weights) {
@@ -19,6 +20,7 @@ public final class T5Runtime implements AutoCloseable {
         this.weights = Objects.requireNonNull(weights, "weights");
         this.encoderPipeline = T5EncoderPipeline.from(weights);
         this.decoderPipeline = T5DecoderPipeline.from(weights);
+        this.generationLoop = T5GenerationLoop.greedy(encoderPipeline, decoderPipeline, weights);
     }
 
     public static T5Runtime load(T5RuntimePackage runtimePackage) throws java.io.IOException {
@@ -29,7 +31,7 @@ public final class T5Runtime implements AutoCloseable {
     public T5RuntimeResult generate(T5RuntimeRequest request) {
         Objects.requireNonNull(request, "request");
         ensureOpen();
-        throw new T5UnsupportedRuntimeException(UNSUPPORTED_MESSAGE);
+        return generationLoop.generate(request);
     }
 
     /**
@@ -81,6 +83,10 @@ public final class T5Runtime implements AutoCloseable {
 
     public T5DecoderPipeline decoderPipeline() {
         return decoderPipeline;
+    }
+
+    public T5GenerationLoop generationLoop() {
+        return generationLoop;
     }
 
     private void ensureOpen() {
