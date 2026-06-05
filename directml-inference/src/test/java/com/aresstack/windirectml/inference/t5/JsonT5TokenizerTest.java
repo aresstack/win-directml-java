@@ -7,7 +7,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class JsonT5TokenizerTest {
     @TempDir
@@ -25,6 +26,30 @@ class JsonT5TokenizerTest {
         assertEquals("hello world", tokenizer.decode(encoded));
     }
 
+    @Test
+    void usesUnigramScoresInsteadOfGreedyLongestMatch() throws Exception {
+        writeTokenizerFiles(tempDir);
+
+        T5TextTokenizer tokenizer = T5TokenizerLoader.load(tempDir);
+
+        int[] encoded = tokenizer.encode("helloed");
+
+        assertArrayEquals(new int[]{3, 5, 1}, encoded);
+        assertEquals("helloed", tokenizer.decode(encoded));
+    }
+
+    @Test
+    void preservesSentencePieceWordBoundariesForPromptText() throws Exception {
+        writeTokenizerFiles(tempDir);
+
+        T5TextTokenizer tokenizer = T5TokenizerLoader.load(tempDir);
+
+        int[] encoded = tokenizer.encode("summarize: Paste a longer text");
+
+        assertEquals(1, encoded[encoded.length - 1]);
+        assertEquals("summarize: Paste a longer text", tokenizer.decode(encoded));
+    }
+
     static void writeTokenizerFiles(Path modelDir) throws Exception {
         Files.createDirectories(modelDir);
         Files.writeString(modelDir.resolve("tokenizer.json"), "{\n" +
@@ -33,9 +58,17 @@ class JsonT5TokenizerTest {
                 "    \"vocab\": [\n" +
                 "      [\"<pad>\", 0.0],\n" +
                 "      [\"</s>\", 0.0],\n" +
-                "      [\"<unk>\", 0.0],\n" +
+                "      [\"<unk>\", -99.0],\n" +
                 "      [\"▁hello\", -1.0],\n" +
-                "      [\"▁world\", -1.0]\n" +
+                "      [\"▁world\", -1.0],\n" +
+                "      [\"ed\", -1.0],\n" +
+                "      [\"▁summarize\", -1.0],\n" +
+                "      [\":\", -0.2],\n" +
+                "      [\"▁Paste\", -1.0],\n" +
+                "      [\"▁a\", -1.0],\n" +
+                "      [\"▁longer\", -1.0],\n" +
+                "      [\"▁text\", -1.0],\n" +
+                "      [\"▁helloed\", -9.0]\n" +
                 "    ]\n" +
                 "  }\n" +
                 "}\n", StandardCharsets.UTF_8);
