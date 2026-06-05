@@ -20,11 +20,13 @@ public final class SmolLM2Runtime implements AutoCloseable {
 
     private final SmolLM2RuntimePackage runtimePackage;
     private final SmolLM2Tokenizer tokenizer;
+    private final SmolLM2ChatPromptTemplate chatPromptTemplate;
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     private SmolLM2Runtime(SmolLM2RuntimePackage runtimePackage, SmolLM2Tokenizer tokenizer) {
         this.runtimePackage = Objects.requireNonNull(runtimePackage, "runtimePackage");
         this.tokenizer = tokenizer;
+        this.chatPromptTemplate = SmolLM2ChatPromptTemplate.defaultInstruct();
     }
 
     public static SmolLM2Runtime load(SmolLM2RuntimePackage runtimePackage) {
@@ -40,7 +42,8 @@ public final class SmolLM2Runtime implements AutoCloseable {
         ensureOpen();
         SmolLM2Tokenizer activeTokenizer = tokenizer().orElseThrow(
                 () -> new SmolLM2RuntimeUnsupportedException(TOKENIZER_REQUIRED_MESSAGE));
-        List<Integer> inputTokenIds = encodePrompt(request.prompt(), activeTokenizer);
+        String renderedPrompt = chatPromptTemplate.renderUserPrompt(request.prompt());
+        List<Integer> inputTokenIds = encodePrompt(renderedPrompt, activeTokenizer);
         SmolLM2TokenRuntimeResult tokenResult = generateTokenIds(new SmolLM2TokenRuntimeRequest(
                 inputTokenIds, request.maxNewTokens(), request.options()));
         String generatedText = activeTokenizer.decode(toIntArray(tokenResult.generatedTokenIds()), true);
