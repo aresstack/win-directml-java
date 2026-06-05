@@ -70,7 +70,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     SmolLM2GenerationOptions.greedy()));
             Optional<SmolLM2WarpExecutionStatus> effectiveWarpStatus = runtime.warpExecutionStatus().or(() -> warpStatus);
             return new Result(
-                    result.generatedText(),
+                    cleanSummarizationOutput(result.generatedText()),
                     result.tokensGenerated(),
                     result.finishReason(),
                     safeBackend.name().toLowerCase(),
@@ -81,6 +81,69 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     result.diagnostics(),
                     warpReadiness);
         }
+    }
+
+    private static String cleanSummarizationOutput(String generatedText) {
+        if (generatedText == null || generatedText.isBlank()) {
+            return "";
+        }
+
+        String text = generatedText.replace("\r\n", "\n").replace('\r', '\n').trim();
+        text = removeChatMarkers(text);
+        text = removeInstructionEcho(text);
+        text = removeRepeatedLeadLabels(text);
+        return text.trim();
+    }
+
+    private static String removeChatMarkers(String text) {
+        String cleaned = text;
+        int assistantMarker = cleaned.lastIndexOf("<|im_start|>assistant");
+        if (assistantMarker >= 0) {
+            cleaned = cleaned.substring(assistantMarker + "<|im_start|>assistant".length());
+        }
+        return cleaned
+                .replace("<|im_end|>", "")
+                .replace("<|im_start|>", "")
+                .trim();
+    }
+
+    private static String removeInstructionEcho(String text) {
+        String cleaned = text.trim();
+        String lower = cleaned.toLowerCase();
+        if (lower.startsWith("fasse diesen quelltext")
+                || lower.startsWith("fasse den folgenden quelltext")
+                || lower.startsWith("aufgabe:")
+                || lower.startsWith("regeln:")) {
+            int summaryLabel = Math.max(cleaned.lastIndexOf("Zusammenfassung:"), cleaned.lastIndexOf("Fassung:"));
+            if (summaryLabel >= 0) {
+                int labelEnd = cleaned.indexOf(':', summaryLabel);
+                cleaned = labelEnd >= 0 ? cleaned.substring(labelEnd + 1) : cleaned.substring(summaryLabel);
+            }
+        }
+        return cleaned.trim();
+    }
+
+    private static String removeRepeatedLeadLabels(String text) {
+        String cleaned = text.trim();
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            String next = removeLeadLabel(cleaned, "Zusammenfassung:");
+            next = removeLeadLabel(next, "Fassung:");
+            if (!next.equals(cleaned)) {
+                cleaned = next.trim();
+                changed = true;
+            }
+        }
+        return cleaned;
+    }
+
+    private static String removeLeadLabel(String text, String label) {
+        String cleaned = text.stripLeading();
+        if (cleaned.startsWith(label)) {
+            return cleaned.substring(label.length()).stripLeading();
+        }
+        return text;
     }
 
     private SmolLM2Runtime loadRuntime(SmolLM2RuntimePackage runtimePackage,

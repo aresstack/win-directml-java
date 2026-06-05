@@ -25,17 +25,17 @@ class SmolLM2ChatPromptTemplateTest {
         assertEquals(prompt, template.renderUserPrompt(prompt));
     }
     @Test
-    void rendersSummarizationPromptWithSourceBoundariesAndNoHallucinationRules() {
+    void rendersSummarizationPromptWithShortTaskAndAssistantPrefix() {
         SmolLM2ChatPromptTemplate template = SmolLM2ChatPromptTemplate.defaultInstruct();
 
         String rendered = template.renderSummarizationPrompt("Adolf Hitler wurde am 30. Januar 1933 ernannt.");
 
         assertTrue(rendered.startsWith("<|im_start|>system\n"));
-        assertTrue(rendered.contains("Aufgabe: Fasse den folgenden Quelltext sachlich und knapp zusammen."));
-        assertTrue(rendered.contains("Antworte in derselben Sprache wie der Quelltext."));
-        assertTrue(rendered.contains("Erfinde keine zusätzlichen Fakten"));
-        assertTrue(rendered.contains("Quelltext:\n<<<\nAdolf Hitler wurde am 30. Januar 1933 ernannt.\n>>>"));
-        assertTrue(rendered.endsWith("<|im_start|>assistant\n"));
+        assertTrue(rendered.contains("Fasse diesen Quelltext kurz zusammen."));
+        assertTrue(rendered.contains("Antworte in der Sprache des Quelltexts."));
+        assertTrue(rendered.contains("Nutze nur Informationen aus dem Quelltext."));
+        assertTrue(rendered.contains("Quelltext:\nAdolf Hitler wurde am 30. Januar 1933 ernannt."));
+        assertTrue(rendered.endsWith("<|im_start|>assistant\nZusammenfassung:\n"));
     }
 
     @Test

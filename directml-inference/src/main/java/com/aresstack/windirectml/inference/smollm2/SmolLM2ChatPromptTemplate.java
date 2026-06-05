@@ -11,6 +11,7 @@ public final class SmolLM2ChatPromptTemplate {
     private static final String IM_END = "<|im_end|>";
     private static final String DEFAULT_SYSTEM_PROMPT =
             "You are a helpful AI assistant named SmolLM, trained by Hugging Face";
+    private static final String SUMMARIZATION_ASSISTANT_PREFIX = "Zusammenfassung:\n";
 
     private final String systemPrompt;
 
@@ -27,7 +28,7 @@ public final class SmolLM2ChatPromptTemplate {
         if (looksLikeRenderedChat(userPrompt)) {
             return userPrompt;
         }
-        return renderConversation(userPrompt);
+        return renderConversation(userPrompt, "");
     }
 
     public String renderSummarizationPrompt(String sourceText) {
@@ -35,28 +36,23 @@ public final class SmolLM2ChatPromptTemplate {
         if (looksLikeRenderedChat(sourceText)) {
             return sourceText;
         }
-        String taskPrompt = "Aufgabe: Fasse den folgenden Quelltext sachlich und knapp zusammen.\n"
-                + "Regeln:\n"
-                + "- Antworte in derselben Sprache wie der Quelltext.\n"
-                + "- Verwende ausschließlich Informationen aus dem Quelltext.\n"
-                + "- Erfinde keine zusätzlichen Fakten, Übersetzungen, Rollen, Datumsangaben oder Ämter.\n"
-                + "- Übernimm Namen, Orte, Datumsangaben und historische Fakten nur aus dem Quelltext.\n"
-                + "- Wenn der Quelltext deutsch ist, antworte deutsch.\n\n"
-                + "Quelltext:\n<<<\n"
-                + sourceText
-                + "\n>>>\n\n"
-                + "Zusammenfassung:";
-        return renderConversation(taskPrompt);
+        String taskPrompt = "Fasse diesen Quelltext kurz zusammen. "
+                + "Antworte in der Sprache des Quelltexts. "
+                + "Nutze nur Informationen aus dem Quelltext.\n\n"
+                + "Quelltext:\n"
+                + sourceText.trim();
+        return renderConversation(taskPrompt, SUMMARIZATION_ASSISTANT_PREFIX);
     }
 
-    private String renderConversation(String userPrompt) {
+    private String renderConversation(String userPrompt, String assistantPrefix) {
         return IM_START + "system\n"
                 + systemPrompt
                 + IM_END + "\n"
                 + IM_START + "user\n"
                 + userPrompt
                 + IM_END + "\n"
-                + IM_START + "assistant\n";
+                + IM_START + "assistant\n"
+                + assistantPrefix;
     }
 
     public boolean looksLikeRenderedChat(String prompt) {

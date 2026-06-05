@@ -2,6 +2,7 @@ package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.winproxy.ProxyConfiguration;
+import com.aresstack.winproxy.ProxyDefaults;
 import com.aresstack.winproxy.ProxyMode;
 import com.aresstack.winproxy.ProxyResult;
 import com.aresstack.winproxy.WindowsProxyResolver;
@@ -27,6 +28,7 @@ public final class ProxyPanel extends JPanel {
     private final WorkbenchModel model;
     private final JComboBox<ProxyMode> mode;
     private final JTextField testUrl;
+    private final JTextField pacUrlDiscoveryScript;
     private final JTextField pacUrl;
     private final JTextField manualHost;
     private final JTextField manualPort;
