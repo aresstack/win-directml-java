@@ -39,6 +39,19 @@ class SmolLM2ReferenceGenerationLoopTest {
         assertEquals("eos_token", result.finishReason());
     }
 
+
+    @Test
+    void referenceRuntimeCanUseSamplingOptions() {
+        SmolLM2ReferenceGenerationLoop generationLoop = new SmolLM2ReferenceGenerationLoop(weightsSelectingTokenOne());
+
+        SmolLM2TokenRuntimeResult result = generationLoop.generate(new SmolLM2TokenRuntimeRequest(
+                List.of(0),
+                1,
+                SmolLM2GenerationOptions.sampling(1.0d, 1, null, 123L)));
+
+        assertEquals(List.of(1), result.generatedTokenIds());
+    }
+
     @Test
     void tokenRuntimeRequestKeepsTokenizerOutOfTheReferencePath() {
         SmolLM2TokenRuntimeRequest request = new SmolLM2TokenRuntimeRequest(
