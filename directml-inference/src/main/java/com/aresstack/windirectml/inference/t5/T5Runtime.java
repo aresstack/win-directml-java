@@ -15,6 +15,7 @@ public final class T5Runtime implements AutoCloseable {
     private final T5EncoderPipeline encoderPipeline;
     private final T5EncoderRunner encoderRunner;
     private final T5DecoderPipeline decoderPipeline;
+    private final T5DecoderRunner decoderRunner;
     private final T5GenerationLoop generationLoop;
     private final T5LogitProjector logitProjector;
     private final String executionMode;
@@ -22,22 +23,32 @@ public final class T5Runtime implements AutoCloseable {
 
     private T5Runtime(T5RuntimePackage runtimePackage, T5Weights weights,
                       T5LogitProjector logitProjector, String executionMode) {
-        this(runtimePackage, weights, T5EncoderPipeline.from(weights), logitProjector, executionMode);
+        this(runtimePackage, weights, T5EncoderPipeline.from(weights), T5DecoderPipeline.from(weights),
+                logitProjector, executionMode);
     }
 
     private T5Runtime(T5RuntimePackage runtimePackage, T5Weights weights,
                       T5EncoderRunner encoderRunner, T5LogitProjector logitProjector,
                       String executionMode) {
+        this(runtimePackage, weights, encoderRunner, T5DecoderPipeline.from(weights), logitProjector, executionMode);
+    }
+
+    private T5Runtime(T5RuntimePackage runtimePackage, T5Weights weights,
+                      T5EncoderRunner encoderRunner, T5DecoderRunner decoderRunner,
+                      T5LogitProjector logitProjector, String executionMode) {
         this.runtimePackage = Objects.requireNonNull(runtimePackage, "runtimePackage");
         this.weights = Objects.requireNonNull(weights, "weights");
         this.encoderRunner = Objects.requireNonNull(encoderRunner, "encoderRunner");
+        this.decoderRunner = Objects.requireNonNull(decoderRunner, "decoderRunner");
         this.logitProjector = Objects.requireNonNull(logitProjector, "logitProjector");
         this.executionMode = Objects.requireNonNull(executionMode, "executionMode");
         this.encoderPipeline = encoderRunner instanceof T5EncoderPipeline
                 ? (T5EncoderPipeline) encoderRunner
                 : T5EncoderPipeline.from(weights);
-        this.decoderPipeline = T5DecoderPipeline.from(weights);
-        this.generationLoop = T5GenerationLoop.greedy(encoderRunner, decoderPipeline, logitProjector);
+        this.decoderPipeline = decoderRunner instanceof T5DecoderPipeline
+                ? (T5DecoderPipeline) decoderRunner
+                : T5DecoderPipeline.from(weights);
+        this.generationLoop = T5GenerationLoop.greedy(encoderRunner, decoderRunner, logitProjector);
     }
 
     public static T5Runtime load(T5RuntimePackage runtimePackage) throws java.io.IOException {
@@ -89,6 +100,66 @@ public final class T5Runtime implements AutoCloseable {
     }
 
     /**
+     * Load a T5 runtime whose decoder stage is routed through the WARP boundary.
+     *
+     * <p>v41 keeps decoder math on the reference implementation behind this
+     * boundary. Future patches can attach native decoder self-attention,
+     * cross-attention, and cache operators without changing the generation loop
+     * or reusing decoder-only runtime infrastructure.</p>
+     *
+     * @param runtimePackage  T5 runtime package
+     * @param windowsBindings initialized Windows bindings using WARP/AUTO
+     * @return runtime using the WARP decoder boundary
+     * @throws java.io.IOException if package weights cannot be loaded
+     */
+    public static T5Runtime loadWarpDecoder(T5RuntimePackage runtimePackage,
+                                            WindowsBindings windowsBindings) throws java.io.IOException {
+        Objects.requireNonNull(runtimePackage, "runtimePackage");
+        T5Weights weights = runtimePackage.weights();
+        T5DecoderRunner decoderRunner = T5WarpDecoderPipeline.from(windowsBindings, weights);
+        return new T5Runtime(runtimePackage, weights, T5EncoderPipeline.from(weights), decoderRunner,
+                T5LmHead.from(weights), "reference-encoder+warp-decoder-boundary+reference-lm-head");
+    }
+
+    /**
+     * Load a T5 runtime with the decoder boundary and LM-head projector routed
+     * through WARP/DirectML contracts.
+     *
+     * @param runtimePackage  T5 runtime package
+     * @param windowsBindings initialized Windows bindings using WARP/AUTO
+     * @return runtime using WARP boundaries for decoder and LM-head stages
+     * @throws java.io.IOException if package weights cannot be loaded
+     */
+    public static T5Runtime loadWarpDecoderAndLmHead(T5RuntimePackage runtimePackage,
+                                                     WindowsBindings windowsBindings) throws java.io.IOException {
+        Objects.requireNonNull(runtimePackage, "runtimePackage");
+        T5Weights weights = runtimePackage.weights();
+        T5DecoderRunner decoderRunner = T5WarpDecoderPipeline.from(windowsBindings, weights);
+        return new T5Runtime(runtimePackage, weights, T5EncoderPipeline.from(weights), decoderRunner,
+                T5WarpLmHead.from(windowsBindings, weights),
+                "reference-encoder+warp-decoder-boundary+warp-lm-head");
+    }
+
+    /**
+     * Load a T5 runtime with encoder and decoder stages routed through WARP
+     * boundaries while keeping LM-head projection on the reference path.
+     *
+     * @param runtimePackage  T5 runtime package
+     * @param windowsBindings initialized Windows bindings using WARP/AUTO
+     * @return runtime using WARP boundaries for encoder and decoder stages
+     * @throws java.io.IOException if package weights cannot be loaded
+     */
+    public static T5Runtime loadWarpEncoderAndDecoder(T5RuntimePackage runtimePackage,
+                                                      WindowsBindings windowsBindings) throws java.io.IOException {
+        Objects.requireNonNull(runtimePackage, "runtimePackage");
+        T5Weights weights = runtimePackage.weights();
+        T5EncoderRunner encoderRunner = T5WarpEncoderPipeline.from(windowsBindings, weights);
+        T5DecoderRunner decoderRunner = T5WarpDecoderPipeline.from(windowsBindings, weights);
+        return new T5Runtime(runtimePackage, weights, encoderRunner, decoderRunner, T5LmHead.from(weights),
+                "warp-encoder-boundary+warp-decoder-boundary+reference-lm-head");
+    }
+
+    /**
      * Load a T5 runtime with both the encoder boundary and the LM-head projector
      * routed through WARP/DirectML contracts.
      *
@@ -104,6 +175,26 @@ public final class T5Runtime implements AutoCloseable {
         T5EncoderRunner encoderRunner = T5WarpEncoderPipeline.from(windowsBindings, weights);
         return new T5Runtime(runtimePackage, weights, encoderRunner, T5WarpLmHead.from(windowsBindings, weights),
                 "warp-encoder-boundary+reference-decoder+warp-lm-head");
+    }
+
+    /**
+     * Load a T5 runtime with encoder, decoder, and LM-head stages routed through
+     * WARP/DirectML contracts.
+     *
+     * @param runtimePackage  T5 runtime package
+     * @param windowsBindings initialized Windows bindings using WARP/AUTO
+     * @return runtime using WARP boundaries for encoder, decoder, and LM-head stages
+     * @throws java.io.IOException if package weights cannot be loaded
+     */
+    public static T5Runtime loadWarpEncoderDecoderAndLmHead(T5RuntimePackage runtimePackage,
+                                                            WindowsBindings windowsBindings) throws java.io.IOException {
+        Objects.requireNonNull(runtimePackage, "runtimePackage");
+        T5Weights weights = runtimePackage.weights();
+        T5EncoderRunner encoderRunner = T5WarpEncoderPipeline.from(windowsBindings, weights);
+        T5DecoderRunner decoderRunner = T5WarpDecoderPipeline.from(windowsBindings, weights);
+        return new T5Runtime(runtimePackage, weights, encoderRunner, decoderRunner,
+                T5WarpLmHead.from(windowsBindings, weights),
+                "warp-encoder-boundary+warp-decoder-boundary+warp-lm-head");
     }
 
     public T5RuntimeResult generate(T5RuntimeRequest request) {
@@ -136,7 +227,7 @@ public final class T5Runtime implements AutoCloseable {
      */
     public T5DecoderState decode(int[] decoderInputIds, T5EncoderOutput encoderOutput) {
         ensureOpen();
-        return decoderPipeline.decode(decoderInputIds, encoderOutput);
+        return decoderRunner.decode(decoderInputIds, encoderOutput);
     }
 
     /**
@@ -144,7 +235,7 @@ public final class T5Runtime implements AutoCloseable {
      */
     public T5DecoderState decodeStep(int decoderTokenId, T5EncoderOutput encoderOutput, T5DecoderCache cache) {
         ensureOpen();
-        return decoderPipeline.decodeStep(decoderTokenId, encoderOutput, cache);
+        return decoderRunner.decodeStep(decoderTokenId, encoderOutput, cache);
     }
 
     public T5RuntimePackage runtimePackage() {
@@ -165,6 +256,10 @@ public final class T5Runtime implements AutoCloseable {
 
     public T5DecoderPipeline decoderPipeline() {
         return decoderPipeline;
+    }
+
+    public T5DecoderRunner decoderRunner() {
+        return decoderRunner;
     }
 
     public T5GenerationLoop generationLoop() {
@@ -202,6 +297,18 @@ public final class T5Runtime implements AutoCloseable {
                         failure = encoderFailure;
                     } else {
                         failure.addSuppressed(encoderFailure);
+                    }
+                }
+            }
+            if (decoderRunner instanceof AutoCloseable) {
+                try {
+                    ((AutoCloseable) decoderRunner).close();
+                } catch (Exception e) {
+                    RuntimeException decoderFailure = new RuntimeException("Failed to close T5 decoder runner", e);
+                    if (failure == null) {
+                        failure = decoderFailure;
+                    } else {
+                        failure.addSuppressed(decoderFailure);
                     }
                 }
             }

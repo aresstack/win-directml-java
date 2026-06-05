@@ -72,6 +72,60 @@ class T5GenerationLoopTest {
     }
 
     @Test
+    void acceptsCustomDecoderRunnerBoundary() {
+        T5EncoderRunner encoderRunner = new T5EncoderRunner() {
+            @Override
+            public T5EncoderOutput encode(int[] inputTokenIds) {
+                return encode(inputTokenIds, null);
+            }
+
+            @Override
+            public T5EncoderOutput encode(int[] inputTokenIds, boolean[] attentionMask) {
+                return new T5EncoderOutput(1, 2, new float[]{1.0f, 0.0f}, new boolean[]{true});
+            }
+
+            @Override
+            public String executionMode() {
+                return "test-encoder";
+            }
+        };
+        T5DecoderRunner decoderRunner = new T5DecoderRunner() {
+            @Override
+            public String executionMode() {
+                return "test-decoder";
+            }
+
+            @Override
+            public T5DecoderState decode(int[] decoderInputIds, T5EncoderOutput encoderOutput) {
+                return new T5DecoderState(decoderInputIds.length, 2, new float[]{0.0f, 0.0f});
+            }
+
+            @Override
+            public T5DecoderState decodeStep(int decoderTokenId, T5EncoderOutput encoderOutput, T5DecoderCache cache) {
+                return new T5DecoderState(1, 2, new float[]{0.0f, 1.0f});
+            }
+        };
+        T5LogitProjector projector = new T5LogitProjector() {
+            @Override
+            public float[] logits(float[] decoderHiddenState) {
+                return new float[]{0.0f, 5.0f, 0.0f};
+            }
+
+            @Override
+            public int vocabularySize() {
+                return 3;
+            }
+        };
+        T5GenerationLoop loop = T5GenerationLoop.greedy(encoderRunner, decoderRunner, projector);
+
+        T5RuntimeResult result = loop.generate(new T5RuntimeRequest(new int[]{7}, 1,
+                T5StopTokenPolicy.stopAtEos(1), 0, 0.0f, 0));
+
+        assertEquals(T5RuntimeResult.FinishReason.stop_token, result.finishReason());
+        assertArrayEquals(new int[]{1}, result.outputTokenIds());
+    }
+
+    @Test
     void rejectsSamplingOptionsInReferenceGeneration() throws Exception {
         T5Config config = T5TestFixtures.untiedConfig();
         T5Runtime runtime = runtime(config, tensorsThatPreferEos(config));

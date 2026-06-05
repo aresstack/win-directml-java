@@ -11,7 +11,7 @@ import java.util.Objects;
  * encoder-decoder cross-attention, and cache API boundaries before replacing
  * the math with WARP kernels.</p>
  */
-public final class T5DecoderPipeline {
+public final class T5DecoderPipeline implements T5DecoderRunner {
     private final T5PackageMetadata metadata;
     private final T5Weights weights;
     private final T5TensorData sharedEmbedding;
@@ -45,6 +45,12 @@ public final class T5DecoderPipeline {
         return new T5DecoderPipeline(metadata, weights, sharedEmbedding, blocks, finalLayerNorm);
     }
 
+    @Override
+    public String executionMode() {
+        return "reference-decoder";
+    }
+
+    @Override
     public T5DecoderState decode(int[] decoderInputIds, T5EncoderOutput encoderOutput) {
         validateInput(decoderInputIds);
         Objects.requireNonNull(encoderOutput, "encoderOutput");
@@ -59,6 +65,7 @@ public final class T5DecoderPipeline {
         return new T5DecoderState(sequenceLength, hiddenSize, hiddenStates);
     }
 
+    @Override
     public T5DecoderState decodeStep(int decoderTokenId, T5EncoderOutput encoderOutput, T5DecoderCache cache) {
         T5DecoderCache safeCache = cache == null ? T5DecoderCache.empty() : cache;
         return decode(safeCache.withAppendedToken(decoderTokenId), encoderOutput);
