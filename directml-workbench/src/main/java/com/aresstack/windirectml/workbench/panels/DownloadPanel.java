@@ -74,6 +74,10 @@ public final class DownloadPanel extends JPanel {
         addEmbeddingRow(buttons, "Download Reranker (ms-marco-MiniLM-L-12-v2)",
                 "cross-encoder/ms-marco-MiniLM-L-12-v2", "cross-encoder-ms-marco-MiniLM-L-12-v2");
         addPhi3Row(buttons);
+        addManifestRow(buttons, "Download Qwen2.5-Coder 1.5B Instruct (SafeTensors, planned)",
+                ModelDownloadUrls.manifestForQwenCoder1_5BSafeTensors());
+        addManifestRow(buttons, "Download Qwen2.5-Coder 3B Instruct (SafeTensors, planned)",
+                ModelDownloadUrls.manifestForQwenCoder3BSafeTensors());
         addManifestRow(buttons, "Download SmolLM2 135M Instruct (Summarizer planned)",
                 ModelDownloadUrls.manifestForSmolLm2_135M());
         addManifestRow(buttons, "Download SmolLM2 360M Instruct (Summarizer planned)",

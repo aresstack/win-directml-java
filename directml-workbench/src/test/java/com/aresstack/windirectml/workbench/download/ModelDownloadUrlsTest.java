@@ -145,6 +145,31 @@ class ModelDownloadUrlsTest {
         assertFalse(urls.stream().anyMatch(u -> u.endsWith("/added_tokens.json")));
     }
 
+
+    @Test
+    void qwenCoderScaleUpManifestsContainSafeTensorsAndTokenizerFiles() {
+        var manifest15 = ModelDownloadUrls.manifestForQwenCoder1_5BSafeTensors();
+        var urls15 = manifest15.files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+        var manifest3 = ModelDownloadUrls.manifestForQwenCoder3BSafeTensors();
+        var urls3 = manifest3.files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+
+        assertEquals(ModelDownloadUrls.QWEN_CODER_1_5B_LOCAL_DIR, manifest15.localDirName());
+        assertEquals(ModelDownloadUrls.QWEN_CODER_3B_LOCAL_DIR, manifest3.localDirName());
+        assertTrue(urls15.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct/resolve/main/model.safetensors"));
+        assertTrue(urls15.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct/resolve/main/config.json"));
+        assertTrue(urls15.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct/resolve/main/tokenizer.json"));
+        assertTrue(urls15.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct/resolve/main/merges.txt"));
+        assertTrue(urls15.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct/resolve/main/vocab.json"));
+        assertTrue(urls3.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct/resolve/main/model-00001-of-00002.safetensors"));
+        assertTrue(urls3.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct/resolve/main/model-00002-of-00002.safetensors"));
+        assertTrue(urls3.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct/resolve/main/model.safetensors.index.json"));
+        assertTrue(urls3.contains("https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct/resolve/main/tokenizer_config.json"));
+    }
+
     @Test
     void smollm2ManifestsContainSafeTensorsAndTokenizerFiles() {
         var manifest135 = ModelDownloadUrls.manifestForSmolLm2_135M();

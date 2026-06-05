@@ -14,6 +14,10 @@ public final class ModelDownloadUrls {
     private static final String HF_BASE_URL = "https://huggingface.co";
     public static final String QWEN_SAFETENSORS_REPO = "Qwen/Qwen2.5-Coder-0.5B-Instruct";
     public static final String QWEN_SAFETENSORS_LOCAL_DIR = "qwen2.5-coder-0.5b-safetensors";
+    public static final String QWEN_CODER_1_5B_REPO = "Qwen/Qwen2.5-Coder-1.5B-Instruct";
+    public static final String QWEN_CODER_1_5B_LOCAL_DIR = "qwen2.5-coder-1.5b-instruct";
+    public static final String QWEN_CODER_3B_REPO = "Qwen/Qwen2.5-Coder-3B-Instruct";
+    public static final String QWEN_CODER_3B_LOCAL_DIR = "qwen2.5-coder-3b-instruct";
 
     public static final String SMOLLM2_135M_REPO = "HuggingFaceTB/SmolLM2-135M-Instruct";
     public static final String SMOLLM2_135M_LOCAL_DIR = "smollm2-135m-instruct";
@@ -89,6 +93,24 @@ public final class ModelDownloadUrls {
         addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "vocab.json", false);
         return new ModelDownloadManifest(QWEN_SAFETENSORS_LOCAL_DIR, QWEN_SAFETENSORS_LOCAL_DIR,
                 List.copyOf(descriptors));
+    }
+
+    /**
+     * Creates a complete download manifest for Qwen2.5-Coder-1.5B-Instruct.
+     */
+    public static ModelDownloadManifest manifestForQwenCoder1_5BSafeTensors() {
+        return manifestForQwenCoderSafeTensors(QWEN_CODER_1_5B_REPO, QWEN_CODER_1_5B_LOCAL_DIR,
+                List.of("model.safetensors"));
+    }
+
+    /**
+     * Creates a complete download manifest for Qwen2.5-Coder-3B-Instruct.
+     */
+    public static ModelDownloadManifest manifestForQwenCoder3BSafeTensors() {
+        return manifestForQwenCoderSafeTensors(QWEN_CODER_3B_REPO, QWEN_CODER_3B_LOCAL_DIR,
+                List.of("model-00001-of-00002.safetensors",
+                        "model-00002-of-00002.safetensors",
+                        "model.safetensors.index.json"));
     }
 
     /**
@@ -188,6 +210,24 @@ public final class ModelDownloadUrls {
     }
 
     /**
+     * Returns download URLs for Qwen2.5-Coder-1.5B-Instruct.
+     */
+    public static List<String> forQwenCoder1_5BSafeTensors() {
+        return manifestForQwenCoder1_5BSafeTensors().files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+    /**
+     * Returns download URLs for Qwen2.5-Coder-3B-Instruct.
+     */
+    public static List<String> forQwenCoder3BSafeTensors() {
+        return manifestForQwenCoder3BSafeTensors().files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+    /**
      * Returns download URLs for SmolLM2-135M-Instruct.
      */
     public static List<String> forSmolLm2_135M() {
@@ -226,6 +266,21 @@ public final class ModelDownloadUrls {
      */
     public static String selectedQwenSafeTensorsModelUrl() {
         return buildUrl(QWEN_SAFETENSORS_REPO, "model.safetensors");
+    }
+
+    private static ModelDownloadManifest manifestForQwenCoderSafeTensors(String repo, String localDirName,
+                                                                         List<String> weightFiles) {
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        for (String file : weightFiles) {
+            addRootDescriptor(descriptors, repo, file, true);
+        }
+        addRootDescriptor(descriptors, repo, "config.json", true);
+        addRootDescriptor(descriptors, repo, "tokenizer.json", true);
+        addRootDescriptor(descriptors, repo, "tokenizer_config.json", true);
+        addRootDescriptor(descriptors, repo, "generation_config.json", true);
+        addRootDescriptor(descriptors, repo, "merges.txt", true);
+        addRootDescriptor(descriptors, repo, "vocab.json", true);
+        return new ModelDownloadManifest(repo, localDirName, List.copyOf(descriptors));
     }
 
     private static ModelDownloadManifest manifestForLlamaStyleSafeTensors(String repo, String localDirName) {
