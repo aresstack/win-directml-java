@@ -113,5 +113,6 @@ class SmolLM2WdmlPackCompileToolTest {
 
         assertEquals(0, exitCode);
         assertTrue(Files.size(output) > 64);
+        assertTrue(com.aresstack.windirectml.inference.model.RuntimeModelPackage.open(output).payloadIncluded());
     }
 }

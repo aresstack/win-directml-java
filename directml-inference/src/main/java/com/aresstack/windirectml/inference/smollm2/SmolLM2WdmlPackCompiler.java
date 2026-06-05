@@ -36,16 +36,22 @@ public final class SmolLM2WdmlPackCompiler {
     }
 
     public SmolLM2CompileReport compile(SmolLM2CompileOptions options) throws IOException {
-        SmolLM2CompileReport report = analyze(options);
-        Path output = report.output();
+        SmolLM2ModelDirectory modelDirectory = new SmolLM2ModelDirectory(options.modelDir());
+        SmolLM2Config config = modelDirectory.readConfig();
+        validateSupported(config);
+        SourceTensorCatalog catalog = modelDirectory.readTensorCatalog();
+        SmolLM2LayoutReport layoutReport = layoutValidator.validate(config, catalog);
+        Path output = resolveOutput(options);
         if (Files.exists(output) && !options.force()) {
             throw new IOException("output already exists: " + output + " (use --force to overwrite)");
         }
+        boolean payloadIncluded = false;
         if (!options.dryRun()) {
-            manifestWriter.writeManifestOnly(output, report.config(), report.layoutReport());
+            manifestWriter.writeWithDensePayload(output, config, layoutReport, catalog);
+            payloadIncluded = true;
         }
-        return new SmolLM2CompileReport(output, options.dryRun(), false, false,
-                SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED, report.config(), report.layoutReport());
+        return new SmolLM2CompileReport(output, options.dryRun(), payloadIncluded, false,
+                SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED, config, layoutReport);
     }
 
     private static void validateSupported(SmolLM2Config config) throws IOException {

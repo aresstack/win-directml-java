@@ -1,10 +1,11 @@
 package com.aresstack.windirectml.inference.smollm2;
 
 /**
- * Initial SmolLM2 package policy: write manifest diagnostics only.
+ * SmolLM2 package payload policy.
  */
 public enum SmolLM2PayloadPolicy {
-    MANIFEST_ONLY(false);
+    MANIFEST_ONLY(false),
+    DENSE_PAYLOAD(true);
 
     private final boolean payloadIncluded;
 
