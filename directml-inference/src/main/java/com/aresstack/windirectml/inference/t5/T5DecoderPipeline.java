@@ -80,7 +80,62 @@ public final class T5DecoderPipeline implements T5DecoderRunner, AutoCloseable {
     @Override
     public T5DecoderState decodeStep(int decoderTokenId, T5EncoderOutput encoderOutput, T5DecoderCache cache) {
         T5DecoderCache safeCache = cache == null ? T5DecoderCache.empty() : cache;
-        return decode(safeCache.withAppendedToken(decoderTokenId), encoderOutput);
+        if (!safeCache.isEmpty() && !safeCache.hasSelfAttentionMemories(blocks.size())) {
+            return decode(safeCache.withAppendedToken(decoderTokenId), encoderOutput);
+        }
+        return decodeIncremental(decoderTokenId, encoderOutput, safeCache);
+    }
+
+
+    private T5DecoderState decodeIncremental(int decoderTokenId, T5EncoderOutput encoderOutput, T5DecoderCache cache) {
+        Objects.requireNonNull(encoderOutput, "encoderOutput");
+        validateToken(decoderTokenId);
+        int tokenIndex = cache.generatedTokens();
+        int hiddenSize = metadata.dModel();
+        float[] hiddenState = embedToken(decoderTokenId);
+        T5CrossAttentionMemorySet memorySet = crossAttentionMemorySetFor(encoderOutput);
+        List<T5SelfAttentionMemory> nextLayerMemories = new ArrayList<>();
+        for (int layer = 0; layer < blocks.size(); layer++) {
+            T5DecoderBlockStep step = blocks.get(layer).applyStep(hiddenState, tokenIndex,
+                    cache.selfAttentionMemory(layer), memorySet.memory(layer));
+            hiddenState = step.hiddenState();
+            nextLayerMemories.add(step.selfAttentionMemory());
+        }
+        float[] finalHiddenState = finalLayerNorm.applySequence(hiddenState, 1, hiddenSize);
+        float[] nextHiddenStates = appendHiddenState(cache.hiddenStates(), finalHiddenState, hiddenSize);
+        int[] nextTokenIds = cache.withAppendedToken(decoderTokenId);
+        T5DecoderCache nextCache = T5DecoderCache.fromIncrementalState(nextTokenIds, hiddenSize,
+                nextHiddenStates, nextLayerMemories);
+        return T5DecoderState.withNextCache(nextTokenIds.length, hiddenSize, nextHiddenStates, nextCache);
+    }
+
+    private float[] embedToken(int tokenId) {
+        validateToken(tokenId);
+        int hiddenSize = metadata.dModel();
+        float[] result = new float[hiddenSize];
+        for (int dim = 0; dim < hiddenSize; dim++) {
+            result[dim] = sharedEmbedding.at(tokenId, dim);
+        }
+        return result;
+    }
+
+    private static float[] appendHiddenState(float[] existing, float[] appended, int hiddenSize) {
+        if (appended.length != hiddenSize) {
+            throw new IllegalArgumentException("appended hidden state length mismatch: " + appended.length
+                    + ", expected=" + hiddenSize);
+        }
+        float[] result = java.util.Arrays.copyOf(existing, existing.length + hiddenSize);
+        System.arraycopy(appended, 0, result, existing.length, hiddenSize);
+        return result;
+    }
+
+    private void validateToken(int tokenId) {
+        if (tokenId < 0) {
+            throw new IllegalArgumentException("decoderInputIds must not contain negative token ids");
+        }
+        if (tokenId >= sharedEmbedding.dim(0)) {
+            throw new IllegalArgumentException("decoderInputIds contains token outside vocabulary: " + tokenId);
+        }
     }
 
     public T5Weights weights() {

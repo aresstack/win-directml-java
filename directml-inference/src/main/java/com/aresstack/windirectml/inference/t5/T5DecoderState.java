@@ -10,12 +10,17 @@ public final class T5DecoderState {
     private final int generatedTokens;
     private final int hiddenSize;
     private final float[] hiddenStates;
+    private final T5DecoderCache nextCache;
 
     public T5DecoderState(int generatedTokens) {
-        this(generatedTokens, 0, new float[0]);
+        this(generatedTokens, 0, new float[0], null);
     }
 
     public T5DecoderState(int generatedTokens, int hiddenSize, float[] hiddenStates) {
+        this(generatedTokens, hiddenSize, hiddenStates, null);
+    }
+
+    private T5DecoderState(int generatedTokens, int hiddenSize, float[] hiddenStates, T5DecoderCache nextCache) {
         if (generatedTokens < 0) {
             throw new IllegalArgumentException("generatedTokens must not be negative: " + generatedTokens);
         }
@@ -25,6 +30,7 @@ public final class T5DecoderState {
         this.generatedTokens = generatedTokens;
         this.hiddenSize = hiddenSize;
         this.hiddenStates = Objects.requireNonNull(hiddenStates, "hiddenStates").clone();
+        this.nextCache = nextCache;
         if (generatedTokens == 0 && this.hiddenStates.length != 0) {
             throw new IllegalArgumentException("hiddenStates must be empty when generatedTokens is zero");
         }
@@ -35,6 +41,14 @@ public final class T5DecoderState {
             throw new IllegalArgumentException("hiddenStates length mismatch: " + this.hiddenStates.length
                     + ", expected=" + (generatedTokens * hiddenSize));
         }
+    }
+
+    static T5DecoderState withNextCache(int generatedTokens,
+                                        int hiddenSize,
+                                        float[] hiddenStates,
+                                        T5DecoderCache nextCache) {
+        return new T5DecoderState(generatedTokens, hiddenSize, hiddenStates,
+                Objects.requireNonNull(nextCache, "nextCache"));
     }
 
     public int generatedTokens() {
@@ -55,5 +69,9 @@ public final class T5DecoderState {
         }
         int offset = (generatedTokens - 1) * hiddenSize;
         return Arrays.copyOfRange(hiddenStates, offset, offset + hiddenSize);
+    }
+
+    T5DecoderCache nextCache() {
+        return nextCache;
     }
 }

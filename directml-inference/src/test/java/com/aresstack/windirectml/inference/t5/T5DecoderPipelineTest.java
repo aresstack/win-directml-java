@@ -63,6 +63,25 @@ class T5DecoderPipelineTest {
         assertAllFinite(second.hiddenStates());
     }
 
+
+    @Test
+    void decodeStepMatchesFullPrefixWithSelfAttentionCache() throws Exception {
+        T5Config config = T5TestFixtures.tinyConfig(false);
+        T5Runtime runtime = runtime(config);
+        T5EncoderOutput encoderOutput = runtime.encode(new int[]{1, 2, 3});
+
+        int[] prefix = new int[]{config.decoderStartTokenId(), 1};
+        T5DecoderState full = runtime.decode(prefix, encoderOutput);
+
+        T5DecoderCache cache = T5DecoderCache.empty();
+        T5DecoderState first = runtime.decodeStep(prefix[0], encoderOutput, cache);
+        cache = cache.append(prefix[0], first);
+        T5DecoderState second = runtime.decodeStep(prefix[1], encoderOutput, cache);
+
+        assertEquals(full.generatedTokens(), second.generatedTokens());
+        assertArrayEquals(full.hiddenStates(), second.hiddenStates(), 1.0e-4f);
+    }
+
     @Test
     void rejectsDecoderTokenOutsideVocabulary() throws Exception {
         T5Config config = T5TestFixtures.tinyConfig(false);

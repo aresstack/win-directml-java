@@ -118,6 +118,62 @@ public final class T5SelfAttention {
         return T5ReferenceMath.finite(sum);
     }
 
+    public T5SelfAttentionStep applyStep(float[] hiddenState, int tokenIndex, T5SelfAttentionMemory previousMemory) {
+        int hiddenSize = metadata.dModel();
+        int heads = metadata.numHeads();
+        int headDim = metadata.dKv();
+        int innerSize = heads * headDim;
+        Objects.requireNonNull(hiddenState, "hiddenState");
+        T5SelfAttentionMemory safeMemory = previousMemory == null ? T5SelfAttentionMemory.empty() : previousMemory;
+        if (hiddenState.length != hiddenSize) {
+            throw new IllegalArgumentException("hiddenState length mismatch: " + hiddenState.length
+                    + ", expected=" + hiddenSize);
+        }
+        if (safeMemory.sequenceLength() != tokenIndex) {
+            throw new IllegalArgumentException("Self-attention memory length mismatch: memory="
+                    + safeMemory.sequenceLength() + ", tokenIndex=" + tokenIndex);
+        }
+        if (safeMemory.sequenceLength() > 0 && safeMemory.innerSize() != innerSize) {
+            throw new IllegalArgumentException("Self-attention memory inner size mismatch: "
+                    + safeMemory.innerSize() + " != " + innerSize);
+        }
+        float[] query = q.apply(hiddenState);
+        float[] tokenKey = k.apply(hiddenState);
+        float[] tokenValue = v.apply(hiddenState);
+        T5SelfAttentionMemory memory = safeMemory.append(tokenKey, tokenValue);
+        int totalLength = memory.sequenceLength();
+        float[] context = new float[innerSize];
+        for (int head = 0; head < heads; head++) {
+            float[] scores = new float[totalLength];
+            int headOffset = head * headDim;
+            for (int source = 0; source < totalLength; source++) {
+                float score = dot(query, memory, source, headOffset, headDim);
+                if (relativePositionBias != null) {
+                    score += relativePositionBias.value(head, tokenIndex, source, bidirectionalRelativeBias);
+                }
+                scores[source] = score;
+            }
+            T5ReferenceMath.softmaxInPlace(scores);
+            for (int dim = 0; dim < headDim; dim++) {
+                float sum = 0.0f;
+                for (int source = 0; source < totalLength; source++) {
+                    sum += scores[source] * memory.valueAt(source, headOffset, dim);
+                }
+                context[headOffset + dim] = T5ReferenceMath.finite(sum);
+            }
+        }
+        return new T5SelfAttentionStep(o.apply(context), memory);
+    }
+
+    private static float dot(float[] query, T5SelfAttentionMemory memory, int keyToken,
+                             int headOffset, int headDim) {
+        float sum = 0.0f;
+        for (int dim = 0; dim < headDim; dim++) {
+            sum += query[headOffset + dim] * memory.keyAt(keyToken, headOffset, dim);
+        }
+        return T5ReferenceMath.finite(sum);
+    }
+
     private static boolean[] normalizeMask(boolean[] mask, int sequenceLength) {
         if (mask == null) {
             boolean[] all = new boolean[sequenceLength];
