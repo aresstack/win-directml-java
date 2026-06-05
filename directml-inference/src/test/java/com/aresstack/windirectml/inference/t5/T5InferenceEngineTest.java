@@ -28,18 +28,16 @@ class T5InferenceEngineTest {
     }
 
     @Test
-    void describesUnsupportedPyTorchCheckpointAsConversionRequirement() throws Exception {
+    void acceptsTorchCheckpointAsAutoCompileSource() throws Exception {
+        T5Config config = T5TestFixtures.tinyConfig(false);
         CodeT5TokenizerTest.writeTokenizerFiles(tempDir);
-        T5TestFixtures.writeConfig(tempDir, T5TestFixtures.tinyConfig(false));
-        Files.write(tempDir.resolve("pytorch_model.bin"), new byte[]{1, 2, 3});
+        T5TestFixtures.writeConfig(tempDir, config);
+        T5TestFixtures.writeTorchCheckpoint(tempDir, T5TestFixtures.completeDenseT5Tensors(config));
 
         String missing = T5InferenceEngine.describeMissingModelFile(tempDir);
 
-        assertNotNull(missing);
-        assertTrue(missing.contains("unsupported PyTorch checkpoint"));
-        assertTrue(missing.contains(T5InferenceEngine.DEFAULT_PACKAGE_NAME));
+        assertNull(missing);
     }
-
 
     @Test
     void acceptsGoogleT5TokenizerJsonAsTokenizerSource() throws Exception {
@@ -79,4 +77,23 @@ class T5InferenceEngineTest {
             engine.shutdown();
         }
     }
+    @Test
+    void initializesFromTorchCheckpointByCompilingWdmlPackOnFirstUse() throws Exception {
+        T5Config config = T5TestFixtures.tinyConfig(false);
+        CodeT5TokenizerTest.writeTokenizerFiles(tempDir);
+        T5TestFixtures.writeConfig(tempDir, config);
+        T5TestFixtures.writeTorchCheckpoint(tempDir, T5TestFixtures.completeDenseT5Tensors(config));
+
+        T5InferenceEngine engine = new T5InferenceEngine(tempDir, 2, 8);
+        try {
+            engine.initialize();
+
+            assertTrue(engine.isReady());
+            assertTrue(Files.isRegularFile(tempDir.resolve(T5InferenceEngine.DEFAULT_PACKAGE_NAME)));
+            assertEquals("torch-state-dict", engine.runtimePackage().manifest().get("sourceFormat"));
+        } finally {
+            engine.shutdown();
+        }
+    }
+
 }

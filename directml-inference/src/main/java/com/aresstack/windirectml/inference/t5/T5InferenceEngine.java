@@ -169,13 +169,10 @@ public final class T5InferenceEngine implements InferenceEngine {
         }
         Path pytorchCheckpoint = modelDir.resolve("pytorch_model.bin");
         if (Files.isRegularFile(pytorchCheckpoint)) {
-            return "Missing T5 runtime package (*.wdmlpack) and no supported SafeTensors source is available. "
-                    + "Found unsupported PyTorch checkpoint pytorch_model.bin. Convert it outside the hardened "
-                    + "runtime environment to model.safetensors or place a precompiled " + DEFAULT_PACKAGE_NAME
-                    + " in the T5 model directory.";
+            return null;
         }
-        return "Missing T5 runtime package (*.wdmlpack) and no SafeTensors source is available for auto-compile. "
-                + "Place model.safetensors or a precompiled " + DEFAULT_PACKAGE_NAME
+        return "Missing T5 runtime package (*.wdmlpack) and no supported import source is available for auto-compile. "
+                + "Place model.safetensors, pytorch_model.bin, or a precompiled " + DEFAULT_PACKAGE_NAME
                 + " in the T5 model directory.";
     }
 
@@ -184,8 +181,11 @@ public final class T5InferenceEngine implements InferenceEngine {
         if (existing.isPresent()) {
             return existing.get();
         }
-        if (T5ModelImport.discoverSafeTensors(modelDir).isEmpty()) {
-            throw new IOException("No T5 .wdmlpack found and no .safetensors source is available in " + modelDir);
+        boolean hasSafeTensors = !T5ModelImport.discoverSafeTensors(modelDir).isEmpty();
+        boolean hasTorchCheckpoint = Files.isRegularFile(modelDir.resolve("pytorch_model.bin"));
+        if (!hasSafeTensors && !hasTorchCheckpoint) {
+            throw new IOException("No T5 .wdmlpack found and no supported import source is available in " + modelDir
+                    + " (expected *.safetensors or pytorch_model.bin)");
         }
         T5CompileOptions options = new T5CompileOptions(modelDir, modelDir.resolve(DEFAULT_PACKAGE_NAME), false, true);
         return T5WdmlPackCompiler.compile(options).output();

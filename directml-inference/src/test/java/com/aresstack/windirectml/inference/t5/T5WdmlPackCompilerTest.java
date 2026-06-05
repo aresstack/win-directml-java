@@ -29,6 +29,27 @@ class T5WdmlPackCompilerTest {
         assertTrue(WdmlPackWriter.readHeader(output).payloadIncluded());
     }
 
+
+    @Test
+    void compilesPayloadPackageFromRestrictedTorchCheckpointWhenSafeTensorsIsAbsent() throws Exception {
+        T5Config config = T5TestFixtures.tinyConfig(false);
+        Path modelDir = tempDir.resolve("torch-model");
+        T5TestFixtures.writeConfig(modelDir, config);
+        T5TestFixtures.writeTorchCheckpoint(modelDir, T5TestFixtures.completeDenseT5Tensors(config));
+        Path output = tempDir.resolve("torch-t5.wdmlpack");
+
+        T5WdmlPackCompiler.T5CompileResult result = T5WdmlPackCompiler.compile(
+                new T5CompileOptions(modelDir, output, false, false));
+
+        assertTrue(result.written());
+        assertTrue(Files.isRegularFile(output));
+        Map<String, Object> manifest = WdmlPackWriter.readManifest(output);
+        assertEquals("torch-state-dict", manifest.get("sourceFormat"));
+        assertEquals(true, manifest.get("payloadIncluded"));
+        assertEquals(true, manifest.get("weightsLoadable"));
+        assertNotNull(result.runtimePackage());
+    }
+
     @Test
     void marksPackageAsWeightsLoadableButGenerationNotRuntimeLoadable() throws Exception {
         Path modelDir = createModelDir(T5TestFixtures.tinyConfig(false));

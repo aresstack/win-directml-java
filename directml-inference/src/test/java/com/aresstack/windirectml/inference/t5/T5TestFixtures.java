@@ -12,9 +12,12 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.ByteArrayOutputStream;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 final class T5TestFixtures {
     private T5TestFixtures() {
@@ -133,6 +136,86 @@ final class T5TestFixtures {
         return safeTensors;
     }
 
+
+    static Path writeTorchCheckpoint(Path modelDir, Map<String, OnnxTensor> tensors) throws IOException {
+        Files.createDirectories(modelDir);
+        Path checkpoint = modelDir.resolve("pytorch_model.bin");
+        try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(checkpoint))) {
+            zip.putNextEntry(new ZipEntry("archive/data.pkl"));
+            zip.write(torchStateDictPickle(tensors));
+            zip.closeEntry();
+
+            int storageIndex = 0;
+            for (OnnxTensor tensor : tensors.values()) {
+                zip.putNextEntry(new ZipEntry("archive/data/" + storageIndex));
+                ByteBuffer payload = tensor.rawDataBuffer();
+                payload.position(0);
+                byte[] bytes = new byte[tensor.rawByteLength()];
+                payload.get(bytes);
+                zip.write(bytes);
+                zip.closeEntry();
+                storageIndex++;
+            }
+
+            zip.putNextEntry(new ZipEntry("archive/version"));
+            zip.write("3\n".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        return checkpoint;
+    }
+
+    private static byte[] torchStateDictPickle(Map<String, OnnxTensor> tensors) {
+        PickleWriter out = new PickleWriter();
+        out.proto(2);
+        out.emptyDict();
+        out.mark();
+        int storageIndex = 0;
+        for (OnnxTensor tensor : tensors.values()) {
+            out.binUnicode(tensor.name());
+            out.global("torch._utils", "_rebuild_tensor_v2");
+            out.mark();
+            out.mark();
+            out.binUnicode("storage");
+            out.global("torch", torchStorageType(tensor.dataType()));
+            out.binUnicode(String.valueOf(storageIndex));
+            out.binUnicode("cpu");
+            out.binInt(elements(tensor.dims()));
+            out.tuple();
+            out.binPersId();
+            out.binInt(0);
+            out.longTuple(tensor.dims());
+            out.longTuple(rowMajorStride(tensor.dims()));
+            out.newFalse();
+            out.emptyDict();
+            out.tuple();
+            out.reduce();
+            storageIndex++;
+        }
+        out.setItems();
+        out.stop();
+        return out.toByteArray();
+    }
+
+    private static String torchStorageType(int dataType) {
+        if (dataType == OnnxModelReader.ONNX_FLOAT16) {
+            return "HalfStorage";
+        }
+        if (dataType == OnnxModelReader.ONNX_FLOAT) {
+            return "FloatStorage";
+        }
+        throw new IllegalArgumentException("Unsupported test torch data type: " + dataType);
+    }
+
+    private static long[] rowMajorStride(long[] dims) {
+        long[] stride = new long[dims.length];
+        long current = 1L;
+        for (int index = dims.length - 1; index >= 0; index--) {
+            stride[index] = current;
+            current *= Math.max(1L, dims[index]);
+        }
+        return stride;
+    }
+
     private static void addEncoderBlock(Map<String, OnnxTensor> tensors, int layer, T5Config config) {
         add(tensors, "encoder.block." + layer + ".layer.0.layer_norm.weight", config.modelSize());
         add(tensors, "encoder.block." + layer + ".layer.1.layer_norm.weight", config.modelSize());
@@ -205,5 +288,92 @@ final class T5TestFixtures {
             sb.append(dims[i]);
         }
         return sb.append(']').toString();
+    }
+
+    private static final class PickleWriter {
+        private final ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        void proto(int version) {
+            out.write(0x80);
+            out.write(version);
+        }
+
+        void mark() {
+            out.write('(');
+        }
+
+        void emptyDict() {
+            out.write('}');
+        }
+
+        void tuple() {
+            out.write('t');
+        }
+
+        void reduce() {
+            out.write('R');
+        }
+
+        void setItems() {
+            out.write('u');
+        }
+
+        void binPersId() {
+            out.write('Q');
+        }
+
+        void newFalse() {
+            out.write(0x89);
+        }
+
+        void stop() {
+            out.write('.');
+        }
+
+        void global(String module, String name) {
+            out.write('c');
+            writeAsciiLine(module);
+            writeAsciiLine(name);
+        }
+
+        void binInt(long value) {
+            if (value >= 0 && value <= 255) {
+                out.write('K');
+                out.write((int) value);
+                return;
+            }
+            if (value >= Integer.MIN_VALUE && value <= Integer.MAX_VALUE) {
+                out.write('J');
+                byte[] bytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt((int) value).array();
+                out.write(bytes, 0, bytes.length);
+                return;
+            }
+            throw new IllegalArgumentException("Test pickle int is out of range: " + value);
+        }
+
+        void binUnicode(String value) {
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            out.write('X');
+            out.write(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(bytes.length).array(), 0, 4);
+            out.write(bytes, 0, bytes.length);
+        }
+
+        void longTuple(long[] values) {
+            mark();
+            for (long value : values) {
+                binInt(value);
+            }
+            tuple();
+        }
+
+        byte[] toByteArray() {
+            return out.toByteArray();
+        }
+
+        private void writeAsciiLine(String value) {
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            out.write(bytes, 0, bytes.length);
+            out.write('\n');
+        }
     }
 }

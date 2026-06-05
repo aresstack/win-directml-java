@@ -155,7 +155,7 @@ public final class DownloadPanel extends JPanel {
     private void addCodeT5Row(JPanel buttons) {
         ModelDownloadManifest manifest = ModelDownloadUrls.manifestForCodeT5Small();
         addT5Row(buttons, "Download CodeT5 small metadata/tokenizer", manifest,
-                "Compile CodeT5 SafeTensors → wdmlpack");
+                "Compile CodeT5 checkpoint → wdmlpack");
     }
 
     private void addT5Row(JPanel buttons, String downloadLabel, ModelDownloadManifest baseManifest, String compileLabel) {
@@ -164,15 +164,15 @@ public final class DownloadPanel extends JPanel {
         String modelId = manifest.modelId();
 
         JButton downloadBtn = new JButton(downloadLabel);
-        downloadBtn.setToolTipText("Downloads T5 config/tokenizer files and SafeTensors when the upstream repository provides them.");
+        downloadBtn.setToolTipText("Downloads T5 config/tokenizer files and model weights when the upstream repository provides a supported source.");
         downloadBtn.addActionListener(e -> startManifestDownload(modelId));
         buttons.add(downloadBtn);
 
         buttons.add(registerProgressBar(manifest));
 
         JButton compileButton = new JButton(compileLabel);
-        compileButton.setToolTipText("Compile model.safetensors into model_t5.wdmlpack in this model folder.");
-        compileButton.addActionListener(e -> startT5SafeTensorsCompile(manifest.localDirName(), manifest.modelId()));
+        compileButton.setToolTipText("Compile model.safetensors or pytorch_model.bin into model_t5.wdmlpack in this model folder.");
+        compileButton.addActionListener(e -> startT5ModelPackageCompile(manifest.localDirName(), manifest.modelId()));
         buttons.add(compileButton);
 
         buttons.add(createOpenFolderButton(() -> selectedT5TargetDir(manifest.localDirName())));
@@ -446,21 +446,18 @@ public final class DownloadPanel extends JPanel {
         return selectedQwenTargetDir().resolve(base + ".wdmlpack");
     }
 
-    private void startT5SafeTensorsCompile(String localDirName, String modelId) {
+    private void startT5ModelPackageCompile(String localDirName, String modelId) {
         Path targetDir = selectedT5TargetDir(localDirName);
         Path output = selectedT5RuntimePackagePath(localDirName);
-        appendLog("Compiling T5 SafeTensors (" + modelId + "): " + targetDir + " -> " + output);
+        appendLog("Compiling T5 model package (" + modelId + "): " + targetDir + " -> " + output);
 
         new SwingWorker<Boolean, String>() {
             @Override
             protected Boolean doInBackground() {
                 try {
-                    if (!hasSafeTensors(targetDir)) {
-                        publish("ERROR: No T5 .safetensors file found in " + targetDir);
-                        if (java.nio.file.Files.isRegularFile(targetDir.resolve("pytorch_model.bin"))) {
-                            publish("  Found pytorch_model.bin, but this checkpoint is pickle-backed and is not compiled on hardened runtime systems.");
-                        }
-                        publish("  This model folder needs model.safetensors or a precompiled "
+                    if (!hasSupportedT5TensorSource(targetDir)) {
+                        publish("ERROR: No supported T5 tensor source found in " + targetDir);
+                        publish("  Expected *.safetensors, pytorch_model.bin restricted state_dict checkpoint, or a precompiled "
                                 + T5InferenceEngine.DEFAULT_PACKAGE_NAME + ".");
                         return false;
                     }
@@ -488,18 +485,21 @@ public final class DownloadPanel extends JPanel {
             @Override
             protected void done() {
                 try {
-                    appendLog(get() ? "T5 SafeTensors compile finished."
-                            : "T5 SafeTensors compile ended with errors.");
+                    appendLog(get() ? "T5 model package compile finished."
+                            : "T5 model package compile ended with errors.");
                 } catch (Exception ex) {
-                    appendLog("T5 SafeTensors compile ended with errors: " + ex.getMessage());
+                    appendLog("T5 model package compile ended with errors: " + ex.getMessage());
                 }
             }
         }.execute();
     }
 
-    private static boolean hasSafeTensors(Path directory) throws java.io.IOException {
+    private static boolean hasSupportedT5TensorSource(Path directory) throws java.io.IOException {
         if (!java.nio.file.Files.isDirectory(directory)) {
             return false;
+        }
+        if (java.nio.file.Files.isRegularFile(directory.resolve("pytorch_model.bin"))) {
+            return true;
         }
         try (java.util.stream.Stream<Path> stream = java.nio.file.Files.list(directory)) {
             return stream

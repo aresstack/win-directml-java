@@ -19,7 +19,7 @@ public final class T5WdmlPackCompiler {
             throw new IOException("T5 model directory not found: " + modelDir);
         }
         T5Config config = T5Config.load(modelDir.resolve("config.json"));
-        T5ModelImport imported = T5ModelImport.loadSafeTensorsDirectory(modelDir);
+        T5ModelImport imported = loadSupportedSource(modelDir);
         T5LayoutManifest layout = T5SafeTensorsLayoutCompiler.analyze(imported, config);
         Path output = options.resolveOutput();
 
@@ -31,6 +31,18 @@ public final class T5WdmlPackCompiler {
         }
         new T5WdmlPackManifestWriter().writeWithPayload(output, modelDir, imported, config, layout);
         return new T5CompileResult(output, true, layout, T5RuntimePackage.open(output));
+    }
+
+    private static T5ModelImport loadSupportedSource(Path modelDir) throws IOException {
+        if (!T5ModelImport.discoverSafeTensors(modelDir).isEmpty()) {
+            return T5ModelImport.loadSafeTensorsDirectory(modelDir);
+        }
+        Path torchCheckpoint = modelDir.resolve("pytorch_model.bin");
+        if (Files.isRegularFile(torchCheckpoint)) {
+            return T5ModelImport.loadTorchCheckpointDirectory(modelDir);
+        }
+        throw new IOException("No supported T5 tensor source found in " + modelDir
+                + ": expected *.safetensors or pytorch_model.bin");
     }
 
     public record T5CompileResult(Path output,

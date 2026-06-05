@@ -8,7 +8,7 @@ import java.nio.file.Path;
 import java.util.Map;
 
 /**
- * T5 SafeTensors-to-wdmlpack compile and inspection entry point.
+ * T5 tensor-source-to-wdmlpack compile and inspection entry point.
  */
 public final class T5WdmlPackCompileTool {
     private T5WdmlPackCompileTool() {
@@ -92,5 +92,9 @@ public final class T5WdmlPackCompileTool {
         out.println("  T5WdmlPackCompileTool --dry-run <hf-model-dir>");
         out.println("  T5WdmlPackCompileTool --inspect <model.wdmlpack>");
         out.println("  T5WdmlPackCompileTool [--force] <hf-model-dir> <output.wdmlpack>");
+        out.println();
+        out.println("Supported sources inside <hf-model-dir>:");
+        out.println("  - *.safetensors");
+        out.println("  - pytorch_model.bin restricted state_dict checkpoint");
     }
 }
