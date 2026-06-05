@@ -29,7 +29,7 @@ public final class T5InferenceEngine implements InferenceEngine {
     private final int maxTokens;
     private final int maxInputTokens;
     private final String backend;
-    private CodeT5Tokenizer tokenizer;
+    private T5TextTokenizer tokenizer;
     private T5RuntimePackage runtimePackage;
     private T5Runtime runtime;
     private WindowsBindings windowsBindings;
@@ -67,7 +67,7 @@ public final class T5InferenceEngine implements InferenceEngine {
         }
         try {
             validateTokenizerFiles(modelDir);
-            tokenizer = CodeT5Tokenizer.load(modelDir);
+            tokenizer = T5TokenizerLoader.load(modelDir);
             Path packagePath = resolveRuntimePackage(modelDir);
             runtimePackage = T5RuntimePackage.open(packagePath);
             runtime = createRuntime(runtimePackage);
@@ -138,16 +138,9 @@ public final class T5InferenceEngine implements InferenceEngine {
     }
 
     public static String describeMissingModelFile(Path modelDir) {
-        if (modelDir == null || !Files.isDirectory(modelDir)) {
-            return "CodeT5 model directory not found: " + modelDir;
-        }
-        Path vocab = modelDir.resolve("vocab.json");
-        if (!Files.isRegularFile(vocab)) {
-            return "Missing CodeT5 tokenizer file: " + vocab.getFileName();
-        }
-        Path merges = modelDir.resolve("merges.txt");
-        if (!Files.isRegularFile(merges)) {
-            return "Missing CodeT5 tokenizer file: " + merges.getFileName();
+        String tokenizerError = T5TokenizerLoader.describeMissingTokenizer(modelDir);
+        if (tokenizerError != null) {
+            return tokenizerError;
         }
         Path config = modelDir.resolve("config.json");
         if (!Files.isRegularFile(config)) {
@@ -168,11 +161,11 @@ public final class T5InferenceEngine implements InferenceEngine {
             return "Missing T5 runtime package (*.wdmlpack) and no supported SafeTensors source is available. "
                     + "Found unsupported PyTorch checkpoint pytorch_model.bin. Convert it outside the hardened "
                     + "runtime environment to model.safetensors or place a precompiled " + DEFAULT_PACKAGE_NAME
-                    + " in the CodeT5 model directory.";
+                    + " in the T5 model directory.";
         }
         return "Missing T5 runtime package (*.wdmlpack) and no SafeTensors source is available for auto-compile. "
                 + "Place model.safetensors or a precompiled " + DEFAULT_PACKAGE_NAME
-                + " in the CodeT5 model directory.";
+                + " in the T5 model directory.";
     }
 
     private static Path resolveRuntimePackage(Path modelDir) throws IOException {
@@ -262,9 +255,9 @@ public final class T5InferenceEngine implements InferenceEngine {
     }
 
     private static void validateTokenizerFiles(Path modelDir) throws IOException {
-        String missing = describeMissingModelFile(modelDir);
-        if (missing != null) {
-            throw new IOException(missing);
+        String tokenizerError = T5TokenizerLoader.describeMissingTokenizer(modelDir);
+        if (tokenizerError != null) {
+            throw new IOException(tokenizerError);
         }
     }
 

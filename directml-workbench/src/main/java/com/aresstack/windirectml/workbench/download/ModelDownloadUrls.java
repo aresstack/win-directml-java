@@ -25,6 +25,8 @@ public final class ModelDownloadUrls {
     public static final String SMOLLM2_360M_LOCAL_DIR = "smollm2-360m-instruct";
     public static final String CODET5_SMALL_REPO = "Salesforce/codet5-small";
     public static final String CODET5_SMALL_LOCAL_DIR = "codet5-small";
+    public static final String GOOGLE_T5_SMALL_REPO = "google-t5/t5-small";
+    public static final String GOOGLE_T5_SMALL_LOCAL_DIR = "t5-small";
 
     private ModelDownloadUrls() {
     }
@@ -146,6 +148,25 @@ public final class ModelDownloadUrls {
         return new ModelDownloadManifest(CODET5_SMALL_REPO, CODET5_SMALL_LOCAL_DIR, List.copyOf(descriptors));
     }
 
+
+    /**
+     * Creates a complete download manifest for google-t5/t5-small.
+     *
+     * <p>This model is useful as the first upstream T5 SafeTensors validation model:
+     * the repository publishes {@code model.safetensors} directly and therefore does
+     * not require a PyTorch checkpoint conversion step.</p>
+     */
+    public static ModelDownloadManifest manifestForGoogleT5Small() {
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        addRootDescriptor(descriptors, GOOGLE_T5_SMALL_REPO, "model.safetensors", true);
+        addRootDescriptor(descriptors, GOOGLE_T5_SMALL_REPO, "config.json", true);
+        addRootDescriptor(descriptors, GOOGLE_T5_SMALL_REPO, "tokenizer.json", true);
+        addRootDescriptor(descriptors, GOOGLE_T5_SMALL_REPO, "tokenizer_config.json", true);
+        addRootDescriptor(descriptors, GOOGLE_T5_SMALL_REPO, "spiece.model", true);
+        addRootDescriptor(descriptors, GOOGLE_T5_SMALL_REPO, "generation_config.json", false);
+        return new ModelDownloadManifest(GOOGLE_T5_SMALL_REPO, GOOGLE_T5_SMALL_LOCAL_DIR, List.copyOf(descriptors));
+    }
+
     /**
      * Creates a small manifest containing only the selected Qwen ONNX model URL.
      */
@@ -254,6 +275,16 @@ public final class ModelDownloadUrls {
      */
     public static List<String> forCodeT5Small() {
         return manifestForCodeT5Small().files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+
+    /**
+     * Returns download URLs for google-t5/t5-small.
+     */
+    public static List<String> forGoogleT5Small() {
+        return manifestForGoogleT5Small().files().stream()
                 .map(ModelFileDescriptor::defaultUrl)
                 .toList();
     }

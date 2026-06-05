@@ -88,6 +88,9 @@ public final class DownloadPanel extends JPanel {
                 ModelDownloadUrls.manifestForSmolLm2_135M());
         addManifestRow(buttons, "Download SmolLM2 360M Instruct (Summarizer planned)",
                 ModelDownloadUrls.manifestForSmolLm2_360M());
+        addT5Row(buttons, "Download google-t5/t5-small (SafeTensors)",
+                ModelDownloadUrls.manifestForGoogleT5Small(),
+                "Compile T5-small SafeTensors → wdmlpack");
         addCodeT5Row(buttons);
 
         forceCheckbox = new JCheckBox("Force re-download (overwrite existing)");
@@ -147,23 +150,29 @@ public final class DownloadPanel extends JPanel {
     }
 
     private void addCodeT5Row(JPanel buttons) {
-        ModelDownloadManifest manifest = overrideStore.applyOverrides(ModelDownloadUrls.manifestForCodeT5Small());
+        ModelDownloadManifest manifest = ModelDownloadUrls.manifestForCodeT5Small();
+        addT5Row(buttons, "Download CodeT5 small metadata/tokenizer", manifest,
+                "Compile CodeT5 SafeTensors → wdmlpack");
+    }
+
+    private void addT5Row(JPanel buttons, String downloadLabel, ModelDownloadManifest baseManifest, String compileLabel) {
+        ModelDownloadManifest manifest = overrideStore.applyOverrides(baseManifest);
         manifests.put(manifest.modelId(), manifest);
         String modelId = manifest.modelId();
 
-        JButton downloadBtn = new JButton("Download CodeT5 small metadata/tokenizer");
-        downloadBtn.setToolTipText("Downloads config and tokenizer files. Weights must be model.safetensors or model_t5.wdmlpack.");
+        JButton downloadBtn = new JButton(downloadLabel);
+        downloadBtn.setToolTipText("Downloads T5 config/tokenizer files and SafeTensors when the upstream repository provides them.");
         downloadBtn.addActionListener(e -> startManifestDownload(modelId));
         buttons.add(downloadBtn);
 
         buttons.add(registerProgressBar(manifest));
 
-        JButton compileButton = new JButton("Compile CodeT5 SafeTensors → wdmlpack");
-        compileButton.setToolTipText("Compile model.safetensors into model_t5.wdmlpack after placing SafeTensors in the CodeT5 folder.");
-        compileButton.addActionListener(e -> startCodeT5SafeTensorsCompile());
+        JButton compileButton = new JButton(compileLabel);
+        compileButton.setToolTipText("Compile model.safetensors into model_t5.wdmlpack in this model folder.");
+        compileButton.addActionListener(e -> startT5SafeTensorsCompile(manifest.localDirName(), manifest.modelId()));
         buttons.add(compileButton);
 
-        buttons.add(createOpenFolderButton(this::selectedCodeT5TargetDir));
+        buttons.add(createOpenFolderButton(() -> selectedT5TargetDir(manifest.localDirName())));
     }
 
     private JPanel createQwenPanel() {
@@ -434,22 +443,22 @@ public final class DownloadPanel extends JPanel {
         return selectedQwenTargetDir().resolve(base + ".wdmlpack");
     }
 
-    private void startCodeT5SafeTensorsCompile() {
-        Path targetDir = selectedCodeT5TargetDir();
-        Path output = selectedCodeT5RuntimePackagePath();
-        appendLog("Compiling CodeT5 SafeTensors: " + targetDir + " -> " + output);
+    private void startT5SafeTensorsCompile(String localDirName, String modelId) {
+        Path targetDir = selectedT5TargetDir(localDirName);
+        Path output = selectedT5RuntimePackagePath(localDirName);
+        appendLog("Compiling T5 SafeTensors (" + modelId + "): " + targetDir + " -> " + output);
 
         new SwingWorker<Boolean, String>() {
             @Override
             protected Boolean doInBackground() {
                 try {
                     if (!hasSafeTensors(targetDir)) {
-                        publish("ERROR: No CodeT5 .safetensors file found in " + targetDir);
+                        publish("ERROR: No T5 .safetensors file found in " + targetDir);
                         if (java.nio.file.Files.isRegularFile(targetDir.resolve("pytorch_model.bin"))) {
                             publish("  Found pytorch_model.bin, but this checkpoint is pickle-backed and is not compiled on hardened runtime systems.");
                         }
-                        publish("  Convert Salesforce/codet5-small outside the runtime environment to model.safetensors, or place a precompiled "
-                                + T5InferenceEngine.DEFAULT_PACKAGE_NAME + " in this folder.");
+                        publish("  This model folder needs model.safetensors or a precompiled "
+                                + T5InferenceEngine.DEFAULT_PACKAGE_NAME + ".");
                         return false;
                     }
                     T5WdmlPackCompiler.T5CompileResult result = T5WdmlPackCompiler.compile(
@@ -476,10 +485,10 @@ public final class DownloadPanel extends JPanel {
             @Override
             protected void done() {
                 try {
-                    appendLog(get() ? "CodeT5 SafeTensors compile finished."
-                            : "CodeT5 SafeTensors compile ended with errors.");
+                    appendLog(get() ? "T5 SafeTensors compile finished."
+                            : "T5 SafeTensors compile ended with errors.");
                 } catch (Exception ex) {
-                    appendLog("CodeT5 SafeTensors compile ended with errors: " + ex.getMessage());
+                    appendLog("T5 SafeTensors compile ended with errors: " + ex.getMessage());
                 }
             }
         }.execute();
@@ -496,12 +505,12 @@ public final class DownloadPanel extends JPanel {
         }
     }
 
-    private Path selectedCodeT5TargetDir() {
-        return model.getModelRoot().resolve(ModelDownloadUrls.CODET5_SMALL_LOCAL_DIR);
+    private Path selectedT5TargetDir(String localDirName) {
+        return model.getModelRoot().resolve(localDirName);
     }
 
-    private Path selectedCodeT5RuntimePackagePath() {
-        return selectedCodeT5TargetDir().resolve(T5InferenceEngine.DEFAULT_PACKAGE_NAME);
+    private Path selectedT5RuntimePackagePath(String localDirName) {
+        return selectedT5TargetDir(localDirName).resolve(T5InferenceEngine.DEFAULT_PACKAGE_NAME);
     }
 
     private void startDownload(ModelDownloadManifest manifest, String label) {

@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
  * bridge user text to the token-id based T5 runtime without involving Python,
  * Hugging Face tokenizers, or native tokenizer libraries.</p>
  */
-public final class CodeT5Tokenizer {
+public final class CodeT5Tokenizer implements T5TextTokenizer {
     private static final Pattern PRE_TOKENIZE_PATTERN = Pattern.compile(
             "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+"
     );
@@ -96,6 +96,7 @@ public final class CodeT5Tokenizer {
         return new CodeT5Tokenizer(vocab, idToToken, mergeRanks, specialTokens, unknownTokenId);
     }
 
+    @Override
     public int[] encode(String text) {
         if (text == null || text.isEmpty()) {
             return new int[0];
@@ -111,6 +112,7 @@ public final class CodeT5Tokenizer {
         return toIntArray(out);
     }
 
+    @Override
     public String decode(int[] tokenIds) {
         if (tokenIds == null || tokenIds.length == 0) {
             return "";
@@ -129,6 +131,7 @@ public final class CodeT5Tokenizer {
         return decodeByteLevelText(tokenText.toString());
     }
 
+    @Override
     public int vocabSize() {
         return idToToken.length;
     }

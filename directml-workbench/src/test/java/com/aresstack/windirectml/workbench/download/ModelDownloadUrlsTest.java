@@ -208,4 +208,20 @@ class ModelDownloadUrlsTest {
         assertTrue(urls.contains("https://huggingface.co/Salesforce/codet5-small/resolve/main/special_tokens_map.json"));
     }
 
+    @Test
+    void googleT5SmallManifestContainsSafeTensorsAndTokenizerJson() {
+        var manifest = ModelDownloadUrls.manifestForGoogleT5Small();
+        var urls = manifest.files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+
+        assertEquals(ModelDownloadUrls.GOOGLE_T5_SMALL_LOCAL_DIR, manifest.localDirName());
+        assertEquals("google-t5/t5-small", manifest.modelId());
+        assertTrue(urls.contains("https://huggingface.co/google-t5/t5-small/resolve/main/model.safetensors"));
+        assertTrue(urls.contains("https://huggingface.co/google-t5/t5-small/resolve/main/config.json"));
+        assertTrue(urls.contains("https://huggingface.co/google-t5/t5-small/resolve/main/tokenizer.json"));
+        assertTrue(urls.contains("https://huggingface.co/google-t5/t5-small/resolve/main/spiece.model"));
+        assertFalse(urls.contains("https://huggingface.co/google-t5/t5-small/resolve/main/pytorch_model.bin"));
+    }
+
 }

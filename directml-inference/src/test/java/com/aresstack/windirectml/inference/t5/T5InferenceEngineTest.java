@@ -40,6 +40,18 @@ class T5InferenceEngineTest {
         assertTrue(missing.contains(T5InferenceEngine.DEFAULT_PACKAGE_NAME));
     }
 
+
+    @Test
+    void acceptsGoogleT5TokenizerJsonAsTokenizerSource() throws Exception {
+        JsonT5TokenizerTest.writeTokenizerFiles(tempDir);
+        T5TestFixtures.writeConfig(tempDir, T5TestFixtures.tinyConfig(false));
+
+        String missing = T5InferenceEngine.describeMissingModelFile(tempDir);
+
+        assertNotNull(missing);
+        assertTrue(missing.contains("Missing T5 runtime package"));
+    }
+
     @Test
     void initializesFromSafeTensorsByCompilingWdmlPackOnFirstUse() throws Exception {
         T5Config config = T5TestFixtures.tinyConfig(false);

@@ -61,14 +61,18 @@ class GenerationModelRegistryTest {
     }
 
     @Test
-    void registryContainsCodeT5AsExperimentalSeq2Seq() {
-        GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId("Salesforce/codet5-small");
+    void registryContainsT5FamilyAsExperimentalSeq2Seq() {
+        String[] ids = {"Salesforce/codet5-small", "google-t5/t5-small"};
 
-        assertNotNull(entry);
-        assertEquals(GenerationModelRegistry.Architecture.SEQ2SEQ, entry.architecture());
-        assertEquals(GenerationModelRegistry.Status.EXPERIMENTAL, entry.status());
-        assertEquals(ChatTemplate.RAW, entry.chatTemplate());
-        assertTrue(entry.isRunnable());
+        for (String id : ids) {
+            GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId(id);
+
+            assertNotNull(entry, "registry must contain " + id);
+            assertEquals(GenerationModelRegistry.Architecture.SEQ2SEQ, entry.architecture());
+            assertEquals(GenerationModelRegistry.Status.EXPERIMENTAL, entry.status());
+            assertEquals(ChatTemplate.RAW, entry.chatTemplate());
+            assertTrue(entry.isRunnable());
+        }
     }
 
     @Test

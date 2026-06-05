@@ -165,7 +165,7 @@ public final class SummarizerPanel extends JPanel {
         } else if (smolLm2Model) {
             appendResult("  NOTE: SmolLM2 currently uses the Java reference runtime. First use compiles SafeTensors to model.wdmlpack.");
         } else if (isT5Model(selectedModel)) {
-            appendResult("  NOTE: CodeT5 uses the T5 seq2seq runtime package path (.wdmlpack or SafeTensors auto-compile).");
+            appendResult("  NOTE: T5-family models use the seq2seq runtime package path (.wdmlpack or SafeTensors auto-compile).");
         }
 
         new SwingWorker<Void, Void>() {
@@ -348,7 +348,7 @@ public final class SummarizerPanel extends JPanel {
     private void validateT5ModelFiles(Path modelDir) {
         String missing = T5InferenceEngine.describeMissingModelFile(modelDir);
         if (missing != null) {
-            throw new IllegalStateException(missing + ". Download or compile the selected CodeT5 model first from the Download/Tools flow.");
+            throw new IllegalStateException(missing + ". Download or compile the selected T5 model first from the Download/Tools flow.");
         }
     }
 

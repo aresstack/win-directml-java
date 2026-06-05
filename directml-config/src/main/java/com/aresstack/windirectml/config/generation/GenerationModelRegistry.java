@@ -283,6 +283,19 @@ public final class GenerationModelRegistry {
                 "Experimental T5-style encoder-decoder runtime. Requires a compiled .wdmlpack "
                         + "or SafeTensors source for first-use compilation."));
 
+        entries.add(new Entry(
+                "google-t5/t5-small",
+                Architecture.SEQ2SEQ,
+                "Google",
+                "60M",
+                ChatTemplate.RAW,
+                Status.EXPERIMENTAL,
+                Arrays.asList(
+                        "model/t5-small",
+                        "model/google-t5/t5-small"),
+                "Experimental upstream T5-small validation model. Publishes model.safetensors "
+                        + "directly and can be compiled into model_t5.wdmlpack from the Workbench."));
+
         ENTRIES = Collections.unmodifiableList(entries);
 
         Map<String, Entry> byKey = new LinkedHashMap<String, Entry>();
