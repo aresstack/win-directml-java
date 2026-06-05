@@ -30,8 +30,9 @@ public final class SmolLM2ReferenceGenerationLoop {
         DecoderOnlyGeneratedTokens generatedTokens = new DecoderOnlyGeneratedTokens(request.maxNewTokens());
         String finishReason = "length";
         float repetitionPenalty = repetitionPenalty(request.options());
+        SmolLM2ReferenceKvCache kvCache = SmolLM2ReferenceKvCache.create(forwardPass.config());
         for (int i = 0; i < request.maxNewTokens(); i++) {
-            float[] logits = forwardPass.logitsForLastToken(fullTokenIds);
+            float[] logits = forwardPass.logitsForLastToken(fullTokenIds, kvCache);
             int nextToken = tokenSelector.selectNextToken(logits, generatedTokens, repetitionPenalty);
             generatedTokens.add(nextToken);
             fullTokenIds.add(nextToken);

@@ -11,7 +11,7 @@ import java.util.Objects;
 /**
  * Correctness-first SmolLM2 forward pass for tiny tests and runtime bring-up.
  *
- * <p>The implementation recomputes the full sequence on every step and intentionally does not use WARP or a KV cache.
+ * <p>The implementation supports both full-sequence validation and incremental decoding with a reference KV cache.
  * It exists to validate roles, tensor layout and generation semantics before optimized kernels are introduced.</p>
  */
 public final class SmolLM2ReferenceForwardPass {
@@ -36,6 +36,10 @@ public final class SmolLM2ReferenceForwardPass {
         this.attentionScale = (float) (1.0d / Math.sqrt(config.effectiveHeadDim()));
     }
 
+    public SmolLM2Config config() {
+        return config;
+    }
+
     public float[] logitsForLastToken(List<Integer> tokenIds) {
         Objects.requireNonNull(tokenIds, "tokenIds");
         if (tokenIds.isEmpty()) {
@@ -48,6 +52,48 @@ public final class SmolLM2ReferenceForwardPass {
         float[] lastHidden = hiddenStates[hiddenStates.length - 1].clone();
         DecoderOnlyMath.rmsNorm(lastHidden, weights.finalNorm().copyValues(), (float) config.rmsNormEps());
         return projectToLogits(lastHidden);
+    }
+
+    public float[] logitsForLastToken(List<Integer> tokenIds, SmolLM2ReferenceKvCache kvCache) {
+        Objects.requireNonNull(tokenIds, "tokenIds");
+        Objects.requireNonNull(kvCache, "kvCache");
+        if (tokenIds.isEmpty()) {
+            throw new IllegalArgumentException("tokenIds must not be empty");
+        }
+        int startPosition = kvCache.completedTokenCount();
+        if (startPosition > tokenIds.size()) {
+            throw new IllegalArgumentException("KV cache contains more tokens than the supplied sequence");
+        }
+        float[] logits = null;
+        for (int position = startPosition; position < tokenIds.size(); position++) {
+            logits = logitsForToken(tokenIds.get(position), position, kvCache);
+        }
+        if (logits == null) {
+            logits = logitsForLastToken(tokenIds);
+        }
+        return logits;
+    }
+
+    private float[] logitsForToken(int tokenId, int position, SmolLM2ReferenceKvCache kvCache) {
+        if (tokenId < 0 || tokenId >= config.vocabSize()) {
+            throw new IllegalArgumentException("tokenId out of vocabulary range: " + tokenId);
+        }
+        if (position >= config.maxPositionEmbeddings()) {
+            throw new IllegalArgumentException("position exceeds max_position_embeddings: " + position);
+        }
+        kvCache.requireReadyForPosition(position);
+        float[] hidden = weights.tokenEmbedding().copyRow(tokenId);
+        List<SmolLM2ReferenceLayerWeights> layers = weights.layers();
+        if (kvCache.layerCount() != layers.size()) {
+            throw new IllegalArgumentException("KV cache layer count mismatch: expected "
+                    + layers.size() + " but got " + kvCache.layerCount());
+        }
+        for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
+            hidden = runLayerStep(hidden, layers.get(layerIndex), kvCache.layer(layerIndex), position);
+        }
+        float[] normalized = hidden.clone();
+        DecoderOnlyMath.rmsNorm(normalized, weights.finalNorm().copyValues(), (float) config.rmsNormEps());
+        return projectToLogits(normalized);
     }
 
     private float[][] embedTokens(List<Integer> tokenIds) {
@@ -77,6 +123,19 @@ public final class SmolLM2ReferenceForwardPass {
             DecoderOnlyMath.rmsNorm(row, layer.postAttentionNorm().copyValues(), (float) config.rmsNormEps());
         }
         float[][] mlpOutput = runMlp(mlpInput, layer);
+        return add(afterAttention, mlpOutput);
+    }
+
+    private float[] runLayerStep(float[] hidden, SmolLM2ReferenceLayerWeights layer,
+                                 SmolLM2ReferenceLayerKvCache layerCache, int position) {
+        float[] attentionInput = hidden.clone();
+        DecoderOnlyMath.rmsNorm(attentionInput, layer.inputNorm().copyValues(), (float) config.rmsNormEps());
+        float[] attentionOutput = runSelfAttentionStep(attentionInput, layer, layerCache, position);
+        float[] afterAttention = add(hidden, attentionOutput);
+
+        float[] mlpInput = afterAttention.clone();
+        DecoderOnlyMath.rmsNorm(mlpInput, layer.postAttentionNorm().copyValues(), (float) config.rmsNormEps());
+        float[] mlpOutput = runMlpStep(mlpInput, layer);
         return add(afterAttention, mlpOutput);
     }
 
@@ -125,20 +184,64 @@ public final class SmolLM2ReferenceForwardPass {
         return output;
     }
 
+
+    private float[] runSelfAttentionStep(float[] input, SmolLM2ReferenceLayerWeights layer,
+                                         SmolLM2ReferenceLayerKvCache layerCache, int position) {
+        int hiddenSize = config.hiddenSize();
+        int numHeads = config.numAttentionHeads();
+        int numKvHeads = config.effectiveKeyValueHeads();
+        int headDim = config.effectiveHeadDim();
+
+        float[] query = layer.queryProjection().multiplyVector(input);
+        float[] key = layer.keyProjection().multiplyVector(input);
+        float[] value = layer.valueProjection().multiplyVector(input);
+        for (int head = 0; head < numHeads; head++) {
+            rotaryEmbedding.apply(query, head * headDim, position);
+        }
+        for (int head = 0; head < numKvHeads; head++) {
+            rotaryEmbedding.apply(key, head * headDim, position);
+        }
+        layerCache.append(key, value);
+
+        float[] context = new float[hiddenSize];
+        int sourceCount = layerCache.size();
+        for (int queryHead = 0; queryHead < numHeads; queryHead++) {
+            int kvHead = attentionLayout.kvHeadForQueryHead(queryHead);
+            float[] scores = new float[sourceCount];
+            for (int sourcePosition = 0; sourcePosition < sourceCount; sourcePosition++) {
+                scores[sourcePosition] = dotHead(
+                        query, queryHead,
+                        layerCache.keyAt(sourcePosition), kvHead,
+                        headDim) * attentionScale;
+            }
+            DecoderOnlyMath.softmax(scores, scores.length);
+            int contextOffset = queryHead * headDim;
+            for (int sourcePosition = 0; sourcePosition < sourceCount; sourcePosition++) {
+                addHeadWeighted(context, contextOffset, layerCache.valueAt(sourcePosition), kvHead, headDim,
+                        scores[sourcePosition]);
+            }
+        }
+        return layer.outputProjection().multiplyVector(context);
+    }
+
     private float[][] runMlp(float[][] input, SmolLM2ReferenceLayerWeights layer) {
         float[][] output = new float[input.length][config.hiddenSize()];
         for (int position = 0; position < input.length; position++) {
-            float[] gate = layer.gateProjection().multiplyVector(input[position]);
-            float[] up = layer.upProjection().multiplyVector(input[position]);
-            if (gate.length != up.length) {
-                throw new IllegalStateException("SmolLM2 gate and up projections must have the same width");
-            }
-            for (int i = 0; i < gate.length; i++) {
-                gate[i] = DecoderOnlyMath.fastSilu(gate[i]) * up[i];
-            }
-            output[position] = layer.downProjection().multiplyVector(gate);
+            output[position] = runMlpStep(input[position], layer);
         }
         return output;
+    }
+
+    private float[] runMlpStep(float[] input, SmolLM2ReferenceLayerWeights layer) {
+        float[] gate = layer.gateProjection().multiplyVector(input);
+        float[] up = layer.upProjection().multiplyVector(input);
+        if (gate.length != up.length) {
+            throw new IllegalStateException("SmolLM2 gate and up projections must have the same width");
+        }
+        for (int i = 0; i < gate.length; i++) {
+            gate[i] = DecoderOnlyMath.fastSilu(gate[i]) * up[i];
+        }
+        return layer.downProjection().multiplyVector(gate);
     }
 
     private float[] projectToLogits(float[] hidden) {
@@ -167,6 +270,17 @@ public final class SmolLM2ReferenceForwardPass {
         for (int i = 0; i < headDim; i++) {
             target[targetOffset + i] += weight * source[sourceOffset + i];
         }
+    }
+
+    private static float[] add(float[] left, float[] right) {
+        if (left.length != right.length) {
+            throw new IllegalArgumentException("hidden size mismatch");
+        }
+        float[] result = new float[left.length];
+        for (int i = 0; i < left.length; i++) {
+            result[i] = left[i] + right[i];
+        }
+        return result;
     }
 
     private static float[][] add(float[][] left, float[][] right) {

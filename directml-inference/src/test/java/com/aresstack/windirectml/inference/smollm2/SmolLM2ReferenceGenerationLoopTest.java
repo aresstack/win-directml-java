@@ -47,6 +47,33 @@ class SmolLM2ReferenceGenerationLoopTest {
         assertEquals(List.of(0), request.inputTokenIds());
     }
 
+    @Test
+    void kvCacheForwardMatchesFullSequenceForward() {
+        SmolLM2Weights weights = weightsSelectingTokenOne();
+        SmolLM2ReferenceForwardPass forwardPass = new SmolLM2ReferenceForwardPass(weights);
+        SmolLM2ReferenceKvCache kvCache = SmolLM2ReferenceKvCache.create(weights.config());
+
+        float[] firstLogits = forwardPass.logitsForLastToken(List.of(0), kvCache);
+        float[] cachedLogits = forwardPass.logitsForLastToken(List.of(0, 1), kvCache);
+        float[] fullLogits = forwardPass.logitsForLastToken(List.of(0, 1));
+
+        assertEquals(weights.config().vocabSize(), firstLogits.length);
+        assertEquals(2, kvCache.completedTokenCount());
+        assertArrayEquals(fullLogits, cachedLogits, 1.0e-6f);
+    }
+
+    @Test
+    void kvCacheRejectsMismatchedLayerProgress() {
+        SmolLM2Config config = config();
+        SmolLM2ReferenceKvCache kvCache = SmolLM2ReferenceKvCache.create(config);
+        kvCache.layer(0).append(new float[]{0.0f, 0.0f}, new float[]{0.0f, 0.0f});
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> kvCache.requireReadyForPosition(0));
+
+        assertTrue(exception.getMessage().contains("KV cache layer"));
+    }
+
     private static SmolLM2Weights weightsSelectingTokenOne() {
         return weightsWithLmHead(new float[]{
                 0.0f, 0.0f,
