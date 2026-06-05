@@ -21,4 +21,14 @@ class T5RuntimeRequestTest {
 
         assertTrue(error.getMessage().contains("maxNewTokens"));
     }
+    @Test
+    void greedyTextSuppressesDecoderControlTokensAndRequiresOneGeneratedTokenBeforeStop() {
+        T5SpecialTokens specialTokens = new T5SpecialTokens(0, 1, 0);
+
+        T5RuntimeRequest request = T5RuntimeRequest.greedyText(new int[]{3, 4}, 8, specialTokens);
+
+        assertTrue(request.suppressedTokenIds().contains(0));
+        assertEquals(1, request.minimumTokensBeforeStop());
+    }
+
 }

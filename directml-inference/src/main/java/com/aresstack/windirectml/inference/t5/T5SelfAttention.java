@@ -66,7 +66,6 @@ public final class T5SelfAttention {
                         continue;
                     }
                     float score = dot(query, key, token, source, head, innerSize, headDim);
-                    score /= Math.sqrt(headDim);
                     if (relativePositionBias != null) {
                         score += relativePositionBias.value(head, token, source, bidirectionalRelativeBias);
                     }

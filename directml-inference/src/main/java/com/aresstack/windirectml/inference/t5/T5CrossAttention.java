@@ -52,7 +52,6 @@ public final class T5CrossAttention {
                         continue;
                     }
                     float score = dot(query, key, token, source, head, innerSize, headDim);
-                    score /= Math.sqrt(headDim);
                     scores[source] = score;
                 }
                 T5ReferenceMath.softmaxInPlace(scores);

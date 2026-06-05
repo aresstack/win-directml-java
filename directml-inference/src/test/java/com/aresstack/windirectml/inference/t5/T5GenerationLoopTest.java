@@ -125,6 +125,21 @@ class T5GenerationLoopTest {
         assertArrayEquals(new int[]{1}, result.outputTokenIds());
     }
 
+
+    @Test
+    void textGenerationDoesNotStopOnFirstEosOrEmitDecoderStartToken() throws Exception {
+        T5Config config = T5TestFixtures.untiedConfig();
+        T5Runtime runtime = runtime(config, tensorsThatPreferEos(config));
+        T5RuntimeRequest request = T5RuntimeRequest.greedyText(new int[]{1, 2, 3}, 2, config.specialTokens());
+
+        T5RuntimeResult result = runtime.generate(request);
+
+        assertEquals(T5RuntimeResult.FinishReason.stop_token, result.finishReason());
+        assertEquals(2, result.generatedTokens());
+        assertNotEquals(config.decoderStartTokenId(), result.outputTokenIds()[0]);
+        assertEquals(config.eosTokenId(), result.outputTokenIds()[1]);
+    }
+
     @Test
     void rejectsSamplingOptionsInReferenceGeneration() throws Exception {
         T5Config config = T5TestFixtures.untiedConfig();

@@ -50,6 +50,7 @@ public final class T5GenerationLoop {
         for (int step = 0; step < request.maxNewTokens(); step++) {
             T5DecoderState state = decoderRunner.decodeStep(decoderTokenId, encoderOutput, cache);
             float[] logits = logitProjector.logits(state.lastHiddenState());
+            suppressControlTokens(logits, request, step);
             int nextTokenId = tokenSelector.select(logits);
             generated[generatedTokens] = nextTokenId;
             generatedTokens++;
@@ -62,6 +63,25 @@ public final class T5GenerationLoop {
         }
         return new T5RuntimeResult(Arrays.copyOf(generated, generatedTokens),
                 T5RuntimeResult.FinishReason.max_tokens, generatedTokens);
+    }
+
+    private static void suppressControlTokens(float[] logits, T5RuntimeRequest request, int step) {
+        for (Integer tokenId : request.suppressedTokenIds()) {
+            suppressToken(logits, tokenId);
+        }
+        if (step < request.minimumTokensBeforeStop()) {
+            for (int token = 0; token < logits.length; token++) {
+                if (request.stopTokenPolicy().shouldStop(token)) {
+                    suppressToken(logits, token);
+                }
+            }
+        }
+    }
+
+    private static void suppressToken(float[] logits, int tokenId) {
+        if (tokenId >= 0 && tokenId < logits.length) {
+            logits[tokenId] = -Float.MAX_VALUE;
+        }
     }
 
     private static void requireGreedyRequest(T5RuntimeRequest request) {

@@ -85,9 +85,9 @@ public final class T5InferenceEngine implements InferenceEngine {
             throw new InferenceException("T5 runtime is not initialized");
         }
         try {
-            String prompt = request.toFullPrompt();
+            String prompt = T5PromptTemplate.format(request);
             int[] inputTokens = truncate(tokenizer.encode(prompt), maxInputTokens);
-            T5RuntimeRequest runtimeRequest = T5RuntimeRequest.greedy(inputTokens,
+            T5RuntimeRequest runtimeRequest = T5RuntimeRequest.greedyText(inputTokens,
                     Math.min(request.getMaxTokens(), maxTokens), runtimePackage.metadata().specialTokens());
             long start = System.nanoTime();
             T5RuntimeResult result = runtime.generate(runtimeRequest);
