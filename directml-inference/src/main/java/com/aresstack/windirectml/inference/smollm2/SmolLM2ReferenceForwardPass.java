@@ -266,9 +266,7 @@ public final class SmolLM2ReferenceForwardPass {
         if (gate.length != up.length) {
             throw new IllegalStateException("SmolLM2 gate and up projections must have the same width");
         }
-        for (int i = 0; i < gate.length; i++) {
-            gate[i] = DecoderOnlyMath.fastSilu(gate[i]) * up[i];
-        }
+        SmolLM2ReferenceDenseOps.gatedSiluMultiply(gate, up);
         float[] output = layer.downProjection().multiplyVector(gate);
         profile.addMlpNanos(System.nanoTime() - mlpStart);
         return output;

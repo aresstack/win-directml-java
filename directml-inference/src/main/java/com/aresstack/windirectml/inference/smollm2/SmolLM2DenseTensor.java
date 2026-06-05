@@ -77,14 +77,7 @@ public final class SmolLM2DenseTensor {
                     + ": expected " + cols + " but got " + input.length);
         }
         float[] output = new float[rows];
-        for (int row = 0; row < rows; row++) {
-            float sum = 0.0f;
-            int rowOffset = row * cols;
-            for (int col = 0; col < cols; col++) {
-                sum += values[rowOffset + col] * input[col];
-            }
-            output[row] = sum;
-        }
+        SmolLM2ReferenceDenseOps.multiplyRows(values, rows, cols, input, output);
         return output;
     }
 
@@ -100,12 +93,7 @@ public final class SmolLM2DenseTensor {
             throw new IllegalArgumentException("Input width mismatch for " + name
                     + ": expected " + cols + " but got " + input.length);
         }
-        float sum = 0.0f;
-        int rowOffset = rowIndex * cols;
-        for (int col = 0; col < cols; col++) {
-            sum += values[rowOffset + col] * input[col];
-        }
-        return sum;
+        return SmolLM2ReferenceDenseOps.dot(values, rowIndex * cols, input, 0, cols);
     }
 
     private void requireRank(int expectedRank) {
