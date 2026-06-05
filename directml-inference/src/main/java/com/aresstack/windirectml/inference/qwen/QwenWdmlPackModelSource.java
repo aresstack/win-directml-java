@@ -3,8 +3,7 @@ package com.aresstack.windirectml.inference.qwen;
 import com.aresstack.windirectml.inference.model.ModelSource;
 import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
 import com.aresstack.windirectml.inference.model.RuntimeTensor;
-import com.aresstack.windirectml.inference.model.SourceTensor;
-import com.aresstack.windirectml.inference.model.SourceTensorCatalog;
+import com.aresstack.windirectml.inference.model.RuntimeTensorCatalog;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
@@ -86,13 +85,13 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
     }
 
     private QwenModelImport loadNativePayload(RuntimeModelPackage modelPackage) throws IOException {
-        Map<String, RuntimeTensor> runtimeTensors = modelPackage.mapPayloadTensors();
+        RuntimeTensorCatalog runtimeTensors = modelPackage.runtimeTensorCatalog();
         Map<String, OnnxTensor> inlineTensors = adaptRuntimeTensors(runtimeTensors);
         OnnxGraph graph = loadRuntimeGraph(modelPackage.manifest(), inlineTensors);
-        SourceTensorCatalog catalog = buildSourceTensorCatalog(runtimeTensors);
         log.info("wdmlpack native payload: mapped {} tensors from package payload ({})",
                 inlineTensors.size(), QwenWdmlPackCompiler.formatBytes(modelPackage.header().payloadLength()));
-        return new QwenModelImport("wdmlpack-payload", packagePath, graph, Map.of(), inlineTensors, catalog);
+        return new QwenModelImport("wdmlpack-payload", packagePath, graph, Map.of(), inlineTensors,
+                runtimeTensors.toSourceTensorCatalog());
     }
 
     @SuppressWarnings("unchecked")
@@ -140,16 +139,7 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         modelPackage.validateSourceFingerprint(sourceOnnx);
     }
 
-    private SourceTensorCatalog buildSourceTensorCatalog(Map<String, RuntimeTensor> runtimeTensors) {
-        List<SourceTensor> tensors = new ArrayList<>();
-        for (RuntimeTensor tensor : runtimeTensors.values()) {
-            tensors.add(SourceTensor.inline(tensor.name(), tensor.dataType(), tensor.dims(),
-                    tensor.rawByteLength(), tensor.hasPayload() ? tensor.rawDataBuffer() : null));
-        }
-        return new SourceTensorCatalog(tensors);
-    }
-
-    private Map<String, OnnxTensor> adaptRuntimeTensors(Map<String, RuntimeTensor> runtimeTensors) {
+    private Map<String, OnnxTensor> adaptRuntimeTensors(RuntimeTensorCatalog runtimeTensors) {
         Map<String, OnnxTensor> tensors = new LinkedHashMap<>();
         for (RuntimeTensor tensor : runtimeTensors.values()) {
             if (tensor.hasPayload()) {
