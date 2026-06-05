@@ -54,7 +54,20 @@ class SmolLM2RuntimeTest {
             assertEquals(List.of(0), result.generatedTokenIds());
             assertEquals(1, result.tokensGenerated());
             assertEquals("length", result.finishReason());
+            assertTrue(result.diagnostics().inputTokenCount() > 0);
+            assertEquals(1, result.diagnostics().outputTokenCount());
+            assertEquals(List.of(0), result.diagnostics().generatedTokenIds());
+            assertFalse(result.diagnostics().immediateEos());
         }
+    }
+
+    @Test
+    void diagnosticsPreviewLimitsGeneratedTokenIds() {
+        SmolLM2GenerationDiagnostics diagnostics = new SmolLM2GenerationDiagnostics(
+                3, 4, 7, 8, List.of(1, 2, 3, 4), "length", false, false);
+
+        assertEquals("[1, 2, ...]", diagnostics.generatedTokenIdsPreview(2));
+        assertEquals("[]", diagnostics.generatedTokenIdsPreview(0));
     }
 
     @Test

@@ -45,7 +45,8 @@ public final class SmolLM2ReferenceGenerationLoop {
                 toList(generatedTokens),
                 fullTokenIds,
                 generatedTokens.count(),
-                finishReason);
+                finishReason,
+                request.maxNewTokens());
     }
 
 

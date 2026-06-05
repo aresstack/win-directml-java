@@ -226,8 +226,17 @@ public final class SummarizerPanel extends JPanel {
         appendResult(result.text());
         appendResult("");
         appendResult("Generation completed");
+        appendResult("  Prompt tokens: " + result.diagnostics().inputTokenCount());
         appendResult("  Output tokens: " + result.outputTokens());
+        appendResult("  Full tokens: " + result.diagnostics().fullTokenCount());
         appendResult("  Finish reason: " + result.finishReason());
+        appendResult("  Generated token IDs: " + result.diagnostics().generatedTokenIdsPreview(32));
+        if (result.diagnostics().immediateEos()) {
+            appendResult("  Warning: generation stopped after an immediate EOS token.");
+        }
+        if (result.diagnostics().emptyDecodedOutput() && result.outputTokens() > 0) {
+            appendResult("  Warning: generated tokens decoded to an empty visible string.");
+        }
     }
 
 

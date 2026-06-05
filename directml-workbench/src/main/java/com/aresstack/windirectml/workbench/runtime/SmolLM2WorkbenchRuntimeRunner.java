@@ -2,6 +2,7 @@ package com.aresstack.windirectml.workbench.runtime;
 
 import com.aresstack.windirectml.inference.smollm2.SmolLM2CompileOptions;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationOptions;
+import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationDiagnostics;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2Runtime;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2RuntimePackage;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2RuntimeRequest;
@@ -56,7 +57,8 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     result.tokensGenerated(),
                     result.finishReason(),
                     runtimePackage.modelPackage().runtimeLoadMode(),
-                    packagePath);
+                    packagePath,
+                    result.diagnostics());
         }
     }
 
@@ -118,12 +120,14 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                          int outputTokens,
                          String finishReason,
                          String runtimeMode,
-                         Path packagePath) {
+                         Path packagePath,
+                         SmolLM2GenerationDiagnostics diagnostics) {
         public Result {
             text = text == null ? "" : text;
             finishReason = finishReason == null ? "" : finishReason;
             runtimeMode = runtimeMode == null || runtimeMode.isBlank() ? "reference" : runtimeMode;
             packagePath = Objects.requireNonNull(packagePath, "packagePath");
+            diagnostics = Objects.requireNonNull(diagnostics, "diagnostics");
         }
     }
 }

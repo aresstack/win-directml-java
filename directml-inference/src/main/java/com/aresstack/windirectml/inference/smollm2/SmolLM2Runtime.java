@@ -51,7 +51,8 @@ public final class SmolLM2Runtime implements AutoCloseable {
                 generatedText,
                 tokenResult.generatedTokenIds(),
                 tokenResult.tokensGenerated(),
-                tokenResult.finishReason());
+                tokenResult.finishReason(),
+                SmolLM2GenerationDiagnostics.fromTokenResult(tokenResult, generatedText));
     }
 
     /**
