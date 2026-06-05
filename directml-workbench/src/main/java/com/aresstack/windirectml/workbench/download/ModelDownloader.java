@@ -1,8 +1,16 @@
 package com.aresstack.windirectml.workbench.download;
 
+import com.aresstack.winproxy.ProxyConfiguration;
+import com.aresstack.winproxy.ProxyResult;
+import com.aresstack.winproxy.WindowsProxyResolver;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.SocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -12,6 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -227,12 +236,27 @@ public final class ModelDownloader {
                                             boolean force, Consumer<String> logger,
                                             ProgressListener progressListener)
             throws IOException, InterruptedException {
+        downloadFromManifest(manifest, targetDir, force, logger, progressListener, ProxyConfiguration.defaults());
+    }
+
+    /**
+     * Download model files using a manifest, byte progress and a workbench proxy configuration.
+     *
+     * @param manifest           the download manifest with effective URLs
+     * @param targetDir          local directory to save files into
+     * @param force              if true, overwrite existing files
+     * @param logger             callback for progress messages
+     * @param progressListener   byte-level progress callback for each manifest file
+     * @param proxyConfiguration Windows proxy configuration for outbound HTTP requests
+     */
+    public static void downloadFromManifest(ModelDownloadManifest manifest, Path targetDir,
+                                            boolean force, Consumer<String> logger,
+                                            ProgressListener progressListener,
+                                            ProxyConfiguration proxyConfiguration)
+            throws IOException, InterruptedException {
         Files.createDirectories(targetDir);
 
-        var client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
+        HttpClient client = createHttpClient(proxyConfiguration);
 
         ProgressListener listener = progressListener == null ? NO_PROGRESS : progressListener;
         int totalFiles = manifest.files().size();
@@ -241,6 +265,36 @@ public final class ModelDownloader {
             downloadFileFromUrl(client, desc.currentUrl(), desc.localFilename(),
                     targetDir, force, logger, desc.required(), i, totalFiles, listener);
         }
+    }
+
+    private static HttpClient createHttpClient(ProxyConfiguration proxyConfiguration) {
+        ProxyConfiguration configuration = proxyConfiguration == null
+                ? ProxyConfiguration.defaults() : proxyConfiguration;
+        WindowsProxyResolver resolver = new WindowsProxyResolver(configuration);
+        return HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(30))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .proxy(new ProxySelector() {
+                    @Override
+                    public List<Proxy> select(URI uri) {
+                        try {
+                            ProxyResult result = resolver.resolve(uri.toString());
+                            if (result == null || result.isDirect()) {
+                                return Collections.singletonList(Proxy.NO_PROXY);
+                            }
+                            return Collections.singletonList(new Proxy(Proxy.Type.HTTP,
+                                    InetSocketAddress.createUnresolved(result.getHost(), result.getPort())));
+                        } catch (RuntimeException ex) {
+                            return Collections.singletonList(Proxy.NO_PROXY);
+                        }
+                    }
+
+                    @Override
+                    public void connectFailed(URI uri, SocketAddress sa, IOException ioe) {
+                        // Best-effort proxy resolution for downloads; the download request reports failures.
+                    }
+                })
+                .build();
     }
 
     private static void downloadFileFromUrl(HttpClient client, String url,

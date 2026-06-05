@@ -20,6 +20,7 @@ public final class WorkbenchFrame extends JFrame {
 
         var tabs = new JTabbedPane();
         tabs.addTab("Config", new ConfigPanel(model));
+        tabs.addTab("Proxy", new ProxyPanel(model));
         tabs.addTab("Download", new DownloadPanel(model));
         tabs.addTab("Embeddings", new EmbeddingsPanel(model));
         tabs.addTab("Batch Embeddings", new BatchEmbeddingsPanel(model));

@@ -531,7 +531,8 @@ public final class DownloadPanel extends JPanel {
                 try {
                     ModelDownloader.downloadFromManifest(manifest, targetDir, force,
                             message -> publish(DownloadUiEvent.message(message)),
-                            event -> publish(progressTracker.update(event)));
+                            event -> publish(progressTracker.update(event)),
+                            model.getProxyConfiguration());
                     publish(DownloadUiEvent.progress(100, "Done"));
                     return true;
                 } catch (Exception ex) {
