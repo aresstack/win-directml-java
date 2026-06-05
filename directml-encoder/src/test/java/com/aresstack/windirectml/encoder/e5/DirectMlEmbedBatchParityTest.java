@@ -4,6 +4,7 @@ import com.aresstack.windirectml.encoder.EmbeddingRequest;
 import com.aresstack.windirectml.encoder.EmbeddingVector;
 import com.aresstack.windirectml.encoder.EncoderTokenizer;
 import com.aresstack.windirectml.encoder.PoolingStrategy;
+import com.aresstack.windirectml.encoder.DirectMlTestAssumptions;
 import com.aresstack.windirectml.encoder.bert.BertCpuEncoderWeights;
 import com.aresstack.windirectml.encoder.bert.BertCpuLayerWeights;
 import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
@@ -135,14 +136,15 @@ class DirectMlEmbedBatchParityTest {
         List<EmbeddingRequest> reqs = new ArrayList<>();
         for (String t : texts) reqs.add(new EmbeddingRequest(t, true, null));
 
-        try (DirectMlContextImpl ctx = new DirectMlContextImpl("embedBatch-parity")) {
-            ctx.initialize();
-            assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
-                    "No DirectML device available on this adapter");
+        try {
+            try (DirectMlContextImpl ctx = new DirectMlContextImpl("embedBatch-parity")) {
+                ctx.initialize();
+                assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
+                        "No DirectML device available on this adapter");
 
-            try (CpuBertEncoder cpu = new CpuBertEncoder(cfg, w, tok);
-                 DirectMlBertEncoder gpu = DirectMlBertEncoder.build(
-                         ctx, /* ownsCtx */ false, cfg, w, tok)) {
+                try (CpuBertEncoder cpu = new CpuBertEncoder(cfg, w, tok);
+                     DirectMlBertEncoder gpu = DirectMlBertEncoder.build(
+                             ctx, /* ownsCtx */ false, cfg, w, tok)) {
 
                 // 1) Reference: CPU sequential.
                 List<EmbeddingVector> cpuSeq = new ArrayList<>();
@@ -187,7 +189,11 @@ class DirectMlEmbedBatchParityTest {
                 assertEquals(batchCacheBefore + 1, batchCacheAfter,
                         "embedBatch must materialise exactly one (bucket, batch) entry "
                                 + "for a single-bucket / single-N call");
+                }
             }
+        } catch (Exception e) {
+            DirectMlTestAssumptions.skipIfHostDirectMlUnavailable(e);
+            throw e;
         }
     }
 
@@ -203,13 +209,14 @@ class DirectMlEmbedBatchParityTest {
         // bucket. To prove the (bucket, batch) cache really keys on both
         // dimensions we feed the encoder twice with different N values and
         // assert two distinct cache entries appear.
-        try (DirectMlContextImpl ctx = new DirectMlContextImpl("embedBatch-batch-sizes")) {
-            ctx.initialize();
-            assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
-                    "No DirectML device available on this adapter");
+        try {
+            try (DirectMlContextImpl ctx = new DirectMlContextImpl("embedBatch-batch-sizes")) {
+                ctx.initialize();
+                assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
+                        "No DirectML device available on this adapter");
 
-            try (DirectMlBertEncoder gpu = DirectMlBertEncoder.build(
-                    ctx, /* ownsCtx */ false, cfg, w, tok)) {
+                try (DirectMlBertEncoder gpu = DirectMlBertEncoder.build(
+                        ctx, /* ownsCtx */ false, cfg, w, tok)) {
                 List<EmbeddingRequest> two = List.of(
                         new EmbeddingRequest("alpha", true, null),
                         new EmbeddingRequest("beta", true, null));
@@ -226,7 +233,11 @@ class DirectMlEmbedBatchParityTest {
                 assertEquals(2, gpu.cachedBatchStackCount(),
                         "two distinct (bucket=B, batch=2) and (bucket=B, batch=3) "
                                 + "entries expected, even though the bucket is identical");
+                }
             }
+        } catch (Exception e) {
+            DirectMlTestAssumptions.skipIfHostDirectMlUnavailable(e);
+            throw e;
         }
     }
 
@@ -346,6 +357,9 @@ class DirectMlEmbedBatchParityTest {
                             "multi-bucket batched cos[" + i + "] vs CPU must be > 0.999, was " + cos);
                 }
             }
+        } catch (Exception e) {
+            DirectMlTestAssumptions.skipIfHostDirectMlUnavailable(e);
+            throw e;
         }
     }
 
@@ -397,6 +411,9 @@ class DirectMlEmbedBatchParityTest {
                             "CPU vs DML-batch cosine[" + i + "] (normalize=false) must be > 0.999, was " + cos);
                 }
             }
+        } catch (Exception e) {
+            DirectMlTestAssumptions.skipIfHostDirectMlUnavailable(e);
+            throw e;
         }
     }
 
@@ -458,6 +475,9 @@ class DirectMlEmbedBatchParityTest {
                             "mixed-normalize batched cos[" + i + "] vs CPU must be > 0.999, was " + cos);
                 }
             }
+        } catch (Exception e) {
+            DirectMlTestAssumptions.skipIfHostDirectMlUnavailable(e);
+            throw e;
         }
     }
 
@@ -483,4 +503,3 @@ class DirectMlEmbedBatchParityTest {
         return Math.sqrt(s);
     }
 }
-

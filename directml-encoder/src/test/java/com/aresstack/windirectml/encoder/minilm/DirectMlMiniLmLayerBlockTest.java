@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.encoder.minilm;
 
+import com.aresstack.windirectml.encoder.DirectMlTestAssumptions;
 import com.aresstack.windirectml.runtime.CpuTensor;
 import com.aresstack.windirectml.runtime.DirectMlContextImpl;
 import com.aresstack.windirectml.runtime.DirectMlRuntimeException;
@@ -172,6 +173,9 @@ class DirectMlMiniLmLayerBlockTest {
                 assertTrue(maxRel < 1e-2f,
                         "max relative error too large: " + maxRel);
             }
+        } catch (RuntimeException e) {
+            DirectMlTestAssumptions.skipIfHostDirectMlUnavailable(e);
+            throw e;
         } finally {
             ctx.close();
         }
@@ -236,4 +240,3 @@ class DirectMlMiniLmLayerBlockTest {
         return out;
     }
 }
-

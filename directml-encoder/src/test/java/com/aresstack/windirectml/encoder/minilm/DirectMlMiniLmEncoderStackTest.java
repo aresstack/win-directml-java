@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.encoder.minilm;
 
+import com.aresstack.windirectml.encoder.DirectMlTestAssumptions;
 import com.aresstack.windirectml.runtime.CpuTensor;
 import com.aresstack.windirectml.runtime.DirectMlContextImpl;
 import com.aresstack.windirectml.runtime.DirectMlRuntimeException;
@@ -218,6 +219,9 @@ class DirectMlMiniLmEncoderStackTest {
                     }
                 }
             }
+        } catch (RuntimeException e) {
+            DirectMlTestAssumptions.skipIfHostDirectMlUnavailable(e);
+            throw e;
         } finally {
             ctx.close();
         }
@@ -282,4 +286,3 @@ class DirectMlMiniLmEncoderStackTest {
         return out;
     }
 }
-

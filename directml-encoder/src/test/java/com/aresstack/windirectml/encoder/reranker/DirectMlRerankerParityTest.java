@@ -2,6 +2,7 @@ package com.aresstack.windirectml.encoder.reranker;
 
 import com.aresstack.windirectml.encoder.EncoderTokenizer;
 import com.aresstack.windirectml.encoder.PoolingStrategy;
+import com.aresstack.windirectml.encoder.DirectMlTestAssumptions;
 import com.aresstack.windirectml.encoder.bert.BertCpuEncoderWeights;
 import com.aresstack.windirectml.encoder.bert.BertCpuLayerWeights;
 import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
@@ -168,22 +169,27 @@ class DirectMlRerankerParityTest {
         RerankerCpuWeights w = tinyWeights(cfg, 9001L);
         TinyPairTokenizer tok = new TinyPairTokenizer(cfg.vocabSize());
 
-        try (DirectMlContextImpl ctx = new DirectMlContextImpl("reranker-parity")) {
-            ctx.initialize();
-            assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
-                    "No DirectML device available on this adapter");
+        try {
+            try (DirectMlContextImpl ctx = new DirectMlContextImpl("reranker-parity")) {
+                ctx.initialize();
+                assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
+                        "No DirectML device available on this adapter");
 
-            try (CpuReranker cpu = new CpuReranker(w, tok);
-                 DirectMlReranker gpu = DirectMlReranker.build(ctx, /* ownsCtx */ false, w, tok)) {
+                try (CpuReranker cpu = new CpuReranker(w, tok);
+                     DirectMlReranker gpu = DirectMlReranker.build(ctx, /* ownsCtx */ false, w, tok)) {
 
-                double sCpu = cpu.scorePair("query alpha", "document beta gamma");
-                List<RerankResult> rGpu = gpu.rerank(new RerankRequest(
-                        "query alpha", Arrays.asList("document beta gamma"), 1));
-                double sGpu = rGpu.get(0).score();
+                    double sCpu = cpu.scorePair("query alpha", "document beta gamma");
+                    List<RerankResult> rGpu = gpu.rerank(new RerankRequest(
+                            "query alpha", Arrays.asList("document beta gamma"), 1));
+                    double sGpu = rGpu.get(0).score();
 
-                assertEquals(sCpu, sGpu, 1e-3,
-                        "CPU↔DirectML reranker score must agree (cpu=" + sCpu + ", gpu=" + sGpu + ")");
+                    assertEquals(sCpu, sGpu, 1e-3,
+                            "CPU↔DirectML reranker score must agree (cpu=" + sCpu + ", gpu=" + sGpu + ")");
+                }
             }
+        } catch (Exception e) {
+            DirectMlTestAssumptions.skipIfHostDirectMlUnavailable(e);
+            throw e;
         }
     }
 
@@ -195,32 +201,37 @@ class DirectMlRerankerParityTest {
         RerankerCpuWeights w = tinyWeights(cfg, 1337L);
         TinyPairTokenizer tok = new TinyPairTokenizer(cfg.vocabSize());
 
-        try (DirectMlContextImpl ctx = new DirectMlContextImpl("reranker-parity-rank")) {
-            ctx.initialize();
-            assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
-                    "No DirectML device available on this adapter");
+        try {
+            try (DirectMlContextImpl ctx = new DirectMlContextImpl("reranker-parity-rank")) {
+                ctx.initialize();
+                assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
+                        "No DirectML device available on this adapter");
 
-            try (CpuReranker cpu = new CpuReranker(w, tok);
-                 DirectMlReranker gpu = DirectMlReranker.build(ctx, /* ownsCtx */ false, w, tok)) {
+                try (CpuReranker cpu = new CpuReranker(w, tok);
+                     DirectMlReranker gpu = DirectMlReranker.build(ctx, /* ownsCtx */ false, w, tok)) {
 
-                List<String> docs = Arrays.asList(
-                        "alpha bravo charlie",
-                        "delta echo foxtrot",
-                        "golf hotel india",
-                        "juliet kilo lima");
-                RerankRequest req = new RerankRequest("query xyz", docs, 0);
-                List<RerankResult> cpuOrder = cpu.rerank(req);
-                List<RerankResult> gpuOrder = gpu.rerank(req);
-                assertEquals(cpuOrder.size(), gpuOrder.size());
-                for (int i = 0; i < cpuOrder.size(); i++) {
-                    assertEquals(cpuOrder.get(i).originalIndex(), gpuOrder.get(i).originalIndex(),
-                            "ranking position " + i + " must match (cpu="
-                                    + cpuOrder + ", gpu=" + gpuOrder + ")");
-                    assertEquals(cpuOrder.get(i).score(), gpuOrder.get(i).score(), 1e-3,
-                            "score at position " + i + " must match");
+                    List<String> docs = Arrays.asList(
+                            "alpha bravo charlie",
+                            "delta echo foxtrot",
+                            "golf hotel india",
+                            "juliet kilo lima");
+                    RerankRequest req = new RerankRequest("query xyz", docs, 0);
+                    List<RerankResult> cpuOrder = cpu.rerank(req);
+                    List<RerankResult> gpuOrder = gpu.rerank(req);
+                    assertEquals(cpuOrder.size(), gpuOrder.size());
+                    for (int i = 0; i < cpuOrder.size(); i++) {
+                        assertEquals(cpuOrder.get(i).originalIndex(), gpuOrder.get(i).originalIndex(),
+                                "ranking position " + i + " must match (cpu="
+                                        + cpuOrder + ", gpu=" + gpuOrder + ")");
+                        assertEquals(cpuOrder.get(i).score(), gpuOrder.get(i).score(), 1e-3,
+                                "score at position " + i + " must match");
+                    }
+                    assertTrue(gpu.cachedStackCount() >= 1, "expected at least one cached stack");
                 }
-                assertTrue(gpu.cachedStackCount() >= 1, "expected at least one cached stack");
             }
+        } catch (Exception e) {
+            DirectMlTestAssumptions.skipIfHostDirectMlUnavailable(e);
+            throw e;
         }
     }
 
@@ -240,4 +251,3 @@ class DirectMlRerankerParityTest {
         return new float[n];
     }
 }
-

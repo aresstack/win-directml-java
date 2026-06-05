@@ -4,6 +4,7 @@ import com.aresstack.windirectml.encoder.EmbeddingRequest;
 import com.aresstack.windirectml.encoder.EmbeddingVector;
 import com.aresstack.windirectml.encoder.EncoderTokenizer;
 import com.aresstack.windirectml.encoder.PoolingStrategy;
+import com.aresstack.windirectml.encoder.DirectMlTestAssumptions;
 import com.aresstack.windirectml.encoder.bert.BertCpuEncoderWeights;
 import com.aresstack.windirectml.encoder.bert.BertCpuLayerWeights;
 import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
@@ -132,32 +133,37 @@ class E5SyntheticParityTest {
         BertCpuEncoderWeights w = randomWeights(cfg, 4242L);
         TinyTokenizer tok = new TinyTokenizer(cfg.vocabSize());
 
-        try (DirectMlContextImpl ctx = new DirectMlContextImpl("e5-parity")) {
-            ctx.initialize();
-            assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
-                    "No DirectML device available on this adapter");
+        try {
+            try (DirectMlContextImpl ctx = new DirectMlContextImpl("e5-parity")) {
+                ctx.initialize();
+                assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
+                        "No DirectML device available on this adapter");
 
-            try (CpuBertEncoder cpu = new CpuBertEncoder(cfg, w, tok);
-                 DirectMlBertEncoder gpu = DirectMlBertEncoder.build(ctx, /* ownsCtx */ false,
-                         cfg, w, tok)) {
+                try (CpuBertEncoder cpu = new CpuBertEncoder(cfg, w, tok);
+                     DirectMlBertEncoder gpu = DirectMlBertEncoder.build(ctx, /* ownsCtx */ false,
+                             cfg, w, tok)) {
 
-                String text = "the quick brown fox jumps";
-                EmbeddingVector vCpu = cpu.embed(new EmbeddingRequest(text, true, E5Prefixes.QUERY));
-                EmbeddingVector vGpu = gpu.embed(new EmbeddingRequest(text, true, E5Prefixes.QUERY));
+                    String text = "the quick brown fox jumps";
+                    EmbeddingVector vCpu = cpu.embed(new EmbeddingRequest(text, true, E5Prefixes.QUERY));
+                    EmbeddingVector vGpu = gpu.embed(new EmbeddingRequest(text, true, E5Prefixes.QUERY));
 
-                assertEquals(cfg.outputDimension(), vCpu.dimension());
-                assertEquals(cfg.outputDimension(), vGpu.dimension());
+                    assertEquals(cfg.outputDimension(), vCpu.dimension());
+                    assertEquals(cfg.outputDimension(), vGpu.dimension());
 
-                double cos = CosineSimilarity.compute(vCpu.values(), vGpu.values());
-                assertTrue(cos > 0.999,
-                        "CPU↔DirectML cosine on synthetic E5 must be > 0.999, was " + cos);
+                    double cos = CosineSimilarity.compute(vCpu.values(), vGpu.values());
+                    assertTrue(cos > 0.999,
+                            "CPU↔DirectML cosine on synthetic E5 must be > 0.999, was " + cos);
 
-                // Both must be unit-norm (normalize=true was passed)
-                assertTrue(Math.abs(norm(vCpu.values()) - 1.0) < 1e-4,
-                        "CPU E5 output must be unit-norm");
-                assertTrue(Math.abs(norm(vGpu.values()) - 1.0) < 1e-4,
-                        "DirectML E5 output must be unit-norm");
+                    // Both must be unit-norm (normalize=true was passed)
+                    assertTrue(Math.abs(norm(vCpu.values()) - 1.0) < 1e-4,
+                            "CPU E5 output must be unit-norm");
+                    assertTrue(Math.abs(norm(vGpu.values()) - 1.0) < 1e-4,
+                            "DirectML E5 output must be unit-norm");
+                }
             }
+        } catch (Exception e) {
+            DirectMlTestAssumptions.skipIfHostDirectMlUnavailable(e);
+            throw e;
         }
     }
 
@@ -205,4 +211,3 @@ class E5SyntheticParityTest {
         return Math.sqrt(s);
     }
 }
-
