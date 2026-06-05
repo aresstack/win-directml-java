@@ -12,6 +12,7 @@ import com.aresstack.windirectml.inference.SummaryRequest;
 import com.aresstack.windirectml.inference.qwen.QwenInferenceEngine;
 import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
 import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
+import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationProfile;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.runtime.SmolLM2WorkbenchRuntimeRunner;
 
@@ -235,11 +236,20 @@ public final class SummarizerPanel extends JPanel {
         appendResult("OUTPUT:");
         appendResult(result.text());
         appendResult("");
-        appendResult("Generation completed");
+        SmolLM2GenerationProfile profile = result.diagnostics().profile();
+        appendResult("Generation completed in " + profile.runtimeMillis() + " ms");
         appendResult("  Prompt tokens: " + result.diagnostics().inputTokenCount());
         appendResult("  Output tokens: " + result.outputTokens());
         appendResult("  Full tokens: " + result.diagnostics().fullTokenCount());
         appendResult("  Finish reason: " + result.finishReason());
+        appendResult("  SmolLM2 profile runtime: " + profile.runtimeMillis() + " ms");
+        appendResult("    tokenize: " + profile.tokenizeMillis() + " ms");
+        appendResult("    prefill: " + profile.prefillMillis() + " ms");
+        appendResult("    decoder steps: " + profile.decoderStepMillis() + " ms");
+        appendResult("    lm head: " + profile.lmHeadMillis() + " ms");
+        appendResult("    token select: " + profile.tokenSelectMillis() + " ms");
+        appendResult("    detokenize: " + profile.detokenizeMillis() + " ms");
+        appendResult("    avg/token runtime: " + profile.averageTokenRuntimeMillis(result.outputTokens()) + " ms");
         appendResult("  Generated token IDs: " + result.diagnostics().generatedTokenIdsPreview(32));
         if (result.diagnostics().immediateEos()) {
             appendResult("  Warning: generation stopped after an immediate EOS token.");

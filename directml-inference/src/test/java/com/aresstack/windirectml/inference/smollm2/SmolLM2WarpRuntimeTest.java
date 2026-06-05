@@ -14,17 +14,17 @@ class SmolLM2WarpRuntimeTest {
     Path tempDir;
 
     @Test
-    void defaultWarpRuntimeReportsMissingNativeExecutor() throws Exception {
+    void defaultWarpRuntimeReportsWarpProbeWithoutExecutableKernels() throws Exception {
         try (SmolLM2WarpRuntime runtime = SmolLM2WarpRuntime.prepare(createExecutablePackage(), 16)) {
             assertFalse(runtime.executable());
-            assertTrue(runtime.status().reason().contains(SmolLM2WarpExecutorFactory.EXECUTOR_CLASS_PROPERTY));
+            assertFalse(runtime.status().reason().isBlank());
             assertFalse(runtime.plan().bufferPlan().entries().isEmpty());
             assertFalse(runtime.uploadManifest().weightEntries().isEmpty());
             assertEquals(runtime.plan().bufferPlan().totalWeightBytes(), runtime.uploadManifest().totalUploadBytes());
 
             SmolLM2RuntimeUnsupportedException exception = assertThrows(SmolLM2RuntimeUnsupportedException.class,
                     () -> runtime.generateTokenIds(new SmolLM2TokenRuntimeRequest(List.of(0), 1, null)));
-            assertTrue(exception.getMessage().contains(SmolLM2WarpExecutorFactory.EXECUTOR_CLASS_PROPERTY));
+            assertEquals(runtime.status().reason(), exception.getMessage());
         }
     }
 

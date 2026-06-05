@@ -12,7 +12,8 @@ public record SmolLM2GenerationDiagnostics(int inputTokenCount,
                                            List<Integer> generatedTokenIds,
                                            String finishReason,
                                            boolean immediateEos,
-                                           boolean emptyDecodedOutput) {
+                                           boolean emptyDecodedOutput,
+                                           SmolLM2GenerationProfile profile) {
 
     public SmolLM2GenerationDiagnostics {
         if (inputTokenCount < 0) {
@@ -30,6 +31,19 @@ public record SmolLM2GenerationDiagnostics(int inputTokenCount,
 
         generatedTokenIds = generatedTokenIds == null ? List.of() : List.copyOf(generatedTokenIds);
         finishReason = finishReason == null ? "" : finishReason;
+        profile = profile == null ? SmolLM2GenerationProfile.empty() : profile;
+    }
+
+    public SmolLM2GenerationDiagnostics(int inputTokenCount,
+                                         int outputTokenCount,
+                                         int fullTokenCount,
+                                         int maxNewTokens,
+                                         List<Integer> generatedTokenIds,
+                                         String finishReason,
+                                         boolean immediateEos,
+                                         boolean emptyDecodedOutput) {
+        this(inputTokenCount, outputTokenCount, fullTokenCount, maxNewTokens, generatedTokenIds, finishReason,
+                immediateEos, emptyDecodedOutput, SmolLM2GenerationProfile.empty());
     }
 
     /**
@@ -37,6 +51,18 @@ public record SmolLM2GenerationDiagnostics(int inputTokenCount,
      */
     public static SmolLM2GenerationDiagnostics fromTokenResult(SmolLM2TokenRuntimeResult result,
                                                                String generatedText) {
+        if (result == null) {
+            return empty(generatedText);
+        }
+        return fromTokenResult(result, generatedText, result.profile());
+    }
+
+    /**
+     * Create diagnostics from the token generation result, decoded visible text and explicit timing profile.
+     */
+    public static SmolLM2GenerationDiagnostics fromTokenResult(SmolLM2TokenRuntimeResult result,
+                                                               String generatedText,
+                                                               SmolLM2GenerationProfile profile) {
         if (result == null) {
             return empty(generatedText);
         }
@@ -53,11 +79,12 @@ public record SmolLM2GenerationDiagnostics(int inputTokenCount,
                 inputTokenIds.size(),
                 result.tokensGenerated(),
                 fullTokenIds.size(),
-                readMaxNewTokens(result),
+                result.maxNewTokens(),
                 generatedTokenIds,
                 finishReason,
                 immediateEos,
-                emptyDecodedOutput);
+                emptyDecodedOutput,
+                profile);
     }
 
     /**
@@ -93,14 +120,7 @@ public record SmolLM2GenerationDiagnostics(int inputTokenCount,
                 List.of(),
                 "",
                 false,
-                generatedText == null || generatedText.isEmpty());
-    }
-
-    private static int readMaxNewTokens(SmolLM2TokenRuntimeResult result) {
-        try {
-            return (Integer) result.getClass().getMethod("maxNewTokens").invoke(result);
-        } catch (ReflectiveOperationException ignored) {
-            return Math.max(0, result.tokensGenerated());
-        }
+                generatedText == null || generatedText.isEmpty(),
+                SmolLM2GenerationProfile.empty());
     }
 }

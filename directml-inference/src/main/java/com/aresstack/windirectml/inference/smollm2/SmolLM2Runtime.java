@@ -83,20 +83,33 @@ public final class SmolLM2Runtime implements AutoCloseable {
 
     public SmolLM2RuntimeResult generate(SmolLM2RuntimeRequest request) {
         Objects.requireNonNull(request, "request");
+        long runtimeStart = System.nanoTime();
         ensureOpen();
         SmolLM2Tokenizer activeTokenizer = tokenizer().orElseThrow(
                 () -> new SmolLM2RuntimeUnsupportedException(TOKENIZER_REQUIRED_MESSAGE));
+
+        long tokenizeStart = System.nanoTime();
         String renderedPrompt = chatPromptTemplate.renderUserPrompt(request.prompt());
         List<Integer> inputTokenIds = encodePrompt(renderedPrompt, activeTokenizer);
+        long tokenizeNanos = System.nanoTime() - tokenizeStart;
+
         SmolLM2TokenRuntimeResult tokenResult = generateTokenIds(new SmolLM2TokenRuntimeRequest(
                 inputTokenIds, request.maxNewTokens(), request.options()));
+
+        long detokenizeStart = System.nanoTime();
         String generatedText = activeTokenizer.decode(toIntArray(tokenResult.generatedTokenIds()), true);
+        long detokenizeNanos = System.nanoTime() - detokenizeStart;
+
+        SmolLM2GenerationProfile profile = tokenResult.profile().withTextTimings(
+                System.nanoTime() - runtimeStart,
+                tokenizeNanos,
+                detokenizeNanos);
         return new SmolLM2RuntimeResult(
                 generatedText,
                 tokenResult.generatedTokenIds(),
                 tokenResult.tokensGenerated(),
                 tokenResult.finishReason(),
-                SmolLM2GenerationDiagnostics.fromTokenResult(tokenResult, generatedText));
+                SmolLM2GenerationDiagnostics.fromTokenResult(tokenResult, generatedText, profile));
     }
 
     /**

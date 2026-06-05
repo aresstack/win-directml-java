@@ -10,12 +10,14 @@ public record SmolLM2TokenRuntimeResult(List<Integer> inputTokenIds,
                                         List<Integer> fullTokenIds,
                                         int tokensGenerated,
                                         String finishReason,
-                                        int maxNewTokens) {
+                                        int maxNewTokens,
+                                        SmolLM2GenerationProfile profile) {
     public SmolLM2TokenRuntimeResult {
         inputTokenIds = inputTokenIds == null ? List.of() : List.copyOf(inputTokenIds);
         generatedTokenIds = generatedTokenIds == null ? List.of() : List.copyOf(generatedTokenIds);
         fullTokenIds = fullTokenIds == null ? List.of() : List.copyOf(fullTokenIds);
         finishReason = finishReason == null ? "" : finishReason;
+        profile = profile == null ? SmolLM2GenerationProfile.empty() : profile;
         if (tokensGenerated < 0) {
             throw new IllegalArgumentException("tokensGenerated must not be negative");
         }
@@ -28,8 +30,19 @@ public record SmolLM2TokenRuntimeResult(List<Integer> inputTokenIds,
                                      List<Integer> generatedTokenIds,
                                      List<Integer> fullTokenIds,
                                      int tokensGenerated,
+                                     String finishReason,
+                                     int maxNewTokens) {
+        this(inputTokenIds, generatedTokenIds, fullTokenIds, tokensGenerated, finishReason, maxNewTokens,
+                SmolLM2GenerationProfile.empty());
+    }
+
+    public SmolLM2TokenRuntimeResult(List<Integer> inputTokenIds,
+                                     List<Integer> generatedTokenIds,
+                                     List<Integer> fullTokenIds,
+                                     int tokensGenerated,
                                      String finishReason) {
-        this(inputTokenIds, generatedTokenIds, fullTokenIds, tokensGenerated, finishReason, tokensGenerated);
+        this(inputTokenIds, generatedTokenIds, fullTokenIds, tokensGenerated, finishReason, tokensGenerated,
+                SmolLM2GenerationProfile.empty());
     }
 
     public int inputTokenCount() {

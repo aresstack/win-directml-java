@@ -21,14 +21,24 @@ public final class SmolLM2ReferenceForwardPass {
     private final DecoderOnlyAttentionLayout attentionLayout;
     private final DecoderOnlyRotaryEmbedding rotaryEmbedding;
     private final float attentionScale;
+    private final SmolLM2ReferenceForwardProfile profile;
 
     public SmolLM2ReferenceForwardPass(SmolLM2Weights weights) {
         this(SmolLM2ReferenceWeights.from(weights));
     }
 
+    public SmolLM2ReferenceForwardPass(SmolLM2Weights weights, SmolLM2ReferenceForwardProfile profile) {
+        this(SmolLM2ReferenceWeights.from(weights), profile);
+    }
+
     public SmolLM2ReferenceForwardPass(SmolLM2ReferenceWeights weights) {
+        this(weights, new SmolLM2ReferenceForwardProfile());
+    }
+
+    SmolLM2ReferenceForwardPass(SmolLM2ReferenceWeights weights, SmolLM2ReferenceForwardProfile profile) {
         this.weights = Objects.requireNonNull(weights, "weights");
         this.config = weights.config();
+        this.profile = Objects.requireNonNull(profile, "profile");
         this.attentionLayout = new DecoderOnlyAttentionLayout(
                 config.numAttentionHeads(), config.effectiveKeyValueHeads());
         this.rotaryEmbedding = new DecoderOnlyRotaryEmbedding(
@@ -38,6 +48,10 @@ public final class SmolLM2ReferenceForwardPass {
 
     public SmolLM2Config config() {
         return config;
+    }
+
+    SmolLM2ReferenceForwardProfile profile() {
+        return profile;
     }
 
     public float[] logitsForLastToken(List<Integer> tokenIds) {
@@ -245,12 +259,14 @@ public final class SmolLM2ReferenceForwardPass {
     }
 
     private float[] projectToLogits(float[] hidden) {
+        long start = System.nanoTime();
         int vocabSize = config.vocabSize();
         float[] logits = new float[vocabSize];
         SmolLM2DenseTensor lmHead = weights.lmHeadTiedToEmbedding() ? weights.tokenEmbedding() : weights.lmHead();
         for (int tokenId = 0; tokenId < vocabSize; tokenId++) {
             logits[tokenId] = lmHead.dotRow(tokenId, hidden);
         }
+        profile.addLmHeadNanos(System.nanoTime() - start);
         return logits;
     }
 
