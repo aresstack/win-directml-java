@@ -285,7 +285,7 @@ public final class ModelDownloader {
                             return Collections.singletonList(new Proxy(Proxy.Type.HTTP,
                                     InetSocketAddress.createUnresolved(result.getHost(), result.getPort())));
                         } catch (RuntimeException ex) {
-                            return Collections.singletonList(Proxy.NO_PROXY);
+                            throw new IllegalStateException("Proxy resolution failed for " + uri + ": " + describe(ex), ex);
                         }
                     }
 
@@ -295,6 +295,17 @@ public final class ModelDownloader {
                     }
                 })
                 .build();
+    }
+
+    private static String describe(Throwable throwable) {
+        if (throwable == null) {
+            return "unknown error";
+        }
+        String message = throwable.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return throwable.getClass().getName();
+        }
+        return throwable.getClass().getName() + ": " + message;
     }
 
     private static void downloadFileFromUrl(HttpClient client, String url,

@@ -536,7 +536,7 @@ public final class DownloadPanel extends JPanel {
                     publish(DownloadUiEvent.progress(100, "Done"));
                     return true;
                 } catch (Exception ex) {
-                    publish(DownloadUiEvent.message("ERROR: " + ex.getMessage()));
+                    publish(DownloadUiEvent.message("ERROR: " + describe(ex)));
                     publish(DownloadUiEvent.progress(progressTracker.percent(), "Error"));
                     return false;
                 }
@@ -562,7 +562,7 @@ public final class DownloadPanel extends JPanel {
                     appendLog((ok ? "Download finished: " : "Download ended with errors: ") + label);
                 } catch (Exception ex) {
                     updateProgress(progressBar, progressBar.getValue(), "Error");
-                    appendLog("Download ended with errors: " + label + " (" + ex.getMessage() + ")");
+                    appendLog("Download ended with errors: " + label + " (" + describe(ex) + ")");
                 }
             }
         }.execute();
@@ -657,6 +657,17 @@ public final class DownloadPanel extends JPanel {
             }
             return String.format(java.util.Locale.ROOT, "%.2f GiB", mib / 1024.0d);
         }
+    }
+
+    private static String describe(Throwable throwable) {
+        if (throwable == null) {
+            return "unknown error";
+        }
+        String message = throwable.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return throwable.getClass().getName();
+        }
+        return throwable.getClass().getName() + ": " + message;
     }
 
     private void appendLog(String message) {
