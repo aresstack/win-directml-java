@@ -269,19 +269,19 @@ public final class GenerationModelRegistry {
                 "Small decoder-only candidate and likely best sub-0.5B fallback. "
                         + "Workbench metadata is available; runtime implementation is pending."));
 
-        // --- T5/CodeT5: encoder-decoder family for future summarization/code tasks ---
+        // --- T5/CodeT5: encoder-decoder family for code explanation and short summaries ---
         entries.add(new Entry(
                 "Salesforce/codet5-small",
                 Architecture.SEQ2SEQ,
                 "Salesforce",
                 "60M",
                 ChatTemplate.RAW,
-                Status.PLANNED,
+                Status.EXPERIMENTAL,
                 Arrays.asList(
                         "model/codet5-small",
                         "model/Salesforce/codet5-small"),
-                "T5-style encoder-decoder candidate. Family metadata and package shell exist; "
-                        + "real T5 inference is pending."));
+                "Experimental T5-style encoder-decoder runtime. Requires a compiled .wdmlpack "
+                        + "or SafeTensors source for first-use compilation."));
 
         ENTRIES = Collections.unmodifiableList(entries);
 

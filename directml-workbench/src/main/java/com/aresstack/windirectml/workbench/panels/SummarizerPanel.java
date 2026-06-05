@@ -11,6 +11,7 @@ import com.aresstack.windirectml.inference.Summary;
 import com.aresstack.windirectml.inference.SummaryRequest;
 import com.aresstack.windirectml.inference.qwen.QwenInferenceEngine;
 import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
+import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 
 import javax.swing.*;
@@ -158,6 +159,8 @@ public final class SummarizerPanel extends JPanel {
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
         if (qwenTestModel) {
             appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
+        } else if (isT5Model(selectedModel)) {
+            appendResult("  NOTE: CodeT5 uses the T5 seq2seq runtime package path (.wdmlpack or SafeTensors auto-compile).");
         }
 
         new SwingWorker<Void, Void>() {
@@ -167,6 +170,8 @@ public final class SummarizerPanel extends JPanel {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
                     if (qwenTestModel) {
                         runQwenGeneration(modelDir, text, maxTokens, selectedModel);
+                    } else if (isT5Model(selectedModel)) {
+                        runT5Generation(modelDir, text, maxTokens, selectedModel);
                     } else {
                         runPhi3Summarizer(modelDir, text, maxTokens);
                     }
@@ -198,6 +203,41 @@ public final class SummarizerPanel extends JPanel {
             appendResult("");
             appendResult("SUMMARY:");
             appendResult(summary.text());
+        }
+    }
+
+
+    private void runT5Generation(Path modelDir, String text, int maxTokens, String selectedModel)
+            throws InferenceException {
+        validateT5ModelFiles(modelDir);
+        long start = System.nanoTime();
+        T5InferenceEngine engine = new T5InferenceEngine(modelDir, maxTokens);
+        try {
+            appendResult("Initializing T5 runtime package from " + modelDir + "...");
+            engine.initialize();
+            appendResult("Model loaded in " + elapsedMs(start) + " ms");
+            appendResult("Seq2Seq generation running with reference encoder/decoder boundaries.");
+            appendResult("");
+            appendResult("OUTPUT:");
+            long genStart = System.nanoTime();
+            InferenceRequest request = InferenceRequest.builder()
+                    .modelId(selectedModel)
+                    .systemPrompt("")
+                    .userPrompt(text)
+                    .maxTokens(maxTokens)
+                    .temperature(0.0f)
+                    .build();
+            InferenceResult result = engine.generate(request);
+            appendResult(result.getText());
+            appendResult("");
+            appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
+            if (result.getUsage() != null) {
+                appendResult("  Prompt tokens: " + result.getUsage().promptTokens());
+                appendResult("  Output tokens: " + result.getUsage().completionTokens());
+            }
+            appendResult("  Finish reason: " + result.getFinishReason());
+        } finally {
+            engine.shutdown();
         }
     }
 
@@ -280,8 +320,20 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
+    private void validateT5ModelFiles(Path modelDir) {
+        String missing = T5InferenceEngine.describeMissingModelFile(modelDir);
+        if (missing != null) {
+            throw new IllegalStateException(missing + ". Download or compile the selected CodeT5 model first from the Download/Tools flow.");
+        }
+    }
+
     private static boolean isQwenTestModel(String modelId) {
         return QWEN05_MODEL_ID.equals(modelId);
+    }
+
+    private static boolean isT5Model(String modelId) {
+        Entry entry = GenerationModelRegistry.findByModelId(modelId);
+        return entry != null && entry.architecture() == GenerationModelRegistry.Architecture.SEQ2SEQ;
     }
 
     private static long elapsedMs(long startNanos) {

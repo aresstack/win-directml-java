@@ -60,14 +60,14 @@ class GenerationModelRegistryTest {
     }
 
     @Test
-    void registryContainsCodeT5AsPlannedSeq2Seq() {
+    void registryContainsCodeT5AsExperimentalSeq2Seq() {
         GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId("Salesforce/codet5-small");
 
         assertNotNull(entry);
         assertEquals(GenerationModelRegistry.Architecture.SEQ2SEQ, entry.architecture());
-        assertEquals(GenerationModelRegistry.Status.PLANNED, entry.status());
+        assertEquals(GenerationModelRegistry.Status.EXPERIMENTAL, entry.status());
         assertEquals(ChatTemplate.RAW, entry.chatTemplate());
-        assertFalse(entry.isRunnable());
+        assertTrue(entry.isRunnable());
     }
 
     @Test
@@ -117,7 +117,7 @@ class GenerationModelRegistryTest {
 
         List<GenerationModelRegistry.Entry> seq2seq =
                 GenerationModelRegistry.entriesByArchitecture(GenerationModelRegistry.Architecture.SEQ2SEQ);
-        assertFalse(seq2seq.isEmpty(), "T5/CodeT5 family should now be visible as planned metadata");
+        assertFalse(seq2seq.isEmpty(), "T5/CodeT5 family should now be visible");
     }
 
     @Test
