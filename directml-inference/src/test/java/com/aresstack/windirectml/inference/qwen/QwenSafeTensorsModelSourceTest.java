@@ -35,8 +35,11 @@ class QwenSafeTensorsModelSourceTest {
         assertEquals("safetensors", imported.sourceFormat());
         assertEquals(safetensors.toAbsolutePath().normalize(), imported.modelPath());
         assertEquals(1, imported.tensorCatalog().size());
+        assertEquals(1, imported.sourceTensorCatalog().size());
         assertEquals(TensorStorageKind.INLINE,
                 imported.tensorCatalog().get("model.embed_tokens.weight").storageKind());
+        assertEquals("FLOAT16", imported.sourceTensorCatalog().get("model.embed_tokens.weight").dataTypeName());
+        assertTrue(imported.sourceTensorCatalog().get("model.embed_tokens.weight").hasPayload());
         OnnxTensor tensor = imported.inlineTensors().get("model.embed_tokens.weight");
         assertNotNull(tensor);
         assertEquals(10, tensor.dataType());

@@ -3,7 +3,8 @@ package com.aresstack.windirectml.inference.qwen;
 import com.aresstack.windirectml.inference.model.ModelSource;
 import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
 import com.aresstack.windirectml.inference.model.RuntimeTensor;
-import com.aresstack.windirectml.inference.model.TensorCatalog;
+import com.aresstack.windirectml.inference.model.SourceTensor;
+import com.aresstack.windirectml.inference.model.SourceTensorCatalog;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
@@ -81,14 +82,14 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
         QwenOnnxModelSource delegate = new QwenOnnxModelSource(sourceOnnx.getParent(), sourceOnnx.getFileName().toString());
         QwenModelImport imported = delegate.load();
         return new QwenModelImport("wdmlpack-manifest", imported.modelPath(), imported.graph(),
-                imported.externalRefs(), imported.inlineTensors(), imported.tensorCatalog());
+                imported.externalRefs(), imported.inlineTensors(), imported.sourceTensorCatalog());
     }
 
     private QwenModelImport loadNativePayload(RuntimeModelPackage modelPackage) throws IOException {
         Map<String, RuntimeTensor> runtimeTensors = modelPackage.mapPayloadTensors();
         Map<String, OnnxTensor> inlineTensors = adaptRuntimeTensors(runtimeTensors);
         OnnxGraph graph = loadRuntimeGraph(modelPackage.manifest(), inlineTensors);
-        TensorCatalog catalog = modelPackage.buildTensorCatalog();
+        SourceTensorCatalog catalog = buildSourceTensorCatalog(runtimeTensors);
         log.info("wdmlpack native payload: mapped {} tensors from package payload ({})",
                 inlineTensors.size(), QwenWdmlPackCompiler.formatBytes(modelPackage.header().payloadLength()));
         return new QwenModelImport("wdmlpack-payload", packagePath, graph, Map.of(), inlineTensors, catalog);
@@ -137,6 +138,15 @@ final class QwenWdmlPackModelSource implements ModelSource<QwenModelImport> {
             throw new IOException("wdmlpack source ONNX is missing: " + sourceOnnx);
         }
         modelPackage.validateSourceFingerprint(sourceOnnx);
+    }
+
+    private SourceTensorCatalog buildSourceTensorCatalog(Map<String, RuntimeTensor> runtimeTensors) {
+        List<SourceTensor> tensors = new ArrayList<>();
+        for (RuntimeTensor tensor : runtimeTensors.values()) {
+            tensors.add(SourceTensor.inline(tensor.name(), tensor.dataType(), tensor.dims(),
+                    tensor.rawByteLength(), tensor.hasPayload() ? tensor.rawDataBuffer() : null));
+        }
+        return new SourceTensorCatalog(tensors);
     }
 
     private Map<String, OnnxTensor> adaptRuntimeTensors(Map<String, RuntimeTensor> runtimeTensors) {

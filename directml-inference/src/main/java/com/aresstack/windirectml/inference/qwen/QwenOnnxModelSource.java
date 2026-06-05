@@ -1,8 +1,9 @@
 package com.aresstack.windirectml.inference.qwen;
 
 import com.aresstack.windirectml.inference.model.ModelSource;
-import com.aresstack.windirectml.inference.model.TensorCatalog;
-import com.aresstack.windirectml.inference.model.TensorEntry;
+import com.aresstack.windirectml.inference.model.SourceTensor;
+import com.aresstack.windirectml.inference.model.SourceTensorCatalog;
+import com.aresstack.windirectml.inference.model.SourceTensorDataType;
 import com.aresstack.windirectml.inference.model.TensorStorageKind;
 import com.aresstack.windirectml.windows.OnnxModelReader;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
@@ -53,7 +54,7 @@ final class QwenOnnxModelSource implements ModelSource<QwenModelImport> {
         OnnxGraph graph = OnnxModelReader.parse(modelPath);
         Map<String, Qwen2Weights.ExternalTensorRef> externalRefs = Qwen2Weights.parseExternalRefs(modelPath);
         Map<String, OnnxTensor> inlineTensors = graph.initializers();
-        TensorCatalog catalog = buildCatalog(inlineTensors, externalRefs);
+        SourceTensorCatalog catalog = buildCatalog(inlineTensors, externalRefs);
 
         log.info("Qwen model source imported: format={}, file={}, graphNodes={}, {}",
                 format(), modelFileName, graph.nodes().size(), catalog.summary());
@@ -61,15 +62,14 @@ final class QwenOnnxModelSource implements ModelSource<QwenModelImport> {
         return new QwenModelImport(format(), modelPath, graph, externalRefs, inlineTensors, catalog);
     }
 
-    private static TensorCatalog buildCatalog(Map<String, OnnxTensor> inlineTensors,
-                                              Map<String, Qwen2Weights.ExternalTensorRef> externalRefs) {
-        List<TensorEntry> entries = new ArrayList<>();
+    private static SourceTensorCatalog buildCatalog(Map<String, OnnxTensor> inlineTensors,
+                                                    Map<String, Qwen2Weights.ExternalTensorRef> externalRefs) {
+        List<SourceTensor> entries = new ArrayList<>();
         for (Map.Entry<String, OnnxTensor> entry : inlineTensors.entrySet()) {
             String name = entry.getKey();
             Qwen2Weights.ExternalTensorRef external = externalRefs.get(name);
             if (external != null) {
-                entries.add(new TensorEntry(name, external.dataType(), external.dims(),
-                        TensorStorageKind.EXTERNAL, external.length()));
+                entries.add(SourceTensor.external(name, external.dataType(), external.dims(), external.length()));
                 continue;
             }
             OnnxTensor tensor = entry.getValue();
@@ -77,14 +77,14 @@ final class QwenOnnxModelSource implements ModelSource<QwenModelImport> {
             long floatBytes = tensor.data() != null ? (long) tensor.data().length * Float.BYTES : 0L;
             long bytes = rawBytes > 0 ? rawBytes : floatBytes;
             TensorStorageKind kind = bytes > 0 ? TensorStorageKind.INLINE : TensorStorageKind.METADATA_ONLY;
-            entries.add(new TensorEntry(name, tensor.dataType(), tensor.dims(), kind, bytes));
+            entries.add(new SourceTensor(name, SourceTensorDataType.fromOnnxCode(tensor.dataType()),
+                    tensor.dims(), kind, bytes, tensor.rawByteLength() > 0 ? tensor.rawDataBuffer() : null));
         }
         for (Qwen2Weights.ExternalTensorRef ref : externalRefs.values()) {
             if (!inlineTensors.containsKey(ref.name())) {
-                entries.add(new TensorEntry(ref.name(), ref.dataType(), ref.dims(),
-                        TensorStorageKind.EXTERNAL, ref.length()));
+                entries.add(SourceTensor.external(ref.name(), ref.dataType(), ref.dims(), ref.length()));
             }
         }
-        return new TensorCatalog(entries);
+        return new SourceTensorCatalog(entries);
     }
 }

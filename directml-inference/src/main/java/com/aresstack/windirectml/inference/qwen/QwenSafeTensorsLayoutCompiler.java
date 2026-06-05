@@ -1,7 +1,7 @@
 package com.aresstack.windirectml.inference.qwen;
 
+import com.aresstack.windirectml.inference.model.SourceTensor;
 import com.aresstack.windirectml.windows.OnnxModelReader;
-import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -33,7 +33,7 @@ final class QwenSafeTensorsLayoutCompiler {
             return LayoutAnalysis.notSafeTensors(imported.sourceFormat());
         }
 
-        Analyzer analyzer = new Analyzer(imported.inlineTensors(), config);
+        Analyzer analyzer = new Analyzer(imported.sourceTensorCatalog().entries(), config);
         analyzer.requiredMatrix("embedding", "model.embed_tokens.weight", config.vocabSize(), config.hiddenSize());
         analyzer.requiredVector("final_norm", "model.norm.weight", config.hiddenSize());
 
@@ -160,7 +160,7 @@ final class QwenSafeTensorsLayoutCompiler {
     }
 
     private static final class Analyzer {
-        private final Map<String, OnnxTensor> tensors;
+        private final Map<String, SourceTensor> tensors;
         private final Qwen2Config config;
         private final List<LayoutRole> roles = new ArrayList<>();
         private final List<String> missingRequired = new ArrayList<>();
@@ -168,14 +168,14 @@ final class QwenSafeTensorsLayoutCompiler {
         private final List<String> unsupportedRuntimeDtypes = new ArrayList<>();
         private long rolePayloadBytes;
 
-        private Analyzer(Map<String, OnnxTensor> tensors, Qwen2Config config) {
+        private Analyzer(Map<String, SourceTensor> tensors, Qwen2Config config) {
             this.tensors = Objects.requireNonNull(tensors, "tensors");
             this.config = Objects.requireNonNull(config, "config");
         }
 
         private boolean exists(String name) {
-            OnnxTensor tensor = tensors.get(name);
-            return tensor != null && tensor.rawByteLength() > 0;
+            SourceTensor tensor = tensors.get(name);
+            return tensor != null && tensor.byteLength() > 0;
         }
 
         private void requiredMatrix(String role, String name, long rows, long cols) {
@@ -195,8 +195,8 @@ final class QwenSafeTensorsLayoutCompiler {
         }
 
         private void tensor(String role, String name, boolean required, long[] expectedDims) {
-            OnnxTensor tensor = tensors.get(name);
-            if (tensor == null || tensor.rawByteLength() <= 0) {
+            SourceTensor tensor = tensors.get(name);
+            if (tensor == null || tensor.byteLength() <= 0) {
                 if (required) {
                     missingRequired.add(name);
                 }
@@ -207,12 +207,12 @@ final class QwenSafeTensorsLayoutCompiler {
                 shapeErrors.add(name + " expected " + dimsToString(expectedDims) + " but got " + dimsToString(dims));
                 return;
             }
-            if (!isCurrentDenseRuntimeDtype(tensor.dataType())) {
-                unsupportedRuntimeDtypes.add(name + " uses " + dataTypeName(tensor.dataType())
+            if (!isCurrentDenseRuntimeDtype(tensor.onnxDataType())) {
+                unsupportedRuntimeDtypes.add(name + " uses " + dataTypeName(tensor.onnxDataType())
                         + "; current dense Qwen loader supports FLOAT16/FLOAT only");
             }
-            rolePayloadBytes += tensor.rawByteLength();
-            roles.add(new LayoutRole(role, name, name, tensor.dataType(), dataTypeName(tensor.dataType()), dims, required, false));
+            rolePayloadBytes += tensor.byteLength();
+            roles.add(new LayoutRole(role, name, name, tensor.onnxDataType(), tensor.dataTypeName(), dims, required, false));
         }
 
         private LayoutAnalysis finish() {

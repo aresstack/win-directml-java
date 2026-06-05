@@ -1,8 +1,7 @@
 package com.aresstack.windirectml.inference.qwen;
 
 import com.aresstack.windirectml.inference.model.SourceFingerprint;
-import com.aresstack.windirectml.inference.model.TensorEntry;
-import com.aresstack.windirectml.inference.model.TensorStorageKind;
+import com.aresstack.windirectml.inference.model.SourceTensor;
 import com.aresstack.windirectml.inference.model.WdmlPackWriter;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
@@ -212,6 +211,7 @@ final class QwenWdmlPackCompiler {
         sourceInfo.put("graphName", imported.graph().name());
         sourceInfo.put("graphNodes", imported.graph().nodes().size());
         sourceInfo.put("initializers", imported.graph().initializers().size());
+        sourceInfo.put("sourceTensors", imported.sourceTensorCatalog().size());
         sourceInfo.put("matMulNBitsNodes", imported.graph().nodes().stream()
                 .filter(n -> "MatMulNBits".equals(n.opType()))
                 .count());
@@ -235,10 +235,10 @@ final class QwenWdmlPackCompiler {
         root.put("model", model);
 
         Map<String, Object> catalog = new LinkedHashMap<>();
-        catalog.put("count", imported.tensorCatalog().size());
-        catalog.put("inlineBytes", imported.tensorCatalog().inlineBytes());
-        catalog.put("externalBytes", imported.tensorCatalog().externalBytes());
-        catalog.put("metadataOnlyCount", imported.tensorCatalog().metadataOnlyCount());
+        catalog.put("count", imported.sourceTensorCatalog().size());
+        catalog.put("inlineBytes", imported.sourceTensorCatalog().inlineBytes());
+        catalog.put("externalBytes", imported.sourceTensorCatalog().externalBytes());
+        catalog.put("metadataOnlyCount", imported.sourceTensorCatalog().metadataOnlyCount());
         root.put("tensorCatalog", catalog);
 
         Map<String, Object> cache = new LinkedHashMap<>();
@@ -305,12 +305,12 @@ final class QwenWdmlPackCompiler {
     }
 
     private static PayloadPlan planPayload(QwenModelImport imported) throws IOException {
-        List<TensorEntry> entries = new ArrayList<>(imported.tensorCatalog().entries().values());
-        entries.sort(Comparator.comparing(TensorEntry::name));
+        List<SourceTensor> entries = new ArrayList<>(imported.sourceTensorCatalog().entries().values());
+        entries.sort(Comparator.comparing(SourceTensor::name));
         Map<String, Long> offsets = new LinkedHashMap<>();
         List<WdmlPackWriter.PayloadEntry> payloadEntries = new ArrayList<>();
         long cursor = 0;
-        for (TensorEntry entry : entries) {
+        for (SourceTensor entry : entries) {
             TensorPayload payload = resolvePayload(entry, imported);
             if (payload == null || payload.length() <= 0) {
                 offsets.put(entry.name(), -1L);
@@ -325,18 +325,17 @@ final class QwenWdmlPackCompiler {
         return new PayloadPlan(offsets, payloadEntries, cursor);
     }
 
-    private static TensorPayload resolvePayload(TensorEntry entry, QwenModelImport imported) throws IOException {
+    private static TensorPayload resolvePayload(SourceTensor entry, QwenModelImport imported) throws IOException {
+        if (entry.hasPayload()) {
+            ByteBuffer raw = entry.payloadBuffer().order(ByteOrder.LITTLE_ENDIAN);
+            return new TensorPayload(entry.byteLength(), channel -> writeBuffer(channel, raw));
+        }
+
         OnnxTensor inline = imported.inlineTensors().get(entry.name());
-        if (inline != null) {
-            if (inline.rawByteLength() > 0) {
-                ByteBuffer raw = inline.rawDataBuffer().order(ByteOrder.LITTLE_ENDIAN);
-                return new TensorPayload(inline.rawByteLength(), channel -> writeBuffer(channel, raw));
-            }
-            if (inline.data() != null && inline.data().length > 0) {
-                float[] data = inline.data();
-                long length = (long) data.length * Float.BYTES;
-                return new TensorPayload(length, channel -> writeFloatArray(channel, data));
-            }
+        if (inline != null && inline.data() != null && inline.data().length > 0) {
+            float[] data = inline.data();
+            long length = (long) data.length * Float.BYTES;
+            return new TensorPayload(length, channel -> writeFloatArray(channel, data));
         }
 
         Qwen2Weights.ExternalTensorRef external = imported.externalRefs().get(entry.name());
@@ -388,14 +387,14 @@ final class QwenWdmlPackCompiler {
     }
 
     private static List<Map<String, Object>> buildTensorDirectory(QwenModelImport imported, Map<String, Long> payloadOffsets) {
-        List<TensorEntry> entries = new ArrayList<>(imported.tensorCatalog().entries().values());
-        entries.sort(Comparator.comparing(TensorEntry::name));
+        List<SourceTensor> entries = new ArrayList<>(imported.sourceTensorCatalog().entries().values());
+        entries.sort(Comparator.comparing(SourceTensor::name));
         List<Map<String, Object>> tensors = new ArrayList<>(entries.size());
-        for (TensorEntry entry : entries) {
+        for (SourceTensor entry : entries) {
             Map<String, Object> tensor = new LinkedHashMap<>();
             tensor.put("name", entry.name());
-            tensor.put("dataType", entry.dataType());
-            tensor.put("dataTypeName", onnxDataTypeName(entry.dataType()));
+            tensor.put("dataType", entry.onnxDataType());
+            tensor.put("dataTypeName", entry.dataTypeName());
             tensor.put("dims", toList(entry.dims()));
             tensor.put("storageKind", entry.storageKind().name());
             tensor.put("byteLength", entry.byteLength());

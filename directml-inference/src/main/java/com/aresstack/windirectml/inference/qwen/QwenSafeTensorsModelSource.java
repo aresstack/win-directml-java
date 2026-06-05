@@ -2,9 +2,10 @@ package com.aresstack.windirectml.inference.qwen;
 
 import com.aresstack.windirectml.inference.model.ModelSource;
 import com.aresstack.windirectml.inference.model.SafeTensorsReader;
+import com.aresstack.windirectml.inference.model.SourceTensor;
+import com.aresstack.windirectml.inference.model.SourceTensorCatalog;
+import com.aresstack.windirectml.inference.model.SourceTensorDataType;
 import com.aresstack.windirectml.inference.model.TensorCatalog;
-import com.aresstack.windirectml.inference.model.TensorEntry;
-import com.aresstack.windirectml.inference.model.TensorStorageKind;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
 import org.slf4j.Logger;
@@ -64,7 +65,7 @@ final class QwenSafeTensorsModelSource implements ModelSource<QwenModelImport> {
         }
 
         Map<String, OnnxTensor> tensors = new LinkedHashMap<>();
-        List<TensorEntry> catalogEntries = new ArrayList<>();
+        List<SourceTensor> catalogEntries = new ArrayList<>();
         long payloadBytes = 0;
         for (Path tensorFile : tensorFiles) {
             SafeTensorsReader.SafeTensorsFile parsed = SafeTensorsReader.read(tensorFile);
@@ -75,14 +76,15 @@ final class QwenSafeTensorsModelSource implements ModelSource<QwenModelImport> {
                 tensors.put(entry.name(), new OnnxTensor(
                         entry.name(), entry.shape(), entry.onnxDataType(),
                         new float[0], new byte[0], entry.dataBuffer(), Math.toIntExact(entry.byteLength())));
-                catalogEntries.add(new TensorEntry(entry.name(), entry.onnxDataType(), entry.shape(),
-                        TensorStorageKind.INLINE, entry.byteLength()));
+                catalogEntries.add(SourceTensor.inline(entry.name(),
+                        SourceTensorDataType.fromSafeTensors(entry.dtype(), entry.onnxDataType()),
+                        entry.shape(), entry.byteLength(), entry.dataBuffer()));
                 payloadBytes += entry.byteLength();
             }
         }
 
         validateQwenSkeleton(tensors);
-        TensorCatalog catalog = new TensorCatalog(catalogEntries);
+        SourceTensorCatalog catalog = new SourceTensorCatalog(catalogEntries);
         OnnxGraph graph = new OnnxGraph("safetensors:qwen2", List.of(), tensors, List.of(), List.of());
         log.info("Qwen SafeTensors source imported: files={}, tensors={}, payload={}",
                 tensorFiles.size(), tensors.size(), QwenWdmlPackCompiler.formatBytes(payloadBytes));
