@@ -18,6 +18,7 @@ import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
@@ -47,11 +48,13 @@ public final class DownloadPanel extends JPanel {
     private final JCheckBox forceCheckbox;
     private final DownloadOverrideStore overrideStore;
     private final Map<String, ModelDownloadManifest> manifests = new HashMap<String, ModelDownloadManifest>();
+    private final Map<String, JProgressBar> downloadProgressBars = new HashMap<String, JProgressBar>();
 
     private JComboBox<QwenDownloadSource> qwenSourceSelector;
     private JComboBox<QwenOnnxModelVariant> qwenVariantSelector;
     private JTextField qwenSelectedUrlField;
     private JCheckBox downloadAllQwenVariantsCheckbox;
+    private JProgressBar qwenDownloadProgressBar;
 
     public DownloadPanel(WorkbenchModel model) {
         this.model = model;
@@ -59,7 +62,7 @@ public final class DownloadPanel extends JPanel {
         setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        JPanel buttons = new JPanel(new GridLayout(0, 3, 4, 4));
+        JPanel buttons = new JPanel(new GridLayout(0, 4, 4, 4));
 
         addEmbeddingRow(buttons, "Download MiniLM (all-MiniLM-L6-v2)",
                 "sentence-transformers/all-MiniLM-L6-v2", "all-MiniLM-L6-v2");
@@ -108,6 +111,7 @@ public final class DownloadPanel extends JPanel {
         downloadBtn.addActionListener(e -> startManifestDownload(folder));
         buttons.add(downloadBtn);
 
+        buttons.add(registerProgressBar(manifest));
         buttons.add(createConfigButton(folder));
         buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(folder)));
     }
@@ -121,6 +125,7 @@ public final class DownloadPanel extends JPanel {
         phi3Btn.addActionListener(e -> startManifestDownload(modelId));
         buttons.add(phi3Btn);
 
+        buttons.add(registerProgressBar(manifest));
         buttons.add(createConfigButton(modelId));
         buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(manifest.localDirName())));
     }
@@ -134,6 +139,7 @@ public final class DownloadPanel extends JPanel {
         downloadBtn.addActionListener(e -> startManifestDownload(modelId));
         buttons.add(downloadBtn);
 
+        buttons.add(registerProgressBar(effectiveManifest));
         buttons.add(createConfigButton(modelId));
         buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(effectiveManifest.localDirName())));
     }
@@ -171,6 +177,12 @@ public final class DownloadPanel extends JPanel {
 
         controls.add(createOpenFolderButton(this::selectedQwenTargetDir));
         panel.add(controls, BorderLayout.NORTH);
+
+        JPanel qwenProgressPanel = new JPanel(new BorderLayout(4, 4));
+        qwenProgressPanel.add(new JLabel("Download-Fortschritt:"), BorderLayout.WEST);
+        qwenDownloadProgressBar = createDownloadProgressBar();
+        qwenProgressPanel.add(qwenDownloadProgressBar, BorderLayout.CENTER);
+        panel.add(qwenProgressPanel, BorderLayout.CENTER);
 
         JPanel urlPanel = new JPanel(new BorderLayout(4, 4));
         urlPanel.add(new JLabel("Gewählte HF-URL:"), BorderLayout.WEST);
@@ -249,6 +261,21 @@ public final class DownloadPanel extends JPanel {
                     "Clipboard unavailable",
                     JOptionPane.WARNING_MESSAGE);
         }
+    }
+
+    private JProgressBar registerProgressBar(ModelDownloadManifest manifest) {
+        JProgressBar progressBar = createDownloadProgressBar();
+        downloadProgressBars.put(manifest.modelId(), progressBar);
+        return progressBar;
+    }
+
+    private JProgressBar createDownloadProgressBar() {
+        JProgressBar progressBar = new JProgressBar(0, 100);
+        progressBar.setStringPainted(true);
+        progressBar.setString("Idle");
+        progressBar.setValue(0);
+        progressBar.setPreferredSize(new Dimension(160, 24));
+        return progressBar;
     }
 
     private JButton createConfigButton(String modelId) {
@@ -388,24 +415,41 @@ public final class DownloadPanel extends JPanel {
     private void startDownload(ModelDownloadManifest manifest, String label) {
         boolean force = forceCheckbox.isSelected();
         Path targetDir = model.getModelRoot().resolve(manifest.localDirName());
+        JProgressBar progressBar = progressBarFor(manifest);
+        resetProgress(progressBar);
         appendLog("Starting download: " + label + " -> " + targetDir);
 
-        new SwingWorker<Boolean, String>() {
+        new SwingWorker<Boolean, DownloadUiEvent>() {
             @Override
             protected Boolean doInBackground() {
+                DownloadProgressTracker progressTracker = new DownloadProgressTracker(manifest.files().size());
+                publish(DownloadUiEvent.progress(0, "0%"));
                 try {
-                    ModelDownloader.downloadFromManifest(manifest, targetDir, force, this::publish);
+                    ModelDownloader.downloadFromManifest(manifest, targetDir, force, message -> {
+                        publish(DownloadUiEvent.message(message));
+                        Integer percent = progressTracker.update(message);
+                        if (percent != null) {
+                            publish(DownloadUiEvent.progress(percent, percent + "%"));
+                        }
+                    });
+                    publish(DownloadUiEvent.progress(100, "Done"));
                     return true;
                 } catch (Exception ex) {
-                    publish("ERROR: " + ex.getMessage());
+                    publish(DownloadUiEvent.message("ERROR: " + ex.getMessage()));
+                    publish(DownloadUiEvent.progress(progressTracker.percent(), "Error"));
                     return false;
                 }
             }
 
             @Override
-            protected void process(java.util.List<String> chunks) {
-                for (String msg : chunks) {
-                    appendLog(msg);
+            protected void process(java.util.List<DownloadUiEvent> chunks) {
+                for (DownloadUiEvent event : chunks) {
+                    if (event.message() != null) {
+                        appendLog(event.message());
+                    }
+                    if (event.progressValue() != null) {
+                        updateProgress(progressBar, event.progressValue(), event.progressText());
+                    }
                 }
             }
 
@@ -413,12 +457,88 @@ public final class DownloadPanel extends JPanel {
             protected void done() {
                 try {
                     boolean ok = get();
+                    updateProgress(progressBar, ok ? 100 : progressBar.getValue(), ok ? "Done" : "Error");
                     appendLog((ok ? "Download finished: " : "Download ended with errors: ") + label);
                 } catch (Exception ex) {
+                    updateProgress(progressBar, progressBar.getValue(), "Error");
                     appendLog("Download ended with errors: " + label + " (" + ex.getMessage() + ")");
                 }
             }
         }.execute();
+    }
+
+    private JProgressBar progressBarFor(ModelDownloadManifest manifest) {
+        JProgressBar progressBar = downloadProgressBars.get(manifest.modelId());
+        if (progressBar != null) {
+            return progressBar;
+        }
+        return qwenDownloadProgressBar;
+    }
+
+    private void resetProgress(JProgressBar progressBar) {
+        if (progressBar == null) {
+            return;
+        }
+        updateProgress(progressBar, 0, "0%");
+    }
+
+    private void updateProgress(JProgressBar progressBar, int value, String text) {
+        if (progressBar == null) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            int clamped = Math.max(0, Math.min(100, value));
+            progressBar.setIndeterminate(false);
+            progressBar.setValue(clamped);
+            progressBar.setString(text);
+        });
+    }
+
+    private record DownloadUiEvent(String message, Integer progressValue, String progressText) {
+        static DownloadUiEvent message(String message) {
+            return new DownloadUiEvent(message, null, null);
+        }
+
+        static DownloadUiEvent progress(int value, String text) {
+            return new DownloadUiEvent(null, value, text);
+        }
+    }
+
+    private static final class DownloadProgressTracker {
+        private final int totalFiles;
+        private int completedFiles;
+
+        DownloadProgressTracker(int totalFiles) {
+            this.totalFiles = Math.max(0, totalFiles);
+            this.completedFiles = 0;
+        }
+
+        Integer update(String message) {
+            if (message == null) {
+                return null;
+            }
+            String trimmed = message.trim();
+            if (isCompletedFileMessage(trimmed)) {
+                completedFiles = Math.min(totalFiles, completedFiles + 1);
+                return percent();
+            }
+            return null;
+        }
+
+        int percent() {
+            if (totalFiles == 0) {
+                return 100;
+            }
+            return Math.round((completedFiles * 100.0f) / totalFiles);
+        }
+
+        private static boolean isCompletedFileMessage(String message) {
+            return message.startsWith("Downloaded:")
+                    || message.startsWith("Skipping (exists):")
+                    || message.startsWith("Optional file not found (skipped):")
+                    || message.startsWith("Optional file URL is blank (skipped):")
+                    || message.startsWith("Warning: HTTP");
+        }
     }
 
     private void appendLog(String message) {
