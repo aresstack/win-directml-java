@@ -18,6 +18,7 @@ public final class T5WarpLinearProjection implements T5LinearProjection {
     private final int inputSize;
     private final int outputSize;
     private final MatMulNBitsKernel kernel;
+    private boolean batchDisabled;
     private boolean closed;
 
     private T5WarpLinearProjection(String name, int inputSize, int outputSize, MatMulNBitsKernel kernel) {
@@ -64,6 +65,47 @@ public final class T5WarpLinearProjection implements T5LinearProjection {
                     + ": input=" + input.length + ", expected=" + inputSize);
         }
         return kernel.matvec(input);
+    }
+
+
+    @Override
+    public float[] applySequence(float[] input, int sequenceLength, int inputSize) {
+        ensureOpen();
+        Objects.requireNonNull(input, "input");
+        if (inputSize != inputSize()) {
+            throw new IllegalArgumentException("WARP projection input size mismatch for " + name
+                    + ": input=" + inputSize + ", expected=" + inputSize());
+        }
+        if (sequenceLength < 1) {
+            throw new IllegalArgumentException("sequenceLength must be positive for " + name + ": " + sequenceLength);
+        }
+        if (input.length != sequenceLength * inputSize) {
+            throw new IllegalArgumentException("WARP projection sequence length mismatch for " + name
+                    + ": values=" + input.length + ", expected=" + (sequenceLength * inputSize));
+        }
+        float[] result = new float[sequenceLength * outputSize];
+        if (sequenceLength == 1 || batchDisabled || !kernel.supportsBatch()) {
+            applyRows(input, result, sequenceLength);
+            return result;
+        }
+        try {
+            kernel.matmulBatch(input, result, sequenceLength);
+            return result;
+        } catch (RuntimeException ex) {
+            batchDisabled = true;
+            applyRows(input, result, sequenceLength);
+            return result;
+        }
+    }
+
+    private void applyRows(float[] input, float[] result, int sequenceLength) {
+        float[] row = new float[inputSize];
+        float[] rowOutput = new float[outputSize];
+        for (int token = 0; token < sequenceLength; token++) {
+            System.arraycopy(input, token * inputSize, row, 0, inputSize);
+            kernel.matvec(row, rowOutput);
+            System.arraycopy(rowOutput, 0, result, token * outputSize, outputSize);
+        }
     }
 
     public boolean isClosed() {
