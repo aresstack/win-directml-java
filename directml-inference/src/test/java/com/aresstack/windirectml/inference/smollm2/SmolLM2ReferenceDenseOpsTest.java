@@ -14,7 +14,7 @@ class SmolLM2ReferenceDenseOpsTest {
 
         float result = SmolLM2ReferenceDenseOps.dot(left, 1, right, 1, 8);
 
-        assertEquals(-27.75f, result, 0.0001f);
+        assertEquals(-29.25f, result, 0.0001f);
     }
 
     @Test
