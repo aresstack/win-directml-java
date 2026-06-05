@@ -43,6 +43,7 @@ public final class ProxyPanel extends JPanel {
         mode = new JComboBox<ProxyMode>(ProxyMode.values());
         mode.setSelectedItem(cfg.getMode());
         testUrl = new JTextField(cfg.getTestUrl());
+        pacUrlDiscoveryScript = new JTextField(defaultPacScript(cfg));
         pacUrl = new JTextField(empty(cfg.getPacUrl()));
         manualHost = new JTextField(empty(cfg.getManualProxyHost()));
         manualPort = new JTextField(cfg.getManualProxyPort() > 0 ? String.valueOf(cfg.getManualProxyPort()) : "");
@@ -53,6 +54,8 @@ public final class ProxyPanel extends JPanel {
         form.add(mode);
         form.add(new JLabel("Test URL"));
         form.add(testUrl);
+        form.add(new JLabel("PAC URL discovery script"));
+        form.add(pacUrlDiscoveryScript);
         form.add(new JLabel("Explicit PAC URL (optional)"));
         form.add(pacUrl);
         form.add(new JLabel("Manual host"));
@@ -93,6 +96,7 @@ public final class ProxyPanel extends JPanel {
         model.setProxyConfiguration(cfg);
         mode.setSelectedItem(cfg.getMode());
         testUrl.setText(cfg.getTestUrl());
+        pacUrlDiscoveryScript.setText(defaultPacScript(cfg));
         pacUrl.setText("");
         manualHost.setText("");
         manualPort.setText("");
@@ -125,7 +129,9 @@ public final class ProxyPanel extends JPanel {
     private ProxyConfiguration buildConfiguration() {
         ProxyConfiguration.Builder builder = ProxyConfiguration.builder()
                 .mode(selectedMode())
-                .testUrl(nonBlank(testUrl.getText(), ProxyConfiguration.defaults().getTestUrl()));
+                .testUrl(nonBlank(testUrl.getText(), ProxyConfiguration.defaults().getTestUrl()))
+                .pacUrlDiscoveryScript(nonBlank(pacUrlDiscoveryScript.getText(),
+                        ProxyDefaults.DEFAULT_PAC_URL_DISCOVERY_SCRIPT));
         String pac = trimToNull(pacUrl.getText());
         if (pac != null) {
             builder.pacUrl(pac);
@@ -148,6 +154,10 @@ public final class ProxyPanel extends JPanel {
 
     private void append(String message) {
         SwingUtilities.invokeLater(() -> log.append(message + System.lineSeparator()));
+    }
+
+    private static String defaultPacScript(ProxyConfiguration cfg) {
+        return nonBlank(cfg.getPacUrlDiscoveryScript(), ProxyDefaults.DEFAULT_PAC_URL_DISCOVERY_SCRIPT);
     }
 
     private static String nonBlank(String value, String fallback) {
