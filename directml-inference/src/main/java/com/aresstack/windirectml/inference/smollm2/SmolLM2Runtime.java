@@ -57,6 +57,7 @@ public final class SmolLM2Runtime implements AutoCloseable {
     public SmolLM2TokenRuntimeResult generateTokenIds(SmolLM2TokenRuntimeRequest request) {
         Objects.requireNonNull(request, "request");
         ensureOpen();
+        ensureExecutablePackage();
         SmolLM2Weights weights = runtimePackage.requireWeights();
         return new SmolLM2ReferenceGenerationLoop(weights).generate(request);
     }
@@ -83,6 +84,12 @@ public final class SmolLM2Runtime implements AutoCloseable {
             ids[i] = tokenIds.get(i);
         }
         return ids;
+    }
+
+    private void ensureExecutablePackage() {
+        if (!runtimePackage.executable()) {
+            throw new SmolLM2RuntimeUnsupportedException(runtimePackage.runtimeLoadableReason());
+        }
     }
 
     private void ensureOpen() {

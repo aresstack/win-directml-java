@@ -42,7 +42,7 @@ class SmolLM2WdmlPackCompileToolTest {
         assertFalse(Files.exists(output));
         String text = stdout.toString();
         assertTrue(text.contains("layoutComplete=yes"));
-        assertTrue(text.contains("runtimeLoadableReason=SmolLM2 runtime is not implemented yet"));
+        assertTrue(text.contains("runtimeLoadableReason=" + SmolLM2LayoutReport.MISSING_DENSE_PAYLOAD));
     }
 
     @Test
@@ -88,7 +88,7 @@ class SmolLM2WdmlPackCompileToolTest {
     }
 
     @Test
-    void reportsRuntimeNotImplemented() throws Exception {
+    void reportsDryRunAsNotRuntimeLoadableBecauseNoPackagePayloadExists() throws Exception {
         SmolLM2TestFixtures.writeModelDirectory(tempDir, SmolLM2TestFixtures.config135(false), true);
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
 
@@ -97,6 +97,21 @@ class SmolLM2WdmlPackCompileToolTest {
 
         assertEquals(0, exitCode);
         assertTrue(stdout.toString().contains("runtimeLoadable=no"));
+        assertTrue(stdout.toString().contains("runtimeLoadableReason=" + SmolLM2LayoutReport.MISSING_DENSE_PAYLOAD));
+    }
+
+    @Test
+    void reportsDenseCompileAsReferenceRuntimeLoadable() throws Exception {
+        SmolLM2TestFixtures.writeModelDirectory(tempDir, SmolLM2TestFixtures.config135(false), true);
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+
+        int exitCode = SmolLM2WdmlPackCompileTool.run(new String[]{"--model-dir", tempDir.toString()},
+                new PrintStream(stdout), new PrintStream(new ByteArrayOutputStream()));
+
+        assertEquals(0, exitCode);
+        String text = stdout.toString();
+        assertTrue(text.contains("runtimeLoadable=yes"));
+        assertTrue(text.contains("runtimeLoadableReason=" + SmolLM2LayoutReport.REFERENCE_RUNTIME_AVAILABLE));
     }
 
     @Test

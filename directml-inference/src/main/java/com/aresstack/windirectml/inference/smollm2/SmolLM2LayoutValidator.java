@@ -74,8 +74,8 @@ public final class SmolLM2LayoutValidator {
         return new SmolLM2LayoutReport(
                 "smollm2",
                 complete,
-                false,
-                SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED,
+                complete,
+                complete ? SmolLM2LayoutReport.REFERENCE_RUNTIME_AVAILABLE : SmolLM2LayoutReport.INCOMPLETE_LAYOUT,
                 catalog.size(),
                 known,
                 unknown,

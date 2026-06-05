@@ -31,8 +31,9 @@ public final class SmolLM2WdmlPackCompiler {
         validateSupported(config);
         SourceTensorCatalog catalog = modelDirectory.readTensorCatalog();
         SmolLM2LayoutReport layoutReport = layoutValidator.validate(config, catalog);
-        return new SmolLM2CompileReport(resolveOutput(options), true, false, false,
-                SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED, config, layoutReport);
+        SmolLM2RuntimeLoadability loadability = SmolLM2RuntimeLoadability.forPackage(layoutReport, false);
+        return new SmolLM2CompileReport(resolveOutput(options), true, false, loadability.runtimeLoadable(),
+                loadability.runtimeLoadableReason(), config, layoutReport);
     }
 
     public SmolLM2CompileReport compile(SmolLM2CompileOptions options) throws IOException {
@@ -50,8 +51,9 @@ public final class SmolLM2WdmlPackCompiler {
             manifestWriter.writeWithDensePayload(output, config, layoutReport, catalog);
             payloadIncluded = true;
         }
-        return new SmolLM2CompileReport(output, options.dryRun(), payloadIncluded, false,
-                SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED, config, layoutReport);
+        SmolLM2RuntimeLoadability loadability = SmolLM2RuntimeLoadability.forPackage(layoutReport, payloadIncluded);
+        return new SmolLM2CompileReport(output, options.dryRun(), payloadIncluded, loadability.runtimeLoadable(),
+                loadability.runtimeLoadableReason(), config, layoutReport);
     }
 
     private static void validateSupported(SmolLM2Config config) throws IOException {

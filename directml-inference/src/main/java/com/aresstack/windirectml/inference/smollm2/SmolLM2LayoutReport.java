@@ -25,6 +25,9 @@ public record SmolLM2LayoutReport(
         List<SmolLM2TensorRoleBinding> roles
 ) {
     public static final String RUNTIME_NOT_IMPLEMENTED = "SmolLM2 runtime is not implemented yet";
+    public static final String REFERENCE_RUNTIME_AVAILABLE = "SmolLM2 reference runtime is available";
+    public static final String MISSING_DENSE_PAYLOAD = "SmolLM2 package has no dense payload";
+    public static final String INCOMPLETE_LAYOUT = "SmolLM2 layout is incomplete";
 
     public SmolLM2LayoutReport {
         missingRequiredRoles = List.copyOf(missingRequiredRoles);

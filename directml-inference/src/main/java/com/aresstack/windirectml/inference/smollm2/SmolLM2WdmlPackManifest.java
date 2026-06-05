@@ -16,7 +16,7 @@ import java.util.Map;
 public final class SmolLM2WdmlPackManifest {
 
     public static final int SCHEMA_VERSION = WdmlPackWriter.VERSION;
-    public static final int COMPILER_VERSION = 36;
+    public static final int COMPILER_VERSION = 41;
 
     private SmolLM2WdmlPackManifest() {
     }
@@ -40,12 +40,14 @@ public final class SmolLM2WdmlPackManifest {
         root.put("createdAt", Instant.now().toString());
         root.put("modelFamily", "smollm2");
         root.put("architecture", "llama-causal-decoder");
+        SmolLM2RuntimeLoadability loadability = SmolLM2RuntimeLoadability.forPackage(
+                layoutReport, payloadPolicy.payloadIncluded());
         root.put("sourceFormat", "safetensors");
         root.put("payloadIncluded", payloadPolicy.payloadIncluded());
         root.put("weightsLoadable", payloadPolicy.payloadIncluded() && layoutReport.layoutComplete());
-        root.put("runtimeLoadable", false);
-        root.put("runtimeLoadMode", "unsupported");
-        root.put("runtimeLoadableReason", SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED);
+        root.put("runtimeLoadable", loadability.runtimeLoadable());
+        root.put("runtimeLoadMode", loadability.runtimeLoadMode());
+        root.put("runtimeLoadableReason", loadability.runtimeLoadableReason());
         root.put("layoutComplete", layoutReport.layoutComplete());
         root.put("model", SmolLM2PackageMetadata.from(config).toManifest());
         root.put("smollm2Layout", layoutReport.toManifest());

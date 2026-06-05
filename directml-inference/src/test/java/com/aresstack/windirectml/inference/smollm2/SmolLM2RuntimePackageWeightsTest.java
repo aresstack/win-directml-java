@@ -26,7 +26,7 @@ class SmolLM2RuntimePackageWeightsTest {
 
         assertTrue(report.payloadIncluded());
         assertTrue(RuntimeModelPackage.open(output).payloadIncluded());
-        assertFalse(runtimePackage.executable());
+        assertTrue(runtimePackage.executable());
         assertTrue(runtimePackage.weightsAvailable());
         assertEquals(config.hiddenSize(), runtimePackage.config().hiddenSize());
         assertEquals(config.numHiddenLayers(), weights.layers().size());

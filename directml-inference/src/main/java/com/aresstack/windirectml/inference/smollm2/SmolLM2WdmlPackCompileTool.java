@@ -80,6 +80,7 @@ public final class SmolLM2WdmlPackCompileTool {
         out.println("payloadIncluded=" + yesNo(modelPackage.payloadIncluded()));
         out.println("runtimeLoadable=" + yesNo(modelPackage.runtimeLoadable()));
         out.println("runtimeLoadMode=" + modelPackage.runtimeLoadMode());
+        out.println("runtimeLoadableReason=" + value(manifest.get("runtimeLoadableReason")));
         out.println("layoutComplete=" + yesNo(Boolean.TRUE.equals(manifest.get("layoutComplete"))));
     }
 
@@ -89,7 +90,7 @@ public final class SmolLM2WdmlPackCompileTool {
         out.println("modelType=" + report.config().modelType());
         out.println("architecture=llama-causal-decoder");
         out.println("layoutComplete=" + yesNo(layout.layoutComplete()));
-        out.println("runtimeLoadable=no");
+        out.println("runtimeLoadable=" + yesNo(report.runtimeLoadable()));
         out.println("runtimeLoadableReason=" + report.runtimeLoadableReason());
         out.println("payloadIncluded=" + yesNo(report.payloadIncluded()));
         out.println("tensors=" + layout.foundTensorCount());

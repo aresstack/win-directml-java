@@ -19,8 +19,8 @@ class SmolLM2LayoutValidatorTest {
         SmolLM2LayoutReport report = validator.validate(config, SmolLM2TestFixtures.completeCatalog(config, true));
 
         assertTrue(report.layoutComplete());
-        assertFalse(report.runtimeLoadable());
-        assertEquals(SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED, report.runtimeLoadableReason());
+        assertTrue(report.runtimeLoadable());
+        assertEquals(SmolLM2LayoutReport.REFERENCE_RUNTIME_AVAILABLE, report.runtimeLoadableReason());
         assertTrue(report.usesGroupedQueryAttention());
     }
 

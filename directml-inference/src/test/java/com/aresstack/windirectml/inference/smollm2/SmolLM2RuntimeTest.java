@@ -18,7 +18,7 @@ class SmolLM2RuntimeTest {
         SmolLM2RuntimePackage runtimePackage = createRuntimePackage();
 
         assertFalse(runtimePackage.executable());
-        assertEquals(SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED, runtimePackage.runtimeLoadableReason());
+        assertEquals(SmolLM2LayoutReport.MISSING_DENSE_PAYLOAD, runtimePackage.runtimeLoadableReason());
     }
 
     @Test
@@ -54,6 +54,15 @@ class SmolLM2RuntimeTest {
             assertEquals(List.of(0), result.generatedTokenIds());
             assertEquals(1, result.tokensGenerated());
             assertEquals("length", result.finishReason());
+        }
+    }
+
+    @Test
+    void tokenGenerationRejectsManifestOnlyPackage() throws Exception {
+        try (SmolLM2Runtime runtime = SmolLM2Runtime.load(createRuntimePackage())) {
+            SmolLM2RuntimeUnsupportedException exception = assertThrows(SmolLM2RuntimeUnsupportedException.class,
+                    () -> runtime.generateTokenIds(new SmolLM2TokenRuntimeRequest(List.of(0), 1, null)));
+            assertEquals(SmolLM2LayoutReport.MISSING_DENSE_PAYLOAD, exception.getMessage());
         }
     }
 
