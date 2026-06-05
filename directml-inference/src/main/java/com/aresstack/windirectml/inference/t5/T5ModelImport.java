@@ -1,7 +1,10 @@
 package com.aresstack.windirectml.inference.t5;
 
 import com.aresstack.windirectml.inference.model.SafeTensorsReader;
+import com.aresstack.windirectml.inference.model.SourceTensor;
+import com.aresstack.windirectml.inference.model.SourceTensorCatalog;
 import com.aresstack.windirectml.inference.model.TensorCatalog;
+import com.aresstack.windirectml.inference.model.TorchCheckpointModelSource;
 import com.aresstack.windirectml.inference.model.TensorEntry;
 import com.aresstack.windirectml.inference.model.TensorStorageKind;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
@@ -54,6 +57,27 @@ record T5ModelImport(
         }
         return new T5ModelImport("safetensors", tensorFiles.size() == 1 ? tensorFiles.get(0) : root,
                 tensors, new TensorCatalog(entries));
+    }
+
+
+    static T5ModelImport loadTorchCheckpointDirectory(Path modelDir) throws IOException {
+        Path root = Objects.requireNonNull(modelDir, "modelDir").toAbsolutePath().normalize();
+        if (!Files.isDirectory(root)) {
+            throw new IOException("T5 Torch checkpoint model directory not found: " + root);
+        }
+        Path checkpoint = root.resolve("pytorch_model.bin");
+        if (!Files.isRegularFile(checkpoint)) {
+            throw new IOException("No pytorch_model.bin found in " + root);
+        }
+        SourceTensorCatalog catalog = TorchCheckpointModelSource.of(checkpoint).load();
+        Map<String, OnnxTensor> tensors = new LinkedHashMap<>();
+        List<TensorEntry> entries = new ArrayList<>();
+        for (SourceTensor tensor : catalog.entries().values()) {
+            tensors.put(tensor.name(), new OnnxTensor(tensor.name(), tensor.dims(), tensor.onnxDataType(),
+                    new float[0], new byte[0], tensor.payloadBuffer(), Math.toIntExact(tensor.byteLength())));
+            entries.add(tensor.toTensorEntry());
+        }
+        return new T5ModelImport(TorchCheckpointModelSource.FORMAT, checkpoint, tensors, new TensorCatalog(entries));
     }
 
     static List<Path> discoverSafeTensors(Path modelDir) throws IOException {

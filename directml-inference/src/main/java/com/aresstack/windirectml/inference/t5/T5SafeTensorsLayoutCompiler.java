@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.t5;
 
+import com.aresstack.windirectml.inference.model.TorchCheckpointModelSource;
 import com.aresstack.windirectml.windows.OnnxModelReader;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
 
@@ -26,7 +27,8 @@ final class T5SafeTensorsLayoutCompiler {
     static T5LayoutManifest analyze(T5ModelImport imported, T5Config config) {
         Objects.requireNonNull(imported, "imported");
         Objects.requireNonNull(config, "config");
-        if (!"safetensors".equals(imported.sourceFormat())) {
+        if (!"safetensors".equals(imported.sourceFormat())
+                && !TorchCheckpointModelSource.FORMAT.equals(imported.sourceFormat())) {
             return T5LayoutManifest.notSafeTensors(imported.sourceFormat());
         }
 
