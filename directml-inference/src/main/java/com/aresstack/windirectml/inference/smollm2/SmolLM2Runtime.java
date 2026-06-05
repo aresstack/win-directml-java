@@ -51,7 +51,7 @@ public final class SmolLM2Runtime implements AutoCloseable {
     public static SmolLM2Runtime loadWarp(SmolLM2RuntimePackage runtimePackage,
                                           SmolLM2Tokenizer tokenizer,
                                           int sequenceLength) {
-        return loadWarp(runtimePackage, tokenizer, sequenceLength, new SmolLM2UnsupportedWarpExecutor());
+        return loadWarp(runtimePackage, tokenizer, sequenceLength, SmolLM2WarpExecutorFactory.createDefaultExecutor());
     }
 
     public static SmolLM2Runtime loadWarp(SmolLM2RuntimePackage runtimePackage,
@@ -65,7 +65,7 @@ public final class SmolLM2Runtime implements AutoCloseable {
     public static SmolLM2Runtime loadAuto(SmolLM2RuntimePackage runtimePackage,
                                           SmolLM2Tokenizer tokenizer,
                                           int sequenceLength) {
-        return loadAuto(runtimePackage, tokenizer, sequenceLength, new SmolLM2UnsupportedWarpExecutor());
+        return loadAuto(runtimePackage, tokenizer, sequenceLength, SmolLM2WarpExecutorFactory.createDefaultExecutor());
     }
 
     public static SmolLM2Runtime loadAuto(SmolLM2RuntimePackage runtimePackage,

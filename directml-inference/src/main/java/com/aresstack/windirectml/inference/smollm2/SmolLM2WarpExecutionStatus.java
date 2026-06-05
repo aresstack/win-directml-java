@@ -22,12 +22,17 @@ public record SmolLM2WarpExecutionStatus(boolean executable,
     }
 
     public static SmolLM2WarpExecutionStatus unsupported(SmolLM2WarpRuntimePlan plan) {
+        return unsupported(plan, NATIVE_EXECUTOR_MISSING);
+    }
+
+    public static SmolLM2WarpExecutionStatus unsupported(SmolLM2WarpRuntimePlan plan, String reason) {
+        String safeReason = Objects.requireNonNull(reason, "reason");
         List<String> mergedWarnings = new ArrayList<>();
         if (plan != null) {
             mergedWarnings.addAll(plan.warnings());
         }
-        mergedWarnings.add(NATIVE_EXECUTOR_MISSING);
-        return new SmolLM2WarpExecutionStatus(false, "warp", NATIVE_EXECUTOR_MISSING, mergedWarnings);
+        mergedWarnings.add(safeReason);
+        return new SmolLM2WarpExecutionStatus(false, "warp", safeReason, mergedWarnings);
     }
 
     public static SmolLM2WarpExecutionStatus unsupported(String reason) {

@@ -28,7 +28,7 @@ public final class SmolLM2WarpRuntime implements AutoCloseable {
     }
 
     public static SmolLM2WarpRuntime prepare(SmolLM2RuntimePackage runtimePackage, int sequenceLength) {
-        return prepare(runtimePackage, sequenceLength, new SmolLM2UnsupportedWarpExecutor());
+        return prepare(runtimePackage, sequenceLength, SmolLM2WarpExecutorFactory.createDefaultExecutor());
     }
 
     public static SmolLM2WarpRuntime prepare(SmolLM2RuntimePackage runtimePackage,
