@@ -58,6 +58,11 @@ public final class SmolLM2WorkbenchRuntimeRunner {
 
     public Result generate(String prompt, int maxTokens, Backend requestedBackend) throws IOException {
         Backend safeBackend = requestedBackend == null ? Backend.CPU : requestedBackend;
+        Optional<Result> guardedInput = guardSummarizationInput(prompt, maxTokens, safeBackend);
+        if (guardedInput.isPresent()) {
+            return guardedInput.get();
+        }
+
         Path packagePath = ensureExecutablePackage();
         Path tokenizerPath = requireTokenizer();
 
@@ -84,6 +89,37 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     result.diagnostics(),
                     warpReadiness);
         }
+    }
+
+
+    private Optional<Result> guardSummarizationInput(String prompt, int maxTokens, Backend requestedBackend) {
+        String source = prompt == null ? "" : prompt.trim();
+        if (!isWorkbenchPlaceholder(source)) {
+            return Optional.empty();
+        }
+
+        String message = "Replace the workbench placeholder with a longer source text before running SmolLM2 summarization.";
+        SmolLM2GenerationDiagnostics diagnostics = new SmolLM2GenerationDiagnostics(
+                0,
+                0,
+                0,
+                Math.max(0, maxTokens),
+                List.of(),
+                "input_guard",
+                false,
+                false);
+
+        return Optional.of(new Result(
+                message,
+                0,
+                "input_guard",
+                requestedBackend.name().toLowerCase(Locale.ROOT),
+                "not_started",
+                "",
+                List.of(),
+                modelDir.resolve(DEFAULT_PACKAGE_FILE),
+                diagnostics,
+                Optional.empty()));
     }
 
     private static String cleanSummarizationOutput(String generatedText, String sourceText) {
