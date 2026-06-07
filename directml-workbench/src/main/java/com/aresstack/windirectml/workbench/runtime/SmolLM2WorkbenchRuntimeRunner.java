@@ -19,8 +19,11 @@ import com.aresstack.windirectml.runtime.facade.Backend;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -93,6 +96,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         text = removeInstructionEcho(text);
         text = removeRepeatedLeadLabels(text);
         text = removeSourceEcho(text, sourceText);
+        text = enforceGroundedSummary(text, sourceText);
         return text.trim();
     }
 
@@ -154,6 +158,102 @@ public final class SmolLM2WorkbenchRuntimeRunner {
             return remaining.isEmpty() ? extractiveFallbackSummary(sourceText) : remaining;
         }
         return text;
+    }
+
+    private static String enforceGroundedSummary(String text, String sourceText) {
+        if (sourceText == null || sourceText.isBlank() || text == null || text.isBlank()) {
+            return text;
+        }
+
+        String source = sourceText.trim();
+        String output = text.trim();
+        if (isWorkbenchPlaceholder(source)) {
+            return extractiveFallbackSummary(source);
+        }
+        if (looksGerman(source) && looksEnglish(output)) {
+            return extractiveFallbackSummary(source);
+        }
+        if (output.length() >= 80 && sourceSupportRatio(output, source) < 0.35d) {
+            return extractiveFallbackSummary(source);
+        }
+        return output;
+    }
+
+    private static boolean isWorkbenchPlaceholder(String sourceText) {
+        String normalized = normalizeForEchoCheck(sourceText).toLowerCase(Locale.ROOT);
+        return normalized.equals("paste a longer text or prompt here. the workbench will generate output using the selected decoder model.");
+    }
+
+    private static boolean looksGerman(String text) {
+        String lower = " " + text.toLowerCase(Locale.ROOT) + " ";
+        return lower.contains(" der ")
+                || lower.contains(" die ")
+                || lower.contains(" das ")
+                || lower.contains(" und ")
+                || lower.contains(" nicht ")
+                || lower.contains(" von ")
+                || lower.contains(" im ")
+                || lower.contains(" ist ")
+                || lower.contains(" war ")
+                || lower.contains(" wurde ")
+                || lower.contains("ö")
+                || lower.contains("ä")
+                || lower.contains("ü")
+                || lower.contains("ß");
+    }
+
+    private static boolean looksEnglish(String text) {
+        String lower = " " + text.toLowerCase(Locale.ROOT) + " ";
+        int hits = 0;
+        hits += lower.contains(" the ") ? 1 : 0;
+        hits += lower.contains(" and ") ? 1 : 0;
+        hits += lower.contains(" was ") ? 1 : 0;
+        hits += lower.contains(" were ") ? 1 : 0;
+        hits += lower.contains(" with ") ? 1 : 0;
+        hits += lower.contains(" from ") ? 1 : 0;
+        hits += lower.contains(" for ") ? 1 : 0;
+        hits += lower.contains(" of ") ? 1 : 0;
+        return hits >= 2;
+    }
+
+    private static double sourceSupportRatio(String outputText, String sourceText) {
+        Set<String> sourceWords = contentWords(sourceText);
+        if (sourceWords.isEmpty()) {
+            return 1.0d;
+        }
+        List<String> outputWords = contentWordList(outputText);
+        if (outputWords.isEmpty()) {
+            return 1.0d;
+        }
+
+        int supported = 0;
+        for (String word : outputWords) {
+            if (sourceWords.contains(word)) {
+                supported++;
+            }
+        }
+        return (double) supported / (double) outputWords.size();
+    }
+
+    private static Set<String> contentWords(String text) {
+        return new HashSet<>(contentWordList(text));
+    }
+
+    private static List<String> contentWordList(String text) {
+        return java.util.Arrays.stream(text.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+"))
+                .map(String::trim)
+                .filter(word -> word.length() >= 4)
+                .filter(word -> !isSummaryStopWord(word))
+                .toList();
+    }
+
+    private static boolean isSummaryStopWord(String word) {
+        return switch (word) {
+            case "this", "that", "with", "from", "have", "will", "using", "used", "into",
+                    "eine", "einer", "einem", "einen", "dieser", "diese", "dieses", "wurde", "wurden", "sind",
+                    "dass", "nicht", "auch", "oder", "über", "unter", "zwischen" -> true;
+            default -> false;
+        };
     }
 
     private static String normalizeForEchoCheck(String text) {
