@@ -62,7 +62,12 @@ class GenerationModelRegistryTest {
 
     @Test
     void registryContainsT5FamilyAsExperimentalSeq2Seq() {
-        String[] ids = {"Salesforce/codet5-small", "google-t5/t5-small", "google/flan-t5-small"};
+        String[] ids = {
+                "Salesforce/codet5-small",
+                "Salesforce/codet5-base-multi-sum",
+                "google-t5/t5-small",
+                "google/flan-t5-small"
+        };
 
         for (String id : ids) {
             GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId(id);

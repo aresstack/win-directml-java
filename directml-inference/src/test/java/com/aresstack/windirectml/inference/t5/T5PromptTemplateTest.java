@@ -27,14 +27,14 @@ class T5PromptTemplateTest {
     }
 
     @Test
-    void formatsCodeT5WithJavaSummarizationPrefix() {
+    void keepsCodeT5InputRawByDefault() {
         InferenceRequest request = InferenceRequest.builder()
                 .modelId("Salesforce/codet5-small")
                 .userPrompt("public int size() { return count; }")
                 .maxTokens(32)
                 .build();
 
-        assertEquals("summarize java: public int size() { return count; }", T5PromptTemplate.format(request));
+        assertEquals("public int size() { return count; }", T5PromptTemplate.format(request));
     }
 
     @Test

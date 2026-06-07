@@ -151,6 +151,18 @@ public final class CodeT5Tokenizer implements T5TextTokenizer {
         return idToToken.length;
     }
 
+    @Override
+    public String describeToken(int tokenId) {
+        if (tokenId < 0 || tokenId >= idToToken.length) {
+            return tokenId + ":<out-of-range>";
+        }
+        String token = idToToken[tokenId];
+        if (token == null || token.isEmpty()) {
+            return tokenId + ":<empty>";
+        }
+        return tokenId + ":" + token;
+    }
+
     public int unknownTokenId() {
         return unknownTokenId;
     }

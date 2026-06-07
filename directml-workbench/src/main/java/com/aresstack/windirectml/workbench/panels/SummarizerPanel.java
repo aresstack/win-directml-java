@@ -317,6 +317,10 @@ public final class SummarizerPanel extends JPanel {
                     .build();
             InferenceResult result = engine.generate(request);
             appendResult(result.getText());
+            if (result.getText() == null || result.getText().isBlank()) {
+                appendResult("  NOTE: generated text is empty after detokenization.");
+                appendResult("  Raw output tokens: " + engine.lastOutputTokenPreview());
+            }
             appendResult("");
             appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
             if (result.getUsage() != null) {

@@ -108,6 +108,18 @@ final class JsonT5Tokenizer implements T5TextTokenizer {
         return idToToken.length;
     }
 
+    @Override
+    public String describeToken(int tokenId) {
+        if (tokenId < 0 || tokenId >= idToToken.length) {
+            return tokenId + ":<out-of-range>";
+        }
+        String token = idToToken[tokenId];
+        if (token == null || token.isEmpty()) {
+            return tokenId + ":<empty>";
+        }
+        return tokenId + ":" + token;
+    }
+
     private List<Integer> encodeUnigram(String text) {
         int length = text.length();
         float[] bestScore = new float[length + 1];

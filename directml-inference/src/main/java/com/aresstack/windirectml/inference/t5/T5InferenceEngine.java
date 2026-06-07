@@ -34,6 +34,7 @@ public final class T5InferenceEngine implements InferenceEngine {
     private T5Runtime runtime;
     private WindowsBindings windowsBindings;
     private T5GenerationMetrics lastGenerationMetrics = T5GenerationMetrics.empty();
+    private String lastOutputTokenPreview = "[]";
     private boolean ready;
 
     public T5InferenceEngine(Path modelDir, int maxTokens) {
@@ -96,7 +97,9 @@ public final class T5InferenceEngine implements InferenceEngine {
             T5RuntimeResult result = runtime.generate(runtimeRequest);
             long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
             long detokenizeStart = System.nanoTime();
-            String text = tokenizer.decode(result.outputTokenIds());
+            int[] outputTokenIds = result.outputTokenIds();
+            String text = tokenizer.decode(outputTokenIds);
+            lastOutputTokenPreview = tokenizer.describeTokens(outputTokenIds, 24);
             long detokenizationNanos = System.nanoTime() - detokenizeStart;
             lastGenerationMetrics = result.generationMetrics()
                     .withTextBoundaryTimings(tokenizationNanos, detokenizationNanos);
@@ -125,6 +128,7 @@ public final class T5InferenceEngine implements InferenceEngine {
         closeWindowsBindingsQuietly();
         runtimePackage = null;
         tokenizer = null;
+        lastOutputTokenPreview = "[]";
     }
 
     @Override
@@ -146,6 +150,10 @@ public final class T5InferenceEngine implements InferenceEngine {
 
     public T5GenerationMetrics lastGenerationMetrics() {
         return lastGenerationMetrics;
+    }
+
+    public String lastOutputTokenPreview() {
+        return lastOutputTokenPreview;
     }
 
     public static String describeMissingModelFile(Path modelDir) {

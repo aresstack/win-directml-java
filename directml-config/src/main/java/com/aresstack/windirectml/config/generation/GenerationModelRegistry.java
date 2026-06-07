@@ -280,8 +280,21 @@ public final class GenerationModelRegistry {
                 Arrays.asList(
                         "model/codet5-small",
                         "model/Salesforce/codet5-small"),
-                "Experimental T5-style encoder-decoder runtime. Requires a compiled .wdmlpack "
-                        + "or SafeTensors source for first-use compilation."));
+                "Experimental CodeT5 base checkpoint for runtime smoke tests. For code summarization, "
+                        + "prefer Salesforce/codet5-base-multi-sum."));
+
+        entries.add(new Entry(
+                "Salesforce/codet5-base-multi-sum",
+                Architecture.SEQ2SEQ,
+                "Salesforce",
+                "220M",
+                ChatTemplate.RAW,
+                Status.EXPERIMENTAL,
+                Arrays.asList(
+                        "model/codet5-base-multi-sum",
+                        "model/Salesforce/codet5-base-multi-sum"),
+                "Experimental CodeT5 model fine-tuned for multi-language code summarization. "
+                        + "Uses the restricted pytorch_model.bin import path to compile model_t5.wdmlpack."));
 
         entries.add(new Entry(
                 "google-t5/t5-small",

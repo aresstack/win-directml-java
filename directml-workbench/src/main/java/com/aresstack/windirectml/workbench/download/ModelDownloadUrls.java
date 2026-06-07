@@ -25,6 +25,8 @@ public final class ModelDownloadUrls {
     public static final String SMOLLM2_360M_LOCAL_DIR = "smollm2-360m-instruct";
     public static final String CODET5_SMALL_REPO = "Salesforce/codet5-small";
     public static final String CODET5_SMALL_LOCAL_DIR = "codet5-small";
+    public static final String CODET5_BASE_MULTI_SUM_REPO = "Salesforce/codet5-base-multi-sum";
+    public static final String CODET5_BASE_MULTI_SUM_LOCAL_DIR = "codet5-base-multi-sum";
     public static final String GOOGLE_T5_SMALL_REPO = "google-t5/t5-small";
     public static final String GOOGLE_T5_SMALL_LOCAL_DIR = "t5-small";
     public static final String GOOGLE_FLAN_T5_SMALL_REPO = "google/flan-t5-small";
@@ -132,24 +134,34 @@ public final class ModelDownloadUrls {
     }
 
     /**
-     * Creates a download manifest for Salesforce CodeT5-small metadata and tokenizer files.
+     * Creates a complete download manifest for Salesforce CodeT5-small.
      *
-     * <p>The upstream repository publishes its weights as {@code pytorch_model.bin}, which is a
-     * pickle-backed PyTorch checkpoint. IronMind deliberately does not download or execute that
-     * checkpoint on hardened runtime systems. Put {@code model.safetensors} or a precompiled
-     * {@code model_t5.wdmlpack} into the target directory before running the model.</p>
+     * <p>The upstream repository publishes its weights as {@code pytorch_model.bin}. The file is
+     * downloaded only as an import source for the restricted Torch state-dict compiler and is never
+     * used by the runtime directly.</p>
      */
     public static ModelDownloadManifest manifestForCodeT5Small() {
-        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
-        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "config.json", true);
-        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "vocab.json", true);
-        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "merges.txt", true);
-        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "tokenizer_config.json", true);
-        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "special_tokens_map.json", true);
-        addRootDescriptor(descriptors, CODET5_SMALL_REPO, "added_tokens.json", false);
-        return new ModelDownloadManifest(CODET5_SMALL_REPO, CODET5_SMALL_LOCAL_DIR, List.copyOf(descriptors));
+        return manifestForCodeT5TorchCheckpoint(CODET5_SMALL_REPO, CODET5_SMALL_LOCAL_DIR);
     }
 
+    /**
+     * Creates a complete download manifest for Salesforce CodeT5 base multi-language summarization.
+     */
+    public static ModelDownloadManifest manifestForCodeT5BaseMultiSum() {
+        return manifestForCodeT5TorchCheckpoint(CODET5_BASE_MULTI_SUM_REPO, CODET5_BASE_MULTI_SUM_LOCAL_DIR);
+    }
+
+    private static ModelDownloadManifest manifestForCodeT5TorchCheckpoint(String repo, String localDir) {
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        addRootDescriptor(descriptors, repo, "pytorch_model.bin", true);
+        addRootDescriptor(descriptors, repo, "config.json", true);
+        addRootDescriptor(descriptors, repo, "vocab.json", true);
+        addRootDescriptor(descriptors, repo, "merges.txt", true);
+        addRootDescriptor(descriptors, repo, "tokenizer_config.json", true);
+        addRootDescriptor(descriptors, repo, "special_tokens_map.json", true);
+        addRootDescriptor(descriptors, repo, "added_tokens.json", false);
+        return new ModelDownloadManifest(repo, localDir, List.copyOf(descriptors));
+    }
 
     /**
      * Creates a complete download manifest for google-t5/t5-small.
@@ -296,6 +308,15 @@ public final class ModelDownloadUrls {
      */
     public static List<String> forCodeT5Small() {
         return manifestForCodeT5Small().files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+    /**
+     * Returns download URLs for CodeT5 base multi-language summarization.
+     */
+    public static List<String> forCodeT5BaseMultiSum() {
+        return manifestForCodeT5BaseMultiSum().files().stream()
                 .map(ModelFileDescriptor::defaultUrl)
                 .toList();
     }

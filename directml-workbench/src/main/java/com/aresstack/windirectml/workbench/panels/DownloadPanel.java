@@ -153,9 +153,13 @@ public final class DownloadPanel extends JPanel {
     }
 
     private void addCodeT5Row(JPanel buttons) {
-        ModelDownloadManifest manifest = ModelDownloadUrls.manifestForCodeT5Small();
-        addT5Row(buttons, "Download CodeT5 small metadata/tokenizer", manifest,
-                "Compile CodeT5 checkpoint → wdmlpack");
+        ModelDownloadManifest smallManifest = ModelDownloadUrls.manifestForCodeT5Small();
+        addT5Row(buttons, "Download CodeT5 small checkpoint", smallManifest,
+                "Compile CodeT5 small → wdmlpack");
+
+        ModelDownloadManifest multiSumManifest = ModelDownloadUrls.manifestForCodeT5BaseMultiSum();
+        addT5Row(buttons, "Download CodeT5 base multi-sum checkpoint", multiSumManifest,
+                "Compile CodeT5 base multi-sum → wdmlpack");
     }
 
     private void addT5Row(JPanel buttons, String downloadLabel, ModelDownloadManifest baseManifest, String compileLabel) {
