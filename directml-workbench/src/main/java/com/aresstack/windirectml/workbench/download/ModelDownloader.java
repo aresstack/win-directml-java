@@ -279,7 +279,8 @@ public final class ModelDownloader {
                     public List<Proxy> select(URI uri) {
                         try {
                             ProxyResult result = resolver.resolve(uri.toString());
-                            if (result == null || result.isDirect()) {
+                            if (result == null || !result.isProxy()) {
+                                // DIRECT, ERROR or NOT_IMPLEMENTED -> best-effort direct connection.
                                 return Collections.singletonList(Proxy.NO_PROXY);
                             }
                             return Collections.singletonList(new Proxy(Proxy.Type.HTTP,

@@ -1,7 +1,6 @@
 package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.workbench.WorkbenchModel;
-import com.aresstack.winproxy.PacUrlSource;
 import com.aresstack.winproxy.ProxyConfiguration;
 import com.aresstack.winproxy.ProxyDefaults;
 import com.aresstack.winproxy.ProxyMode;
@@ -27,6 +26,18 @@ import java.awt.GridLayout;
  * Proxy settings used by model downloads.
  */
 public final class ProxyPanel extends JPanel {
+    /** Modes offered in the UI. The legacy PowerShell route resolver is intentionally hidden. */
+    private static final ProxyMode[] UI_MODES = {
+            ProxyMode.DISABLED,
+            ProxyMode.MANUAL_PROXY,
+            ProxyMode.WINDOWS_STATIC_PROXY,
+            ProxyMode.PAC_URL_MANUAL,
+            ProxyMode.PAC_URL_POWERSHELL,
+            ProxyMode.PAC_URL_WINDOWS_SETTINGS,
+            ProxyMode.WINDOWS_NATIVE_PROXY_SETTINGS,
+            ProxyMode.WINDOWS_NATIVE_ROUTE_RESOLVER
+    };
+
     private final WorkbenchModel model;
     private final JComboBox<ProxyMode> mode;
     private final JTextField testUrl;
@@ -42,7 +53,7 @@ public final class ProxyPanel extends JPanel {
         setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        mode = new JComboBox<ProxyMode>(ProxyMode.values());
+        mode = new JComboBox<ProxyMode>(UI_MODES);
         mode.setSelectedItem(cfg.getMode());
         testUrl = new JTextField(cfg.getTestUrl());
         pacUrlDiscoveryScript = new JTextField(defaultPacScript(cfg));
@@ -132,14 +143,8 @@ public final class ProxyPanel extends JPanel {
     }
 
     private ProxyResult resolveProxyForTest(ProxyConfiguration cfg, String url) {
-        if (cfg.getMode() == ProxyMode.PAC_URL) {
-            String explicitPacUrl = trimToNull(cfg.getPacUrl());
-            if (explicitPacUrl != null) {
-                return new WindowsProxyResolver(cfg).resolve(url, PacUrlSource.DIRECT, explicitPacUrl);
-            }
-            String script = nonBlank(cfg.getPacUrlDiscoveryScript(), ProxyDefaults.DEFAULT_PAC_URL_DISCOVERY_SCRIPT);
-            return new WindowsProxyResolver(cfg).resolve(url, PacUrlSource.POWERSHELL, script);
-        }
+        // The configured mode fully drives resolution. PAC_URL_POWERSHELL is the
+        // important path on hardened machines (inline -Command discovery + GraalVM).
         return new WindowsProxyResolver(cfg).resolve(url);
     }
 
@@ -165,16 +170,14 @@ public final class ProxyPanel extends JPanel {
     }
 
     private static String formatProxyResult(ProxyResult result, ProxyMode mode) {
-        String reason = mode.name().toLowerCase(java.util.Locale.ROOT) + "-" + result.getReason();
-        if (result.isDirect()) {
-            return "DIRECT (" + reason + ")";
-        }
-        return "/" + result.getHost() + ":" + result.getPort() + " (" + reason + ")";
+        // Show the honest result kind + technical reason. No misleading mode prefix
+        // that masks the underlying cause.
+        return result.toString();
     }
 
     private ProxyMode selectedMode() {
         Object selected = mode.getSelectedItem();
-        return selected instanceof ProxyMode ? (ProxyMode) selected : ProxyMode.PAC_URL;
+        return selected instanceof ProxyMode ? (ProxyMode) selected : ProxyMode.PAC_URL_POWERSHELL;
     }
 
     private void append(String message) {

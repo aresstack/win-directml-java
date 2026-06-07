@@ -88,6 +88,7 @@ public final class WorkbenchModel {
 
     private static ProxyConfiguration defaultProxyConfiguration() {
         return ProxyConfiguration.builder()
+                .mode(com.aresstack.winproxy.ProxyMode.PAC_URL_POWERSHELL)
                 .pacUrlDiscoveryScript(com.aresstack.winproxy.ProxyDefaults.DEFAULT_PAC_URL_DISCOVERY_SCRIPT)
                 .build();
     }

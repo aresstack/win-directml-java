@@ -9,6 +9,7 @@ allprojects {
     version = project.findProperty('version') == 'unspecified'
             ? '0.1.0-SNAPSHOT' : project.version
     repositories {
+        mavenLocal()
         mavenCentral()
     }
 }
