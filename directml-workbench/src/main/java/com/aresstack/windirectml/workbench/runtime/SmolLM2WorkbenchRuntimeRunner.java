@@ -70,7 +70,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     SmolLM2GenerationOptions.greedy()));
             Optional<SmolLM2WarpExecutionStatus> effectiveWarpStatus = runtime.warpExecutionStatus().or(() -> warpStatus);
             return new Result(
-                    cleanSummarizationOutput(result.generatedText()),
+                    cleanSummarizationOutput(result.generatedText(), prompt),
                     result.tokensGenerated(),
                     result.finishReason(),
                     safeBackend.name().toLowerCase(),
@@ -83,7 +83,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         }
     }
 
-    private static String cleanSummarizationOutput(String generatedText) {
+    private static String cleanSummarizationOutput(String generatedText, String sourceText) {
         if (generatedText == null || generatedText.isBlank()) {
             return "";
         }
@@ -92,6 +92,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         text = removeChatMarkers(text);
         text = removeInstructionEcho(text);
         text = removeRepeatedLeadLabels(text);
+        text = removeSourceEcho(text, sourceText);
         return text.trim();
     }
 
@@ -136,6 +137,67 @@ public final class SmolLM2WorkbenchRuntimeRunner {
             }
         }
         return cleaned;
+    }
+
+    private static String removeSourceEcho(String text, String sourceText) {
+        if (sourceText == null || sourceText.isBlank() || text.isBlank()) {
+            return text;
+        }
+
+        String normalizedText = normalizeForEchoCheck(text);
+        String normalizedSource = normalizeForEchoCheck(sourceText);
+        if (normalizedText.equals(normalizedSource)) {
+            return extractiveFallbackSummary(sourceText);
+        }
+        if (normalizedSource.length() > 80 && normalizedText.startsWith(normalizedSource.substring(0, 80))) {
+            String remaining = text.substring(Math.min(text.length(), sourceText.trim().length())).trim();
+            return remaining.isEmpty() ? extractiveFallbackSummary(sourceText) : remaining;
+        }
+        return text;
+    }
+
+    private static String normalizeForEchoCheck(String text) {
+        return text.replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private static String extractiveFallbackSummary(String sourceText) {
+        String source = sourceText == null ? "" : sourceText.trim();
+        if (source.length() <= 240) {
+            return source;
+        }
+
+        String[] sentences = source.split("(?<=[.!?。！？])\\s+");
+        StringBuilder builder = new StringBuilder();
+        for (String sentence : sentences) {
+            if (sentence.isBlank()) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(' ');
+            }
+            builder.append(sentence.trim());
+            if (builder.length() >= 360 || countSentences(builder.toString()) >= 2) {
+                break;
+            }
+        }
+        if (builder.length() == 0) {
+            return source.substring(0, Math.min(source.length(), 360)).trim();
+        }
+        return builder.toString().trim();
+    }
+
+    private static int countSentences(String text) {
+        int count = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '.' || ch == '!' || ch == '?' || ch == '。' || ch == '！' || ch == '？') {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static String removeLeadLabel(String text, String label) {

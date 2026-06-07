@@ -11,7 +11,8 @@ public final class SmolLM2ChatPromptTemplate {
     private static final String IM_END = "<|im_end|>";
     private static final String DEFAULT_SYSTEM_PROMPT =
             "You are a helpful AI assistant named SmolLM, trained by Hugging Face";
-    private static final String SUMMARIZATION_ASSISTANT_PREFIX = "Zusammenfassung:\n";
+    private static final String GERMAN_SUMMARIZATION_ASSISTANT_PREFIX = "Zusammenfassung:\n";
+    private static final String ENGLISH_SUMMARIZATION_ASSISTANT_PREFIX = "Summary:\n";
 
     private final String systemPrompt;
 
@@ -36,12 +37,44 @@ public final class SmolLM2ChatPromptTemplate {
         if (looksLikeRenderedChat(sourceText)) {
             return sourceText;
         }
-        String taskPrompt = "Fasse diesen Quelltext kurz zusammen. "
-                + "Antworte in der Sprache des Quelltexts. "
-                + "Nutze nur Informationen aus dem Quelltext.\n\n"
-                + "Quelltext:\n"
-                + sourceText.trim();
-        return renderConversation(taskPrompt, SUMMARIZATION_ASSISTANT_PREFIX);
+        String trimmedSource = sourceText.trim();
+        if (looksGerman(trimmedSource)) {
+            return renderConversation(renderGermanSummarizationTask(trimmedSource), GERMAN_SUMMARIZATION_ASSISTANT_PREFIX);
+        }
+        return renderConversation(renderEnglishSummarizationTask(trimmedSource), ENGLISH_SUMMARIZATION_ASSISTANT_PREFIX);
+    }
+
+    private static String renderGermanSummarizationTask(String sourceText) {
+        return "Schreibe eine sachliche Kurzfassung des Textes zwischen <text> und </text>. "
+                + "Gib nur die Kurzfassung aus. Wiederhole nicht den Quelltext. "
+                + "Erfinde keine Fakten.\n\n"
+                + "<text>\n"
+                + sourceText
+                + "\n</text>";
+    }
+
+    private static String renderEnglishSummarizationTask(String sourceText) {
+        return "Write a concise factual summary of the text between <text> and </text>. "
+                + "Output only the summary. Do not repeat the source text. "
+                + "Do not invent facts.\n\n"
+                + "<text>\n"
+                + sourceText
+                + "\n</text>";
+    }
+
+    private static boolean looksGerman(String text) {
+        String lower = text.toLowerCase();
+        return lower.contains(" der ")
+                || lower.contains(" die ")
+                || lower.contains(" das ")
+                || lower.contains(" und ")
+                || lower.contains(" nicht ")
+                || lower.contains(" von ")
+                || lower.contains(" im ")
+                || lower.contains("ö")
+                || lower.contains("ä")
+                || lower.contains("ü")
+                || lower.contains("ß");
     }
 
     private String renderConversation(String userPrompt, String assistantPrefix) {

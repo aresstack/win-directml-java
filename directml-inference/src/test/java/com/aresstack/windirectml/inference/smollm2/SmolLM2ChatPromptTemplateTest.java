@@ -2,7 +2,8 @@ package com.aresstack.windirectml.inference.smollm2;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SmolLM2ChatPromptTemplateTest {
 
@@ -24,18 +25,30 @@ class SmolLM2ChatPromptTemplateTest {
 
         assertEquals(prompt, template.renderUserPrompt(prompt));
     }
+
     @Test
-    void rendersSummarizationPromptWithShortTaskAndAssistantPrefix() {
+    void rendersGermanSummarizationPromptWithTextBoundaryAndAssistantPrefix() {
         SmolLM2ChatPromptTemplate template = SmolLM2ChatPromptTemplate.defaultInstruct();
 
         String rendered = template.renderSummarizationPrompt("Adolf Hitler wurde am 30. Januar 1933 ernannt.");
 
         assertTrue(rendered.startsWith("<|im_start|>system\n"));
-        assertTrue(rendered.contains("Fasse diesen Quelltext kurz zusammen."));
-        assertTrue(rendered.contains("Antworte in der Sprache des Quelltexts."));
-        assertTrue(rendered.contains("Nutze nur Informationen aus dem Quelltext."));
-        assertTrue(rendered.contains("Quelltext:\nAdolf Hitler wurde am 30. Januar 1933 ernannt."));
+        assertTrue(rendered.contains("Schreibe eine sachliche Kurzfassung"));
+        assertTrue(rendered.contains("Gib nur die Kurzfassung aus."));
+        assertTrue(rendered.contains("<text>\nAdolf Hitler wurde am 30. Januar 1933 ernannt.\n</text>"));
         assertTrue(rendered.endsWith("<|im_start|>assistant\nZusammenfassung:\n"));
+    }
+
+    @Test
+    void rendersEnglishSummarizationPromptWithEnglishInstruction() {
+        SmolLM2ChatPromptTemplate template = SmolLM2ChatPromptTemplate.defaultInstruct();
+
+        String rendered = template.renderSummarizationPrompt("Paste a longer text or prompt here.");
+
+        assertTrue(rendered.contains("Write a concise factual summary"));
+        assertTrue(rendered.contains("Output only the summary."));
+        assertTrue(rendered.contains("<text>\nPaste a longer text or prompt here.\n</text>"));
+        assertTrue(rendered.endsWith("<|im_start|>assistant\nSummary:\n"));
     }
 
     @Test
@@ -45,5 +58,4 @@ class SmolLM2ChatPromptTemplateTest {
 
         assertEquals(prompt, template.renderSummarizationPrompt(prompt));
     }
-
 }
