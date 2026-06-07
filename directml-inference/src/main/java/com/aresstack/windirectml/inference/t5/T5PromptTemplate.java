@@ -27,7 +27,7 @@ final class T5PromptTemplate {
             return "summarize: " + text;
         }
         if (modelId.contains("codet5")) {
-            return "summarize: " + text;
+            return "summarize java: " + text;
         }
         return text;
     }

@@ -55,17 +55,23 @@ public final class CodeT5Tokenizer implements T5TextTokenizer {
     private final Map<Long, Integer> mergeRanks;
     private final Map<String, Integer> specialTokens;
     private final int unknownTokenId;
+    private final int bosTokenId;
+    private final int eosTokenId;
 
     private CodeT5Tokenizer(Map<String, Integer> vocab,
                             String[] idToToken,
                             Map<Long, Integer> mergeRanks,
                             Map<String, Integer> specialTokens,
-                            int unknownTokenId) {
+                            int unknownTokenId,
+                            int bosTokenId,
+                            int eosTokenId) {
         this.vocab = Map.copyOf(new LinkedHashMap<>(vocab));
         this.idToToken = idToToken.clone();
         this.mergeRanks = Map.copyOf(new LinkedHashMap<>(mergeRanks));
         this.specialTokens = Map.copyOf(new LinkedHashMap<>(specialTokens));
         this.unknownTokenId = unknownTokenId;
+        this.bosTokenId = bosTokenId;
+        this.eosTokenId = eosTokenId;
     }
 
     /**
@@ -93,7 +99,12 @@ public final class CodeT5Tokenizer implements T5TextTokenizer {
         if (unknownTokenId < 0) {
             throw new IOException("CodeT5 tokenizer has no <unk> token in vocab/special tokens");
         }
-        return new CodeT5Tokenizer(vocab, idToToken, mergeRanks, specialTokens, unknownTokenId);
+        int bosTokenId = firstAvailableId(specialTokens, vocab, "<s>", "<cls>");
+        int eosTokenId = firstAvailableId(specialTokens, vocab, "</s>", "<sep>");
+        if (bosTokenId < 0 || eosTokenId < 0) {
+            throw new IOException("CodeT5 tokenizer must provide RoBERTa-style BOS/EOS tokens (<s>, </s>)");
+        }
+        return new CodeT5Tokenizer(vocab, idToToken, mergeRanks, specialTokens, unknownTokenId, bosTokenId, eosTokenId);
     }
 
     @Override
@@ -102,12 +113,16 @@ public final class CodeT5Tokenizer implements T5TextTokenizer {
             return new int[0];
         }
         List<Integer> out = new ArrayList<>();
+        out.add(bosTokenId);
         for (Object segment : splitSpecialTokens(text)) {
             if (segment instanceof Integer id) {
                 out.add(id);
             } else {
                 encodeRegularText((String) segment, out);
             }
+        }
+        if (out.size() == 1 || out.get(out.size() - 1) != eosTokenId) {
+            out.add(eosTokenId);
         }
         return toIntArray(out);
     }
@@ -138,6 +153,14 @@ public final class CodeT5Tokenizer implements T5TextTokenizer {
 
     public int unknownTokenId() {
         return unknownTokenId;
+    }
+
+    public int bosTokenId() {
+        return bosTokenId;
+    }
+
+    public int eosTokenId() {
+        return eosTokenId;
     }
 
     public Map<String, Integer> specialTokens() {
@@ -237,6 +260,20 @@ public final class CodeT5Tokenizer implements T5TextTokenizer {
             }
         }
         return new String(Arrays.copyOf(bytes, count), StandardCharsets.UTF_8);
+    }
+
+    private static int firstAvailableId(Map<String, Integer> specialTokens, Map<String, Integer> vocab, String... tokens) {
+        for (String token : tokens) {
+            Integer specialId = specialTokens.get(token);
+            if (specialId != null) {
+                return specialId;
+            }
+            Integer vocabId = vocab.get(token);
+            if (vocabId != null) {
+                return vocabId;
+            }
+        }
+        return -1;
     }
 
     private static Map<String, Integer> readVocab(Path vocabJson) throws IOException {

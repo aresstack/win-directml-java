@@ -21,8 +21,10 @@ class CodeT5TokenizerTest {
 
         int[] encoded = tokenizer.encode("Hi");
 
-        assertArrayEquals(new int[]{4, 5}, encoded);
+        assertArrayEquals(new int[]{1, 4, 5, 2}, encoded);
         assertEquals("Hi", tokenizer.decode(encoded));
+        assertEquals(1, tokenizer.bosTokenId());
+        assertEquals(2, tokenizer.eosTokenId());
     }
 
     @Test

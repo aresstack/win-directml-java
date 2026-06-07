@@ -27,6 +27,17 @@ class T5PromptTemplateTest {
     }
 
     @Test
+    void formatsCodeT5WithJavaSummarizationPrefix() {
+        InferenceRequest request = InferenceRequest.builder()
+                .modelId("Salesforce/codet5-small")
+                .userPrompt("public int size() { return count; }")
+                .maxTokens(32)
+                .build();
+
+        assertEquals("summarize java: public int size() { return count; }", T5PromptTemplate.format(request));
+    }
+
+    @Test
     void keepsExistingTaskPrefix() {
         InferenceRequest request = InferenceRequest.builder()
                 .modelId("google-t5/t5-small")
@@ -34,5 +45,16 @@ class T5PromptTemplateTest {
                 .build();
 
         assertEquals("translate English to German: hello", T5PromptTemplate.format(request));
+    }
+
+    @Test
+    void keepsExplicitCodeT5TaskPrefix() {
+        InferenceRequest request = InferenceRequest.builder()
+                .modelId("Salesforce/codet5-small")
+                .userPrompt("explain java: public int size() { return count; }")
+                .maxTokens(32)
+                .build();
+
+        assertEquals("explain java: public int size() { return count; }", T5PromptTemplate.format(request));
     }
 }
