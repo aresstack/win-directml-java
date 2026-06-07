@@ -26,10 +26,26 @@ tasks.withType(Test).configureEach {
 
 // Fat/shadow jar – uses the official Shadow plugin to produce a single
 // executable jar with all runtime dependencies correctly resolved.
-shadowJar {
+tasks.named('shadowJar') {
     archiveBaseName = 'directml-workbench'
     archiveClassifier = 'all'
     archiveVersion = ''
+
+    // GraalVM/Truffle (used by win-proxy-java's GraalJS PAC evaluator) registers its
+    // languages via a ServiceLoader file under
+    // META-INF/services/com.oracle.truffle.api.TruffleLanguage$Provider.
+    // The JS engine pulls in a SEPARATE internal 'regex' (TRegex) language for regular
+    // expressions, shipped in its own jar with its OWN copy of that provider file. In the
+    // fat jar both copies collide and only ONE would survive, dropping the 'regex' language;
+    // any RegExp in a PAC script then fails with "No language for id regex found"
+    // -> pac-evaluation-failed.
+    //
+    // NOTE: gradleup-shadow 9.3.0's mergeServiceFiles() does NOT merge this particular
+    // provider file (unlike johnrengelman-shadow, which MainframeMate uses successfully).
+    // We therefore ship an explicit, correctly-merged provider file as a project resource
+    // (src/main/resources/META-INF/services/...$Provider) listing BOTH the js and regex
+    // providers, and let mergeServiceFiles() fold the dependency copies into it.
+    mergeServiceFiles()
 
     manifest {
         attributes(
