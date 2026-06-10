@@ -11,50 +11,59 @@ import java.util.Objects;
 /**
  * User-selectable prompt templates for Workbench generation runs.
  * <p>
- * Templates are an application-layer convenience. They keep the source text
- * unchanged and only add task metadata around it. Decoder-only chat models
- * receive natural-language system instructions. T5-style seq2seq models receive
- * canonical text-to-text task prefixes, because natural chat instructions make
- * base T5 models behave like span-infilling models.
+ * Templates are an application-layer convenience. The {@link #NONE} template
+ * passes the source text unchanged. Task templates intentionally wrap the user
+ * text for causal language models, because small instruction models follow a
+ * concrete user task more reliably than a system-only instruction. T5-style
+ * seq2seq models receive canonical task prefixes through the system prompt so
+ * the family-specific T5 formatter can render {@code summarize: ...} or
+ * {@code translate English to German: ...}.
  */
 public enum WorkbenchPromptTemplate {
 
-    NONE("Keines", "", "", true, true),
+    NONE("Keines", "", "", CausalTask.NONE, true, true),
     SUMMARIZE_DE("Zusammenfassen",
             "Fasse den folgenden Text kurz und sachlich auf Deutsch zusammen. Gib nur die Zusammenfassung aus.",
             "summarize",
+            CausalTask.SUMMARIZE_GERMAN,
             true,
             true),
     TRANSLATE_TO_GERMAN("Ins Deutsche übersetzen",
-            "Übersetze den folgenden Text ins Deutsche. Gib nur die Übersetzung aus.",
+            "Translate the user's text into German. Output only the translation.",
             "translate English to German",
+            CausalTask.TRANSLATE_TO_GERMAN,
             true,
             true),
     TRANSLATE_TO_ENGLISH("Ins Englische übersetzen",
-            "Translate the following text into English. Output only the translation.",
+            "Translate the user's text into English. Output only the translation.",
             "translate German to English",
+            CausalTask.TRANSLATE_TO_ENGLISH,
             true,
             true),
     EXPLAIN_CODE_DE("Code erklären",
-            "Erkläre den folgenden Code kurz und verständlich auf Deutsch.",
+            "Explain the user's code in concise German.",
             "explain java",
+            CausalTask.EXPLAIN_CODE_GERMAN,
             true,
             false);
 
     private final String displayName;
     private final String causalInstruction;
     private final String seq2SeqInstruction;
+    private final CausalTask causalTask;
     private final boolean causalLmSupported;
     private final boolean seq2SeqSupported;
 
     WorkbenchPromptTemplate(String displayName,
                             String causalInstruction,
                             String seq2SeqInstruction,
+                            CausalTask causalTask,
                             boolean causalLmSupported,
                             boolean seq2SeqSupported) {
         this.displayName = Objects.requireNonNull(displayName, "displayName");
         this.causalInstruction = Objects.requireNonNull(causalInstruction, "causalInstruction");
         this.seq2SeqInstruction = Objects.requireNonNull(seq2SeqInstruction, "seq2SeqInstruction");
+        this.causalTask = Objects.requireNonNull(causalTask, "causalTask");
         this.causalLmSupported = causalLmSupported;
         this.seq2SeqSupported = seq2SeqSupported;
     }
@@ -82,6 +91,18 @@ public enum WorkbenchPromptTemplate {
             return applyToSeq2SeqPrompt(userSystemPrompt);
         }
         return applyToCausalPrompt(userSystemPrompt);
+    }
+
+    public String applyToUserPrompt(String userPrompt, String modelId) {
+        GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId(modelId);
+        GenerationModelRegistry.Architecture architecture = entry == null
+                ? GenerationModelRegistry.Architecture.CAUSAL_LM
+                : entry.architecture();
+        String safePrompt = userPrompt == null ? "" : userPrompt;
+        if (architecture == GenerationModelRegistry.Architecture.SEQ2SEQ || isNone()) {
+            return safePrompt;
+        }
+        return causalTask.render(safePrompt);
     }
 
     public String applyToSystemPrompt(String userSystemPrompt) {
@@ -138,5 +159,60 @@ public enum WorkbenchPromptTemplate {
 
     private static boolean isCodeT5Model(String modelId) {
         return modelId != null && modelId.toLowerCase(Locale.ROOT).contains("codet5");
+    }
+
+    private enum CausalTask {
+        NONE {
+            @Override
+            String render(String input) {
+                return input;
+            }
+        },
+        SUMMARIZE_GERMAN {
+            @Override
+            String render(String input) {
+                return renderTextTask(
+                        "Summarize the text between <text> and </text> in concise German. Output only the summary.",
+                        "text",
+                        input);
+            }
+        },
+        TRANSLATE_TO_GERMAN {
+            @Override
+            String render(String input) {
+                return renderTextTask(
+                        "Translate the text between <text> and </text> into German. Output only the translation.",
+                        "text",
+                        input);
+            }
+        },
+        TRANSLATE_TO_ENGLISH {
+            @Override
+            String render(String input) {
+                return renderTextTask(
+                        "Translate the text between <text> and </text> into English. Output only the translation.",
+                        "text",
+                        input);
+            }
+        },
+        EXPLAIN_CODE_GERMAN {
+            @Override
+            String render(String input) {
+                return renderTextTask(
+                        "Explain the code between <code> and </code> in concise German.",
+                        "code",
+                        input);
+            }
+        };
+
+        abstract String render(String input);
+
+        private static String renderTextTask(String instruction, String tagName, String input) {
+            String safeInput = input == null ? "" : input;
+            return instruction
+                    + "\n\n<" + tagName + ">\n"
+                    + safeInput
+                    + "\n</" + tagName + ">";
+        }
     }
 }

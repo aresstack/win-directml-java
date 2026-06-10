@@ -162,6 +162,7 @@ public final class SummarizerPanel extends JPanel {
         }
 
         String effectiveSystemPrompt = promptTemplate.applyToSystemPrompt(systemPrompt, selectedModel);
+        String effectiveUserPrompt = promptTemplate.applyToUserPrompt(text, selectedModel);
 
         boolean qwenTestModel = isQwenTestModel(selectedModel);
         boolean smolLm2Model = isSmolLm2Model(selectedModel);
@@ -197,11 +198,11 @@ public final class SummarizerPanel extends JPanel {
                 try {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
                     if (qwenTestModel) {
-                        runQwenGeneration(modelDir, text, effectiveSystemPrompt, maxTokens, selectedModel);
+                        runQwenGeneration(modelDir, effectiveUserPrompt, effectiveSystemPrompt, maxTokens, selectedModel);
                     } else if (smolLm2Model) {
-                        runSmolLm2Generation(modelDir, text, effectiveSystemPrompt, maxTokens);
+                        runSmolLm2Generation(modelDir, effectiveUserPrompt, effectiveSystemPrompt, maxTokens);
                     } else if (isT5Model(selectedModel)) {
-                        runT5Generation(modelDir, text, effectiveSystemPrompt, maxTokens, selectedModel);
+                        runT5Generation(modelDir, effectiveUserPrompt, effectiveSystemPrompt, maxTokens, selectedModel);
                     } else {
                         runPhi3Summarizer(modelDir, text, maxTokens);
                     }
