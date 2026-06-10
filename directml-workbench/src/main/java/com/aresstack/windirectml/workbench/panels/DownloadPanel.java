@@ -7,9 +7,11 @@ import com.aresstack.windirectml.inference.t5.T5WdmlPackCompiler;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.download.DownloadFolderOpener;
 import com.aresstack.windirectml.workbench.download.DownloadOverrideStore;
+import com.aresstack.windirectml.workbench.download.DownloadUrlOpener;
 import com.aresstack.windirectml.workbench.download.ModelDownloadManifest;
 import com.aresstack.windirectml.workbench.download.ModelDownloadUrls;
 import com.aresstack.windirectml.workbench.download.ModelDownloader;
+import com.aresstack.windirectml.workbench.download.ModelFileDescriptor;
 import com.aresstack.windirectml.workbench.download.QwenDownloadSource;
 import com.aresstack.windirectml.workbench.download.QwenModelDownloadConfig;
 import com.aresstack.windirectml.workbench.download.QwenOnnxModelVariant;
@@ -18,6 +20,7 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -31,13 +34,17 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
-import java.awt.GridLayout;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.HeadlessException;
 import java.awt.Insets;
 import java.awt.Toolkit;
+import java.awt.Window;
 import java.awt.datatransfer.StringSelection;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -46,6 +53,9 @@ import java.util.function.Supplier;
  */
 public final class DownloadPanel extends JPanel {
 
+    private static final int ICON_BUTTON_SIZE = 28;
+    private static final Insets ICON_BUTTON_MARGIN = new Insets(0, 0, 0, 0);
+
     private final WorkbenchModel model;
     private final JTextArea logArea;
     private final JCheckBox forceCheckbox;
@@ -53,10 +63,8 @@ public final class DownloadPanel extends JPanel {
     private final Map<String, ModelDownloadManifest> manifests = new HashMap<String, ModelDownloadManifest>();
     private final Map<String, JProgressBar> downloadProgressBars = new HashMap<String, JProgressBar>();
 
-    private JComboBox<QwenDownloadSource> qwenSourceSelector;
-    private JComboBox<QwenOnnxModelVariant> qwenVariantSelector;
-    private JTextField qwenSelectedUrlField;
-    private JCheckBox downloadAllQwenVariantsCheckbox;
+    private int downloadRowIndex;
+    private boolean downloadAllQwenVariants;
     private JProgressBar qwenDownloadProgressBar;
 
     public DownloadPanel(WorkbenchModel model) {
@@ -65,42 +73,43 @@ public final class DownloadPanel extends JPanel {
         setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        JPanel buttons = new JPanel(new GridLayout(0, 4, 4, 4));
+        JPanel downloadRows = new JPanel(new GridBagLayout());
+        downloadRowIndex = 0;
 
-        addEmbeddingRow(buttons, "Download MiniLM (all-MiniLM-L6-v2)",
+        addEmbeddingRow(downloadRows, "Download MiniLM (all-MiniLM-L6-v2)",
                 "sentence-transformers/all-MiniLM-L6-v2", "all-MiniLM-L6-v2");
-        addEmbeddingRow(buttons, "Download E5 small-v2",
+        addEmbeddingRow(downloadRows, "Download E5 small-v2",
                 "intfloat/e5-small-v2", "e5-small-v2");
-        addEmbeddingRow(buttons, "Download E5 base-v2",
+        addEmbeddingRow(downloadRows, "Download E5 base-v2",
                 "intfloat/e5-base-v2", "e5-base-v2");
-        addEmbeddingRow(buttons, "Download E5 large-v2",
+        addEmbeddingRow(downloadRows, "Download E5 large-v2",
                 "intfloat/e5-large-v2", "e5-large-v2");
-        addEmbeddingRow(buttons, "Download Reranker (ms-marco-MiniLM-L-6-v2)",
+        addEmbeddingRow(downloadRows, "Download Reranker (ms-marco-MiniLM-L-6-v2)",
                 "cross-encoder/ms-marco-MiniLM-L-6-v2", "cross-encoder-ms-marco-MiniLM-L-6-v2");
-        addEmbeddingRow(buttons, "Download Reranker (ms-marco-MiniLM-L-12-v2)",
+        addEmbeddingRow(downloadRows, "Download Reranker (ms-marco-MiniLM-L-12-v2)",
                 "cross-encoder/ms-marco-MiniLM-L-12-v2", "cross-encoder-ms-marco-MiniLM-L-12-v2");
-        addPhi3Row(buttons);
-        addManifestRow(buttons, "Download Qwen2.5-Coder 1.5B Instruct (SafeTensors, planned)",
+        addPhi3Row(downloadRows);
+        addQwenRow(downloadRows);
+        addManifestRow(downloadRows, "Download Qwen2.5-Coder 1.5B Instruct (SafeTensors, planned)",
                 ModelDownloadUrls.manifestForQwenCoder1_5BSafeTensors());
-        addManifestRow(buttons, "Download Qwen2.5-Coder 3B Instruct (SafeTensors, planned)",
+        addManifestRow(downloadRows, "Download Qwen2.5-Coder 3B Instruct (SafeTensors, planned)",
                 ModelDownloadUrls.manifestForQwenCoder3BSafeTensors());
-        addManifestRow(buttons, "Download SmolLM2 135M Instruct (Summarizer planned)",
+        addManifestRow(downloadRows, "Download SmolLM2 135M Instruct (Summarizer planned)",
                 ModelDownloadUrls.manifestForSmolLm2_135M());
-        addManifestRow(buttons, "Download SmolLM2 360M Instruct (Summarizer planned)",
+        addManifestRow(downloadRows, "Download SmolLM2 360M Instruct (Summarizer planned)",
                 ModelDownloadUrls.manifestForSmolLm2_360M());
-        addT5Row(buttons, "Download google/flan-t5-small (SafeTensors)",
+        addT5Row(downloadRows, "Download google/flan-t5-small (SafeTensors)",
                 ModelDownloadUrls.manifestForGoogleFlanT5Small(),
                 "Compile FLAN-T5 small SafeTensors → wdmlpack");
-        addT5Row(buttons, "Download google-t5/t5-small (SafeTensors smoke-test)",
+        addT5Row(downloadRows, "Download google-t5/t5-small (SafeTensors smoke-test)",
                 ModelDownloadUrls.manifestForGoogleT5Small(),
                 "Compile T5-small SafeTensors → wdmlpack");
-        addCodeT5Row(buttons);
+        addCodeT5Row(downloadRows);
 
         forceCheckbox = new JCheckBox("Force re-download (overwrite existing)");
 
         JPanel topPanel = new JPanel(new BorderLayout(8, 8));
-        topPanel.add(buttons, BorderLayout.NORTH);
-        topPanel.add(createQwenPanel(), BorderLayout.CENTER);
+        topPanel.add(downloadRows, BorderLayout.NORTH);
         topPanel.add(forceCheckbox, BorderLayout.SOUTH);
         add(topPanel, BorderLayout.NORTH);
 
@@ -110,195 +119,127 @@ public final class DownloadPanel extends JPanel {
         add(new JScrollPane(logArea), BorderLayout.CENTER);
     }
 
-    private void addEmbeddingRow(JPanel buttons, String label, String repo, String folder) {
+    private void addEmbeddingRow(JPanel rows, String label, String repo, String folder) {
         ModelDownloadManifest manifest = overrideStore.applyOverrides(
                 ModelDownloadUrls.manifestForEmbedding(repo, folder));
         manifests.put(manifest.modelId(), manifest);
 
-        JButton downloadBtn = new JButton(label);
-        downloadBtn.addActionListener(e -> startManifestDownload(folder));
-        buttons.add(downloadBtn);
+        JButton downloadButton = new JButton(label);
+        downloadButton.addActionListener(e -> startManifestDownload(folder));
 
-        buttons.add(registerProgressBar(manifest));
-        buttons.add(createConfigButton(folder));
-        buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(folder)));
+        addDownloadRow(rows,
+                downloadButton,
+                createConfigButton(folder),
+                createCompilePlaceholderButton(),
+                createOpenFolderButton(() -> model.getModelRoot().resolve(folder)),
+                registerProgressBar(manifest));
     }
 
-    private void addPhi3Row(JPanel buttons) {
+    private void addPhi3Row(JPanel rows) {
         ModelDownloadManifest manifest = overrideStore.applyOverrides(ModelDownloadUrls.manifestForPhi3());
         manifests.put(manifest.modelId(), manifest);
         String modelId = manifest.modelId();
 
-        JButton phi3Btn = new JButton("Download Phi-3 Mini 4K Instruct (Summarizer)");
-        phi3Btn.addActionListener(e -> startManifestDownload(modelId));
-        buttons.add(phi3Btn);
+        JButton downloadButton = new JButton("Download Phi-3 Mini 4K Instruct (Summarizer)");
+        downloadButton.addActionListener(e -> startManifestDownload(modelId));
 
-        buttons.add(registerProgressBar(manifest));
-        buttons.add(createConfigButton(modelId));
-        buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(manifest.localDirName())));
+        addDownloadRow(rows,
+                downloadButton,
+                createConfigButton(modelId),
+                createCompilePlaceholderButton(),
+                createOpenFolderButton(() -> model.getModelRoot().resolve(manifest.localDirName())),
+                registerProgressBar(manifest));
     }
 
-    private void addManifestRow(JPanel buttons, String label, ModelDownloadManifest manifest) {
+    private void addQwenRow(JPanel rows) {
+        ModelDownloadManifest onnxManifest = overrideStore.applyOverrides(
+                ModelDownloadUrls.manifestForQwen(QwenModelDownloadConfig.forVariant(selectedQwenVariant())));
+        ModelDownloadManifest safeTensorsManifest = overrideStore.applyOverrides(
+                ModelDownloadUrls.manifestForQwenSafeTensors());
+        manifests.put(onnxManifest.modelId(), onnxManifest);
+        manifests.put(safeTensorsManifest.modelId(), safeTensorsManifest);
+
+        JButton downloadButton = new JButton("Download Qwen2.5-Coder 0.5B Instruct");
+        downloadButton.addActionListener(e -> startQwenDownload());
+
+        qwenDownloadProgressBar = createDownloadProgressBar();
+        downloadProgressBars.put(onnxManifest.modelId(), qwenDownloadProgressBar);
+        downloadProgressBars.put(safeTensorsManifest.modelId(), qwenDownloadProgressBar);
+
+        addDownloadRow(rows,
+                downloadButton,
+                createQwenConfigButton(),
+                createCompileButton("Compile Qwen SafeTensors → wdmlpack", () -> startQwenSafeTensorsCompile()),
+                createOpenFolderButton(this::selectedQwenTargetDir),
+                qwenDownloadProgressBar);
+    }
+
+    private void addManifestRow(JPanel rows, String label, ModelDownloadManifest manifest) {
         ModelDownloadManifest effectiveManifest = overrideStore.applyOverrides(manifest);
         manifests.put(effectiveManifest.modelId(), effectiveManifest);
         String modelId = effectiveManifest.modelId();
 
-        JButton downloadBtn = new JButton(label);
-        downloadBtn.addActionListener(e -> startManifestDownload(modelId));
-        buttons.add(downloadBtn);
+        JButton downloadButton = new JButton(label);
+        downloadButton.addActionListener(e -> startManifestDownload(modelId));
 
-        buttons.add(registerProgressBar(effectiveManifest));
-        buttons.add(createConfigButton(modelId));
-        buttons.add(createOpenFolderButton(() -> model.getModelRoot().resolve(effectiveManifest.localDirName())));
+        addDownloadRow(rows,
+                downloadButton,
+                createConfigButton(modelId),
+                createCompilePlaceholderButton(),
+                createOpenFolderButton(() -> model.getModelRoot().resolve(effectiveManifest.localDirName())),
+                registerProgressBar(effectiveManifest));
     }
 
-    private void addCodeT5Row(JPanel buttons) {
+    private void addCodeT5Row(JPanel rows) {
         ModelDownloadManifest smallManifest = ModelDownloadUrls.manifestForCodeT5Small();
-        addT5Row(buttons, "Download CodeT5 small checkpoint", smallManifest,
+        addT5Row(rows, "Download CodeT5 small checkpoint", smallManifest,
                 "Compile CodeT5 small → wdmlpack");
 
         ModelDownloadManifest multiSumManifest = ModelDownloadUrls.manifestForCodeT5BaseMultiSum();
-        addT5Row(buttons, "Download CodeT5 base multi-sum checkpoint", multiSumManifest,
+        addT5Row(rows, "Download CodeT5 base multi-sum checkpoint", multiSumManifest,
                 "Compile CodeT5 base multi-sum → wdmlpack");
     }
 
-    private void addT5Row(JPanel buttons, String downloadLabel, ModelDownloadManifest baseManifest, String compileLabel) {
+    private void addT5Row(JPanel rows, String downloadLabel, ModelDownloadManifest baseManifest, String compileLabel) {
         ModelDownloadManifest manifest = overrideStore.applyOverrides(baseManifest);
         manifests.put(manifest.modelId(), manifest);
         String modelId = manifest.modelId();
 
-        JButton downloadBtn = new JButton(downloadLabel);
-        downloadBtn.setToolTipText("Downloads T5 config/tokenizer files and model weights when the upstream repository provides a supported source.");
-        downloadBtn.addActionListener(e -> startManifestDownload(modelId));
-        buttons.add(downloadBtn);
+        JButton downloadButton = new JButton(downloadLabel);
+        downloadButton.setToolTipText("Downloads T5 config/tokenizer files and model weights when the upstream repository provides a supported source.");
+        downloadButton.addActionListener(e -> startManifestDownload(modelId));
 
-        buttons.add(registerProgressBar(manifest));
-
-        JButton compileButton = new JButton(compileLabel);
-        compileButton.setToolTipText("Compile model.safetensors or pytorch_model.bin into model_t5.wdmlpack in this model folder.");
-        compileButton.addActionListener(e -> startT5ModelPackageCompile(manifest.localDirName(), manifest.modelId()));
-        buttons.add(compileButton);
-
-        buttons.add(createOpenFolderButton(() -> selectedT5TargetDir(manifest.localDirName())));
+        addDownloadRow(rows,
+                downloadButton,
+                createConfigButton(modelId),
+                createCompileButton(compileLabel, () -> startT5ModelPackageCompile(manifest.localDirName(), manifest.modelId())),
+                createOpenFolderButton(() -> selectedT5TargetDir(manifest.localDirName())),
+                registerProgressBar(manifest));
     }
 
-    private JPanel createQwenPanel() {
-        JPanel panel = new JPanel(new BorderLayout(4, 4));
-        panel.setBorder(BorderFactory.createTitledBorder("Qwen2.5-Coder 0.5B"));
-
-        JPanel controls = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-        controls.add(new JLabel("Quelle:"));
-
-        qwenSourceSelector = new JComboBox<QwenDownloadSource>(QwenDownloadSource.values());
-        qwenSourceSelector.setSelectedItem(model.getQwenDownloadSource());
-        qwenSourceSelector.addActionListener(e -> updateSelectedQwenSource());
-        controls.add(qwenSourceSelector);
-
-        controls.add(new JLabel("ONNX-Variante:"));
-        qwenVariantSelector = new JComboBox<QwenOnnxModelVariant>(QwenOnnxModelVariant.values());
-        qwenVariantSelector.setSelectedItem(QwenOnnxModelVariant.fromModelFileName(model.getQwenModelFile()));
-        qwenVariantSelector.addActionListener(e -> updateSelectedQwenSource());
-        controls.add(qwenVariantSelector);
-
-        JButton downloadBtn = new JButton("Download selected Qwen");
-        downloadBtn.addActionListener(e -> startQwenDownload());
-        controls.add(downloadBtn);
-
-        JButton compileBtn = new JButton("Compile SafeTensors → wdmlpack");
-        compileBtn.setToolTipText("Compile downloaded Qwen SafeTensors into the selected runtime package name.");
-        compileBtn.addActionListener(e -> startQwenSafeTensorsCompile());
-        controls.add(compileBtn);
-
-        downloadAllQwenVariantsCheckbox = new JCheckBox("alle ONNX-Varianten herunterladen");
-        downloadAllQwenVariantsCheckbox.setToolTipText("Nur aktivieren, wenn alle Qwen-ONNX-Dateien vorab geladen werden sollen.");
-        controls.add(downloadAllQwenVariantsCheckbox);
-
-        controls.add(createOpenFolderButton(this::selectedQwenTargetDir));
-        panel.add(controls, BorderLayout.NORTH);
-
-        JPanel qwenProgressPanel = new JPanel(new BorderLayout(4, 4));
-        qwenProgressPanel.add(new JLabel("Download-Fortschritt:"), BorderLayout.WEST);
-        qwenDownloadProgressBar = createDownloadProgressBar();
-        qwenProgressPanel.add(qwenDownloadProgressBar, BorderLayout.CENTER);
-        panel.add(qwenProgressPanel, BorderLayout.CENTER);
-
-        JPanel urlPanel = new JPanel(new BorderLayout(4, 4));
-        urlPanel.add(new JLabel("Gewählte HF-URL:"), BorderLayout.WEST);
-        qwenSelectedUrlField = new JTextField();
-        qwenSelectedUrlField.setEditable(false);
-        urlPanel.add(qwenSelectedUrlField, BorderLayout.CENTER);
-        JButton copyButton = new JButton("Copy");
-        copyButton.addActionListener(e -> copySelectedQwenUrl());
-        urlPanel.add(copyButton, BorderLayout.EAST);
-        panel.add(urlPanel, BorderLayout.SOUTH);
-
-        updateSelectedQwenSource();
-        return panel;
+    private void addDownloadRow(JPanel rows,
+                                JButton downloadButton,
+                                JButton configButton,
+                                JButton compileButton,
+                                JButton openFolderButton,
+                                JProgressBar progressBar) {
+        int row = downloadRowIndex++;
+        rows.add(downloadButton, rowConstraints(row, 0, 0.75d, GridBagConstraints.HORIZONTAL));
+        rows.add(configButton, rowConstraints(row, 1, 0.0d, GridBagConstraints.NONE));
+        rows.add(compileButton, rowConstraints(row, 2, 0.0d, GridBagConstraints.NONE));
+        rows.add(openFolderButton, rowConstraints(row, 3, 0.0d, GridBagConstraints.NONE));
+        rows.add(progressBar, rowConstraints(row, 4, 1.0d, GridBagConstraints.HORIZONTAL));
     }
 
-    private void updateSelectedQwenSource() {
-        QwenDownloadSource source = selectedQwenSource();
-        model.setQwenDownloadSource(source);
-        QwenOnnxModelVariant variant = selectedQwenVariant();
-        model.setQwenModelFile(variant.modelFileName());
-
-        boolean onnx = source == QwenDownloadSource.ONNX;
-        if (qwenVariantSelector != null) {
-            qwenVariantSelector.setEnabled(onnx);
-        }
-        if (downloadAllQwenVariantsCheckbox != null) {
-            downloadAllQwenVariantsCheckbox.setEnabled(onnx);
-            if (!onnx) {
-                downloadAllQwenVariantsCheckbox.setSelected(false);
-            }
-        }
-        if (qwenSelectedUrlField != null) {
-            if (onnx) {
-                QwenModelDownloadConfig config = QwenModelDownloadConfig.forVariant(variant);
-                qwenSelectedUrlField.setText(ModelDownloadUrls.selectedQwenModelUrl(config));
-            } else {
-                qwenSelectedUrlField.setText(ModelDownloadUrls.selectedQwenSafeTensorsModelUrl());
-            }
-        }
-    }
-
-    private QwenDownloadSource selectedQwenSource() {
-        if (qwenSourceSelector == null) {
-            return model.getQwenDownloadSource();
-        }
-        Object selected = qwenSourceSelector.getSelectedItem();
-        if (selected instanceof QwenDownloadSource source) {
-            return source;
-        }
-        return QwenDownloadSource.ONNX;
-    }
-
-    private QwenOnnxModelVariant selectedQwenVariant() {
-        if (qwenVariantSelector == null) {
-            return QwenOnnxModelVariant.fromModelFileName(model.getQwenModelFile());
-        }
-        Object selected = qwenVariantSelector.getSelectedItem();
-        if (selected instanceof QwenOnnxModelVariant) {
-            return (QwenOnnxModelVariant) selected;
-        }
-        return QwenOnnxModelVariant.Q4F16;
-    }
-
-    private void copySelectedQwenUrl() {
-        if (qwenSelectedUrlField == null) {
-            return;
-        }
-        String url = qwenSelectedUrlField.getText();
-        StringSelection selection = new StringSelection(url);
-        try {
-            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
-            appendLog("Copied Qwen URL: " + url);
-        } catch (HeadlessException | IllegalStateException | SecurityException ex) {
-            JOptionPane.showMessageDialog(this,
-                    "Could not copy URL to clipboard: " + ex.getMessage(),
-                    "Clipboard unavailable",
-                    JOptionPane.WARNING_MESSAGE);
-        }
+    private GridBagConstraints rowConstraints(int row, int column, double weightX, int fill) {
+        GridBagConstraints constraints = new GridBagConstraints();
+        constraints.gridx = column;
+        constraints.gridy = row;
+        constraints.weightx = weightX;
+        constraints.fill = fill;
+        constraints.anchor = GridBagConstraints.CENTER;
+        constraints.insets = new Insets(2, 3, 2, 3);
+        return constraints;
     }
 
     private JProgressBar registerProgressBar(ModelDownloadManifest manifest) {
@@ -317,16 +258,54 @@ public final class DownloadPanel extends JPanel {
     }
 
     private JButton createConfigButton(String modelId) {
-        JButton btn = new JButton("\u2699");
-        btn.setToolTipText("Configure download URLs");
-        btn.setMargin(new Insets(0, 0, 0, 0));
-        Dimension sq = new Dimension(28, 28);
-        btn.setPreferredSize(sq);
-        btn.setMinimumSize(sq);
-        btn.setMaximumSize(sq);
-        btn.getAccessibleContext().setAccessibleName("Configure download URLs");
-        btn.addActionListener(e -> openConfigDialog(modelId));
-        return btn;
+        JButton button = createIconButton("\u2699", "Configure download URLs");
+        button.getAccessibleContext().setAccessibleName("Configure download URLs");
+        button.addActionListener(e -> openConfigDialog(modelId));
+        return button;
+    }
+
+    private JButton createQwenConfigButton() {
+        JButton button = createIconButton("\u2699", "Configure Qwen download source, variant and URLs");
+        button.getAccessibleContext().setAccessibleName("Configure Qwen download settings");
+        button.addActionListener(e -> openQwenConfigDialog());
+        return button;
+    }
+
+    private JButton createCompileButton(String tooltip, Runnable action) {
+        JButton button = createIconButton("\u21C4", tooltip);
+        button.getAccessibleContext().setAccessibleName(tooltip);
+        button.addActionListener(e -> action.run());
+        return button;
+    }
+
+    private JButton createCompilePlaceholderButton() {
+        JButton button = createIconButton(" ", "No compile step available");
+        button.setEnabled(false);
+        button.getAccessibleContext().setAccessibleName("No compile step available");
+        return button;
+    }
+
+    private JButton createOpenFolderButton(Supplier<Path> folderSupplier) {
+        JButton button = createIconButton("\uD83D\uDCC2", "Open target folder");
+        button.getAccessibleContext().setAccessibleName("Open target folder");
+        button.addActionListener(e -> {
+            Path folder = folderSupplier.get();
+            DownloadFolderOpener.openFolder(folder, this::appendLog);
+        });
+        return button;
+    }
+
+    private JButton createIconButton(String text, String tooltip) {
+        JButton button = new JButton(text);
+        button.setToolTipText(tooltip);
+        button.setMargin(ICON_BUTTON_MARGIN);
+        button.setIconTextGap(0);
+        Dimension square = new Dimension(ICON_BUTTON_SIZE, ICON_BUTTON_SIZE);
+        button.setPreferredSize(square);
+        button.setMinimumSize(square);
+        button.setMaximumSize(square);
+        button.setFocusable(false);
+        return button;
     }
 
     private void openConfigDialog(String modelId) {
@@ -346,16 +325,9 @@ public final class DownloadPanel extends JPanel {
         }
     }
 
-    private JButton createOpenFolderButton(Supplier<Path> folderSupplier) {
-        JButton btn = new JButton("\uD83D\uDCC2");
-        btn.setToolTipText("Open target folder");
-        btn.setMargin(new Insets(2, 4, 2, 4));
-        btn.getAccessibleContext().setAccessibleName("Open target folder");
-        btn.addActionListener(e -> {
-            Path folder = folderSupplier.get();
-            DownloadFolderOpener.openFolder(folder, this::appendLog);
-        });
-        return btn;
+    private void openQwenConfigDialog() {
+        QwenDownloadSettingsDialog dialog = new QwenDownloadSettingsDialog(SwingUtilities.getWindowAncestor(this));
+        dialog.setVisible(true);
     }
 
     private void startManifestDownload(String modelId) {
@@ -369,31 +341,54 @@ public final class DownloadPanel extends JPanel {
     private void startQwenDownload() {
         QwenDownloadSource source = selectedQwenSource();
         QwenOnnxModelVariant variant = selectedQwenVariant();
-        model.setQwenDownloadSource(source);
-        model.setQwenModelFile(variant.modelFileName());
+        boolean downloadAllVariants = source == QwenDownloadSource.ONNX && downloadAllQwenVariants;
 
-        ModelDownloadManifest manifest;
-        String label;
+        ModelDownloadManifest manifest = overrideStore.applyOverrides(createQwenManifest(source, variant, downloadAllVariants));
+        manifests.put(manifest.modelId(), manifest);
+        if (qwenDownloadProgressBar != null) {
+            downloadProgressBars.put(manifest.modelId(), qwenDownloadProgressBar);
+        }
+
+        String label = qwenDownloadLabel(source, variant, downloadAllVariants, manifest);
         if (source == QwenDownloadSource.SAFETENSORS) {
-            manifest = ModelDownloadUrls.manifestForQwenSafeTensors();
-            label = manifest.modelId() + " (SafeTensors)";
             appendLog("Selected Qwen SafeTensors URL: " + ModelDownloadUrls.selectedQwenSafeTensorsModelUrl());
             appendLog("Runtime package target after compile: " + selectedQwenRuntimePackagePath());
-        } else if (downloadAllQwenVariantsCheckbox != null && downloadAllQwenVariantsCheckbox.isSelected()) {
-            manifest = ModelDownloadUrls.manifestForAllQwenVariants();
-            label = manifest.modelId() + " (all ONNX variants)";
+        } else if (downloadAllVariants) {
             appendLog("Selected Qwen file for runtime remains: " + variant.modelFileName());
         } else {
             QwenModelDownloadConfig config = QwenModelDownloadConfig.forVariant(variant);
-            manifest = ModelDownloadUrls.manifestForQwen(config);
-            label = manifest.modelId() + " (" + variant.modelFileName() + ")";
             appendLog("Selected Qwen URL: " + ModelDownloadUrls.selectedQwenModelUrl(config));
         }
         startDownload(manifest, label);
     }
 
+    private String qwenDownloadLabel(QwenDownloadSource source,
+                                     QwenOnnxModelVariant variant,
+                                     boolean downloadAllVariants,
+                                     ModelDownloadManifest manifest) {
+        if (source == QwenDownloadSource.SAFETENSORS) {
+            return manifest.modelId() + " (SafeTensors)";
+        }
+        if (downloadAllVariants) {
+            return manifest.modelId() + " (all ONNX variants)";
+        }
+        return manifest.modelId() + " (" + variant.modelFileName() + ")";
+    }
+
+    private ModelDownloadManifest createQwenManifest(QwenDownloadSource source,
+                                                     QwenOnnxModelVariant variant,
+                                                     boolean downloadAllVariants) {
+        if (source == QwenDownloadSource.SAFETENSORS) {
+            return ModelDownloadUrls.manifestForQwenSafeTensors();
+        }
+        if (downloadAllVariants) {
+            return ModelDownloadUrls.manifestForAllQwenVariants();
+        }
+        return ModelDownloadUrls.manifestForQwen(QwenModelDownloadConfig.forVariant(variant));
+    }
+
     private void startQwenSafeTensorsCompile() {
-        Path targetDir = selectedQwenTargetDir();
+        Path targetDir = selectedQwenSafeTensorsTargetDir();
         Path output = selectedQwenRuntimePackagePath();
         appendLog("Compiling Qwen SafeTensors: " + targetDir + " -> " + output);
 
@@ -435,11 +430,23 @@ public final class DownloadPanel extends JPanel {
         }.execute();
     }
 
+    private QwenDownloadSource selectedQwenSource() {
+        return model.getQwenDownloadSource();
+    }
+
+    private QwenOnnxModelVariant selectedQwenVariant() {
+        return QwenOnnxModelVariant.fromModelFileName(model.getQwenModelFile());
+    }
+
     private Path selectedQwenTargetDir() {
         if (selectedQwenSource() == QwenDownloadSource.SAFETENSORS) {
-            return model.getModelRoot().resolve(ModelDownloadUrls.QWEN_SAFETENSORS_LOCAL_DIR);
+            return selectedQwenSafeTensorsTargetDir();
         }
         return model.getModelRoot().resolve(QwenModelDownloadConfig.LOCAL_DIR_NAME);
+    }
+
+    private Path selectedQwenSafeTensorsTargetDir() {
+        return model.getModelRoot().resolve(ModelDownloadUrls.QWEN_SAFETENSORS_LOCAL_DIR);
     }
 
     private Path selectedQwenRuntimePackagePath() {
@@ -447,7 +454,7 @@ public final class DownloadPanel extends JPanel {
         String base = modelFile.endsWith(".onnx")
                 ? modelFile.substring(0, modelFile.length() - ".onnx".length())
                 : modelFile;
-        return selectedQwenTargetDir().resolve(base + ".wdmlpack");
+        return selectedQwenSafeTensorsTargetDir().resolve(base + ".wdmlpack");
     }
 
     private void startT5ModelPackageCompile(String localDirName, String modelId) {
@@ -577,7 +584,16 @@ public final class DownloadPanel extends JPanel {
         if (progressBar != null) {
             return progressBar;
         }
-        return qwenDownloadProgressBar;
+        if (isQwenManifest(manifest)) {
+            return qwenDownloadProgressBar;
+        }
+        return null;
+    }
+
+    private boolean isQwenManifest(ModelDownloadManifest manifest) {
+        String modelId = manifest.modelId();
+        return QwenModelDownloadConfig.LOCAL_DIR_NAME.equals(modelId)
+                || ModelDownloadUrls.QWEN_SAFETENSORS_LOCAL_DIR.equals(modelId);
     }
 
     private void resetProgress(JProgressBar progressBar) {
@@ -597,6 +613,19 @@ public final class DownloadPanel extends JPanel {
             progressBar.setValue(clamped);
             progressBar.setString(text);
         });
+    }
+
+    private void copyUrlToClipboard(String url, String label) {
+        StringSelection selection = new StringSelection(url == null ? "" : url);
+        try {
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, null);
+            appendLog("Copied URL" + label + ": " + url);
+        } catch (HeadlessException | IllegalStateException | SecurityException ex) {
+            JOptionPane.showMessageDialog(this,
+                    "Could not copy URL to clipboard: " + ex.getMessage(),
+                    "Clipboard unavailable",
+                    JOptionPane.WARNING_MESSAGE);
+        }
     }
 
     private record DownloadUiEvent(String message, Integer progressValue, String progressText) {
@@ -660,6 +689,170 @@ public final class DownloadPanel extends JPanel {
                 return String.format(java.util.Locale.ROOT, "%.1f MiB", mib);
             }
             return String.format(java.util.Locale.ROOT, "%.2f GiB", mib / 1024.0d);
+        }
+    }
+
+    private final class QwenDownloadSettingsDialog extends JDialog {
+
+        private final JComboBox<QwenDownloadSource> sourceSelector;
+        private final JComboBox<QwenOnnxModelVariant> variantSelector;
+        private final JCheckBox allVariantsCheckbox;
+        private final JPanel filesPanel;
+        private final List<JTextField> urlFields = new ArrayList<JTextField>();
+
+        private ModelDownloadManifest currentManifest;
+
+        QwenDownloadSettingsDialog(Window owner) {
+            super(owner, "Configure Qwen2.5-Coder 0.5B", ModalityType.APPLICATION_MODAL);
+            setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+
+            sourceSelector = new JComboBox<QwenDownloadSource>(QwenDownloadSource.values());
+            sourceSelector.setSelectedItem(selectedQwenSource());
+            variantSelector = new JComboBox<QwenOnnxModelVariant>(QwenOnnxModelVariant.values());
+            variantSelector.setSelectedItem(selectedQwenVariant());
+            allVariantsCheckbox = new JCheckBox("download all ONNX variants");
+            allVariantsCheckbox.setSelected(downloadAllQwenVariants);
+            filesPanel = new JPanel(new GridBagLayout());
+
+            buildUserInterface();
+            updateManifestRows();
+            pack();
+            setMinimumSize(new Dimension(820, 360));
+            setLocationRelativeTo(owner);
+        }
+
+        private void buildUserInterface() {
+            JPanel contentPanel = new JPanel(new BorderLayout(8, 8));
+            contentPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+            JPanel selectorPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+            selectorPanel.add(new JLabel("Quelle:"));
+            selectorPanel.add(sourceSelector);
+            selectorPanel.add(new JLabel("ONNX-Variante:"));
+            selectorPanel.add(variantSelector);
+            selectorPanel.add(allVariantsCheckbox);
+            contentPanel.add(selectorPanel, BorderLayout.NORTH);
+
+            sourceSelector.addActionListener(e -> updateManifestRows());
+            variantSelector.addActionListener(e -> updateManifestRows());
+            allVariantsCheckbox.addActionListener(e -> updateManifestRows());
+
+            JPanel filesWrapper = new JPanel(new BorderLayout(4, 4));
+            filesWrapper.setBorder(BorderFactory.createTitledBorder("Effective download URLs"));
+            filesWrapper.add(new JScrollPane(filesPanel), BorderLayout.CENTER);
+            contentPanel.add(filesWrapper, BorderLayout.CENTER);
+
+            JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+            JButton okButton = new JButton("OK");
+            okButton.addActionListener(e -> accept());
+            JButton cancelButton = new JButton("Cancel");
+            cancelButton.addActionListener(e -> dispose());
+            buttonPanel.add(okButton);
+            buttonPanel.add(cancelButton);
+            contentPanel.add(buttonPanel, BorderLayout.SOUTH);
+
+            setContentPane(contentPanel);
+        }
+
+        private void updateManifestRows() {
+            QwenDownloadSource source = selectedDialogSource();
+            boolean onnxSelected = source == QwenDownloadSource.ONNX;
+            variantSelector.setEnabled(onnxSelected);
+            allVariantsCheckbox.setEnabled(onnxSelected);
+            if (!onnxSelected && allVariantsCheckbox.isSelected()) {
+                allVariantsCheckbox.setSelected(false);
+            }
+
+            currentManifest = overrideStore.applyOverrides(
+                    createQwenManifest(source, selectedDialogVariant(), onnxSelected && allVariantsCheckbox.isSelected()));
+            rebuildFileRows();
+        }
+
+        private void rebuildFileRows() {
+            filesPanel.removeAll();
+            urlFields.clear();
+
+            GridBagConstraints constraints = new GridBagConstraints();
+            constraints.insets = new Insets(2, 2, 2, 2);
+            constraints.fill = GridBagConstraints.HORIZONTAL;
+
+            int row = 0;
+            for (ModelFileDescriptor descriptor : currentManifest.files()) {
+                String labelText = descriptor.displayName()
+                        + (descriptor.required() ? " (required)" : " (optional)");
+                constraints.gridx = 0;
+                constraints.gridy = row;
+                constraints.weightx = 0.0d;
+                constraints.fill = GridBagConstraints.NONE;
+                constraints.anchor = GridBagConstraints.WEST;
+                filesPanel.add(new JLabel(labelText), constraints);
+
+                JTextField urlField = new JTextField(descriptor.currentUrl(), 52);
+                urlFields.add(urlField);
+                constraints.gridx = 1;
+                constraints.weightx = 1.0d;
+                constraints.fill = GridBagConstraints.HORIZONTAL;
+                filesPanel.add(urlField, constraints);
+
+                final int fieldIndex = row;
+                JButton copyButton = createIconButton("\uD83D\uDCCB", "Copy address");
+                copyButton.getAccessibleContext().setAccessibleName("Copy URL for " + descriptor.localFilename());
+                copyButton.addActionListener(e -> copyUrlToClipboard(urlFields.get(fieldIndex).getText(),
+                        " for " + descriptor.localFilename()));
+                constraints.gridx = 2;
+                constraints.weightx = 0.0d;
+                constraints.fill = GridBagConstraints.NONE;
+                filesPanel.add(copyButton, constraints);
+
+                JButton browserButton = createIconButton("\uD83C\uDF10", "Open address in default browser");
+                browserButton.getAccessibleContext().setAccessibleName("Open URL for " + descriptor.localFilename());
+                browserButton.addActionListener(e -> DownloadUrlOpener.openInBrowser(
+                        urlFields.get(fieldIndex).getText(), this));
+                constraints.gridx = 3;
+                filesPanel.add(browserButton, constraints);
+
+                row++;
+            }
+
+            filesPanel.revalidate();
+            filesPanel.repaint();
+        }
+
+        private void accept() {
+            ModelDownloadManifest updated = currentManifest.withAllUrls(readEditedUrls());
+            QwenDownloadSource source = selectedDialogSource();
+            model.setQwenDownloadSource(source);
+            model.setQwenModelFile(selectedDialogVariant().modelFileName());
+            downloadAllQwenVariants = source == QwenDownloadSource.ONNX && allVariantsCheckbox.isSelected();
+
+            manifests.put(updated.modelId(), updated);
+            overrideStore.storeOverrides(updated);
+            appendLog("Updated Qwen download settings for: " + updated.modelId());
+            dispose();
+        }
+
+        private List<String> readEditedUrls() {
+            ArrayList<String> urls = new ArrayList<String>();
+            for (JTextField field : urlFields) {
+                urls.add(field.getText().trim());
+            }
+            return urls;
+        }
+
+        private QwenDownloadSource selectedDialogSource() {
+            Object selected = sourceSelector.getSelectedItem();
+            if (selected instanceof QwenDownloadSource) {
+                return (QwenDownloadSource) selected;
+            }
+            return QwenDownloadSource.ONNX;
+        }
+
+        private QwenOnnxModelVariant selectedDialogVariant() {
+            Object selected = variantSelector.getSelectedItem();
+            if (selected instanceof QwenOnnxModelVariant) {
+                return (QwenOnnxModelVariant) selected;
+            }
+            return QwenOnnxModelVariant.Q4F16;
         }
     }
 
