@@ -17,6 +17,8 @@ import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationProfile;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.runtime.SmolLM2WorkbenchRuntimeRunner;
+import com.aresstack.windirectml.workbench.prompt.RenderedWorkbenchPrompt;
+import com.aresstack.windirectml.workbench.prompt.WorkbenchPromptProfileRegistry;
 import com.aresstack.windirectml.workbench.prompt.WorkbenchPromptTemplate;
 
 import javax.swing.*;
@@ -39,7 +41,6 @@ public final class SummarizerPanel extends JPanel {
     private static final String SMOLLM2_MODEL_ID_PREFIX = "HuggingFaceTB/SmolLM2-";
 
     private final WorkbenchModel model;
-    private final JTextField systemPromptField;
     private final JTextArea inputArea;
     private final JTextArea resultArea;
     private final JComboBox<String> modelSelector;
@@ -73,15 +74,7 @@ public final class SummarizerPanel extends JPanel {
         controlsPanel.add(modelPanel, BorderLayout.NORTH);
 
         var inputPanel = new JPanel(new BorderLayout(4, 4));
-        JPanel promptHeader = new JPanel(new BorderLayout(4, 4));
-        promptHeader.add(new JLabel("Text / prompt:"), BorderLayout.NORTH);
-        JPanel systemPromptPanel = new JPanel(new BorderLayout(4, 4));
-        systemPromptPanel.add(new JLabel("System prompt (optional):"), BorderLayout.WEST);
-        systemPromptField = new JTextField();
-        systemPromptField.setToolTipText("Leave empty to pass the input unchanged. Use it for tasks such as summarize or translate.");
-        systemPromptPanel.add(systemPromptField, BorderLayout.CENTER);
-        promptHeader.add(systemPromptPanel, BorderLayout.SOUTH);
-        inputPanel.add(promptHeader, BorderLayout.NORTH);
+        inputPanel.add(new JLabel("Text / prompt:"), BorderLayout.NORTH);
         inputArea = new JTextArea(8, 70);
         inputArea.setLineWrap(true);
         inputArea.setWrapStyleWord(true);
@@ -123,7 +116,7 @@ public final class SummarizerPanel extends JPanel {
     private void updatePromptTemplateOptions(String selectedModel) {
         WorkbenchPromptTemplate previous = (WorkbenchPromptTemplate) promptTemplateSelector.getSelectedItem();
         promptTemplateSelector.removeAllItems();
-        for (WorkbenchPromptTemplate template : WorkbenchPromptTemplate.templatesFor(selectedModel)) {
+        for (WorkbenchPromptTemplate template : WorkbenchPromptProfileRegistry.templatesFor(selectedModel)) {
             promptTemplateSelector.addItem(template);
         }
         WorkbenchPromptTemplate next = previous == null ? WorkbenchPromptTemplate.NONE : previous;
@@ -149,7 +142,6 @@ public final class SummarizerPanel extends JPanel {
             return;
         }
 
-        String systemPrompt = systemPromptField.getText() == null ? "" : systemPromptField.getText().trim();
         WorkbenchPromptTemplate promptTemplate = (WorkbenchPromptTemplate) promptTemplateSelector.getSelectedItem();
         if (promptTemplate == null) {
             promptTemplate = WorkbenchPromptTemplate.NONE;
@@ -161,8 +153,7 @@ public final class SummarizerPanel extends JPanel {
             return;
         }
 
-        String effectiveSystemPrompt = promptTemplate.applyToSystemPrompt(systemPrompt, selectedModel);
-        String effectiveUserPrompt = promptTemplate.applyToUserPrompt(text, selectedModel);
+        RenderedWorkbenchPrompt renderedPrompt = WorkbenchPromptProfileRegistry.render(selectedModel, promptTemplate, text);
 
         boolean qwenTestModel = isQwenTestModel(selectedModel);
         boolean smolLm2Model = isSmolLm2Model(selectedModel);
@@ -198,11 +189,11 @@ public final class SummarizerPanel extends JPanel {
                 try {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
                     if (qwenTestModel) {
-                        runQwenGeneration(modelDir, effectiveUserPrompt, effectiveSystemPrompt, maxTokens, selectedModel);
+                        runQwenGeneration(modelDir, renderedPrompt.getUserPrompt(), renderedPrompt.getSystemPrompt(), maxTokens, selectedModel);
                     } else if (smolLm2Model) {
-                        runSmolLm2Generation(modelDir, effectiveUserPrompt, effectiveSystemPrompt, maxTokens);
+                        runSmolLm2Generation(modelDir, renderedPrompt.getUserPrompt(), renderedPrompt.getSystemPrompt(), maxTokens);
                     } else if (isT5Model(selectedModel)) {
-                        runT5Generation(modelDir, effectiveUserPrompt, effectiveSystemPrompt, maxTokens, selectedModel);
+                        runT5Generation(modelDir, renderedPrompt.getUserPrompt(), renderedPrompt.getSystemPrompt(), maxTokens, selectedModel);
                     } else {
                         runPhi3Summarizer(modelDir, text, maxTokens);
                     }
