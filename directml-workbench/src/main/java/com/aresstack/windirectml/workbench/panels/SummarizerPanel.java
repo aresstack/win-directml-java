@@ -2,6 +2,8 @@ package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.config.generation.GenerationModelRegistry;
 import com.aresstack.windirectml.config.generation.GenerationModelRegistry.Entry;
+import com.aresstack.windirectml.inference.GenerationTokenSink;
+import com.aresstack.windirectml.inference.GeneratedToken;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.InferenceRequest;
 import com.aresstack.windirectml.inference.InferenceResult;
@@ -36,6 +38,7 @@ public final class SummarizerPanel extends JPanel {
     private static final String SMOLLM2_MODEL_ID_PREFIX = "HuggingFaceTB/SmolLM2-";
 
     private final WorkbenchModel model;
+    private final JTextField systemPromptField;
     private final JTextArea inputArea;
     private final JTextArea resultArea;
     private final JComboBox<String> modelSelector;
@@ -66,7 +69,15 @@ public final class SummarizerPanel extends JPanel {
         controlsPanel.add(modelPanel, BorderLayout.NORTH);
 
         var inputPanel = new JPanel(new BorderLayout(4, 4));
-        inputPanel.add(new JLabel("Text / prompt:"), BorderLayout.NORTH);
+        JPanel promptHeader = new JPanel(new BorderLayout(4, 4));
+        promptHeader.add(new JLabel("Text / prompt:"), BorderLayout.NORTH);
+        JPanel systemPromptPanel = new JPanel(new BorderLayout(4, 4));
+        systemPromptPanel.add(new JLabel("System prompt (optional):"), BorderLayout.WEST);
+        systemPromptField = new JTextField();
+        systemPromptField.setToolTipText("Leave empty to pass the input unchanged. Use it for tasks such as summarize or translate.");
+        systemPromptPanel.add(systemPromptField, BorderLayout.CENTER);
+        promptHeader.add(systemPromptPanel, BorderLayout.SOUTH);
+        inputPanel.add(promptHeader, BorderLayout.NORTH);
         inputArea = new JTextArea(8, 70);
         inputArea.setLineWrap(true);
         inputArea.setWrapStyleWord(true);
@@ -136,6 +147,8 @@ public final class SummarizerPanel extends JPanel {
             return;
         }
 
+        String systemPrompt = systemPromptField.getText() == null ? "" : systemPromptField.getText().trim();
+
         String selectedModel = (String) modelSelector.getSelectedItem();
         if (selectedModel == null) {
             appendResult("ERROR: No generation model selected.");
@@ -176,11 +189,11 @@ public final class SummarizerPanel extends JPanel {
                 try {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
                     if (qwenTestModel) {
-                        runQwenGeneration(modelDir, text, maxTokens, selectedModel);
+                        runQwenGeneration(modelDir, text, systemPrompt, maxTokens, selectedModel);
                     } else if (smolLm2Model) {
-                        runSmolLm2Generation(modelDir, text, maxTokens);
+                        runSmolLm2Generation(modelDir, text, systemPrompt, maxTokens);
                     } else if (isT5Model(selectedModel)) {
-                        runT5Generation(modelDir, text, maxTokens, selectedModel);
+                        runT5Generation(modelDir, text, systemPrompt, maxTokens, selectedModel);
                     } else {
                         runPhi3Summarizer(modelDir, text, maxTokens);
                     }
@@ -215,12 +228,16 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void runSmolLm2Generation(Path modelDir, String text, int maxTokens) throws Exception {
+    private void runSmolLm2Generation(Path modelDir, String text, String systemPrompt, int maxTokens) throws Exception {
         long start = System.nanoTime();
         SmolLM2WorkbenchRuntimeRunner runner = new SmolLM2WorkbenchRuntimeRunner(modelDir);
         appendResult("Initializing SmolLM2 runtime from " + modelDir
                 + " (requested backend=" + model.getBackend().name().toLowerCase() + ")...");
-        SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(text, maxTokens, model.getBackend());
+        appendResult("");
+        appendResult("OUTPUT:");
+        SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(text, systemPrompt, maxTokens, model.getBackend(),
+                new UiTokenSink());
+        appendResult("");
         appendResult("Model loaded and generated in " + elapsedMs(start) + " ms");
         appendResult("Requested backend: " + result.requestedBackend());
         appendResult("Runtime mode: " + result.runtimeMode());
@@ -232,9 +249,9 @@ public final class SummarizerPanel extends JPanel {
         }
         result.warpReadinessReport().ifPresent(this::appendSmolLm2WarpReadiness);
         appendResult("Runtime package: " + result.packagePath().getFileName());
-        appendResult("");
-        appendResult("OUTPUT:");
-        appendResult(result.text());
+        if (result.text().isBlank()) {
+            appendResult("  NOTE: generated text is empty after detokenization.");
+        }
         appendResult("");
         SmolLM2GenerationProfile profile = result.diagnostics().profile();
         appendResult("Generation completed in " + profile.runtimeMillis() + " ms");
@@ -259,8 +276,6 @@ public final class SummarizerPanel extends JPanel {
             appendResult("  Warning: generated tokens decoded to an empty visible string.");
         }
     }
-
-
 
 
     private void appendSmolLm2ReferenceHotspots(SmolLM2GenerationProfile profile) {
@@ -294,7 +309,7 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void runT5Generation(Path modelDir, String text, int maxTokens, String selectedModel)
+    private void runT5Generation(Path modelDir, String text, String systemPrompt, int maxTokens, String selectedModel)
             throws InferenceException {
         validateT5ModelFiles(modelDir);
         long start = System.nanoTime();
@@ -310,13 +325,12 @@ public final class SummarizerPanel extends JPanel {
             long genStart = System.nanoTime();
             InferenceRequest request = InferenceRequest.builder()
                     .modelId(selectedModel)
-                    .systemPrompt("")
+                    .systemPrompt(systemPrompt)
                     .userPrompt(text)
                     .maxTokens(maxTokens)
                     .temperature(0.0f)
                     .build();
-            InferenceResult result = engine.generate(request);
-            appendResult(result.getText());
+            InferenceResult result = engine.generate(request, new UiTokenSink());
             if (result.getText() == null || result.getText().isBlank()) {
                 appendResult("  NOTE: generated text is empty after detokenization.");
                 appendResult("  Raw output tokens: " + engine.lastOutputTokenPreview());
@@ -336,7 +350,7 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void runQwenGeneration(Path modelDir, String text, int maxTokens, String selectedModel)
+    private void runQwenGeneration(Path modelDir, String text, String systemPrompt, int maxTokens, String selectedModel)
             throws InferenceException {
         String qwenModelFile = model.getQwenModelFile();
         validateQwenModelFiles(modelDir, qwenModelFile);
@@ -351,26 +365,34 @@ public final class SummarizerPanel extends JPanel {
             appendResult("");
             appendResult("OUTPUT:");
             long genStart = System.nanoTime();
-            // Format prompt using ChatML template and stream tokens to UI as they appear.
-            String systemPrompt = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.";
-            String formattedPrompt = com.aresstack.windirectml.inference.qwen.QwenChatTemplate.formatChat(
-                    systemPrompt, text);
-            com.aresstack.windirectml.inference.qwen.Qwen2Runtime runtime = engine.getRuntime();
-            final int[] tokenCount = {0};
-            String generated = runtime.generateStreaming(formattedPrompt, maxTokens,
-                    (tokenId, full, delta) -> {
-                        tokenCount[0]++;
-                        appendInline(delta);
-                    });
+            InferenceRequest request = InferenceRequest.builder()
+                    .modelId(selectedModel)
+                    .systemPrompt(systemPrompt)
+                    .userPrompt(text)
+                    .maxTokens(maxTokens)
+                    .temperature(0.0f)
+                    .build();
+            InferenceResult result = engine.generate(request, new UiTokenSink());
             appendResult("");
             appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
-            appendResult("  Output tokens (approx): " + tokenCount[0]);
-            appendResult("  Finish reason: " + (tokenCount[0] >= maxTokens ? "max_tokens" : "end_turn"));
+            if (result.getUsage() != null) {
+                appendResult("  Prompt tokens: " + result.getUsage().promptTokens());
+                appendResult("  Output tokens: " + result.getUsage().completionTokens());
+            }
+            appendResult("  Finish reason: " + result.getFinishReason());
         } finally {
             engine.shutdown();
         }
     }
 
+    private final class UiTokenSink implements GenerationTokenSink {
+        @Override
+        public void onToken(GeneratedToken token) {
+            if (token != null) {
+                appendInline(token.delta());
+            }
+        }
+    }
     private void appendInline(String s) {
         if (s == null || s.isEmpty()) return;
         SwingUtilities.invokeLater(() -> {

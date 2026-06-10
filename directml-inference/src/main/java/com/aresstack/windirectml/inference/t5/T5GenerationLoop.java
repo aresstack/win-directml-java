@@ -1,5 +1,8 @@
 package com.aresstack.windirectml.inference.t5;
 
+import com.aresstack.windirectml.inference.GeneratedToken;
+import com.aresstack.windirectml.inference.GenerationTokenSink;
+
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -40,6 +43,10 @@ public final class T5GenerationLoop {
     }
 
     public T5RuntimeResult generate(T5RuntimeRequest request) {
+        return generate(request, null);
+    }
+
+    public T5RuntimeResult generate(T5RuntimeRequest request, GenerationTokenSink sink) {
         Objects.requireNonNull(request, "request");
         requireGreedyRequest(request);
         T5GenerationMetricsCollector metrics = new T5GenerationMetricsCollector();
@@ -69,6 +76,9 @@ public final class T5GenerationLoop {
 
                 generated[generatedTokens] = nextTokenId;
                 generatedTokens++;
+                if (sink != null) {
+                    sink.onToken(new GeneratedToken(nextTokenId, "", ""));
+                }
                 cache = cache.append(decoderTokenId, state);
                 if (request.stopTokenPolicy().shouldStop(nextTokenId)) {
                     return result(generated, generatedTokens, T5RuntimeResult.FinishReason.stop_token,

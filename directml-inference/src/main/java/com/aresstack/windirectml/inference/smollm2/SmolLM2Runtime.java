@@ -1,5 +1,8 @@
 package com.aresstack.windirectml.inference.smollm2;
 
+import com.aresstack.windirectml.inference.GeneratedToken;
+import com.aresstack.windirectml.inference.GenerationTokenSink;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -20,7 +23,7 @@ public final class SmolLM2Runtime implements AutoCloseable {
 
     private final SmolLM2RuntimePackage runtimePackage;
     private final SmolLM2Tokenizer tokenizer;
-    private final SmolLM2ChatPromptTemplate chatPromptTemplate;
+    private final SmolLM2PromptRenderer promptRenderer;
     private final SmolLM2RuntimeMode runtimeMode;
     private final SmolLM2WarpRuntime warpRuntime;
     private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -28,12 +31,13 @@ public final class SmolLM2Runtime implements AutoCloseable {
     private SmolLM2Runtime(SmolLM2RuntimePackage runtimePackage,
                            SmolLM2Tokenizer tokenizer,
                            SmolLM2RuntimeMode runtimeMode,
-                           SmolLM2WarpRuntime warpRuntime) {
+                           SmolLM2WarpRuntime warpRuntime,
+                           SmolLM2PromptRenderer promptRenderer) {
         this.runtimePackage = Objects.requireNonNull(runtimePackage, "runtimePackage");
         this.tokenizer = tokenizer;
         this.runtimeMode = Objects.requireNonNull(runtimeMode, "runtimeMode");
         this.warpRuntime = warpRuntime;
-        this.chatPromptTemplate = SmolLM2ChatPromptTemplate.defaultInstruct();
+        this.promptRenderer = promptRenderer == null ? SmolLM2PromptRenderer.rawInput() : promptRenderer;
     }
 
     public static SmolLM2Runtime load(SmolLM2RuntimePackage runtimePackage) {
@@ -45,7 +49,13 @@ public final class SmolLM2Runtime implements AutoCloseable {
     }
 
     public static SmolLM2Runtime loadReference(SmolLM2RuntimePackage runtimePackage, SmolLM2Tokenizer tokenizer) {
-        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null);
+        return loadReference(runtimePackage, tokenizer, SmolLM2PromptRenderer.rawInput());
+    }
+
+    public static SmolLM2Runtime loadReference(SmolLM2RuntimePackage runtimePackage,
+                                               SmolLM2Tokenizer tokenizer,
+                                               SmolLM2PromptRenderer promptRenderer) {
+        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null, promptRenderer);
     }
 
     public static SmolLM2Runtime loadWarp(SmolLM2RuntimePackage runtimePackage,
@@ -59,7 +69,8 @@ public final class SmolLM2Runtime implements AutoCloseable {
                                           int sequenceLength,
                                           SmolLM2WarpExecutor executor) {
         SmolLM2WarpRuntime warpRuntime = SmolLM2WarpRuntime.prepare(runtimePackage, sequenceLength, executor);
-        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime);
+        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime,
+                SmolLM2PromptRenderer.rawInput());
     }
 
     public static SmolLM2Runtime loadAuto(SmolLM2RuntimePackage runtimePackage,
@@ -76,12 +87,18 @@ public final class SmolLM2Runtime implements AutoCloseable {
         SmolLM2RuntimeMode selectedMode = warpRuntime.executable() ? SmolLM2RuntimeMode.WARP : SmolLM2RuntimeMode.REFERENCE;
         if (selectedMode == SmolLM2RuntimeMode.REFERENCE) {
             warpRuntime.close();
-            return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null);
+            return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null,
+                    SmolLM2PromptRenderer.rawInput());
         }
-        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime);
+        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime,
+                SmolLM2PromptRenderer.rawInput());
     }
 
     public SmolLM2RuntimeResult generate(SmolLM2RuntimeRequest request) {
+        return generate(request, null);
+    }
+
+    public SmolLM2RuntimeResult generate(SmolLM2RuntimeRequest request, GenerationTokenSink sink) {
         Objects.requireNonNull(request, "request");
         long runtimeStart = System.nanoTime();
         ensureOpen();
@@ -89,33 +106,54 @@ public final class SmolLM2Runtime implements AutoCloseable {
                 () -> new SmolLM2RuntimeUnsupportedException(TOKENIZER_REQUIRED_MESSAGE));
 
         long tokenizeStart = System.nanoTime();
-        String renderedPrompt = chatPromptTemplate.renderUserPrompt(request.prompt());
+        String renderedPrompt = promptRenderer.render(request.prompt());
         List<Integer> inputTokenIds = encodePrompt(renderedPrompt, activeTokenizer);
         long tokenizeNanos = System.nanoTime() - tokenizeStart;
 
+        StreamingTextBridge streamingTextBridge = sink == null
+                ? null
+                : new StreamingTextBridge(activeTokenizer, sink);
         SmolLM2TokenRuntimeResult tokenResult = generateTokenIds(new SmolLM2TokenRuntimeRequest(
-                inputTokenIds, request.maxNewTokens(), request.options()));
+                inputTokenIds, request.maxNewTokens(), request.options()),
+                streamingTextBridge);
 
         long detokenizeStart = System.nanoTime();
-        String generatedText = activeTokenizer.decode(toIntArray(tokenResult.generatedTokenIds()), true);
+        String generatedText = streamingTextBridge == null
+                ? activeTokenizer.decode(toIntArray(tokenResult.generatedTokenIds()), true)
+                : streamingTextBridge.textSoFar();
         long detokenizeNanos = System.nanoTime() - detokenizeStart;
 
         SmolLM2GenerationProfile profile = tokenResult.profile().withTextTimings(
                 System.nanoTime() - runtimeStart,
                 tokenizeNanos,
                 detokenizeNanos);
-        return new SmolLM2RuntimeResult(
+        SmolLM2RuntimeResult result = new SmolLM2RuntimeResult(
                 generatedText,
                 tokenResult.generatedTokenIds(),
                 tokenResult.tokensGenerated(),
                 tokenResult.finishReason(),
                 SmolLM2GenerationDiagnostics.fromTokenResult(tokenResult, generatedText, profile));
+        if (sink != null) {
+            sink.onCompleted(new com.aresstack.windirectml.inference.InferenceResult(
+                    result.generatedText(),
+                    result.finishReason(),
+                    new com.aresstack.windirectml.inference.InferenceResult.Usage(
+                            tokenResult.inputTokenCount(),
+                            result.tokensGenerated(),
+                            tokenResult.fullTokenCount())));
+        }
+        return result;
     }
 
     /**
      * Generate token IDs through the correctness-first reference pipeline.
      */
     public SmolLM2TokenRuntimeResult generateTokenIds(SmolLM2TokenRuntimeRequest request) {
+        return generateTokenIds(request, null);
+    }
+
+    public SmolLM2TokenRuntimeResult generateTokenIds(SmolLM2TokenRuntimeRequest request,
+                                                     java.util.function.IntConsumer generatedTokenConsumer) {
         Objects.requireNonNull(request, "request");
         ensureOpen();
         ensureExecutablePackage();
@@ -123,7 +161,7 @@ public final class SmolLM2Runtime implements AutoCloseable {
             return warpRuntime.generateTokenIds(request);
         }
         SmolLM2Weights weights = runtimePackage.requireWeights();
-        return new SmolLM2ReferenceGenerationLoop(weights).generate(request);
+        return new SmolLM2ReferenceGenerationLoop(weights).generate(request, generatedTokenConsumer);
     }
 
     public Optional<SmolLM2Tokenizer> tokenizer() {
@@ -150,6 +188,35 @@ public final class SmolLM2Runtime implements AutoCloseable {
         return ids;
     }
 
+
+    private static final class StreamingTextBridge implements java.util.function.IntConsumer {
+        private final SmolLM2Tokenizer tokenizer;
+        private final GenerationTokenSink sink;
+        private final List<Integer> tokenIds = new ArrayList<>();
+        private String textSoFar = "";
+
+        private StreamingTextBridge(SmolLM2Tokenizer tokenizer, GenerationTokenSink sink) {
+            this.tokenizer = Objects.requireNonNull(tokenizer, "tokenizer");
+            this.sink = Objects.requireNonNull(sink, "sink");
+        }
+
+        @Override
+        public void accept(int tokenId) {
+            tokenIds.add(tokenId);
+            String decoded = tokenizer.decode(toIntArray(tokenIds), true);
+            String delta = decoded.startsWith(textSoFar)
+                    ? decoded.substring(textSoFar.length())
+                    : decoded;
+            textSoFar = decoded;
+            if (!delta.isEmpty()) {
+                sink.onToken(new GeneratedToken(tokenId, textSoFar, delta));
+            }
+        }
+
+        private String textSoFar() {
+            return textSoFar;
+        }
+    }
     private void ensureExecutablePackage() {
         if (!runtimePackage.executable()) {
             throw new SmolLM2RuntimeUnsupportedException(runtimePackage.runtimeLoadableReason());

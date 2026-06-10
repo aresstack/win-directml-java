@@ -24,6 +24,11 @@ public final class SmolLM2ChatPromptTemplate {
         return new SmolLM2ChatPromptTemplate(DEFAULT_SYSTEM_PROMPT);
     }
 
+    public static SmolLM2ChatPromptTemplate withSystemPrompt(String systemPrompt) {
+        String safePrompt = systemPrompt == null ? "" : systemPrompt.trim();
+        return new SmolLM2ChatPromptTemplate(safePrompt);
+    }
+
     public String renderUserPrompt(String userPrompt) {
         Objects.requireNonNull(userPrompt, "userPrompt");
         if (looksLikeRenderedChat(userPrompt)) {

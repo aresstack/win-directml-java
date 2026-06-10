@@ -1,5 +1,7 @@
 package com.aresstack.windirectml.inference.qwen;
 
+import com.aresstack.windirectml.inference.GeneratedToken;
+import com.aresstack.windirectml.inference.GenerationTokenSink;
 import com.aresstack.windirectml.inference.InferenceEngine;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.InferenceRequest;
@@ -282,49 +284,63 @@ public class QwenInferenceEngine implements InferenceEngine {
 
     @Override
     public InferenceResult generate(InferenceRequest request) throws InferenceException {
+        return generate(request, null);
+    }
+
+    @Override
+    public InferenceResult generate(InferenceRequest request, GenerationTokenSink sink) throws InferenceException {
         if (!ready) {
             throw new InferenceException("Qwen engine not initialized");
         }
 
         try {
-            // Format prompt using ChatML template
-            String systemPrompt = request.getSystemPrompt();
-            String userMessage = request.getUserPrompt();
-
-            String formattedPrompt = QwenChatTemplate.formatChat(
-                    systemPrompt != null && !systemPrompt.isBlank() ? systemPrompt : null,
-                    userMessage
-            );
-
+            String formattedPrompt = formatPrompt(request);
             int maxTokens = request.getMaxTokens() > 0 ? request.getMaxTokens() : defaultMaxTokens;
             log.info("Generating: maxTokens={}, promptLen={} chars", maxTokens, formattedPrompt.length());
 
             long t0 = System.currentTimeMillis();
-            String generatedText = runtime.generate(formattedPrompt, maxTokens);
+            final int[] streamedTokens = {0};
+            Qwen2Runtime.TokenConsumer consumer = sink == null ? null : (tokenId, fullText, delta) -> {
+                streamedTokens[0]++;
+                sink.onToken(new GeneratedToken(tokenId, fullText, delta));
+            };
+            String generatedText = runtime.generateStreaming(formattedPrompt, maxTokens, consumer);
             long elapsed = System.currentTimeMillis() - t0;
 
-            // Count tokens for usage. This is approximate because generated text
-            // can re-tokenize differently from the emitted token IDs.
             int promptTokens = tokenizer.encode(formattedPrompt).length;
-            int completionTokens = tokenizer.encode(generatedText).length;
+            int completionTokens = streamedTokens[0] > 0
+                    ? streamedTokens[0]
+                    : tokenizer.encode(generatedText).length;
 
             log.info("Generated {} chars ({} tokens approx) in {} ms ({} ms/token approx)",
                     generatedText.length(), completionTokens, elapsed,
                     completionTokens > 0 ? elapsed / completionTokens : 0);
 
             String finishReason = completionTokens >= maxTokens ? "max_tokens" : "end_turn";
-
-            return new InferenceResult(
+            InferenceResult result = new InferenceResult(
                     generatedText.strip(),
                     finishReason,
                     new InferenceResult.Usage(promptTokens, completionTokens,
                             promptTokens + completionTokens)
             );
+            if (sink != null) {
+                sink.onCompleted(result);
+            }
+            return result;
 
         } catch (Exception e) {
             throw new InferenceException("Qwen generation failed: " + e.getMessage(), e);
         }
     }
+
+    private String formatPrompt(InferenceRequest request) {
+        String systemPrompt = request.getSystemPrompt();
+        String userMessage = request.getUserPrompt();
+        return QwenChatTemplate.formatChat(
+                systemPrompt != null && !systemPrompt.isBlank() ? systemPrompt : null,
+                userMessage == null ? "" : userMessage);
+    }
+
 
     @Override
     public void shutdown() {

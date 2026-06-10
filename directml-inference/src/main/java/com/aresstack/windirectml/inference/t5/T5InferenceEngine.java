@@ -1,5 +1,7 @@
 package com.aresstack.windirectml.inference.t5;
 
+import com.aresstack.windirectml.inference.GeneratedToken;
+import com.aresstack.windirectml.inference.GenerationTokenSink;
 import com.aresstack.windirectml.inference.InferenceEngine;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.InferenceRequest;
@@ -10,6 +12,8 @@ import com.aresstack.windirectml.windows.WindowsNativeException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -82,6 +86,11 @@ public final class T5InferenceEngine implements InferenceEngine {
 
     @Override
     public InferenceResult generate(InferenceRequest request) throws InferenceException {
+        return generate(request, null);
+    }
+
+    @Override
+    public InferenceResult generate(InferenceRequest request, GenerationTokenSink sink) throws InferenceException {
         Objects.requireNonNull(request, "request");
         if (!ready) {
             throw new InferenceException("T5 runtime is not initialized");
@@ -94,18 +103,19 @@ public final class T5InferenceEngine implements InferenceEngine {
             T5RuntimeRequest runtimeRequest = T5RuntimeRequest.greedyText(inputTokens,
                     Math.min(request.getMaxTokens(), maxTokens), runtimePackage.metadata().specialTokens());
             long start = System.nanoTime();
-            T5RuntimeResult result = runtime.generate(runtimeRequest);
+            TokenDecodingSink decodingSink = sink == null ? null : new TokenDecodingSink(tokenizer, sink);
+            T5RuntimeResult result = runtime.generate(runtimeRequest, decodingSink);
             long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
             long detokenizeStart = System.nanoTime();
             int[] outputTokenIds = result.outputTokenIds();
-            String text = tokenizer.decode(outputTokenIds);
+            String text = decodingSink == null ? tokenizer.decode(outputTokenIds) : decodingSink.textSoFar();
             lastOutputTokenPreview = tokenizer.describeTokens(outputTokenIds, 24);
             long detokenizationNanos = System.nanoTime() - detokenizeStart;
             lastGenerationMetrics = result.generationMetrics()
                     .withTextBoundaryTimings(tokenizationNanos, detokenizationNanos);
             String finishReason = result.finishReason() == T5RuntimeResult.FinishReason.max_tokens
                     ? "max_tokens" : "end_turn";
-            return new InferenceResult(text, finishReason,
+            InferenceResult inferenceResult = new InferenceResult(text, finishReason,
                     new InferenceResult.Usage(inputTokens.length, result.generatedTokens(),
                             inputTokens.length + result.generatedTokens())) {
                 @Override
@@ -113,10 +123,15 @@ public final class T5InferenceEngine implements InferenceEngine {
                     return super.toString() + " elapsedMs=" + elapsedMs;
                 }
             };
+            if (sink != null) {
+                sink.onCompleted(inferenceResult);
+            }
+            return inferenceResult;
         } catch (RuntimeException e) {
             throw new InferenceException("T5 generation failed: " + e.getMessage(), e);
         }
     }
+
 
     @Override
     public void shutdown() {
@@ -220,6 +235,44 @@ public final class T5InferenceEngine implements InferenceEngine {
         return T5Runtime.loadWarp(packageToLoad, windowsBindings);
     }
 
+
+    private static final class TokenDecodingSink implements GenerationTokenSink {
+        private final T5TextTokenizer tokenizer;
+        private final GenerationTokenSink delegate;
+        private final List<Integer> tokenIds = new ArrayList<Integer>();
+        private String textSoFar = "";
+
+        private TokenDecodingSink(T5TextTokenizer tokenizer, GenerationTokenSink delegate) {
+            this.tokenizer = Objects.requireNonNull(tokenizer, "tokenizer");
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+        }
+
+        @Override
+        public void onToken(GeneratedToken token) {
+            if (token == null) {
+                return;
+            }
+            if (token.tokenId() >= 0) {
+                tokenIds.add(token.tokenId());
+            }
+            int[] ids = new int[tokenIds.size()];
+            for (int i = 0; i < tokenIds.size(); i++) {
+                ids[i] = tokenIds.get(i);
+            }
+            String decoded = tokenizer.decode(ids);
+            String delta = decoded.startsWith(textSoFar)
+                    ? decoded.substring(textSoFar.length())
+                    : decoded;
+            textSoFar = decoded;
+            if (!delta.isEmpty()) {
+                delegate.onToken(new GeneratedToken(token.tokenId(), textSoFar, delta));
+            }
+        }
+
+        private String textSoFar() {
+            return textSoFar;
+        }
+    }
     private void closeWindowsBindingsQuietly() {
         if (windowsBindings != null) {
             try {

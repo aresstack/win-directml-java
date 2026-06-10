@@ -6,6 +6,7 @@ import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyStopTokenPolic
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.IntConsumer;
 
 /**
  * Token-level SmolLM2 reference generator.
@@ -25,6 +26,10 @@ public final class SmolLM2ReferenceGenerationLoop {
     }
 
     public SmolLM2TokenRuntimeResult generate(SmolLM2TokenRuntimeRequest request) {
+        return generate(request, null);
+    }
+
+    public SmolLM2TokenRuntimeResult generate(SmolLM2TokenRuntimeRequest request, IntConsumer generatedTokenConsumer) {
         Objects.requireNonNull(request, "request");
         long runtimeStart = System.nanoTime();
         long prefillNanos = 0L;
@@ -54,6 +59,9 @@ public final class SmolLM2ReferenceGenerationLoop {
 
             generatedTokens.add(nextToken);
             fullTokenIds.add(nextToken);
+            if (generatedTokenConsumer != null && !tokenSampler.shouldStop(nextToken)) {
+                generatedTokenConsumer.accept(nextToken);
+            }
             if (tokenSampler.shouldStop(nextToken)) {
                 finishReason = "eos_token";
                 break;

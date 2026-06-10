@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.t5;
 
+import com.aresstack.windirectml.inference.GenerationTokenSink;
 import com.aresstack.windirectml.windows.WindowsBindings;
 
 import java.util.Objects;
@@ -217,9 +218,13 @@ public final class T5Runtime implements AutoCloseable {
     }
 
     public T5RuntimeResult generate(T5RuntimeRequest request) {
+        return generate(request, null);
+    }
+
+    public T5RuntimeResult generate(T5RuntimeRequest request, GenerationTokenSink sink) {
         Objects.requireNonNull(request, "request");
         ensureOpen();
-        return generationLoop.generate(request);
+        return generationLoop.generate(request, sink);
     }
 
     /**

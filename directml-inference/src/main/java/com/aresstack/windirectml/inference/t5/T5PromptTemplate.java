@@ -6,7 +6,7 @@ import java.util.Locale;
 import java.util.Objects;
 
 /**
- * Formats workbench text into the narrow text-to-text prompts expected by T5 models.
+ * Formats the optional instruction boundary for T5-family text-to-text models.
  */
 final class T5PromptTemplate {
     private T5PromptTemplate() {
@@ -14,22 +14,30 @@ final class T5PromptTemplate {
 
     static String format(InferenceRequest request) {
         Objects.requireNonNull(request, "request");
-        String modelId = request.getModelId() == null ? "" : request.getModelId().toLowerCase(Locale.ROOT);
         String text = request.getUserPrompt() == null ? "" : request.getUserPrompt().trim();
         if (text.isEmpty()) {
             return text;
         }
-        if (hasKnownTaskPrefix(text)) {
+        String systemPrompt = request.getSystemPrompt() == null ? "" : request.getSystemPrompt().trim();
+        if (systemPrompt.isEmpty() || hasKnownTaskPrefix(text)) {
             return text;
         }
-        if (modelId.contains("flan-t5") || modelId.contains("google-t5")
-                || modelId.contains("/t5-small") || modelId.equals("t5-small")) {
+        return formatSystemPrompt(systemPrompt, text);
+    }
+
+    private static String formatSystemPrompt(String systemPrompt, String text) {
+        String normalized = systemPrompt.toLowerCase(Locale.ROOT).trim();
+        if (normalized.equals("summarize") || normalized.equals("summary")
+                || normalized.contains("fasse") || normalized.contains("zusammen")) {
             return "summarize: " + text;
         }
-        if (modelId.contains("codet5")) {
-            return text;
+        if (normalized.contains("translate") || normalized.contains("übersetze") || normalized.contains("uebersetze")) {
+            return systemPrompt + ": " + text;
         }
-        return text;
+        if (normalized.contains("explain") || normalized.contains("erkläre") || normalized.contains("erklaere")) {
+            return "explain: " + text;
+        }
+        return systemPrompt + "\n\n" + text;
     }
 
     private static boolean hasKnownTaskPrefix(String text) {

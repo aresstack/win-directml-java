@@ -28,6 +28,24 @@ public interface InferenceEngine {
     InferenceResult generate(InferenceRequest request) throws InferenceException;
 
     /**
+     * Run inference and stream generated token deltas when the implementation supports it.
+     *
+     * <p>Implementations that cannot stream yet fall back to buffered output while preserving
+     * the same caller contract.</p>
+     */
+    default InferenceResult generate(InferenceRequest request, GenerationTokenSink sink) throws InferenceException {
+        InferenceResult result = generate(request);
+        if (sink != null) {
+            String text = result == null ? "" : result.getText();
+            if (text != null && !text.isEmpty()) {
+                sink.onToken(GeneratedToken.bufferedText(text));
+            }
+            sink.onCompleted(result);
+        }
+        return result;
+    }
+
+    /**
      * Release all resources.
      */
     void shutdown();

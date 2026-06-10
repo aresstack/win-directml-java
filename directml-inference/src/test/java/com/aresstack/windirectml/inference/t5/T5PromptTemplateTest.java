@@ -7,19 +7,30 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class T5PromptTemplateTest {
     @Test
-    void addsSummarizePrefixForGoogleT5Small() {
+    void keepsGoogleT5SmallInputRawByDefault() {
         InferenceRequest request = InferenceRequest.builder()
                 .modelId("google-t5/t5-small")
                 .userPrompt("public class Demo {}")
                 .build();
 
-        assertEquals("summarize: public class Demo {}", T5PromptTemplate.format(request));
+        assertEquals("public class Demo {}", T5PromptTemplate.format(request));
     }
 
     @Test
-    void addsSummarizePrefixForGoogleFlanT5Small() {
+    void keepsGoogleFlanT5SmallInputRawByDefault() {
         InferenceRequest request = InferenceRequest.builder()
                 .modelId("google/flan-t5-small")
+                .userPrompt("public class Demo {}")
+                .build();
+
+        assertEquals("public class Demo {}", T5PromptTemplate.format(request));
+    }
+
+    @Test
+    void appliesSummarizePrefixFromSystemPrompt() {
+        InferenceRequest request = InferenceRequest.builder()
+                .modelId("google-t5/t5-small")
+                .systemPrompt("summarize")
                 .userPrompt("public class Demo {}")
                 .build();
 
