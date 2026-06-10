@@ -161,7 +161,7 @@ public final class SummarizerPanel extends JPanel {
             return;
         }
 
-        String effectiveSystemPrompt = promptTemplate.applyToSystemPrompt(systemPrompt);
+        String effectiveSystemPrompt = promptTemplate.applyToSystemPrompt(systemPrompt, selectedModel);
 
         boolean qwenTestModel = isQwenTestModel(selectedModel);
         boolean smolLm2Model = isSmolLm2Model(selectedModel);

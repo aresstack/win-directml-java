@@ -50,6 +50,16 @@ class JsonT5TokenizerTest {
         assertEquals("summarize: Paste a longer text", tokenizer.decode(encoded));
     }
 
+
+
+    @Test
+    void skipsExtraIdTokensDuringVisibleDecode() throws Exception {
+        writeTokenizerFiles(tempDir);
+
+        T5TextTokenizer tokenizer = T5TokenizerLoader.load(tempDir);
+
+        assertEquals("hello world", tokenizer.decode(new int[]{13, 3, 4, 1}));
+    }
     static void writeTokenizerFiles(Path modelDir) throws Exception {
         Files.createDirectories(modelDir);
         Files.writeString(modelDir.resolve("tokenizer.json"), "{\n" +
@@ -68,7 +78,8 @@ class JsonT5TokenizerTest {
                 "      [\"▁a\", -1.0],\n" +
                 "      [\"▁longer\", -1.0],\n" +
                 "      [\"▁text\", -1.0],\n" +
-                "      [\"▁helloed\", -9.0]\n" +
+                "      [\"▁helloed\", -9.0],\n" +
+                "      [\"<extra_id_0>\", 0.0]\n" +
                 "    ]\n" +
                 "  }\n" +
                 "}\n", StandardCharsets.UTF_8);

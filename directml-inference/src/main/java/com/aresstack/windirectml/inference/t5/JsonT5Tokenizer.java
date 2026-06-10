@@ -92,7 +92,7 @@ final class JsonT5Tokenizer implements T5TextTokenizer {
                 continue;
             }
             String token = idToToken[id];
-            if (token == null || token.isEmpty() || "<unk>".equals(token)) {
+            if (token == null || token.isEmpty() || "<unk>".equals(token) || isSkippableSpecialToken(token)) {
                 continue;
             }
             pieces.append(token);
@@ -101,6 +101,10 @@ final class JsonT5Tokenizer implements T5TextTokenizer {
                 .replace(WORD_PREFIX, " ")
                 .replaceAll("\\s+", " ")
                 .trim();
+    }
+
+    private static boolean isSkippableSpecialToken(String token) {
+        return token.startsWith("<extra_id_") && token.endsWith(">");
     }
 
     @Override

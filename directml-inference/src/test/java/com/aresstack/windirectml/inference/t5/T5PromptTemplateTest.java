@@ -68,4 +68,38 @@ class T5PromptTemplateTest {
 
         assertEquals("explain java: public int size() { return count; }", T5PromptTemplate.format(request));
     }
+
+    @Test
+    void mapsWorkbenchTranslateGermanTemplateToCanonicalT5Prefix() {
+        InferenceRequest request = InferenceRequest.builder()
+                .modelId("google-t5/t5-small")
+                .systemPrompt("translate English to German")
+                .userPrompt("Paste a longer text or prompt here.")
+                .build();
+
+        assertEquals("translate English to German: Paste a longer text or prompt here.", T5PromptTemplate.format(request));
+    }
+
+    @Test
+    void mapsGermanWorkbenchTranslateInstructionToCanonicalT5Prefix() {
+        InferenceRequest request = InferenceRequest.builder()
+                .modelId("google-t5/t5-small")
+                .systemPrompt("Übersetze den folgenden Text ins Deutsche. Gib nur die Übersetzung aus.")
+                .userPrompt("Paste a longer text or prompt here.")
+                .build();
+
+        assertEquals("translate English to German: Paste a longer text or prompt here.", T5PromptTemplate.format(request));
+    }
+
+    @Test
+    void mapsWorkbenchTranslateEnglishTemplateToCanonicalT5Prefix() {
+        InferenceRequest request = InferenceRequest.builder()
+                .modelId("google-t5/t5-small")
+                .systemPrompt("translate German to English")
+                .userPrompt("Füge hier einen längeren Text ein.")
+                .build();
+
+        assertEquals("translate German to English: Füge hier einen längeren Text ein.", T5PromptTemplate.format(request));
+    }
+
 }

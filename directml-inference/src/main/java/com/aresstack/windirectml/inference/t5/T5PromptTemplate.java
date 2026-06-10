@@ -7,6 +7,11 @@ import java.util.Objects;
 
 /**
  * Formats the optional instruction boundary for T5-family text-to-text models.
+ * <p>
+ * Base T5 checkpoints are not chat models. They react best to canonical task
+ * prefixes such as {@code summarize:} or {@code translate English to German:}.
+ * Natural-language workbench instructions are therefore normalized before they
+ * reach the tokenizer.
  */
 final class T5PromptTemplate {
     private T5PromptTemplate() {
@@ -26,18 +31,62 @@ final class T5PromptTemplate {
     }
 
     private static String formatSystemPrompt(String systemPrompt, String text) {
-        String normalized = systemPrompt.toLowerCase(Locale.ROOT).trim();
-        if (normalized.equals("summarize") || normalized.equals("summary")
-                || normalized.contains("fasse") || normalized.contains("zusammen")) {
+        String normalized = normalize(systemPrompt);
+        if (isSummarizePrompt(normalized)) {
             return "summarize: " + text;
         }
-        if (normalized.contains("translate") || normalized.contains("übersetze") || normalized.contains("uebersetze")) {
-            return systemPrompt + ": " + text;
+        if (isTranslateToGermanPrompt(normalized)) {
+            return "translate English to German: " + text;
         }
-        if (normalized.contains("explain") || normalized.contains("erkläre") || normalized.contains("erklaere")) {
+        if (isTranslateToEnglishPrompt(normalized)) {
+            return "translate German to English: " + text;
+        }
+        if (isGenericTranslatePrompt(normalized)) {
+            return "translate English to German: " + text;
+        }
+        if (isExplainPrompt(normalized)) {
             return "explain: " + text;
         }
         return systemPrompt + "\n\n" + text;
+    }
+
+    private static boolean isSummarizePrompt(String normalized) {
+        return normalized.equals("summarize")
+                || normalized.equals("summary")
+                || normalized.contains("fasse")
+                || normalized.contains("zusammen")
+                || normalized.contains("summarize")
+                || normalized.contains("summary");
+    }
+
+    private static boolean isTranslateToGermanPrompt(String normalized) {
+        return normalized.equals("translate english to german")
+                || normalized.contains("translate english to german")
+                || normalized.contains("ins deutsche")
+                || normalized.contains("into german")
+                || normalized.contains("to german")
+                || normalized.contains("nach deutsch");
+    }
+
+    private static boolean isTranslateToEnglishPrompt(String normalized) {
+        return normalized.equals("translate german to english")
+                || normalized.contains("translate german to english")
+                || normalized.contains("ins englische")
+                || normalized.contains("into english")
+                || normalized.contains("to english")
+                || normalized.contains("nach englisch");
+    }
+
+    private static boolean isGenericTranslatePrompt(String normalized) {
+        return normalized.contains("translate")
+                || normalized.contains("ubersetze")
+                || normalized.contains("uebersetze");
+    }
+
+    private static boolean isExplainPrompt(String normalized) {
+        return normalized.contains("explain")
+                || normalized.contains("erklaere")
+                || normalized.contains("erklar");
     }
 
     private static boolean hasKnownTaskPrefix(String text) {
@@ -48,5 +97,14 @@ final class T5PromptTemplate {
                 || lower.startsWith("explain java:")
                 || lower.startsWith("summarize java:")
                 || lower.startsWith("classify:");
+    }
+
+    private static String normalize(String value) {
+        return value.toLowerCase(Locale.ROOT)
+                .replace('ä', 'a')
+                .replace('ö', 'o')
+                .replace('ü', 'u')
+                .replace('ß', 's')
+                .trim();
     }
 }

@@ -11,31 +11,50 @@ import java.util.Objects;
 /**
  * User-selectable prompt templates for Workbench generation runs.
  * <p>
- * Templates are an application-layer convenience. They never alter the source
- * text directly. Instead, they add an optional task instruction that is passed
- * through the normal system-prompt channel. This keeps runtimes model-neutral:
- * causal chat models receive the instruction as system text, while T5-family
- * engines can map the same instruction to their text-to-text task prefix.
+ * Templates are an application-layer convenience. They keep the source text
+ * unchanged and only add task metadata around it. Decoder-only chat models
+ * receive natural-language system instructions. T5-style seq2seq models receive
+ * canonical text-to-text task prefixes, because natural chat instructions make
+ * base T5 models behave like span-infilling models.
  */
 public enum WorkbenchPromptTemplate {
 
-    NONE("Keines", "", true, true),
-    SUMMARIZE_DE("Zusammenfassen", "Fasse den folgenden Text kurz und sachlich auf Deutsch zusammen. Gib nur die Zusammenfassung aus.", true, true),
-    TRANSLATE_TO_GERMAN("Ins Deutsche übersetzen", "Übersetze den folgenden Text ins Deutsche. Gib nur die Übersetzung aus.", true, true),
-    TRANSLATE_TO_ENGLISH("Ins Englische übersetzen", "Translate the following text into English. Output only the translation.", true, true),
-    EXPLAIN_CODE_DE("Code erklären", "Erkläre den folgenden Code kurz und verständlich auf Deutsch.", true, false);
+    NONE("Keines", "", "", true, true),
+    SUMMARIZE_DE("Zusammenfassen",
+            "Fasse den folgenden Text kurz und sachlich auf Deutsch zusammen. Gib nur die Zusammenfassung aus.",
+            "summarize",
+            true,
+            true),
+    TRANSLATE_TO_GERMAN("Ins Deutsche übersetzen",
+            "Übersetze den folgenden Text ins Deutsche. Gib nur die Übersetzung aus.",
+            "translate English to German",
+            true,
+            true),
+    TRANSLATE_TO_ENGLISH("Ins Englische übersetzen",
+            "Translate the following text into English. Output only the translation.",
+            "translate German to English",
+            true,
+            true),
+    EXPLAIN_CODE_DE("Code erklären",
+            "Erkläre den folgenden Code kurz und verständlich auf Deutsch.",
+            "explain java",
+            true,
+            false);
 
     private final String displayName;
-    private final String instruction;
+    private final String causalInstruction;
+    private final String seq2SeqInstruction;
     private final boolean causalLmSupported;
     private final boolean seq2SeqSupported;
 
     WorkbenchPromptTemplate(String displayName,
-                            String instruction,
+                            String causalInstruction,
+                            String seq2SeqInstruction,
                             boolean causalLmSupported,
                             boolean seq2SeqSupported) {
         this.displayName = Objects.requireNonNull(displayName, "displayName");
-        this.instruction = Objects.requireNonNull(instruction, "instruction");
+        this.causalInstruction = Objects.requireNonNull(causalInstruction, "causalInstruction");
+        this.seq2SeqInstruction = Objects.requireNonNull(seq2SeqInstruction, "seq2SeqInstruction");
         this.causalLmSupported = causalLmSupported;
         this.seq2SeqSupported = seq2SeqSupported;
     }
@@ -54,15 +73,19 @@ public enum WorkbenchPromptTemplate {
         return Collections.unmodifiableList(templates);
     }
 
+    public String applyToSystemPrompt(String userSystemPrompt, String modelId) {
+        GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId(modelId);
+        GenerationModelRegistry.Architecture architecture = entry == null
+                ? GenerationModelRegistry.Architecture.CAUSAL_LM
+                : entry.architecture();
+        if (architecture == GenerationModelRegistry.Architecture.SEQ2SEQ) {
+            return applyToSeq2SeqPrompt(userSystemPrompt);
+        }
+        return applyToCausalPrompt(userSystemPrompt);
+    }
+
     public String applyToSystemPrompt(String userSystemPrompt) {
-        String customPrompt = userSystemPrompt == null ? "" : userSystemPrompt.trim();
-        if (instruction.isEmpty()) {
-            return customPrompt;
-        }
-        if (customPrompt.isEmpty()) {
-            return instruction;
-        }
-        return customPrompt + "\n\n" + instruction;
+        return applyToCausalPrompt(userSystemPrompt);
     }
 
     public boolean isNone() {
@@ -72,6 +95,28 @@ public enum WorkbenchPromptTemplate {
     @Override
     public String toString() {
         return displayName;
+    }
+
+    private String applyToCausalPrompt(String userSystemPrompt) {
+        String customPrompt = sanitize(userSystemPrompt);
+        if (causalInstruction.isEmpty()) {
+            return customPrompt;
+        }
+        if (customPrompt.isEmpty()) {
+            return causalInstruction;
+        }
+        return customPrompt + "\n\n" + causalInstruction;
+    }
+
+    private String applyToSeq2SeqPrompt(String userSystemPrompt) {
+        String customPrompt = sanitize(userSystemPrompt);
+        if (seq2SeqInstruction.isEmpty()) {
+            return customPrompt;
+        }
+        if (customPrompt.isEmpty()) {
+            return seq2SeqInstruction;
+        }
+        return seq2SeqInstruction + "\n" + customPrompt;
     }
 
     private boolean supports(GenerationModelRegistry.Architecture architecture, String modelId) {
@@ -85,6 +130,10 @@ public enum WorkbenchPromptTemplate {
             return seq2SeqSupported || isCodeT5Model(modelId);
         }
         return false;
+    }
+
+    private static String sanitize(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private static boolean isCodeT5Model(String modelId) {
