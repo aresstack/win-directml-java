@@ -54,6 +54,7 @@ import java.util.function.Supplier;
 public final class DownloadPanel extends JPanel {
 
     private static final int ICON_BUTTON_SIZE = 28;
+    private static final String SETTINGS_BUTTON_ICON = "\uD83D\uDEE0";
     private static final Insets ICON_BUTTON_MARGIN = new Insets(0, 0, 0, 0);
 
     private final WorkbenchModel model;
@@ -258,14 +259,14 @@ public final class DownloadPanel extends JPanel {
     }
 
     private JButton createConfigButton(String modelId) {
-        JButton button = createIconButton("\u2699", "Configure download URLs");
+        JButton button = createIconButton(SETTINGS_BUTTON_ICON, "Configure download URLs");
         button.getAccessibleContext().setAccessibleName("Configure download URLs");
         button.addActionListener(e -> openConfigDialog(modelId));
         return button;
     }
 
     private JButton createQwenConfigButton() {
-        JButton button = createIconButton("\u2699", "Configure Qwen download source, variant and URLs");
+        JButton button = createIconButton(SETTINGS_BUTTON_ICON, "Configure Qwen download source, variant and URLs");
         button.getAccessibleContext().setAccessibleName("Configure Qwen download settings");
         button.addActionListener(e -> openQwenConfigDialog());
         return button;
