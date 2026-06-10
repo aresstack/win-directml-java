@@ -71,6 +71,20 @@ public final class SmolLM2ChatPromptTemplate {
                 || lower.contains(" nicht ")
                 || lower.contains(" von ")
                 || lower.contains(" im ")
+                || lower.contains(" wurde ")
+                || lower.contains(" werden ")
+                || lower.contains(" hatte ")
+                || lower.contains(" haben ")
+                || lower.contains(" mit ")
+                || lower.contains(" auch ")
+                || lower.contains(" aber ")
+                || lower.contains(" wird ")
+                || lower.contains("januar")   // English: january
+                || lower.contains("februar")  // English: february
+                || lower.contains("juni")     // English: june
+                || lower.contains("juli")     // English: july
+                || lower.contains("oktober")  // English: october
+                || lower.contains("dezember") // English: december
                 || lower.contains("ö")
                 || lower.contains("ä")
                 || lower.contains("ü")
