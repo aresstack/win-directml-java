@@ -19,6 +19,7 @@ import com.aresstack.windirectml.runtime.facade.Backend;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -58,7 +59,8 @@ public final class SmolLM2WorkbenchRuntimeRunner {
 
     public Result generate(String prompt, int maxTokens, Backend requestedBackend) throws IOException {
         Backend safeBackend = requestedBackend == null ? Backend.CPU : requestedBackend;
-        Optional<Result> guardedInput = guardSummarizationInput(prompt, maxTokens, safeBackend);
+        String sourceText = extractSummarizationSource(prompt);
+        Optional<Result> guardedInput = guardSummarizationInput(sourceText, maxTokens, safeBackend);
         if (guardedInput.isPresent()) {
             return guardedInput.get();
         }
@@ -71,14 +73,14 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         Optional<SmolLM2WarpReadinessReport> warpReadiness = inspectWarpReadinessIfRequested(runtimePackage, safeBackend);
         Optional<SmolLM2WarpExecutionStatus> warpStatus = warpReadiness.map(SmolLM2WorkbenchRuntimeRunner::toExecutionStatus);
         try (SmolLM2Runtime runtime = loadRuntime(runtimePackage, tokenizer, safeBackend, warpStatus)) {
-            String summarizationPrompt = SmolLM2ChatPromptTemplate.defaultInstruct().renderSummarizationPrompt(prompt);
+            String summarizationPrompt = SmolLM2ChatPromptTemplate.defaultInstruct().renderSummarizationPrompt(sourceText);
             SmolLM2RuntimeResult result = runtime.generate(new SmolLM2RuntimeRequest(
                     summarizationPrompt,
                     maxTokens,
                     SmolLM2GenerationOptions.greedy()));
             Optional<SmolLM2WarpExecutionStatus> effectiveWarpStatus = runtime.warpExecutionStatus().or(() -> warpStatus);
             return new Result(
-                    cleanSummarizationOutput(result.generatedText(), prompt),
+                    cleanSummarizationOutput(result.generatedText(), prompt, sourceText),
                     result.tokensGenerated(),
                     result.finishReason(),
                     safeBackend.name().toLowerCase(),
@@ -122,9 +124,9 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                 Optional.empty()));
     }
 
-    private static String cleanSummarizationOutput(String generatedText, String sourceText) {
+    private static String cleanSummarizationOutput(String generatedText, String originalPrompt, String sourceText) {
         if (generatedText == null || generatedText.isBlank()) {
-            return "";
+            return extractiveFallbackSummary(sourceText);
         }
 
         String text = generatedText.replace("\r\n", "\n").replace('\r', '\n').trim();
@@ -133,7 +135,87 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         text = removeRepeatedLeadLabels(text);
         text = removeSourceEcho(text, sourceText);
         text = enforceGroundedSummary(text, sourceText);
+        if (looksLikeInstructionEcho(text, originalPrompt)) {
+            return extractiveFallbackSummary(sourceText);
+        }
         return text.trim();
+    }
+
+    private static String extractSummarizationSource(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return "";
+        }
+
+        String normalized = prompt.replace("\r\n", "\n").replace('\r', '\n').trim();
+        String paragraphStripped = stripLeadingInstructionParagraphs(normalized);
+        String sentenceStripped = stripLeadingInstructionSentences(paragraphStripped);
+        if (sentenceStripped.length() >= 80) {
+            return sentenceStripped;
+        }
+        return paragraphStripped.length() >= 80 ? paragraphStripped : normalized;
+    }
+
+    private static String stripLeadingInstructionParagraphs(String text) {
+        String[] rawParagraphs = text.split("\\n\\s*\\n");
+        List<String> paragraphs = new ArrayList<>();
+        boolean sourceStarted = false;
+        for (String rawParagraph : rawParagraphs) {
+            String paragraph = rawParagraph.trim();
+            if (paragraph.isEmpty()) {
+                continue;
+            }
+            if (!sourceStarted && looksLikeInstructionParagraph(paragraph)) {
+                continue;
+            }
+            sourceStarted = true;
+            paragraphs.add(paragraph);
+        }
+        return paragraphs.isEmpty() ? text : String.join("\n\n", paragraphs).trim();
+    }
+
+    private static String stripLeadingInstructionSentences(String text) {
+        String remaining = text.trim();
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            int sentenceEnd = firstSentenceEnd(remaining);
+            if (sentenceEnd <= 0) {
+                return remaining;
+            }
+            String firstSentence = remaining.substring(0, sentenceEnd).trim();
+            if (looksLikeInstructionParagraph(firstSentence)) {
+                remaining = remaining.substring(sentenceEnd).stripLeading();
+                changed = true;
+            }
+        }
+        return remaining;
+    }
+
+    private static int firstSentenceEnd(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '.' || ch == '!' || ch == '?' || ch == '。' || ch == '！' || ch == '？') {
+                return i + 1;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean looksLikeInstructionParagraph(String paragraph) {
+        String lower = normalizeForEchoCheck(paragraph).toLowerCase(Locale.ROOT);
+        if (lower.isEmpty()) {
+            return true;
+        }
+        if (startsWithInstruction(lower)) {
+            return true;
+        }
+        int signals = 0;
+        signals += lower.contains("kurzfassung") || lower.contains("zusammenfassung") || lower.contains("summary") ? 1 : 0;
+        signals += lower.contains("wiederhole nicht") || lower.contains("do not repeat") ? 1 : 0;
+        signals += lower.contains("erfinde keine") || lower.contains("do not invent") ? 1 : 0;
+        signals += lower.contains("gib nur") || lower.contains("output only") ? 1 : 0;
+        signals += lower.contains("quelltext") || lower.contains("source text") ? 1 : 0;
+        return signals >= 2;
     }
 
     private static String removeChatMarkers(String text) {
@@ -150,18 +232,50 @@ public final class SmolLM2WorkbenchRuntimeRunner {
 
     private static String removeInstructionEcho(String text) {
         String cleaned = text.trim();
-        String lower = cleaned.toLowerCase();
-        if (lower.startsWith("fasse diesen quelltext")
-                || lower.startsWith("fasse den folgenden quelltext")
-                || lower.startsWith("aufgabe:")
-                || lower.startsWith("regeln:")) {
-            int summaryLabel = Math.max(cleaned.lastIndexOf("Zusammenfassung:"), cleaned.lastIndexOf("Fassung:"));
+        String lower = normalizeForEchoCheck(cleaned).toLowerCase(Locale.ROOT);
+        if (startsWithInstruction(lower)) {
+            int summaryLabel = Math.max(cleaned.lastIndexOf("Zusammenfassung:"), cleaned.lastIndexOf("Kurzfassung:"));
+            summaryLabel = Math.max(summaryLabel, cleaned.lastIndexOf("Fassung:"));
+            summaryLabel = Math.max(summaryLabel, cleaned.lastIndexOf("Summary:"));
             if (summaryLabel >= 0) {
                 int labelEnd = cleaned.indexOf(':', summaryLabel);
                 cleaned = labelEnd >= 0 ? cleaned.substring(labelEnd + 1) : cleaned.substring(summaryLabel);
+            } else {
+                return "";
             }
         }
         return cleaned.trim();
+    }
+
+    private static boolean looksLikeInstructionEcho(String text, String originalPrompt) {
+        String normalizedText = normalizeForEchoCheck(text).toLowerCase(Locale.ROOT);
+        if (normalizedText.isEmpty()) {
+            return true;
+        }
+        if (startsWithInstruction(normalizedText)) {
+            return true;
+        }
+        String normalizedPrompt = normalizeForEchoCheck(originalPrompt).toLowerCase(Locale.ROOT);
+        int sentenceEnd = firstSentenceEnd(normalizedPrompt);
+        if (sentenceEnd > 0) {
+            String firstPromptSentence = normalizedPrompt.substring(0, sentenceEnd).trim();
+            return !firstPromptSentence.isEmpty() && normalizedText.startsWith(firstPromptSentence);
+        }
+        return false;
+    }
+
+    private static boolean startsWithInstruction(String lower) {
+        return lower.startsWith("schreibe ")
+                || lower.startsWith("fasse ")
+                || lower.startsWith("erstelle ")
+                || lower.startsWith("gib ")
+                || lower.startsWith("wiederhole ")
+                || lower.startsWith("aufgabe")
+                || lower.startsWith("regeln")
+                || lower.startsWith("summarize ")
+                || lower.startsWith("write ")
+                || lower.startsWith("output only")
+                || lower.startsWith("do not ");
     }
 
     private static String removeRepeatedLeadLabels(String text) {
@@ -170,7 +284,9 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         while (changed) {
             changed = false;
             String next = removeLeadLabel(cleaned, "Zusammenfassung:");
+            next = removeLeadLabel(next, "Kurzfassung:");
             next = removeLeadLabel(next, "Fassung:");
+            next = removeLeadLabel(next, "Summary:");
             if (!next.equals(cleaned)) {
                 cleaned = next.trim();
                 changed = true;
@@ -203,6 +319,9 @@ public final class SmolLM2WorkbenchRuntimeRunner {
 
         String source = sourceText.trim();
         String output = text.trim();
+        if (startsWithInstruction(normalizeForEchoCheck(output).toLowerCase(Locale.ROOT))) {
+            return extractiveFallbackSummary(source);
+        }
         if (isWorkbenchPlaceholder(source)) {
             return extractiveFallbackSummary(source);
         }
@@ -293,6 +412,9 @@ public final class SmolLM2WorkbenchRuntimeRunner {
     }
 
     private static String normalizeForEchoCheck(String text) {
+        if (text == null) {
+            return "";
+        }
         return text.replace("\r\n", "\n")
                 .replace('\r', '\n')
                 .replaceAll("\\s+", " ")
@@ -308,7 +430,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         String[] sentences = source.split("(?<=[.!?。！？])\\s+");
         StringBuilder builder = new StringBuilder();
         for (String sentence : sentences) {
-            if (sentence.isBlank()) {
+            if (sentence.isBlank() || looksLikeInstructionParagraph(sentence)) {
                 continue;
             }
             if (builder.length() > 0) {
