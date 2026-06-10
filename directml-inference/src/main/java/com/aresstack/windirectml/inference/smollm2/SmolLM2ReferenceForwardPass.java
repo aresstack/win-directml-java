@@ -2,6 +2,7 @@ package com.aresstack.windirectml.inference.smollm2;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyAttentionLayout;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyReferenceDenseOps;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyRotaryEmbedding;
 
 import java.util.Arrays;
@@ -270,7 +271,7 @@ public final class SmolLM2ReferenceForwardPass {
         if (gate.length != up.length) {
             throw new IllegalStateException("SmolLM2 gate and up projections must have the same width");
         }
-        SmolLM2ReferenceDenseOps.gatedSiluMultiply(gate, up);
+        DecoderOnlyReferenceDenseOps.gatedSiluMultiply(gate, up);
         float[] output = layer.downProjection().multiplyVector(gate);
         profile.addMlpNanos(System.nanoTime() - mlpStart);
         return output;

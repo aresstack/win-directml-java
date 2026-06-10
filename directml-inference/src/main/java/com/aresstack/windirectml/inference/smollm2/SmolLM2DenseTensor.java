@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.smollm2;
 
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyReferenceDenseOps;
 import com.aresstack.windirectml.inference.model.SourceTensorDataType;
 
 import java.nio.ByteBuffer;
@@ -77,7 +78,7 @@ public final class SmolLM2DenseTensor {
                     + ": expected " + cols + " but got " + input.length);
         }
         float[] output = new float[rows];
-        SmolLM2ReferenceDenseOps.multiplyRows(values, rows, cols, input, output);
+        DecoderOnlyReferenceDenseOps.multiplyRows(values, rows, cols, input, output);
         return output;
     }
 
@@ -93,7 +94,7 @@ public final class SmolLM2DenseTensor {
             throw new IllegalArgumentException("Input width mismatch for " + name
                     + ": expected " + cols + " but got " + input.length);
         }
-        return SmolLM2ReferenceDenseOps.dot(values, rowIndex * cols, input, 0, cols);
+        return DecoderOnlyReferenceDenseOps.dot(values, rowIndex * cols, input, 0, cols);
     }
 
     private void requireRank(int expectedRank) {
