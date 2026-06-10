@@ -17,6 +17,7 @@ import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationProfile;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.runtime.SmolLM2WorkbenchRuntimeRunner;
+import com.aresstack.windirectml.workbench.prompt.WorkbenchPromptTemplate;
 
 import javax.swing.*;
 import java.awt.*;
@@ -42,6 +43,7 @@ public final class SummarizerPanel extends JPanel {
     private final JTextArea inputArea;
     private final JTextArea resultArea;
     private final JComboBox<String> modelSelector;
+    private final JComboBox<WorkbenchPromptTemplate> promptTemplateSelector;
     private final JSpinner maxTokensSpinner;
 
     public SummarizerPanel(WorkbenchModel model) {
@@ -58,14 +60,16 @@ public final class SummarizerPanel extends JPanel {
             String selected = (String) modelSelector.getSelectedItem();
             if (selected != null) {
                 model.setSummarizerModel(selected);
+                updatePromptTemplateOptions(selected);
             }
         });
         modelPanel.add(modelSelector);
 
-        var statusLabel = new JLabel();
-        updateStatusLabel(statusLabel);
-        modelSelector.addActionListener(e -> updateStatusLabel(statusLabel));
-        modelPanel.add(statusLabel);
+        modelPanel.add(new JLabel("Template:"));
+        promptTemplateSelector = new JComboBox<>();
+        promptTemplateSelector.setToolTipText("Choose an optional task template. 'Keines' passes the input without an additional task instruction.");
+        modelPanel.add(promptTemplateSelector);
+        updatePromptTemplateOptions((String) modelSelector.getSelectedItem());
         controlsPanel.add(modelPanel, BorderLayout.NORTH);
 
         var inputPanel = new JPanel(new BorderLayout(4, 4));
@@ -116,28 +120,26 @@ public final class SummarizerPanel extends JPanel {
         return options.toArray(new String[0]);
     }
 
-    private void updateStatusLabel(JLabel label) {
-        String selected = (String) modelSelector.getSelectedItem();
-        if (selected == null) {
-            label.setText("");
-            return;
+    private void updatePromptTemplateOptions(String selectedModel) {
+        WorkbenchPromptTemplate previous = (WorkbenchPromptTemplate) promptTemplateSelector.getSelectedItem();
+        promptTemplateSelector.removeAllItems();
+        for (WorkbenchPromptTemplate template : WorkbenchPromptTemplate.templatesFor(selectedModel)) {
+            promptTemplateSelector.addItem(template);
         }
-        Entry entry = GenerationModelRegistry.findByModelId(selected);
-        if (entry == null) {
-            label.setText(" [unknown]");
-            return;
+        WorkbenchPromptTemplate next = previous == null ? WorkbenchPromptTemplate.NONE : previous;
+        if (!selectPromptTemplate(next)) {
+            selectPromptTemplate(WorkbenchPromptTemplate.NONE);
         }
-        if (isQwenTestModel(selected)) {
-            label.setText(" 🧪 experimental (DirectML)");
-            return;
+    }
+
+    private boolean selectPromptTemplate(WorkbenchPromptTemplate template) {
+        for (int i = 0; i < promptTemplateSelector.getItemCount(); i++) {
+            if (promptTemplateSelector.getItemAt(i) == template) {
+                promptTemplateSelector.setSelectedIndex(i);
+                return true;
+            }
         }
-        String statusText = switch (entry.status()) {
-            case SHIPPED -> " ✅ shipped";
-            case EXPERIMENTAL -> " 🧪 experimental";
-            case PLANNED -> " 🚧 planned";
-            case UNSUPPORTED -> " ❌ unsupported";
-        };
-        label.setText(statusText);
+        return false;
     }
 
     private void runSummarizer() {
@@ -148,12 +150,18 @@ public final class SummarizerPanel extends JPanel {
         }
 
         String systemPrompt = systemPromptField.getText() == null ? "" : systemPromptField.getText().trim();
+        WorkbenchPromptTemplate promptTemplate = (WorkbenchPromptTemplate) promptTemplateSelector.getSelectedItem();
+        if (promptTemplate == null) {
+            promptTemplate = WorkbenchPromptTemplate.NONE;
+        }
 
         String selectedModel = (String) modelSelector.getSelectedItem();
         if (selectedModel == null) {
             appendResult("ERROR: No generation model selected.");
             return;
         }
+
+        String effectiveSystemPrompt = promptTemplate.applyToSystemPrompt(systemPrompt);
 
         boolean qwenTestModel = isQwenTestModel(selectedModel);
         boolean smolLm2Model = isSmolLm2Model(selectedModel);
@@ -189,11 +197,11 @@ public final class SummarizerPanel extends JPanel {
                 try {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
                     if (qwenTestModel) {
-                        runQwenGeneration(modelDir, text, systemPrompt, maxTokens, selectedModel);
+                        runQwenGeneration(modelDir, text, effectiveSystemPrompt, maxTokens, selectedModel);
                     } else if (smolLm2Model) {
-                        runSmolLm2Generation(modelDir, text, systemPrompt, maxTokens);
+                        runSmolLm2Generation(modelDir, text, effectiveSystemPrompt, maxTokens);
                     } else if (isT5Model(selectedModel)) {
-                        runT5Generation(modelDir, text, systemPrompt, maxTokens, selectedModel);
+                        runT5Generation(modelDir, text, effectiveSystemPrompt, maxTokens, selectedModel);
                     } else {
                         runPhi3Summarizer(modelDir, text, maxTokens);
                     }
