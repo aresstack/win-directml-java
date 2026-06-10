@@ -19,6 +19,28 @@ class SmolLM2ChatPromptTemplateTest {
     }
 
     @Test
+    void omitsSystemBlockWhenSystemPromptIsBlank() {
+        SmolLM2ChatPromptTemplate template = SmolLM2ChatPromptTemplate.withSystemPrompt("");
+
+        String rendered = template.renderUserPrompt("Paste a longer text or prompt here.");
+
+        assertTrue(rendered.startsWith("<|im_start|>user\n"));
+        assertTrue(rendered.contains("Paste a longer text or prompt here."));
+        assertTrue(rendered.endsWith("<|im_start|>assistant\n"));
+    }
+
+    @Test
+    void attachesExplicitSystemPromptWithoutChangingUserText() {
+        SmolLM2ChatPromptTemplate template = SmolLM2ChatPromptTemplate.withSystemPrompt("fasse den Text zusammen");
+
+        String rendered = template.renderUserPrompt("Adolf Hitler wurde am 30. Januar 1933 ernannt.");
+
+        assertTrue(rendered.startsWith("<|im_start|>system\n"));
+        assertTrue(rendered.contains("fasse den Text zusammen"));
+        assertTrue(rendered.contains("<|im_start|>user\nAdolf Hitler wurde am 30. Januar 1933 ernannt.<|im_end|>\n"));
+    }
+
+    @Test
     void keepsAlreadyRenderedChatPromptUnchanged() {
         SmolLM2ChatPromptTemplate template = SmolLM2ChatPromptTemplate.defaultInstruct();
         String prompt = "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n";

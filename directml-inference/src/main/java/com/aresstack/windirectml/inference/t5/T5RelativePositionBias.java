@@ -22,18 +22,18 @@ public final class T5RelativePositionBias {
         }
         int bucket = bucket(keyPosition - queryPosition, bidirectional);
         int safeHead = Math.floorMod(head, heads);
-        if (bias.rank() == 2 && bucket < bias.dim(0) && safeHead < bias.dim(1)) {
+        if (bias.rank() == 2 && bucket >= 0 && bucket < bias.dim(0) && safeHead < bias.dim(1)) {
             return bias.at(bucket, safeHead);
         }
         return 0.0f;
     }
 
     private int bucket(int relativePosition, boolean bidirectional) {
-        int numBuckets = buckets;
+        int numBuckets = Math.max(1, buckets);
         int ret = 0;
         int distance;
         if (bidirectional) {
-            numBuckets /= 2;
+            numBuckets = Math.max(1, numBuckets / 2);
             if (relativePosition > 0) {
                 ret += numBuckets;
             }
@@ -43,12 +43,20 @@ public final class T5RelativePositionBias {
         }
         int maxExact = Math.max(1, numBuckets / 2);
         if (distance < maxExact) {
-            return Math.min(ret + distance, buckets - 1);
+            return clampBucket(ret + distance);
         }
-        double logDistance = Math.log((double) distance / maxExact);
-        double logMax = Math.log((double) maxDistance / maxExact);
-        int large = maxExact + (int) (logDistance / logMax * (numBuckets - maxExact));
-        large = Math.min(large, numBuckets - 1);
-        return Math.min(ret + large, buckets - 1);
+        int effectiveMaxDistance = Math.max(maxDistance, maxExact + 1);
+        double logDistance = Math.log((double) Math.max(distance, maxExact) / maxExact);
+        double logMax = Math.log((double) effectiveMaxDistance / maxExact);
+        int large = maxExact;
+        if (logMax > 0.0d && !Double.isNaN(logMax)) {
+            large += (int) (logDistance / logMax * (numBuckets - maxExact));
+        }
+        large = Math.max(maxExact, Math.min(large, numBuckets - 1));
+        return clampBucket(ret + large);
+    }
+
+    private int clampBucket(int bucket) {
+        return Math.max(0, Math.min(bucket, buckets - 1));
     }
 }

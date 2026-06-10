@@ -29,6 +29,26 @@ class T5RelativePositionBiasTest {
         assertEquals(17.0f, nextToken);
     }
 
+    @Test
+    void clampsBucketsWhenConfiguredMaxDistanceIsSmallerThanExactRange() {
+        T5RelativePositionBias bias = new T5RelativePositionBias(biasTable(32, 1), 32, 8, 1);
+
+        float farPreviousToken = bias.value(0, 512, 0, false);
+
+        assertEquals(31.0f, farPreviousToken);
+    }
+
+    @Test
+    void neverUsesNegativeBucketsForLongBidirectionalDistances() {
+        T5RelativePositionBias bias = new T5RelativePositionBias(biasTable(32, 1), 32, 8, 1);
+
+        float farPreviousToken = bias.value(0, 512, 0, true);
+        float farNextToken = bias.value(0, 0, 512, true);
+
+        assertEquals(15.0f, farPreviousToken);
+        assertEquals(31.0f, farNextToken);
+    }
+
     private static T5TensorData biasTable(int buckets, int heads) {
         float[] values = new float[buckets * heads];
         for (int bucket = 0; bucket < buckets; bucket++) {

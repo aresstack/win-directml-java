@@ -96,9 +96,6 @@ public final class SmolLM2WorkbenchRuntimeRunner {
 
     private static String renderPrompt(String prompt, String systemPrompt) {
         String safePrompt = prompt == null ? "" : prompt;
-        if (systemPrompt == null || systemPrompt.isBlank()) {
-            return safePrompt;
-        }
         return SmolLM2ChatPromptTemplate.withSystemPrompt(systemPrompt).renderUserPrompt(safePrompt);
     }
 

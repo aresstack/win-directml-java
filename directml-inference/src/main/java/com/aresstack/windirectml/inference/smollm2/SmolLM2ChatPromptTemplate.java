@@ -97,14 +97,23 @@ public final class SmolLM2ChatPromptTemplate {
     }
 
     private String renderConversation(String userPrompt, String assistantPrefix) {
-        return IM_START + "system\n"
-                + systemPrompt
-                + IM_END + "\n"
-                + IM_START + "user\n"
-                + userPrompt
-                + IM_END + "\n"
-                + IM_START + "assistant\n"
-                + assistantPrefix;
+        StringBuilder prompt = new StringBuilder();
+        if (!systemPrompt.isBlank()) {
+            prompt.append(IM_START)
+                    .append("system\n")
+                    .append(systemPrompt)
+                    .append(IM_END)
+                    .append('\n');
+        }
+        prompt.append(IM_START)
+                .append("user\n")
+                .append(userPrompt)
+                .append(IM_END)
+                .append('\n')
+                .append(IM_START)
+                .append("assistant\n")
+                .append(assistantPrefix);
+        return prompt.toString();
     }
 
     public boolean looksLikeRenderedChat(String prompt) {
