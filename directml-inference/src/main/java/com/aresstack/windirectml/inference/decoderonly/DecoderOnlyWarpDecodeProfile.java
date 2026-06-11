@@ -1,56 +1,66 @@
-package com.aresstack.windirectml.inference.smollm2;
+package com.aresstack.windirectml.inference.decoderonly;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
- * Fine-grained timing accumulator for the WARP decode path, broken down per sub-operation.
+ * Fine-grained timing accumulator for the decoder-only WARP decode path, broken down per sub-operation.
  *
- * <p>Disabled by default and only active when {@code -Dsmollm2.profile.decode=true} is set, so normal runs are not
- * polluted with profiling output and pay no measurement overhead. Timings are accumulated across all layers and all
- * decode steps of one generation run and emitted once at the end.</p>
+ * <p>Whether profiling is active and which label prefixes the output are injected by the model family (e.g. SmolLM2
+ * reads {@code -Dsmollm2.profile.decode} and labels the breakdown {@code "SmolLM2"}). When disabled, normal runs pay
+ * no measurement overhead and produce no profiling output.</p>
  *
  * <p>This is a pure measurement aid: it never changes the numerical result.</p>
  */
-final class SmolLM2WarpDecodeProfile {
+public final class DecoderOnlyWarpDecodeProfile {
 
-    /** Master switch — read once at class load from {@code -Dsmollm2.profile.decode}. */
-    static final boolean ENABLED = Boolean.getBoolean("smollm2.profile.decode");
+    private final boolean enabled;
+    private final String label;
 
-    long decodeSteps;
+    public long decodeSteps;
 
     // Per-layer decode sub-operations (aggregated over all layers and decode steps).
-    long embedding;
-    long attentionNorm;
-    long qkvProjection;
-    long qkvSlice;
-    long rope;
-    long kvAppend;
-    long attentionScore;
-    long softmax;
-    long attentionContext;
-    long outputProjection;
-    long attentionResidual;
-    long mlpNorm;
+    public long embedding;
+    public long attentionNorm;
+    public long qkvProjection;
+    public long qkvSlice;
+    public long rope;
+    public long kvAppend;
+    public long attentionScore;
+    public long softmax;
+    public long attentionContext;
+    public long outputProjection;
+    public long attentionResidual;
+    public long mlpNorm;
     // Decode path: gate_up → WARP SwiGLU → down run as one GPU-resident submission, measured as a single timer.
-    long mlpPipeline;
+    public long mlpPipeline;
     // Individual MLP stage timers (populated only when the stages run separately, e.g. the batched prefill path).
-    long gateUpProjection;
-    long gateUpSlice;
-    long swiglu;
-    long downProjection;
-    long mlpResidual;
+    public long gateUpProjection;
+    public long gateUpSlice;
+    public long swiglu;
+    public long downProjection;
+    public long mlpResidual;
 
     // Separately tracked stages outside the per-layer loop.
-    long lmHead;
-    long tokenSelect;
-    long streamingCallback;
+    public long lmHead;
+    public long tokenSelect;
+    public long streamingCallback;
 
-    boolean enabled() {
-        return ENABLED;
+    /**
+     * @param enabled whether timings are collected and emitted (typically read once from a family system property)
+     * @param label   prefix for the human-readable breakdown header (e.g. the model family name)
+     */
+    public DecoderOnlyWarpDecodeProfile(boolean enabled, String label) {
+        this.enabled = enabled;
+        this.label = Objects.requireNonNull(label, "label");
     }
 
-    void reset() {
+    public boolean enabled() {
+        return enabled;
+    }
+
+    public void reset() {
         decodeSteps = 0;
         embedding = 0;
         attentionNorm = 0;
@@ -76,9 +86,9 @@ final class SmolLM2WarpDecodeProfile {
     }
 
     /** Human-readable breakdown (one entry per measured sub-operation, in milliseconds). */
-    List<String> format() {
+    public List<String> format() {
         List<String> lines = new ArrayList<>();
-        lines.add("SmolLM2 WARP decode micro-profile (decode steps: " + decodeSteps + ", ms aggregated):");
+        lines.add(label + " WARP decode micro-profile (decode steps: " + decodeSteps + ", ms aggregated):");
         lines.add(line("embedding", embedding));
         lines.add(line("attention RMSNorm", attentionNorm));
         lines.add(line("qkv projection", qkvProjection));

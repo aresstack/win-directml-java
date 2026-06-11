@@ -2,6 +2,7 @@ package com.aresstack.windirectml.inference.smollm2;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyGeneratedTokens;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyStopTokenPolicy;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpDecodeProfile;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpKvCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,7 +43,7 @@ final class SmolLM2WarpGenerationLoop {
         long decoderStepNanos = 0L;
         long lmHeadNanos = 0L;
         long tokenSelectNanos = 0L;
-        SmolLM2WarpDecodeProfile decodeProfile = forwardPass.decodeProfile();
+        DecoderOnlyWarpDecodeProfile decodeProfile = forwardPass.decodeProfile();
         boolean profileDecode = decodeProfile.enabled();
         if (profileDecode) {
             decodeProfile.reset();
