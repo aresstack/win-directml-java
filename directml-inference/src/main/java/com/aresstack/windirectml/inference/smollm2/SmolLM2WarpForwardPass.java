@@ -17,13 +17,19 @@ import java.util.Objects;
  * Native DirectML/WARP forward pass for the SmolLM2 decoder-only family.
  *
  * <p>This is the executable counterpart of {@link SmolLM2ReferenceForwardPass}. It keeps the identical numerical
- * structure (RMSNorm, RoPE, grouped-query attention, SwiGLU MLP, tied/untied LM head) but runs every dense
+ * structure (RMSNorm, RoPE, grouped-query attention, SwiGLU MLP, tied/untied LM head) but runs every per-layer dense
  * projection on the shared {@link DecoderOnlyWarpDenseProjection} GPU kernel instead of the CPU reference matmul.
  * Norms, RoPE, attention scoring and the SwiGLU non-linearity reuse the shared {@code decoderonly} math so the WARP
  * path stays byte-for-byte aligned with the reference path apart from GPU floating-point rounding.</p>
  *
- * <p>The projections are uploaded once at construction and reused across every decode step. Attention and the
- * KV cache run on the CPU exactly like the reference path; only the matmul-heavy projections move to WARP.</p>
+ * <p>The matmul-heavy per-layer projections (qkv, o, gate_up, down) run on WARP; the LM head runs on the CPU SIMD
+ * dense path ({@link SmolLM2DenseTensor#multiplyVector}) because measurements show the WARP software-adapter matvec is
+ * far slower than CPU SIMD for the single-row decode shape, and for tied embeddings the LM-head weights are already
+ * resident on the CPU (zero extra memory). This is the exact reference LM-head computation, so it is numerically
+ * identical to the HF-verified path.</p>
+ *
+ * <p>The per-layer projections are uploaded once at construction and reused across every decode step. Attention and
+ * the KV cache run on the CPU exactly like the reference path; only the matmul-heavy projections move to WARP.</p>
  */
 final class SmolLM2WarpForwardPass implements AutoCloseable {
 
@@ -36,7 +42,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     private final SmolLM2DenseTensor tokenEmbedding;
     private final float[] finalNorm;
     private final List<WarpLayer> layers;
-    private final DecoderOnlyWarpDenseProjection lmHead;
+    private final SmolLM2DenseTensor lmHeadTensor;
 
     // Decode dimensions (identical across layers for SmolLM2).
     private final int hiddenSize;
@@ -88,10 +94,6 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
             for (SmolLM2ReferenceLayerWeights layer : referenceWeights.layers()) {
                 builtLayers.add(WarpLayer.build(windowsBindings, layer));
             }
-            SmolLM2DenseTensor lmHeadTensor = referenceWeights.lmHeadTiedToEmbedding()
-                    ? referenceWeights.tokenEmbedding()
-                    : referenceWeights.lmHead();
-            this.lmHead = projection(windowsBindings, "lm_head", lmHeadTensor);
         } catch (RuntimeException e) {
             for (WarpLayer layer : builtLayers) {
                 layer.close();
@@ -99,6 +101,11 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
             throw e;
         }
         this.layers = List.copyOf(builtLayers);
+        // The LM head runs on the CPU SIMD dense path (see class javadoc). For tied embeddings this tensor is the
+        // already-resident token embedding, so it costs no extra memory.
+        this.lmHeadTensor = referenceWeights.lmHeadTiedToEmbedding()
+                ? referenceWeights.tokenEmbedding()
+                : referenceWeights.lmHead();
 
         this.hiddenSize = config.hiddenSize();
         this.qSize = config.numAttentionHeads() * config.effectiveHeadDim();
@@ -210,12 +217,12 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         return projectLogits(scratchHidden);
     }
 
-    /** Apply the final RMSNorm and project the LM head, accumulating the LM-head time separately. */
+    /** Apply the final RMSNorm and project the LM head on the CPU SIMD path, accumulating the LM-head time. */
     private float[] projectLogits(float[] hidden) {
         System.arraycopy(hidden, 0, scratchFinalNorm, 0, hiddenSize);
         DecoderOnlyMath.rmsNorm(scratchFinalNorm, finalNorm, rmsNormEps);
         long lmHeadStart = System.nanoTime();
-        float[] logits = lmHead.project(scratchFinalNorm);
+        float[] logits = lmHeadTensor.multiplyVector(scratchFinalNorm);
         long elapsed = System.nanoTime() - lmHeadStart;
         lastCallLmHeadNanos += elapsed;
         if (decodeProfile.enabled()) {
@@ -526,7 +533,6 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         for (WarpLayer layer : layers) {
             layer.close();
         }
-        lmHead.close();
     }
 
     private static float dotOffset(float[] left, int leftOffset, float[] right, int rightOffset, int length) {
