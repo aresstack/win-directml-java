@@ -48,12 +48,12 @@ final class SmolLM2NativeWarpSession implements SmolLM2WarpSession {
             // Readiness is reported optimistically without uploading any weights yet. The projection
             // weights are uploaded lazily on the first generate call so the readiness probe stays cheap
             // (the workbench prepares a runtime once just to inspect readiness, then opens the real one).
-            this.status = new SmolLM2WarpExecutionStatus(true, "warp",
+            this.status = new SmolLM2WarpExecutionStatus(true, this.backend,
                     "SmolLM2 native WARP executor available (backend=" + this.backend + ").", warnings);
         } else {
             String reason = "SmolLM2 native WARP executor unavailable: Windows D3D12/DirectML is not supported on this host.";
             warnings.add(reason);
-            this.status = new SmolLM2WarpExecutionStatus(false, "warp", reason, warnings);
+            this.status = new SmolLM2WarpExecutionStatus(false, this.backend, reason, warnings);
         }
     }
 

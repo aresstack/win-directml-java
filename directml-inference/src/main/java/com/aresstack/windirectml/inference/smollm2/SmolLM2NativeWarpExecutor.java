@@ -46,9 +46,9 @@ public final class SmolLM2NativeWarpExecutor implements SmolLM2WarpExecutor {
         if (!WindowsBindings.isSupported()) {
             String reason = "SmolLM2 native WARP executor unavailable: Windows D3D12/DirectML is not supported on this host.";
             warnings.add(reason);
-            return new SmolLM2WarpExecutionStatus(false, "warp", reason, warnings);
+            return new SmolLM2WarpExecutionStatus(false, backend, reason, warnings);
         }
-        return new SmolLM2WarpExecutionStatus(true, "warp",
+        return new SmolLM2WarpExecutionStatus(true, backend,
                 "SmolLM2 native WARP executor available (backend=" + backend + ").", warnings);
     }
 

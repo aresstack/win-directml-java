@@ -83,7 +83,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     result.tokensGenerated(),
                     result.finishReason(),
                     safeBackend.name().toLowerCase(),
-                    runtime.runtimeMode().displayLabel(),
+                    runtime.runtimeModeDisplay(),
                     fallbackReason(safeBackend, runtime, effectiveWarpStatus),
                     warnings(effectiveWarpStatus),
                     packagePath,
@@ -115,11 +115,20 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         if (requestedBackend == Backend.CPU) {
             return SmolLM2Runtime.loadReference(runtimePackage, tokenizer);
         }
-        if (requestedBackend == Backend.AUTO && warpStatus.map(SmolLM2WarpExecutionStatus::executable).orElse(false)) {
-            return SmolLM2Runtime.loadWarp(runtimePackage, tokenizer, runtimePackage.config().maxPositionEmbeddings());
-        }
-        if (isWarpLike(requestedBackend) && warpStatus.map(SmolLM2WarpExecutionStatus::executable).orElse(false)) {
-            return SmolLM2Runtime.loadWarp(runtimePackage, tokenizer, runtimePackage.config().maxPositionEmbeddings());
+        boolean warpReady = warpStatus.map(SmolLM2WarpExecutionStatus::executable).orElse(false);
+        int maxPos = runtimePackage.config().maxPositionEmbeddings();
+        // Adapter selection: explicit WARP uses the D3D12 software rasterizer; DirectML/AUTO/HYBRID target the
+        // first hardware DirectML adapter (same kernels/numerics — only the device differs). The GPU-resident
+        // pipeline's dispatch/readback savings only pay off on a real hardware adapter.
+        String adapterBackend = requestedBackend == Backend.WARP ? "warp" : "directml";
+        // AUTO (and HYBRID, treated as AUTO here) allows a clean lazy fallback to the CPU reference path if the
+        // hardware adapter or weight upload turns out to be unavailable on first use. Explicit WARP/DIRECTML do not
+        // silently fall back — they honour the requested device or fail honestly.
+        boolean allowFallback = requestedBackend == Backend.AUTO || requestedBackend == Backend.HYBRID;
+        if ((requestedBackend == Backend.AUTO || isWarpLike(requestedBackend)) && warpReady) {
+            return allowFallback
+                    ? SmolLM2Runtime.loadAuto(runtimePackage, tokenizer, maxPos, adapterBackend)
+                    : SmolLM2Runtime.loadWarp(runtimePackage, tokenizer, maxPos, adapterBackend);
         }
         return SmolLM2Runtime.loadReference(runtimePackage, tokenizer);
     }

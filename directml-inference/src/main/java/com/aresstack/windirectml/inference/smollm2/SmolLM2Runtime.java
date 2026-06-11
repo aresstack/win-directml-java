@@ -41,6 +41,8 @@ public final class SmolLM2Runtime implements AutoCloseable {
     private volatile SmolLM2RuntimeMode runtimeMode;
     private final SmolLM2WarpRuntime warpRuntime;
     private final boolean warpFallbackAllowed;
+    /** The D3D12 adapter the native projection path runs on ("warp" software rasterizer or "directml" hardware). */
+    private final String warpAdapterBackend;
     private volatile String warpFallbackReason = "";
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -50,11 +52,23 @@ public final class SmolLM2Runtime implements AutoCloseable {
                            SmolLM2WarpRuntime warpRuntime,
                            boolean warpFallbackAllowed,
                            PromptStrategy promptStrategy) {
+        this(runtimePackage, tokenizer, runtimeMode, warpRuntime, warpFallbackAllowed, promptStrategy, "warp");
+    }
+
+    private SmolLM2Runtime(SmolLM2RuntimePackage runtimePackage,
+                           SmolLM2Tokenizer tokenizer,
+                           SmolLM2RuntimeMode runtimeMode,
+                           SmolLM2WarpRuntime warpRuntime,
+                           boolean warpFallbackAllowed,
+                           PromptStrategy promptStrategy,
+                           String warpAdapterBackend) {
         this.runtimePackage = Objects.requireNonNull(runtimePackage, "runtimePackage");
         this.tokenizer = tokenizer;
         this.runtimeMode = Objects.requireNonNull(runtimeMode, "runtimeMode");
         this.warpRuntime = warpRuntime;
         this.warpFallbackAllowed = warpFallbackAllowed;
+        this.warpAdapterBackend = warpAdapterBackend == null || warpAdapterBackend.isBlank()
+                ? "warp" : warpAdapterBackend.trim();
         this.promptStrategy = promptStrategy == null ? DEFAULT_PROMPT_STRATEGY : promptStrategy;
     }
 
@@ -79,7 +93,22 @@ public final class SmolLM2Runtime implements AutoCloseable {
     public static SmolLM2Runtime loadWarp(SmolLM2RuntimePackage runtimePackage,
                                           SmolLM2Tokenizer tokenizer,
                                           int sequenceLength) {
-        return loadWarp(runtimePackage, tokenizer, sequenceLength, SmolLM2WarpExecutorFactory.createDefaultExecutor());
+        return loadWarp(runtimePackage, tokenizer, sequenceLength, "warp");
+    }
+
+    /**
+     * Load the native projection runtime bound to a specific D3D12 adapter: {@code "warp"} for the software
+     * rasterizer or {@code "directml"} for the first hardware DirectML adapter. The kernels and numerics are
+     * identical on both — only the device differs.
+     */
+    public static SmolLM2Runtime loadWarp(SmolLM2RuntimePackage runtimePackage,
+                                          SmolLM2Tokenizer tokenizer,
+                                          int sequenceLength,
+                                          String adapterBackend) {
+        SmolLM2WarpExecutor executor = SmolLM2WarpExecutorFactory.createDefaultExecutor(adapterBackend);
+        SmolLM2WarpRuntime warpRuntime = SmolLM2WarpRuntime.prepare(runtimePackage, sequenceLength, executor);
+        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime, false,
+                DEFAULT_PROMPT_STRATEGY, adapterBackend);
     }
 
     public static SmolLM2Runtime loadWarp(SmolLM2RuntimePackage runtimePackage,
@@ -94,7 +123,27 @@ public final class SmolLM2Runtime implements AutoCloseable {
     public static SmolLM2Runtime loadAuto(SmolLM2RuntimePackage runtimePackage,
                                           SmolLM2Tokenizer tokenizer,
                                           int sequenceLength) {
-        return loadAuto(runtimePackage, tokenizer, sequenceLength, SmolLM2WarpExecutorFactory.createDefaultExecutor());
+        return loadAuto(runtimePackage, tokenizer, sequenceLength, "warp");
+    }
+
+    /**
+     * Load the native projection runtime in AUTO mode bound to a specific adapter, falling back to the CPU
+     * reference path when the device or weight upload is unavailable (including a lazy failure on first use).
+     */
+    public static SmolLM2Runtime loadAuto(SmolLM2RuntimePackage runtimePackage,
+                                          SmolLM2Tokenizer tokenizer,
+                                          int sequenceLength,
+                                          String adapterBackend) {
+        SmolLM2WarpExecutor executor = SmolLM2WarpExecutorFactory.createDefaultExecutor(adapterBackend);
+        SmolLM2WarpRuntime warpRuntime = SmolLM2WarpRuntime.prepare(runtimePackage, sequenceLength, executor);
+        SmolLM2RuntimeMode selectedMode = warpRuntime.executable() ? SmolLM2RuntimeMode.WARP : SmolLM2RuntimeMode.REFERENCE;
+        if (selectedMode == SmolLM2RuntimeMode.REFERENCE) {
+            warpRuntime.close();
+            return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null, false,
+                    DEFAULT_PROMPT_STRATEGY, adapterBackend);
+        }
+        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime, true,
+                DEFAULT_PROMPT_STRATEGY, adapterBackend);
     }
 
     public static SmolLM2Runtime loadAuto(SmolLM2RuntimePackage runtimePackage,
@@ -295,6 +344,21 @@ public final class SmolLM2Runtime implements AutoCloseable {
 
     public SmolLM2RuntimeMode runtimeMode() {
         return runtimeMode;
+    }
+
+    /**
+     * Honest, human-facing runtime-mode label that reflects the <em>actual</em> D3D12 adapter the native projection
+     * path runs on. For the reference path this is the CPU reference label; for the native path it names the real
+     * adapter ("warp" software rasterizer vs "directml" hardware) so the workbench never claims WARP while running on
+     * a hardware DirectML adapter (or vice versa).
+     */
+    public String runtimeModeDisplay() {
+        if (runtimeMode == SmolLM2RuntimeMode.REFERENCE) {
+            return SmolLM2RuntimeMode.REFERENCE.displayLabel();
+        }
+        String adapterLabel = "directml".equalsIgnoreCase(warpAdapterBackend) ? "DirectML" : "WARP";
+        return warpAdapterBackend + " (" + adapterLabel
+                + " projection path; norms/RoPE/attention/KV-cache on CPU)";
     }
 
     public Optional<SmolLM2WarpExecutionStatus> warpExecutionStatus() {
