@@ -7,4 +7,8 @@ public final class SmolLM2RuntimeUnsupportedException extends RuntimeException {
     public SmolLM2RuntimeUnsupportedException(String message) {
         super(message);
     }
+
+    public SmolLM2RuntimeUnsupportedException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }

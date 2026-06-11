@@ -29,9 +29,9 @@ import java.util.stream.Stream;
  * Workbench adapter for the SmolLM2 reference runtime.
  *
  * <p>This class keeps the Swing panel free from package-loading and first-use
- * compile details. It deliberately targets the reference runtime only. The
- * optimized WARP path can replace this adapter later without changing the UI
- * dispatch.</p>
+ * compile details. The CPU backend uses the reference runtime; the AUTO/WARP/DirectML
+ * backends route to the native DirectML/WARP runtime when the WARP device is available,
+ * and transparently fall back to the reference runtime otherwise.</p>
  */
 public final class SmolLM2WorkbenchRuntimeRunner {
 
@@ -159,7 +159,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         return warpStatus
                 .filter(SmolLM2WarpExecutionStatus::requiresFallback)
                 .map(status -> requestedBackend.name().toLowerCase()
-                        + " requested, but SmolLM2 native WARP execution is not available yet: "
+                        + " requested, but SmolLM2 native WARP execution is not available: "
                         + status.reason())
                 .orElse("");
     }

@@ -15,12 +15,19 @@ final class SmolLM2WarpExecutorFactoryTest {
     }
 
     @Test
-    void createsBuiltInProbeExecutorByDefault() {
+    void createsNativeExecutorByDefault() {
+        assertInstanceOf(SmolLM2NativeWarpExecutor.class, SmolLM2WarpExecutorFactory.createDefaultExecutor());
+    }
+
+    @Test
+    void createsBuiltInProbeExecutorForProbeMode() {
+        System.setProperty(SmolLM2WarpExecutorFactory.EXECUTOR_MODE_PROPERTY, "probe");
+
         assertInstanceOf(SmolLM2DirectMlWarpExecutor.class, SmolLM2WarpExecutorFactory.createDefaultExecutor());
     }
 
     @Test
-    void canDisableProbeExecutorForExplicitUnsupportedMode() {
+    void canDisableExecutorForExplicitNoneMode() {
         System.setProperty(SmolLM2WarpExecutorFactory.EXECUTOR_MODE_PROPERTY, "none");
 
         assertInstanceOf(SmolLM2UnsupportedWarpExecutor.class, SmolLM2WarpExecutorFactory.createDefaultExecutor());

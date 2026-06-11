@@ -14,8 +14,9 @@ class SmolLM2WarpRuntimeTest {
     Path tempDir;
 
     @Test
-    void defaultWarpRuntimeReportsWarpProbeWithoutExecutableKernels() throws Exception {
-        try (SmolLM2WarpRuntime runtime = SmolLM2WarpRuntime.prepare(createExecutablePackage(), 16)) {
+    void probeWarpRuntimeReportsWarpProbeWithoutExecutableKernels() throws Exception {
+        try (SmolLM2WarpRuntime runtime = SmolLM2WarpRuntime.prepare(
+                createExecutablePackage(), 16, new SmolLM2DirectMlWarpExecutor())) {
             assertFalse(runtime.executable());
             assertFalse(runtime.status().reason().isBlank());
             assertFalse(runtime.plan().bufferPlan().entries().isEmpty());
@@ -30,7 +31,8 @@ class SmolLM2WarpRuntimeTest {
 
     @Test
     void autoRuntimeFallsBackToReferenceWhenWarpExecutorIsUnavailable() throws Exception {
-        try (SmolLM2Runtime runtime = SmolLM2Runtime.loadAuto(createExecutablePackage(), null, 16)) {
+        try (SmolLM2Runtime runtime = SmolLM2Runtime.loadAuto(createExecutablePackage(), null, 16,
+                new SmolLM2UnsupportedWarpExecutor("warp executor unavailable for test"))) {
             assertEquals(SmolLM2RuntimeMode.REFERENCE, runtime.runtimeMode());
             assertTrue(runtime.warpExecutionStatus().isEmpty());
         }

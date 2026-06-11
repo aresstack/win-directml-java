@@ -16,8 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Public SmolLM2 runtime facade.
  *
- * <p>The optimized WARP runtime is still a future work item. This facade exposes a correctness-first reference path
- * that can run token-level generation and, when a tokenizer is supplied, prompt-to-text generation.</p>
+ * <p>Two execution paths are available: the correctness-first CPU reference path and the native DirectML/WARP path
+ * ({@link SmolLM2NativeWarpExecutor}) which runs every dense projection on the shared decoder-only WARP kernels.
+ * Use {@link #loadWarp} / {@link #loadAuto} for WARP execution and {@link #loadReference} for the CPU reference.</p>
  */
 public final class SmolLM2Runtime implements AutoCloseable {
 
