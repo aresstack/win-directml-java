@@ -24,6 +24,9 @@ public final class SmolLM2ChatPromptTemplate {
 
     public static SmolLM2ChatPromptTemplate withSystemPrompt(String systemPrompt) {
         String safePrompt = systemPrompt == null ? "" : systemPrompt.trim();
+        if (safePrompt.isEmpty()) {
+            return defaultInstruct();
+        }
         return new SmolLM2ChatPromptTemplate(safePrompt);
     }
 

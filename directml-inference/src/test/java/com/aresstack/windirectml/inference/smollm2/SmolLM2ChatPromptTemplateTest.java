@@ -20,13 +20,14 @@ class SmolLM2ChatPromptTemplateTest {
     }
 
     @Test
-    void omitsSystemBlockWhenSystemPromptIsBlank() {
+    void blankSystemPromptUsesUpstreamDefaultSystemBlock() {
         SmolLM2ChatPromptTemplate template = SmolLM2ChatPromptTemplate.withSystemPrompt("");
 
         String rendered = template.renderUserPrompt("Paste a longer text or prompt here.");
 
-        assertTrue(rendered.startsWith("<|im_start|>user\n"));
-        assertTrue(rendered.contains("Paste a longer text or prompt here."));
+        assertTrue(rendered.startsWith("<|im_start|>system\n"));
+        assertTrue(rendered.contains("You are a helpful AI assistant named SmolLM, trained by Hugging Face"));
+        assertTrue(rendered.contains("<|im_start|>user\nPaste a longer text or prompt here.<|im_end|>\n"));
         assertTrue(rendered.endsWith("<|im_start|>assistant\n"));
     }
 

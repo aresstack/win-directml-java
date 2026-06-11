@@ -30,8 +30,17 @@ public final class SmolLM2Tokenizer {
     private static final char[] BYTE_TO_UNICODE = new char[256];
     private static final Map<Character, Byte> UNICODE_TO_BYTE = new HashMap<>(512);
 
+    /**
+     * GPT-2 byte-level BPE pre-tokenizer pattern.
+     * <p>
+     * SmolLM2 tokenizer_config.json declares {@code GPT2Tokenizer}. The previous
+     * expression used a cl100k-like number split and allowed arbitrary punctuation
+     * before word tokens. That changes the token IDs fed into the decoder and can
+     * produce valid-looking but semantically broken generations. Keep this pattern
+     * aligned with the GPT-2 tokenizer regex used by Hugging Face.
+     */
     private static final Pattern PRE_TOKENIZE_PATTERN = Pattern.compile(
-            "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+"
+            "(?i:'s|'t|'re|'ve|'m|'ll|'d)| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+"
     );
 
     static {
