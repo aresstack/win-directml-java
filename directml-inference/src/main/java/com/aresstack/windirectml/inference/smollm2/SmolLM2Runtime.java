@@ -23,6 +23,10 @@ public final class SmolLM2Runtime implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(SmolLM2Runtime.class);
 
+    /** When true ({@code -Dsmollm2.debug.prompt=true}) the rendered prompt, prompt token IDs
+     *  and effective model config are logged for diagnostics. Off by default. */
+    private static final boolean DEBUG_PROMPT = Boolean.getBoolean("smollm2.debug.prompt");
+
     private static final String TOKENIZER_REQUIRED_MESSAGE =
             "SmolLM2 text generation requires a SmolLM2Tokenizer. Load the runtime with "
                     + "SmolLM2Runtime.load(runtimePackage, tokenizer) or call generateTokenIds(...).";
@@ -199,7 +203,7 @@ public final class SmolLM2Runtime implements AutoCloseable {
      * tokens collapse to single IDs instead of literal byte text.
      */
     private void logPromptDiagnostics(SmolLM2RuntimeRequest request, String renderedPrompt, List<Integer> inputTokenIds) {
-        if (!log.isInfoEnabled()) {
+        if (!DEBUG_PROMPT || !log.isInfoEnabled()) {
             return;
         }
         SmolLM2Config cfg = runtimePackage.config();

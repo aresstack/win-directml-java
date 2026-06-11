@@ -41,6 +41,10 @@ public final class SummarizerPanel extends JPanel {
     private static final String QWEN05_MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct";
     private static final String SMOLLM2_MODEL_ID_PREFIX = "HuggingFaceTB/SmolLM2-";
 
+    /** Diagnostic toggle ({@code -Dsmollm2.debug.prompt=true}): show the rendered prompt and
+     *  effective model config in the output panel. Off by default to keep normal output lean. */
+    private static final boolean DEBUG_PROMPT = Boolean.getBoolean("smollm2.debug.prompt");
+
     private final WorkbenchModel model;
     private final JTextArea inputArea;
     private final JTextArea resultArea;
@@ -242,10 +246,12 @@ public final class SummarizerPanel extends JPanel {
         appendResult("Initializing SmolLM2 runtime from " + modelDir
                 + " (requested backend=" + model.getBackend().name().toLowerCase() + ")...");
         appendResult("");
-        String renderedPrompt = PromptStrategies.forModel("smollm2").renderPrompt(PromptInput.of(task, text));
-        appendResult("PROMPT (task=" + task + ", " + renderedPrompt.length() + " chars):");
-        appendResult(renderedPrompt);
-        appendResult("");
+        if (DEBUG_PROMPT) {
+            String renderedPrompt = PromptStrategies.forModel("smollm2").renderPrompt(PromptInput.of(task, text));
+            appendResult("[debug] PROMPT (task=" + task + ", " + renderedPrompt.length() + " chars):");
+            appendResult(renderedPrompt);
+            appendResult("");
+        }
         appendResult("OUTPUT:");
         SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(PromptInput.of(task, text), maxTokens,
                 model.getBackend(), new UiTokenSink());
@@ -261,7 +267,13 @@ public final class SummarizerPanel extends JPanel {
         }
         result.warpReadinessReport().ifPresent(this::appendSmolLm2WarpReadiness);
         appendResult("Runtime package: " + result.packagePath().getFileName());
-        appendResult("Effective config: " + result.effectiveConfig());
+        appendResult("Generation config: greedyChat, repetitionPenalty="
+                + com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationOptions.CHAT_REPETITION_PENALTY
+                + ", maxTokens=" + maxTokens);
+        if (DEBUG_PROMPT) {
+            appendResult("  [debug] prompt task: " + task);
+            appendResult("  [debug] effective model config: " + result.effectiveConfig());
+        }
         if (result.text().isBlank()) {
             appendResult("  NOTE: generated text is empty after detokenization.");
         }
@@ -284,7 +296,7 @@ public final class SummarizerPanel extends JPanel {
         appendResult("  Generated token IDs: " + result.diagnostics().generatedTokenIdsPreview(32));
         List<String> stepTopK = result.diagnostics().profile().stepTopK();
         if (!stepTopK.isEmpty()) {
-            appendResult("  Top-K raw logits (for numerical comparison vs Transformers):");
+            appendResult("  [debug] Top-K raw logits (numerical comparison vs Transformers):");
             for (String line : stepTopK) {
                 appendResult("    " + line);
             }

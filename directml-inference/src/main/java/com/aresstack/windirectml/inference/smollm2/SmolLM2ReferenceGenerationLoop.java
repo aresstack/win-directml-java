@@ -55,7 +55,6 @@ public final class SmolLM2ReferenceGenerationLoop {
         SmolLM2TokenSampler tokenSampler = tokenSamplerFactory.create(request.options());
         SmolLM2ReferenceKvCache kvCache = SmolLM2ReferenceKvCache.create(forwardPass.config());
         List<String> stepTopK = new ArrayList<>();
-        int topKSteps = Math.max(DEBUG_STEPS, 3);
         for (int i = 0; i < request.maxNewTokens(); i++) {
             long lmHeadBefore = forwardPass.profile().lmHeadNanos();
             long forwardStart = System.nanoTime();
@@ -69,15 +68,13 @@ public final class SmolLM2ReferenceGenerationLoop {
                 decoderStepNanos += nonLmHeadForwardNanos;
             }
 
-            // Always capture the first few steps' top-K raw logits (pre-penalty) so the
-            // numerical comparison against a Hugging Face Transformers reference is visible
-            // in the workbench output without any VM flag.
-            if (i < topKSteps) {
-                String line = topKLine(i, logits, 10);
+            // Diagnostic only: capture the first steps' raw top-K logits (pre-penalty) for a
+            // numerical comparison against Hugging Face Transformers. Gated behind
+            // -Dsmollm2.debug.topk so normal runs stay allocation- and noise-free.
+            if (DEBUG_TOP_K > 0 && i < DEBUG_STEPS) {
+                String line = topKLine(i, logits, DEBUG_TOP_K);
                 stepTopK.add(line);
-                if (DEBUG_TOP_K > 0 && i < DEBUG_STEPS) {
-                    log.info(line);
-                }
+                log.info(line);
             }
 
             long tokenSelectStart = System.nanoTime();

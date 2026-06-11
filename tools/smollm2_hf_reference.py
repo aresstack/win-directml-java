@@ -1,5 +1,8 @@
 """
+DIAGNOSTIC TOOL — not part of the runtime, not required for deployment.
+
 Independent Hugging Face reference for the SmolLM2 reference-runtime numerical check.
+See docs/diagnostics.md for the full workflow.
 
 Runs the EXACT same rendered prompt the workbench feeds to the Java SmolLM2 runtime,
 prints the prompt token IDs and the top-10 next-token logits (step 0, raw, pre-penalty).
