@@ -4,6 +4,8 @@ import com.aresstack.windirectml.inference.GeneratedToken;
 import com.aresstack.windirectml.inference.GenerationTokenSink;
 import com.aresstack.windirectml.inference.prompt.PromptStrategies;
 import com.aresstack.windirectml.inference.prompt.PromptStrategy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,6 +20,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * that can run token-level generation and, when a tokenizer is supplied, prompt-to-text generation.</p>
  */
 public final class SmolLM2Runtime implements AutoCloseable {
+
+    private static final Logger log = LoggerFactory.getLogger(SmolLM2Runtime.class);
 
     private static final String TOKENIZER_REQUIRED_MESSAGE =
             "SmolLM2 text generation requires a SmolLM2Tokenizer. Load the runtime with "
@@ -115,6 +119,8 @@ public final class SmolLM2Runtime implements AutoCloseable {
         List<Integer> inputTokenIds = encodePrompt(renderedPrompt, activeTokenizer);
         long tokenizeNanos = System.nanoTime() - tokenizeStart;
 
+        logPromptDiagnostics(request, renderedPrompt, inputTokenIds);
+
         StreamingTextBridge streamingTextBridge = sink == null
                 ? null
                 : new StreamingTextBridge(activeTokenizer, sink);
@@ -183,6 +189,26 @@ public final class SmolLM2Runtime implements AutoCloseable {
             inputTokenIds.add(runtimePackage.config().bosTokenId());
         }
         return inputTokenIds;
+    }
+
+    /**
+     * Log the actual prompt fed to the model: the rendered chat string and the
+     * resulting token IDs. This is ground truth for diagnosing "model ignores the
+     * task / produces base-continuation" reports — it reveals whether the ChatML
+     * structure and the task instruction are present, and whether the special
+     * tokens collapse to single IDs instead of literal byte text.
+     */
+    private void logPromptDiagnostics(SmolLM2RuntimeRequest request, String renderedPrompt, List<Integer> inputTokenIds) {
+        if (!log.isInfoEnabled()) {
+            return;
+        }
+        int preview = Math.min(24, inputTokenIds.size());
+        log.info("SmolLM2 prompt [task={}]: {} tokens; first {} ids={}; renderedPrompt=<<<{}>>>",
+                request.prompt() == null ? null : request.prompt().task(),
+                inputTokenIds.size(),
+                preview,
+                inputTokenIds.subList(0, preview),
+                renderedPrompt);
     }
 
     private static int[] toIntArray(List<Integer> tokenIds) {

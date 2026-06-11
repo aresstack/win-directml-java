@@ -242,6 +242,10 @@ public final class SummarizerPanel extends JPanel {
         appendResult("Initializing SmolLM2 runtime from " + modelDir
                 + " (requested backend=" + model.getBackend().name().toLowerCase() + ")...");
         appendResult("");
+        String renderedPrompt = PromptStrategies.forModel("smollm2").renderPrompt(PromptInput.of(task, text));
+        appendResult("PROMPT (task=" + task + ", " + renderedPrompt.length() + " chars):");
+        appendResult(renderedPrompt);
+        appendResult("");
         appendResult("OUTPUT:");
         SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(PromptInput.of(task, text), maxTokens,
                 model.getBackend(), new UiTokenSink());
