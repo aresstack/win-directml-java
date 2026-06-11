@@ -95,6 +95,14 @@ public final class DecoderOnlyWarpFusedDenseProjection implements AutoCloseable 
         return name;
     }
 
+    /**
+     * The underlying GPU matmul kernel for the fused projection. Exposed so GPU-resident subgraphs (e.g. a fused MLP
+     * block) can chain this projection's dispatch into a shared pipeline without an intermediate CPU readback.
+     */
+    public com.aresstack.windirectml.windows.MatMulNBitsKernel kernel() {
+        return projection.kernel();
+    }
+
     public int inputSize() {
         return inputSize;
     }

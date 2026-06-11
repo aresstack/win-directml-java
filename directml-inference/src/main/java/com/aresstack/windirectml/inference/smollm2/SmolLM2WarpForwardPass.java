@@ -6,7 +6,11 @@ import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyReferenceDense
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyRotaryEmbedding;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpDenseProjection;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpFusedDenseProjection;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpMlpBlock;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpSwiGluKernel;
+import com.aresstack.windirectml.windows.GpuPipeline;
 import com.aresstack.windirectml.windows.WindowsBindings;
+import com.aresstack.windirectml.windows.WindowsNativeException;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -56,6 +60,12 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     private final int qSize;
     private final int kvSize;
     private final int intermediateSize;
+
+    // GPU-resident MLP block (gate_up → WARP SwiGLU → down in one submission) per layer, plus the shared pipeline
+    // and SwiGLU kernel they record into. Removes the per-layer gate/up readback + intermediate re-upload.
+    private final GpuPipeline mlpPipeline;
+    private final DecoderOnlyWarpSwiGluKernel swiGluKernel;
+    private final List<DecoderOnlyWarpMlpBlock> mlpBlocks;
 
     // Reusable per-instance scratch buffers for the single-token decode path. Generation is sequential per session,
     // so these are reused across decode steps instead of allocating fresh arrays every token/layer.
@@ -148,6 +158,39 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         this.scratchDown = new float[hiddenSize];
         this.scratchFinalNorm = new float[hiddenSize];
         this.scratchScores = new float[config.maxPositionEmbeddings()];
+
+        // GPU-resident MLP block infrastructure: one shared pipeline + SwiGLU kernel, one block per layer.
+        GpuPipeline builtPipeline = null;
+        DecoderOnlyWarpSwiGluKernel builtSwiGlu = null;
+        try {
+            long activationBytes = (long) hiddenSize * Float.BYTES;
+            builtPipeline = new GpuPipeline(windowsBindings, activationBytes, activationBytes);
+            builtSwiGlu = new DecoderOnlyWarpSwiGluKernel(
+                    windowsBindings, builtPipeline.getCommandList(), intermediateSize);
+            List<DecoderOnlyWarpMlpBlock> blocks = new ArrayList<>(layers.size());
+            for (WarpLayer layer : layers) {
+                blocks.add(new DecoderOnlyWarpMlpBlock(builtPipeline,
+                        layer.gateUpProjection.kernel(), layer.downProjection.kernel(),
+                        builtSwiGlu, hiddenSize));
+            }
+            this.mlpPipeline = builtPipeline;
+            this.swiGluKernel = builtSwiGlu;
+            this.mlpBlocks = List.copyOf(blocks);
+        } catch (WindowsNativeException | RuntimeException e) {
+            if (builtSwiGlu != null) {
+                builtSwiGlu.close();
+            }
+            if (builtPipeline != null) {
+                builtPipeline.close();
+            }
+            for (WarpLayer layer : layers) {
+                layer.close();
+            }
+            if (lmHead != null) {
+                lmHead.close();
+            }
+            throw new RuntimeException("SmolLM2 WARP MLP pipeline initialisation failed", e);
+        }
     }
 
     SmolLM2WarpDecodeProfile decodeProfile() {
@@ -227,7 +270,8 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
             decodeProfile.embedding += System.nanoTime() - t;
         }
         for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
-            runLayerStepInPlace(scratchHidden, layers.get(layerIndex), kvCache.layer(layerIndex), position, prof);
+            runLayerStepInPlace(scratchHidden, layerIndex, layers.get(layerIndex), kvCache.layer(layerIndex),
+                    position, prof);
         }
         if (!projectLogits) {
             return null;
@@ -251,7 +295,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         return logits;
     }
 
-    private void runLayerStepInPlace(float[] hidden, WarpLayer layer,
+    private void runLayerStepInPlace(float[] hidden, int layerIndex, WarpLayer layer,
                                      SmolLM2WarpLayerKvCache layerCache, int position, boolean prof) {
         long t = prof ? System.nanoTime() : 0L;
         System.arraycopy(hidden, 0, scratchAttnNorm, 0, hiddenSize);
@@ -277,7 +321,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
             decodeProfile.mlpNorm += System.nanoTime() - t;
         }
 
-        runMlpStepInto(scratchMlpNorm, layer, prof); // writes scratchDown
+        runMlpStepInto(layerIndex, prof); // writes scratchDown
 
         t = prof ? System.nanoTime() : 0L;
         for (int i = 0; i < hiddenSize; i++) {
@@ -369,30 +413,13 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         }
     }
 
-    private void runMlpStepInto(float[] input, WarpLayer layer, boolean prof) {
+    private void runMlpStepInto(int layerIndex, boolean prof) {
+        // GPU-resident MLP: gate_up → WARP SwiGLU → down in ONE submission, readback only after down.
+        // (No CPU readback of gate/up and no re-upload of the intermediate between the two GEMMs.)
         long t = prof ? System.nanoTime() : 0L;
-        layer.gateUpProjection.projectInto(input, scratchGateUp);
+        mlpBlocks.get(layerIndex).project(scratchMlpNorm, scratchDown);
         if (prof) {
-            decodeProfile.gateUpProjection += System.nanoTime() - t;
-        }
-
-        t = prof ? System.nanoTime() : 0L;
-        layer.gateUpProjection.copySlice(scratchGateUp, WarpLayer.GATE_UP_GATE, scratchGate);
-        layer.gateUpProjection.copySlice(scratchGateUp, WarpLayer.GATE_UP_UP, scratchUp);
-        if (prof) {
-            decodeProfile.gateUpSlice += System.nanoTime() - t;
-        }
-
-        t = prof ? System.nanoTime() : 0L;
-        DecoderOnlyReferenceDenseOps.gatedSiluMultiply(scratchGate, scratchUp);
-        if (prof) {
-            decodeProfile.swiglu += System.nanoTime() - t;
-        }
-
-        t = prof ? System.nanoTime() : 0L;
-        layer.downProjection.projectInto(scratchGate, scratchDown);
-        if (prof) {
-            decodeProfile.downProjection += System.nanoTime() - t;
+            decodeProfile.mlpPipeline += System.nanoTime() - t;
         }
     }
 

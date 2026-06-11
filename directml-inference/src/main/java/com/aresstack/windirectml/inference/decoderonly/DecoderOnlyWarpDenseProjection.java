@@ -44,6 +44,14 @@ public final class DecoderOnlyWarpDenseProjection implements DecoderOnlyDensePro
         return name;
     }
 
+    /**
+     * The underlying GPU matmul kernel. Exposed so GPU-resident subgraphs (e.g. a fused MLP block) can chain this
+     * projection's dispatch into a shared pipeline without an intermediate CPU readback.
+     */
+    public MatMulNBitsKernel kernel() {
+        return kernel;
+    }
+
     @Override
     public int inputSize() {
         return inputSize;
