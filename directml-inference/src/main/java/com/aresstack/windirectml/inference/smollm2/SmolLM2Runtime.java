@@ -97,8 +97,8 @@ public final class SmolLM2Runtime implements AutoCloseable {
     }
 
     /**
-     * Load the native projection runtime bound to a specific D3D12 adapter: {@code "warp"} for the software
-     * rasterizer or {@code "directml"} for the first hardware DirectML adapter. The kernels and numerics are
+     * Load the native projection runtime bound to a specific D3D12 device family: {@code "warp"} for the software
+     * rasterizer (the default) or {@code "auto"} for a hardware GPU when one exists. The kernels and numerics are
      * identical on both — only the device differs.
      */
     public static SmolLM2Runtime loadWarp(SmolLM2RuntimePackage runtimePackage,
@@ -127,8 +127,8 @@ public final class SmolLM2Runtime implements AutoCloseable {
     }
 
     /**
-     * Load the native projection runtime in AUTO mode bound to a specific adapter, falling back to the CPU
-     * reference path when the device or weight upload is unavailable (including a lazy failure on first use).
+     * Load the native projection runtime in AUTO mode bound to a specific device family, falling back to the CPU
+     * reference path when no usable device is available (including a lazy failure on first use).
      */
     public static SmolLM2Runtime loadAuto(SmolLM2RuntimePackage runtimePackage,
                                           SmolLM2Tokenizer tokenizer,
@@ -347,18 +347,18 @@ public final class SmolLM2Runtime implements AutoCloseable {
     }
 
     /**
-     * Honest, human-facing runtime-mode label that reflects the <em>actual</em> D3D12 adapter the native projection
-     * path runs on. For the reference path this is the CPU reference label; for the native path it names the real
-     * adapter ("warp" software rasterizer vs "directml" hardware) so the workbench never claims WARP while running on
-     * a hardware DirectML adapter (or vice versa).
+     * Honest, human-facing runtime-mode label that reflects how the native projection path actually runs. For the
+     * reference path this is the CPU reference label; for the native path it names the selected device family: WARP
+     * (the D3D12 software rasterizer, the default) or AUTO (a hardware GPU when one exists).
      */
     public String runtimeModeDisplay() {
         if (runtimeMode == SmolLM2RuntimeMode.REFERENCE) {
             return SmolLM2RuntimeMode.REFERENCE.displayLabel();
         }
-        String adapterLabel = "directml".equalsIgnoreCase(warpAdapterBackend) ? "DirectML" : "WARP";
-        return warpAdapterBackend + " (" + adapterLabel
-                + " projection path; norms/RoPE/attention/KV-cache on CPU)";
+        if ("auto".equalsIgnoreCase(warpAdapterBackend)) {
+            return "auto (GPU projection path; norms/RoPE/attention/KV-cache on CPU)";
+        }
+        return "warp (WARP projection path; norms/RoPE/attention/KV-cache on CPU)";
     }
 
     public Optional<SmolLM2WarpExecutionStatus> warpExecutionStatus() {

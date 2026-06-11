@@ -34,13 +34,11 @@ public final class SmolLM2WarpExecutorFactory {
     }
 
     /**
-     * Create the configured WARP executor bound to a specific D3D12 adapter backend.
+     * Create the configured WARP executor bound to a specific D3D12 device family.
      *
      * <p>{@code adapterBackend} selects the device the native executor initialises: {@code "warp"} uses the D3D12
-     * WARP software rasterizer (CPU), {@code "directml"} uses the first hardware DirectML adapter. The math, kernels
-     * and numerics are identical on both adapters — only the device differs. The dispatch/readback reductions of the
-     * GPU-resident pipeline only pay off on a real hardware adapter, where each submission is an actual CPU↔GPU
-     * round-trip; on WARP there is no round-trip to amortise.</p>
+     * WARP software rasterizer (CPU, the default), {@code "auto"} uses a hardware GPU when one exists. The math,
+     * kernels and numerics are identical on both — only the device differs.</p>
      */
     public static SmolLM2WarpExecutor createDefaultExecutor(String adapterBackend) {
         String executorClassName = System.getProperty(EXECUTOR_CLASS_PROPERTY, "").trim();

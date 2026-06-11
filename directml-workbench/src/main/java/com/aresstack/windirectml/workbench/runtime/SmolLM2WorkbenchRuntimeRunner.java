@@ -117,20 +117,17 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         }
         boolean warpReady = warpStatus.map(SmolLM2WarpExecutionStatus::executable).orElse(false);
         int maxPos = runtimePackage.config().maxPositionEmbeddings();
-        // Adapter selection: explicit WARP uses the D3D12 software rasterizer; DirectML/AUTO/HYBRID target the
-        // first hardware DirectML adapter (same kernels/numerics — only the device differs). The GPU-resident
-        // pipeline's dispatch/readback savings only pay off on a real hardware adapter.
-        String adapterBackend = requestedBackend == Backend.WARP ? "warp" : "directml";
-        // AUTO (and HYBRID, treated as AUTO here) allows a clean lazy fallback to the CPU reference path if the
-        // hardware adapter or weight upload turns out to be unavailable on first use. Explicit WARP/DIRECTML do not
-        // silently fall back — they honour the requested device or fail honestly.
-        boolean allowFallback = requestedBackend == Backend.AUTO || requestedBackend == Backend.HYBRID;
-        if ((requestedBackend == Backend.AUTO || isWarpLike(requestedBackend)) && warpReady) {
-            return allowFallback
-                    ? SmolLM2Runtime.loadAuto(runtimePackage, tokenizer, maxPos, adapterBackend)
-                    : SmolLM2Runtime.loadWarp(runtimePackage, tokenizer, maxPos, adapterBackend);
+        if (requestedBackend == Backend.AUTO) {
+            // AUTO uses a GPU if one exists (D3D12 hardware adapter), and falls back cleanly to the CPU reference
+            // path when no usable device is available (including a lazy failure on first use).
+            return warpReady
+                    ? SmolLM2Runtime.loadAuto(runtimePackage, tokenizer, maxPos, "auto")
+                    : SmolLM2Runtime.loadReference(runtimePackage, tokenizer);
         }
-        return SmolLM2Runtime.loadReference(runtimePackage, tokenizer);
+        // WARP is the default: the D3D12 WARP software rasterizer.
+        return warpReady
+                ? SmolLM2Runtime.loadWarp(runtimePackage, tokenizer, maxPos, "warp")
+                : SmolLM2Runtime.loadReference(runtimePackage, tokenizer);
     }
 
     private Optional<SmolLM2WarpReadinessReport> inspectWarpReadinessIfRequested(SmolLM2RuntimePackage runtimePackage,
