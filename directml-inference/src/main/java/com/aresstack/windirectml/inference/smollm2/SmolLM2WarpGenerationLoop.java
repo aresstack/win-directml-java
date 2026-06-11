@@ -93,9 +93,13 @@ final class SmolLM2WarpGenerationLoop {
                 break;
             }
         }
-        if (profileDecode && log.isInfoEnabled()) {
-            for (String line : decodeProfile.format()) {
-                log.info(line);
+        List<String> microProfileLines = List.of();
+        if (profileDecode) {
+            microProfileLines = decodeProfile.format();
+            if (log.isInfoEnabled()) {
+                for (String line : microProfileLines) {
+                    log.info(line);
+                }
             }
         }
         SmolLM2GenerationProfile profile = new SmolLM2GenerationProfile(
@@ -107,7 +111,8 @@ final class SmolLM2WarpGenerationLoop {
                 tokenSelectNanos,
                 0L,
                 SmolLM2ReferenceHotspotProfile.empty(),
-                stepTopK);
+                stepTopK,
+                microProfileLines);
         return new SmolLM2TokenRuntimeResult(
                 request.inputTokenIds(),
                 toList(generatedTokens),

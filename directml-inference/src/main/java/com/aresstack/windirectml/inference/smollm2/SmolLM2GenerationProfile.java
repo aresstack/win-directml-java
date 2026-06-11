@@ -13,7 +13,8 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
                                        long tokenSelectNanos,
                                        long detokenizeNanos,
                                        SmolLM2ReferenceHotspotProfile referenceHotspots,
-                                       List<String> stepTopK) {
+                                       List<String> stepTopK,
+                                       List<String> decodeMicroProfile) {
 
     public SmolLM2GenerationProfile {
         runtimeNanos = nonNegative(runtimeNanos);
@@ -27,6 +28,20 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
                 ? SmolLM2ReferenceHotspotProfile.empty()
                 : referenceHotspots;
         stepTopK = stepTopK == null ? List.of() : List.copyOf(stepTopK);
+        decodeMicroProfile = decodeMicroProfile == null ? List.of() : List.copyOf(decodeMicroProfile);
+    }
+
+    public SmolLM2GenerationProfile(long runtimeNanos,
+                                    long tokenizeNanos,
+                                    long prefillNanos,
+                                    long decoderStepNanos,
+                                    long lmHeadNanos,
+                                    long tokenSelectNanos,
+                                    long detokenizeNanos,
+                                    SmolLM2ReferenceHotspotProfile referenceHotspots,
+                                    List<String> stepTopK) {
+        this(runtimeNanos, tokenizeNanos, prefillNanos, decoderStepNanos, lmHeadNanos,
+                tokenSelectNanos, detokenizeNanos, referenceHotspots, stepTopK, List.of());
     }
 
     public SmolLM2GenerationProfile(long runtimeNanos,
@@ -38,7 +53,7 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
                                     long detokenizeNanos,
                                     SmolLM2ReferenceHotspotProfile referenceHotspots) {
         this(runtimeNanos, tokenizeNanos, prefillNanos, decoderStepNanos, lmHeadNanos,
-                tokenSelectNanos, detokenizeNanos, referenceHotspots, List.of());
+                tokenSelectNanos, detokenizeNanos, referenceHotspots, List.of(), List.of());
     }
 
     public SmolLM2GenerationProfile(long runtimeNanos,
@@ -49,12 +64,12 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
                                     long tokenSelectNanos,
                                     long detokenizeNanos) {
         this(runtimeNanos, tokenizeNanos, prefillNanos, decoderStepNanos, lmHeadNanos,
-                tokenSelectNanos, detokenizeNanos, SmolLM2ReferenceHotspotProfile.empty(), List.of());
+                tokenSelectNanos, detokenizeNanos, SmolLM2ReferenceHotspotProfile.empty(), List.of(), List.of());
     }
 
     public static SmolLM2GenerationProfile empty() {
         return new SmolLM2GenerationProfile(0L, 0L, 0L, 0L, 0L, 0L, 0L,
-                SmolLM2ReferenceHotspotProfile.empty(), List.of());
+                SmolLM2ReferenceHotspotProfile.empty(), List.of(), List.of());
     }
 
     public SmolLM2GenerationProfile withTextTimings(long newRuntimeNanos,
@@ -69,7 +84,8 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
                 tokenSelectNanos,
                 newDetokenizeNanos,
                 referenceHotspots,
-                stepTopK);
+                stepTopK,
+                decodeMicroProfile);
     }
 
     public long runtimeMillis() {

@@ -294,6 +294,13 @@ public final class SummarizerPanel extends JPanel {
         appendResult("    detokenize: " + profile.detokenizeMillis() + " ms");
         appendResult("    avg/token runtime: " + profile.averageTokenRuntimeMillis(result.outputTokens()) + " ms");
         appendSmolLm2ReferenceHotspots(profile);
+        List<String> decodeMicroProfile = profile.decodeMicroProfile();
+        if (!decodeMicroProfile.isEmpty()) {
+            appendResult("  [debug] WARP decode micro-profile (-Dsmollm2.profile.decode):");
+            for (String line : decodeMicroProfile) {
+                appendResult("  " + line);
+            }
+        }
         appendResult("  Generated token IDs: " + result.diagnostics().generatedTokenIdsPreview(32));
         List<String> stepTopK = result.diagnostics().profile().stepTopK();
         if (!stepTopK.isEmpty()) {
