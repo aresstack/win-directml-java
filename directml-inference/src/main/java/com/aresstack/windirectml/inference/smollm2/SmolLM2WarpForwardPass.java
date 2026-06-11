@@ -17,21 +17,25 @@ import java.util.Objects;
  * Native DirectML/WARP forward pass for the SmolLM2 decoder-only family.
  *
  * <p>This is the executable counterpart of {@link SmolLM2ReferenceForwardPass}. It keeps the identical numerical
- * structure (RMSNorm, RoPE, grouped-query attention, SwiGLU MLP, tied/untied LM head) but runs every per-layer dense
+ * structure (RMSNorm, RoPE, grouped-query attention, SwiGLU MLP, tied/untied LM head) but runs every dense
  * projection on the shared {@link DecoderOnlyWarpDenseProjection} GPU kernel instead of the CPU reference matmul.
  * Norms, RoPE, attention scoring and the SwiGLU non-linearity reuse the shared {@code decoderonly} math so the WARP
  * path stays byte-for-byte aligned with the reference path apart from GPU floating-point rounding.</p>
  *
- * <p>The matmul-heavy per-layer projections (qkv, o, gate_up, down) run on WARP; the LM head runs on the CPU SIMD
- * dense path ({@link SmolLM2DenseTensor#multiplyVector}) because measurements show the WARP software-adapter matvec is
- * far slower than CPU SIMD for the single-row decode shape, and for tied embeddings the LM-head weights are already
- * resident on the CPU (zero extra memory). This is the exact reference LM-head computation, so it is numerically
- * identical to the HF-verified path.</p>
- *
- * <p>The per-layer projections are uploaded once at construction and reused across every decode step. Attention and
- * the KV cache run on the CPU exactly like the reference path; only the matmul-heavy projections move to WARP.</p>
+ * <p>The projections are uploaded once at construction and reused across every decode step. Attention and the
+ * KV cache run on the CPU exactly like the reference path; only the matmul-heavy projections move to WARP. The LM
+ * head is part of the WARP product path and runs on WARP as well — the CPU SIMD dense path is only used by the
+ * reference/diagnostic runtime, never to optimize the WARP path.</p>
  */
 final class SmolLM2WarpForwardPass implements AutoCloseable {
+
+    /**
+     * Dev/diagnostic switch: {@code -Dwindirectml.smollm2.lmhead=reference} runs the LM head on the CPU-SIMD reference
+     * dense path instead of WARP. This is NOT part of the WARP product path — for {@code backend=WARP} the LM head
+     * runs on WARP by default like every other large tensor operation. Any other value keeps the WARP path.
+     */
+    private static final boolean LM_HEAD_REFERENCE =
+            "reference".equalsIgnoreCase(System.getProperty("windirectml.smollm2.lmhead", "warp"));
 
     private final SmolLM2Config config;
     private final DecoderOnlyAttentionLayout attentionLayout;
@@ -42,7 +46,10 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     private final SmolLM2DenseTensor tokenEmbedding;
     private final float[] finalNorm;
     private final List<WarpLayer> layers;
-    private final SmolLM2DenseTensor lmHeadTensor;
+    /** WARP product path for the LM head (default for {@code backend=WARP}); null only in the dev reference mode. */
+    private final DecoderOnlyWarpDenseProjection lmHead;
+    /** CPU-SIMD reference LM head; only set (and only used) when {@link #LM_HEAD_REFERENCE} is enabled. */
+    private final SmolLM2DenseTensor lmHeadReferenceTensor;
 
     // Decode dimensions (identical across layers for SmolLM2).
     private final int hiddenSize;
@@ -90,22 +97,33 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         this.finalNorm = referenceWeights.finalNorm().copyValues();
 
         List<WarpLayer> builtLayers = new ArrayList<>(referenceWeights.layers().size());
+        DecoderOnlyWarpDenseProjection builtLmHead = null;
         try {
             for (SmolLM2ReferenceLayerWeights layer : referenceWeights.layers()) {
                 builtLayers.add(WarpLayer.build(windowsBindings, layer));
+            }
+            SmolLM2DenseTensor lmHeadSource = referenceWeights.lmHeadTiedToEmbedding()
+                    ? referenceWeights.tokenEmbedding()
+                    : referenceWeights.lmHead();
+            if (LM_HEAD_REFERENCE) {
+                // Dev/diagnostic only: CPU-SIMD reference LM head (explicitly opted in via system property).
+                this.lmHeadReferenceTensor = lmHeadSource;
+            } else {
+                // WARP product path: the LM head runs on WARP like every other large projection.
+                this.lmHeadReferenceTensor = null;
+                builtLmHead = projection(windowsBindings, "lm_head", lmHeadSource);
             }
         } catch (RuntimeException e) {
             for (WarpLayer layer : builtLayers) {
                 layer.close();
             }
+            if (builtLmHead != null) {
+                builtLmHead.close();
+            }
             throw e;
         }
         this.layers = List.copyOf(builtLayers);
-        // The LM head runs on the CPU SIMD dense path (see class javadoc). For tied embeddings this tensor is the
-        // already-resident token embedding, so it costs no extra memory.
-        this.lmHeadTensor = referenceWeights.lmHeadTiedToEmbedding()
-                ? referenceWeights.tokenEmbedding()
-                : referenceWeights.lmHead();
+        this.lmHead = builtLmHead;
 
         this.hiddenSize = config.hiddenSize();
         this.qSize = config.numAttentionHeads() * config.effectiveHeadDim();
