@@ -235,12 +235,14 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         return projectLogits(scratchHidden);
     }
 
-    /** Apply the final RMSNorm and project the LM head on the CPU SIMD path, accumulating the LM-head time. */
+    /** Apply the final RMSNorm and project the LM head (WARP by default; CPU-SIMD only in the dev reference mode). */
     private float[] projectLogits(float[] hidden) {
         System.arraycopy(hidden, 0, scratchFinalNorm, 0, hiddenSize);
         DecoderOnlyMath.rmsNorm(scratchFinalNorm, finalNorm, rmsNormEps);
         long lmHeadStart = System.nanoTime();
-        float[] logits = lmHeadTensor.multiplyVector(scratchFinalNorm);
+        float[] logits = LM_HEAD_REFERENCE
+                ? lmHeadReferenceTensor.multiplyVector(scratchFinalNorm)
+                : lmHead.project(scratchFinalNorm);
         long elapsed = System.nanoTime() - lmHeadStart;
         lastCallLmHeadNanos += elapsed;
         if (decodeProfile.enabled()) {
@@ -550,6 +552,9 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         closed = true;
         for (WarpLayer layer : layers) {
             layer.close();
+        }
+        if (lmHead != null) {
+            lmHead.close();
         }
     }
 
