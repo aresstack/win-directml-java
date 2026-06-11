@@ -6,8 +6,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Prepared SmolLM2 WARP runtime boundary.
  *
- * <p>This class does not pretend that native kernels already exist. It prepares the deterministic plan and delegates
- * execution to a {@link SmolLM2WarpExecutor}. The default executor reports that WARP execution is not implemented yet.</p>
+ * <p>Prepares the deterministic execution plan and delegates token generation to a {@link SmolLM2WarpExecutor}. The
+ * default executor ({@link SmolLM2NativeWarpExecutor}) runs every dense projection on the shared decoder-only WARP
+ * kernels and falls back to the CPU reference path only when the WARP device is unavailable.</p>
  */
 public final class SmolLM2WarpRuntime implements AutoCloseable {
 
@@ -37,12 +38,17 @@ public final class SmolLM2WarpRuntime implements AutoCloseable {
     }
 
     public SmolLM2TokenRuntimeResult generateTokenIds(SmolLM2TokenRuntimeRequest request) {
+        return generateTokenIds(request, null);
+    }
+
+    public SmolLM2TokenRuntimeResult generateTokenIds(SmolLM2TokenRuntimeRequest request,
+                                                      java.util.function.IntConsumer generatedTokenConsumer) {
         Objects.requireNonNull(request, "request");
         ensureOpen();
         if (!session.status().executable()) {
             throw new SmolLM2RuntimeUnsupportedException(session.status().reason());
         }
-        return session.generateTokenIds(request);
+        return session.generateTokenIds(request, generatedTokenConsumer);
     }
 
     public SmolLM2WarpRuntimePlan plan() {

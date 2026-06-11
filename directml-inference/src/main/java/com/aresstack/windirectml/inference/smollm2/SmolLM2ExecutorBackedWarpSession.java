@@ -41,12 +41,15 @@ final class SmolLM2ExecutorBackedWarpSession implements SmolLM2WarpSession {
     }
 
     @Override
-    public SmolLM2TokenRuntimeResult generateTokenIds(SmolLM2TokenRuntimeRequest request) {
+    public SmolLM2TokenRuntimeResult generateTokenIds(SmolLM2TokenRuntimeRequest request,
+                                                      java.util.function.IntConsumer generatedTokenConsumer) {
         Objects.requireNonNull(request, "request");
         ensureOpen();
         if (!status.executable()) {
             throw new SmolLM2RuntimeUnsupportedException(status.reason());
         }
+        // Legacy executor-backed sessions produce the full token batch in one call and cannot stream
+        // incrementally, so {@code generatedTokenConsumer} is intentionally ignored here.
         return executor.generate(weights, plan, request);
     }
 

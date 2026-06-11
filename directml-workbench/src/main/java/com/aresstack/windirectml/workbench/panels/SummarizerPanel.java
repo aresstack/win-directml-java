@@ -189,7 +189,8 @@ public final class SummarizerPanel extends JPanel {
         if (qwenTestModel) {
             appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
         } else if (smolLm2Model) {
-            appendResult("  NOTE: SmolLM2 uses the Java reference runtime unless a native WARP executor is configured.");
+            appendResult("  NOTE: On WARP/AUTO, SmolLM2 runs dense projections on the WARP projection path "
+                    + "(norms/RoPE/attention/KV-cache stay on CPU); AUTO falls back to the Java reference runtime if WARP is unavailable.");
             appendResult("  NOTE: First use compiles SafeTensors to model.wdmlpack.");
         } else if (isT5Model(selectedModel)) {
             appendResult("  NOTE: T5-family models use the seq2seq runtime package path (.wdmlpack or SafeTensors auto-compile).");

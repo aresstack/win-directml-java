@@ -69,6 +69,32 @@ class SmolLM2NativeWarpExecutorTest {
                 "WARP greedy decoding must match the reference loop token-for-token");
     }
 
+    @Test
+    void warpSessionStreamsEachGeneratedTokenToTheConsumer() {
+        assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12/DirectML");
+        SmolLM2Weights weights = syntheticWeights();
+        SmolLM2TokenRuntimeRequest request = new SmolLM2TokenRuntimeRequest(
+                List.of(3, 7), 6, SmolLM2GenerationOptions.greedy());
+
+        SmolLM2WarpRuntimePlan plan = new SmolLM2WarpRuntimePlanner()
+                .plan(weights, weights.config().maxPositionEmbeddings());
+
+        List<Integer> streamed = new ArrayList<>();
+        SmolLM2TokenRuntimeResult result;
+        try (SmolLM2NativeWarpSession session = new SmolLM2NativeWarpSession(weights, plan, "warp")) {
+            result = session.generateTokenIds(request, streamed::add);
+        }
+
+        // The non-stop tokens (everything except a trailing stop token) must have been streamed in order as they
+        // were produced — the WARP path must not buffer the whole batch and skip the per-token callback.
+        List<Integer> expectedStreamed = result.generatedTokenIds();
+        if (!expectedStreamed.isEmpty() && "eos_token".equals(result.finishReason())) {
+            expectedStreamed = expectedStreamed.subList(0, expectedStreamed.size() - 1);
+        }
+        assertEquals(expectedStreamed, streamed,
+                "WARP generate(request, consumer) must invoke onToken for every accepted token");
+    }
+
     // ── Synthetic weights ─────────────────────────────────────────────────
 
     private static SmolLM2Config config() {

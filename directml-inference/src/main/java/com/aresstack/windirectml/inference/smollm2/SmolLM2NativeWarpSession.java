@@ -73,13 +73,14 @@ final class SmolLM2NativeWarpSession implements SmolLM2WarpSession {
     }
 
     @Override
-    public SmolLM2TokenRuntimeResult generateTokenIds(SmolLM2TokenRuntimeRequest request) {
+    public SmolLM2TokenRuntimeResult generateTokenIds(SmolLM2TokenRuntimeRequest request,
+                                                      java.util.function.IntConsumer generatedTokenConsumer) {
         Objects.requireNonNull(request, "request");
         ensureOpen();
         if (!supported) {
             throw new SmolLM2RuntimeUnsupportedException(status.reason());
         }
-        return ensureEngine().generate(request, null);
+        return ensureEngine().generate(request, generatedTokenConsumer);
     }
 
     private SmolLM2WarpGenerationLoop ensureEngine() {

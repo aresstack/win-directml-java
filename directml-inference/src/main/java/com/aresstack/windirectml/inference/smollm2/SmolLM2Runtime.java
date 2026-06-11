@@ -38,19 +38,23 @@ public final class SmolLM2Runtime implements AutoCloseable {
     private final SmolLM2RuntimePackage runtimePackage;
     private final SmolLM2Tokenizer tokenizer;
     private final PromptStrategy promptStrategy;
-    private final SmolLM2RuntimeMode runtimeMode;
+    private volatile SmolLM2RuntimeMode runtimeMode;
     private final SmolLM2WarpRuntime warpRuntime;
+    private final boolean warpFallbackAllowed;
+    private volatile String warpFallbackReason = "";
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     private SmolLM2Runtime(SmolLM2RuntimePackage runtimePackage,
                            SmolLM2Tokenizer tokenizer,
                            SmolLM2RuntimeMode runtimeMode,
                            SmolLM2WarpRuntime warpRuntime,
+                           boolean warpFallbackAllowed,
                            PromptStrategy promptStrategy) {
         this.runtimePackage = Objects.requireNonNull(runtimePackage, "runtimePackage");
         this.tokenizer = tokenizer;
         this.runtimeMode = Objects.requireNonNull(runtimeMode, "runtimeMode");
         this.warpRuntime = warpRuntime;
+        this.warpFallbackAllowed = warpFallbackAllowed;
         this.promptStrategy = promptStrategy == null ? DEFAULT_PROMPT_STRATEGY : promptStrategy;
     }
 
@@ -69,7 +73,7 @@ public final class SmolLM2Runtime implements AutoCloseable {
     public static SmolLM2Runtime loadReference(SmolLM2RuntimePackage runtimePackage,
                                                SmolLM2Tokenizer tokenizer,
                                                PromptStrategy promptStrategy) {
-        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null, promptStrategy);
+        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null, false, promptStrategy);
     }
 
     public static SmolLM2Runtime loadWarp(SmolLM2RuntimePackage runtimePackage,
@@ -83,7 +87,7 @@ public final class SmolLM2Runtime implements AutoCloseable {
                                           int sequenceLength,
                                           SmolLM2WarpExecutor executor) {
         SmolLM2WarpRuntime warpRuntime = SmolLM2WarpRuntime.prepare(runtimePackage, sequenceLength, executor);
-        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime,
+        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime, false,
                 DEFAULT_PROMPT_STRATEGY);
     }
 
@@ -101,10 +105,13 @@ public final class SmolLM2Runtime implements AutoCloseable {
         SmolLM2RuntimeMode selectedMode = warpRuntime.executable() ? SmolLM2RuntimeMode.WARP : SmolLM2RuntimeMode.REFERENCE;
         if (selectedMode == SmolLM2RuntimeMode.REFERENCE) {
             warpRuntime.close();
-            return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null,
+            return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null, false,
                     DEFAULT_PROMPT_STRATEGY);
         }
-        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime,
+        // AUTO: the WARP readiness probe is optimistic (it does not upload weights), so the real device/upload
+        // initialisation happens lazily on the first generate call. Allow a clean fallback to the reference path
+        // if that lazy initialisation fails, instead of surfacing the failure to the caller.
+        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime, true,
                 DEFAULT_PROMPT_STRATEGY);
     }
 
@@ -174,7 +181,20 @@ public final class SmolLM2Runtime implements AutoCloseable {
         ensureOpen();
         ensureExecutablePackage();
         if (runtimeMode == SmolLM2RuntimeMode.WARP) {
-            return warpRuntime.generateTokenIds(request);
+            try {
+                return warpRuntime.generateTokenIds(request, generatedTokenConsumer);
+            } catch (SmolLM2RuntimeUnsupportedException e) {
+                if (!warpFallbackAllowed) {
+                    throw e;
+                }
+                // AUTO mode: the lazy WARP device/upload initialisation failed on first use. Fall back to the
+                // correctness-first reference path. The failure happens before any token is emitted to the
+                // consumer (the engine is built up front in the session), so no token is streamed twice.
+                this.warpFallbackReason = safeMessage(e);
+                this.runtimeMode = SmolLM2RuntimeMode.REFERENCE;
+                log.warn("SmolLM2 AUTO mode falling back from WARP to the reference runtime: {}", warpFallbackReason);
+                warpRuntime.close();
+            }
         }
         SmolLM2Weights weights = runtimePackage.requireWeights();
         return new SmolLM2ReferenceGenerationLoop(weights).generate(request, generatedTokenConsumer);
@@ -279,6 +299,20 @@ public final class SmolLM2Runtime implements AutoCloseable {
 
     public Optional<SmolLM2WarpExecutionStatus> warpExecutionStatus() {
         return Optional.ofNullable(warpRuntime).map(SmolLM2WarpRuntime::status);
+    }
+
+    /**
+     * Reason the AUTO runtime fell back from WARP to the reference path at first use, if it did.
+     * Empty when no runtime fallback occurred.
+     */
+    public Optional<String> warpFallbackReason() {
+        return warpFallbackReason.isBlank() ? Optional.empty() : Optional.of(warpFallbackReason);
+    }
+
+    private static String safeMessage(Throwable e) {
+        return e.getMessage() == null || e.getMessage().isBlank()
+                ? e.getClass().getSimpleName()
+                : e.getMessage();
     }
 
     @Override

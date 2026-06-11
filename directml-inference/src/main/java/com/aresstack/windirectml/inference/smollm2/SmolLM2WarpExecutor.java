@@ -1,7 +1,8 @@
 package com.aresstack.windirectml.inference.smollm2;
 
 /**
- * Strategy boundary for the future native/WARP SmolLM2 executor.
+ * Strategy boundary for the native/WARP SmolLM2 executor. The production implementation is
+ * {@link SmolLM2NativeWarpExecutor}; probe/unsupported implementations exist for diagnostics and AUTO fallback tests.
  */
 public interface SmolLM2WarpExecutor {
 

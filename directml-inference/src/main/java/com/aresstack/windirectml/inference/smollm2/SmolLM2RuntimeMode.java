@@ -5,17 +5,33 @@ package com.aresstack.windirectml.inference.smollm2;
  */
 public enum SmolLM2RuntimeMode {
     /**
-     * Run the correctness-first Java reference implementation.
+     * Run the correctness-first Java reference implementation entirely on the CPU.
      */
-    REFERENCE,
+    REFERENCE("reference (CPU)"),
 
     /**
-     * Require a future native/WARP executor and fail clearly when it is not available.
+     * WARP projection path: every dense projection (q/k/v/o, gate/up/down, lm_head) runs on the shared decoder-only
+     * WARP kernels, while norms, RoPE, attention scoring/context, SwiGLU and the KV cache still run on the CPU.
+     * This is a WARP-assisted decoder-only runtime, not a fully GPU-resident decode loop.
      */
-    WARP,
+    WARP("warp (WARP projection path; norms/RoPE/attention/KV-cache on CPU)"),
 
     /**
-     * Prefer the future native/WARP executor and fall back to the Java reference implementation.
+     * Prefer the WARP projection path and fall back to the Java reference implementation when the WARP device or
+     * weight upload is unavailable.
      */
-    AUTO
+    AUTO("auto");
+
+    private final String displayLabel;
+
+    SmolLM2RuntimeMode(String displayLabel) {
+        this.displayLabel = displayLabel;
+    }
+
+    /**
+     * Human-facing label that honestly describes what the mode runs on (for diagnostics/UI output).
+     */
+    public String displayLabel() {
+        return displayLabel;
+    }
 }

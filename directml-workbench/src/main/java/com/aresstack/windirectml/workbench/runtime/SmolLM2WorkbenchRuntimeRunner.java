@@ -83,8 +83,8 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     result.tokensGenerated(),
                     result.finishReason(),
                     safeBackend.name().toLowerCase(),
-                    runtime.runtimeMode().name().toLowerCase(),
-                    fallbackReason(safeBackend, runtime.runtimeMode(), effectiveWarpStatus),
+                    runtime.runtimeMode().displayLabel(),
+                    fallbackReason(safeBackend, runtime, effectiveWarpStatus),
                     warnings(effectiveWarpStatus),
                     packagePath,
                     result.diagnostics(),
@@ -151,10 +151,17 @@ public final class SmolLM2WorkbenchRuntimeRunner {
     }
 
     private static String fallbackReason(Backend requestedBackend,
-                                         SmolLM2RuntimeMode runtimeMode,
+                                         SmolLM2Runtime runtime,
                                          Optional<SmolLM2WarpExecutionStatus> warpStatus) {
-        if (runtimeMode != SmolLM2RuntimeMode.REFERENCE || requestedBackend == Backend.CPU) {
+        if (runtime.runtimeMode() != SmolLM2RuntimeMode.REFERENCE || requestedBackend == Backend.CPU) {
             return "";
+        }
+        // A WARP device/upload failure that happened lazily on first use (AUTO mode) is the most precise reason.
+        Optional<String> runtimeFallback = runtime.warpFallbackReason();
+        if (runtimeFallback.isPresent()) {
+            return requestedBackend.name().toLowerCase()
+                    + " requested, but SmolLM2 native WARP execution failed at first use: "
+                    + runtimeFallback.get();
         }
         return warpStatus
                 .filter(SmolLM2WarpExecutionStatus::requiresFallback)
