@@ -19,7 +19,7 @@ import java.nio.file.Path;
  * text generation. This engine:
  * <ul>
  *   <li>Loads config, tokenizer, and weights from a model directory</li>
- *   <li>Formats prompts using {@link QwenChatTemplate} (ChatML)</li>
+ *   <li>Formats prompts through the shared prompt pipeline ({@code PromptStrategies})</li>
  *   <li>Generates text using {@link Qwen2Runtime} (greedy CPU decode)</li>
  *   <li>Stops on {@link QwenStopTokenPolicy} tokens</li>
  * </ul>
@@ -334,11 +334,10 @@ public class QwenInferenceEngine implements InferenceEngine {
     }
 
     private String formatPrompt(InferenceRequest request) {
-        String systemPrompt = request.getSystemPrompt();
-        String userMessage = request.getUserPrompt();
-        return QwenChatTemplate.formatChat(
-                systemPrompt != null && !systemPrompt.isBlank() ? systemPrompt : null,
-                userMessage == null ? "" : userMessage);
+        return com.aresstack.windirectml.inference.prompt.PromptStrategies
+                .forModel(request.getModelId())
+                .renderPrompt(new com.aresstack.windirectml.inference.prompt.PromptInput(
+                        request.getTask(), request.getUserPrompt(), request.getSystemPrompt()));
     }
 
 

@@ -190,13 +190,11 @@ public class Phi3InferenceEngine implements InferenceEngine {
             // there is no benefit to reusing the cache.
             runtime.resetCache();
 
-            // Format the prompt using Phi-3 chat template
-            String systemPrompt = request.getSystemPrompt();
-            String userPrompt = request.getUserPrompt();
-            String formattedPrompt = tokenizer.formatChat(
-                    systemPrompt.isBlank() ? null : systemPrompt,
-                    userPrompt
-            );
+            // Format the prompt through the model-neutral prompt pipeline.
+            String formattedPrompt = com.aresstack.windirectml.inference.prompt.PromptStrategies
+                    .forModel(request.getModelId())
+                    .renderPrompt(new com.aresstack.windirectml.inference.prompt.PromptInput(
+                            request.getTask(), request.getUserPrompt(), request.getSystemPrompt()));
 
             int maxTokens = request.getMaxTokens() > 0 ? request.getMaxTokens() : defaultMaxTokens;
             log.info("Generating: maxTokens={}, promptLen={}", maxTokens, formattedPrompt.length());

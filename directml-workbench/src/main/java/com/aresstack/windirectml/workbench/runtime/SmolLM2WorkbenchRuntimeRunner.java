@@ -1,8 +1,8 @@
 package com.aresstack.windirectml.workbench.runtime;
 
-import com.aresstack.windirectml.inference.smollm2.SmolLM2ChatPromptTemplate;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2CompileOptions;
 import com.aresstack.windirectml.inference.GenerationTokenSink;
+import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationOptions;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationDiagnostics;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2Runtime;
@@ -51,22 +51,18 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         this.compiler = Objects.requireNonNull(compiler, "compiler");
     }
 
-    public Result generate(String prompt, int maxTokens) throws IOException {
-        return generate(prompt, maxTokens, Backend.CPU);
+    public Result generate(PromptInput promptInput, int maxTokens) throws IOException {
+        return generate(promptInput, maxTokens, Backend.CPU, null);
     }
 
-    public Result generate(String prompt, int maxTokens, Backend requestedBackend) throws IOException {
-        return generate(prompt, maxTokens, requestedBackend, null);
+    public Result generate(PromptInput promptInput, int maxTokens, Backend requestedBackend) throws IOException {
+        return generate(promptInput, maxTokens, requestedBackend, null);
     }
 
-    public Result generate(String prompt, int maxTokens, Backend requestedBackend, GenerationTokenSink sink) throws IOException {
-        return generate(prompt, "", maxTokens, requestedBackend, sink);
-    }
-
-    public Result generate(String prompt, String systemPrompt, int maxTokens, Backend requestedBackend,
+    public Result generate(PromptInput promptInput, int maxTokens, Backend requestedBackend,
                            GenerationTokenSink sink) throws IOException {
+        PromptInput safeInput = promptInput == null ? PromptInput.raw("") : promptInput;
         Backend safeBackend = requestedBackend == null ? Backend.CPU : requestedBackend;
-        String rawPrompt = renderPrompt(prompt, systemPrompt);
 
         Path packagePath = ensureExecutablePackage();
         Path tokenizerPath = requireTokenizer();
@@ -78,7 +74,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         Optional<SmolLM2WarpExecutionStatus> warpStatus = warpReadiness.map(SmolLM2WorkbenchRuntimeRunner::toExecutionStatus);
         try (SmolLM2Runtime runtime = loadRuntime(runtimePackage, tokenizer, safeBackend, warpStatus)) {
             SmolLM2RuntimeResult result = runtime.generate(new SmolLM2RuntimeRequest(
-                    rawPrompt,
+                    safeInput,
                     maxTokens,
                     SmolLM2GenerationOptions.greedy()), sink);
             Optional<SmolLM2WarpExecutionStatus> effectiveWarpStatus = runtime.warpExecutionStatus().or(() -> warpStatus);
@@ -94,11 +90,6 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     result.diagnostics(),
                     warpReadiness);
         }
-    }
-
-    private static String renderPrompt(String prompt, String systemPrompt) {
-        String safePrompt = prompt == null ? "" : prompt;
-        return SmolLM2ChatPromptTemplate.withSystemPrompt(systemPrompt).renderUserPrompt(safePrompt);
     }
 
     private SmolLM2Runtime loadRuntime(SmolLM2RuntimePackage runtimePackage,

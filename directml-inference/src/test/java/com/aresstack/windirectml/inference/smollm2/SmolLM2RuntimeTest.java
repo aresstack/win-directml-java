@@ -1,5 +1,7 @@
 package com.aresstack.windirectml.inference.smollm2;
 
+import com.aresstack.windirectml.inference.prompt.PromptInput;
+import com.aresstack.windirectml.inference.prompt.RawPromptStrategy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -32,7 +34,7 @@ class SmolLM2RuntimeTest {
     void generateRequiresTokenizer() throws Exception {
         try (SmolLM2Runtime runtime = SmolLM2Runtime.load(createRuntimePackage())) {
             SmolLM2RuntimeUnsupportedException exception = assertThrows(SmolLM2RuntimeUnsupportedException.class,
-                    () -> runtime.generate(new SmolLM2RuntimeRequest("hello", 4, null)));
+                    () -> runtime.generate(new SmolLM2RuntimeRequest(PromptInput.raw("hello"), 4, null)));
             assertTrue(exception.getMessage().contains("requires a SmolLM2Tokenizer"));
         }
     }
@@ -46,9 +48,10 @@ class SmolLM2RuntimeTest {
         Path tokenizerJson = tempDir.resolve("tokenizer.json");
         SmolLM2TestFixtures.writeTokenizerJson(tokenizerJson);
 
-        try (SmolLM2Runtime runtime = SmolLM2Runtime.load(
-                SmolLM2RuntimePackage.open(packagePath), SmolLM2Tokenizer.load(tokenizerJson))) {
-            SmolLM2RuntimeResult result = runtime.generate(new SmolLM2RuntimeRequest("a", 1, null));
+        try (SmolLM2Runtime runtime = SmolLM2Runtime.loadReference(
+                SmolLM2RuntimePackage.open(packagePath), SmolLM2Tokenizer.load(tokenizerJson),
+                RawPromptStrategy.INSTANCE)) {
+            SmolLM2RuntimeResult result = runtime.generate(new SmolLM2RuntimeRequest(PromptInput.raw("a"), 1, null));
 
             assertEquals("a", result.generatedText());
             assertEquals(List.of(0), result.generatedTokenIds());
@@ -93,7 +96,7 @@ class SmolLM2RuntimeTest {
 
     @Test
     void requestRejectsNonPositiveMaxNewTokens() {
-        assertThrows(IllegalArgumentException.class, () -> new SmolLM2RuntimeRequest("x", 0, null));
+        assertThrows(IllegalArgumentException.class, () -> new SmolLM2RuntimeRequest(PromptInput.raw("x"), 0, null));
     }
 
     @Test

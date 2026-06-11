@@ -2,6 +2,8 @@ package com.aresstack.windirectml.inference.smollm2;
 
 import com.aresstack.windirectml.inference.GeneratedToken;
 import com.aresstack.windirectml.inference.GenerationTokenSink;
+import com.aresstack.windirectml.inference.prompt.PromptStrategies;
+import com.aresstack.windirectml.inference.prompt.PromptStrategy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,9 +23,12 @@ public final class SmolLM2Runtime implements AutoCloseable {
             "SmolLM2 text generation requires a SmolLM2Tokenizer. Load the runtime with "
                     + "SmolLM2Runtime.load(runtimePackage, tokenizer) or call generateTokenIds(...).";
 
+    /** Default ChatML prompt strategy for the SmolLM2 family (single source of truth). */
+    private static final PromptStrategy DEFAULT_PROMPT_STRATEGY = PromptStrategies.forModel("smollm2");
+
     private final SmolLM2RuntimePackage runtimePackage;
     private final SmolLM2Tokenizer tokenizer;
-    private final SmolLM2PromptRenderer promptRenderer;
+    private final PromptStrategy promptStrategy;
     private final SmolLM2RuntimeMode runtimeMode;
     private final SmolLM2WarpRuntime warpRuntime;
     private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -32,12 +37,12 @@ public final class SmolLM2Runtime implements AutoCloseable {
                            SmolLM2Tokenizer tokenizer,
                            SmolLM2RuntimeMode runtimeMode,
                            SmolLM2WarpRuntime warpRuntime,
-                           SmolLM2PromptRenderer promptRenderer) {
+                           PromptStrategy promptStrategy) {
         this.runtimePackage = Objects.requireNonNull(runtimePackage, "runtimePackage");
         this.tokenizer = tokenizer;
         this.runtimeMode = Objects.requireNonNull(runtimeMode, "runtimeMode");
         this.warpRuntime = warpRuntime;
-        this.promptRenderer = promptRenderer == null ? SmolLM2PromptRenderer.rawInput() : promptRenderer;
+        this.promptStrategy = promptStrategy == null ? DEFAULT_PROMPT_STRATEGY : promptStrategy;
     }
 
     public static SmolLM2Runtime load(SmolLM2RuntimePackage runtimePackage) {
@@ -49,13 +54,13 @@ public final class SmolLM2Runtime implements AutoCloseable {
     }
 
     public static SmolLM2Runtime loadReference(SmolLM2RuntimePackage runtimePackage, SmolLM2Tokenizer tokenizer) {
-        return loadReference(runtimePackage, tokenizer, SmolLM2PromptRenderer.rawInput());
+        return loadReference(runtimePackage, tokenizer, DEFAULT_PROMPT_STRATEGY);
     }
 
     public static SmolLM2Runtime loadReference(SmolLM2RuntimePackage runtimePackage,
                                                SmolLM2Tokenizer tokenizer,
-                                               SmolLM2PromptRenderer promptRenderer) {
-        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null, promptRenderer);
+                                               PromptStrategy promptStrategy) {
+        return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null, promptStrategy);
     }
 
     public static SmolLM2Runtime loadWarp(SmolLM2RuntimePackage runtimePackage,
@@ -70,7 +75,7 @@ public final class SmolLM2Runtime implements AutoCloseable {
                                           SmolLM2WarpExecutor executor) {
         SmolLM2WarpRuntime warpRuntime = SmolLM2WarpRuntime.prepare(runtimePackage, sequenceLength, executor);
         return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime,
-                SmolLM2PromptRenderer.rawInput());
+                DEFAULT_PROMPT_STRATEGY);
     }
 
     public static SmolLM2Runtime loadAuto(SmolLM2RuntimePackage runtimePackage,
@@ -88,10 +93,10 @@ public final class SmolLM2Runtime implements AutoCloseable {
         if (selectedMode == SmolLM2RuntimeMode.REFERENCE) {
             warpRuntime.close();
             return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.REFERENCE, null,
-                    SmolLM2PromptRenderer.rawInput());
+                    DEFAULT_PROMPT_STRATEGY);
         }
         return new SmolLM2Runtime(runtimePackage, tokenizer, SmolLM2RuntimeMode.WARP, warpRuntime,
-                SmolLM2PromptRenderer.rawInput());
+                DEFAULT_PROMPT_STRATEGY);
     }
 
     public SmolLM2RuntimeResult generate(SmolLM2RuntimeRequest request) {
@@ -106,7 +111,7 @@ public final class SmolLM2Runtime implements AutoCloseable {
                 () -> new SmolLM2RuntimeUnsupportedException(TOKENIZER_REQUIRED_MESSAGE));
 
         long tokenizeStart = System.nanoTime();
-        String renderedPrompt = promptRenderer.render(request.prompt());
+        String renderedPrompt = promptStrategy.renderPrompt(request.prompt());
         List<Integer> inputTokenIds = encodePrompt(renderedPrompt, activeTokenizer);
         long tokenizeNanos = System.nanoTime() - tokenizeStart;
 

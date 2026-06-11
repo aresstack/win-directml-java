@@ -96,7 +96,10 @@ public final class T5InferenceEngine implements InferenceEngine {
             throw new InferenceException("T5 runtime is not initialized");
         }
         try {
-            String prompt = T5PromptTemplate.format(request);
+            String prompt = com.aresstack.windirectml.inference.prompt.PromptStrategies
+                    .forModel(request.getModelId())
+                    .renderPrompt(new com.aresstack.windirectml.inference.prompt.PromptInput(
+                            request.getTask(), request.getUserPrompt(), request.getSystemPrompt()));
             long tokenizeStart = System.nanoTime();
             int[] inputTokens = truncate(tokenizer.encode(prompt), maxInputTokens);
             long tokenizationNanos = System.nanoTime() - tokenizeStart;

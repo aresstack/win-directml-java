@@ -15,11 +15,12 @@ import com.aresstack.windirectml.inference.qwen.QwenInferenceEngine;
 import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
 import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationProfile;
+import com.aresstack.windirectml.inference.prompt.PromptInput;
+import com.aresstack.windirectml.inference.prompt.PromptStrategies;
+import com.aresstack.windirectml.inference.prompt.PromptTask;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.runtime.SmolLM2WorkbenchRuntimeRunner;
-import com.aresstack.windirectml.workbench.prompt.RenderedWorkbenchPrompt;
-import com.aresstack.windirectml.workbench.prompt.WorkbenchPromptProfileRegistry;
-import com.aresstack.windirectml.workbench.prompt.WorkbenchPromptTemplate;
+import com.aresstack.windirectml.workbench.prompt.PromptTaskLabels;
 
 import javax.swing.*;
 import java.awt.*;
@@ -44,7 +45,7 @@ public final class SummarizerPanel extends JPanel {
     private final JTextArea inputArea;
     private final JTextArea resultArea;
     private final JComboBox<String> modelSelector;
-    private final JComboBox<WorkbenchPromptTemplate> promptTemplateSelector;
+    private final JComboBox<PromptTask> promptTemplateSelector;
     private final JSpinner maxTokensSpinner;
 
     public SummarizerPanel(WorkbenchModel model) {
@@ -69,6 +70,17 @@ public final class SummarizerPanel extends JPanel {
         modelPanel.add(new JLabel("Template:"));
         promptTemplateSelector = new JComboBox<>();
         promptTemplateSelector.setToolTipText("Choose an optional task template. 'Keines' passes the input without an additional task instruction.");
+        promptTemplateSelector.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                          boolean isSelected, boolean cellHasFocus) {
+                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (value instanceof PromptTask task) {
+                    setText(PromptTaskLabels.labelFor(task));
+                }
+                return this;
+            }
+        });
         modelPanel.add(promptTemplateSelector);
         updatePromptTemplateOptions((String) modelSelector.getSelectedItem());
         controlsPanel.add(modelPanel, BorderLayout.NORTH);
@@ -114,20 +126,20 @@ public final class SummarizerPanel extends JPanel {
     }
 
     private void updatePromptTemplateOptions(String selectedModel) {
-        WorkbenchPromptTemplate previous = (WorkbenchPromptTemplate) promptTemplateSelector.getSelectedItem();
+        PromptTask previous = (PromptTask) promptTemplateSelector.getSelectedItem();
         promptTemplateSelector.removeAllItems();
-        for (WorkbenchPromptTemplate template : WorkbenchPromptProfileRegistry.templatesFor(selectedModel)) {
-            promptTemplateSelector.addItem(template);
+        for (PromptTask task : PromptStrategies.supportedTasks(selectedModel)) {
+            promptTemplateSelector.addItem(task);
         }
-        WorkbenchPromptTemplate next = previous == null ? WorkbenchPromptTemplate.NONE : previous;
+        PromptTask next = previous == null ? PromptTask.NONE : previous;
         if (!selectPromptTemplate(next)) {
-            selectPromptTemplate(WorkbenchPromptTemplate.NONE);
+            selectPromptTemplate(PromptTask.NONE);
         }
     }
 
-    private boolean selectPromptTemplate(WorkbenchPromptTemplate template) {
+    private boolean selectPromptTemplate(PromptTask task) {
         for (int i = 0; i < promptTemplateSelector.getItemCount(); i++) {
-            if (promptTemplateSelector.getItemAt(i) == template) {
+            if (promptTemplateSelector.getItemAt(i) == task) {
                 promptTemplateSelector.setSelectedIndex(i);
                 return true;
             }
@@ -142,18 +154,14 @@ public final class SummarizerPanel extends JPanel {
             return;
         }
 
-        WorkbenchPromptTemplate promptTemplate = (WorkbenchPromptTemplate) promptTemplateSelector.getSelectedItem();
-        if (promptTemplate == null) {
-            promptTemplate = WorkbenchPromptTemplate.NONE;
-        }
+        PromptTask selectedTask = (PromptTask) promptTemplateSelector.getSelectedItem();
+        final PromptTask promptTask = selectedTask == null ? PromptTask.NONE : selectedTask;
 
         String selectedModel = (String) modelSelector.getSelectedItem();
         if (selectedModel == null) {
             appendResult("ERROR: No generation model selected.");
             return;
         }
-
-        RenderedWorkbenchPrompt renderedPrompt = WorkbenchPromptProfileRegistry.render(selectedModel, promptTemplate, text);
 
         boolean qwenTestModel = isQwenTestModel(selectedModel);
         boolean smolLm2Model = isSmolLm2Model(selectedModel);
@@ -189,11 +197,11 @@ public final class SummarizerPanel extends JPanel {
                 try {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
                     if (qwenTestModel) {
-                        runQwenGeneration(modelDir, renderedPrompt.getUserPrompt(), renderedPrompt.getSystemPrompt(), maxTokens, selectedModel);
+                        runQwenGeneration(modelDir, promptTask, text, maxTokens, selectedModel);
                     } else if (smolLm2Model) {
-                        runSmolLm2Generation(modelDir, renderedPrompt.getUserPrompt(), renderedPrompt.getSystemPrompt(), maxTokens);
+                        runSmolLm2Generation(modelDir, promptTask, text, maxTokens);
                     } else if (isT5Model(selectedModel)) {
-                        runT5Generation(modelDir, renderedPrompt.getUserPrompt(), renderedPrompt.getSystemPrompt(), maxTokens, selectedModel);
+                        runT5Generation(modelDir, promptTask, text, maxTokens, selectedModel);
                     } else {
                         runPhi3Summarizer(modelDir, text, maxTokens);
                     }
@@ -228,15 +236,15 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void runSmolLm2Generation(Path modelDir, String text, String systemPrompt, int maxTokens) throws Exception {
+    private void runSmolLm2Generation(Path modelDir, PromptTask task, String text, int maxTokens) throws Exception {
         long start = System.nanoTime();
         SmolLM2WorkbenchRuntimeRunner runner = new SmolLM2WorkbenchRuntimeRunner(modelDir);
         appendResult("Initializing SmolLM2 runtime from " + modelDir
                 + " (requested backend=" + model.getBackend().name().toLowerCase() + ")...");
         appendResult("");
         appendResult("OUTPUT:");
-        SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(text, systemPrompt, maxTokens, model.getBackend(),
-                new UiTokenSink());
+        SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(PromptInput.of(task, text), maxTokens,
+                model.getBackend(), new UiTokenSink());
         appendResult("");
         appendResult("Model loaded and generated in " + elapsedMs(start) + " ms");
         appendResult("Requested backend: " + result.requestedBackend());
@@ -309,7 +317,7 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void runT5Generation(Path modelDir, String text, String systemPrompt, int maxTokens, String selectedModel)
+    private void runT5Generation(Path modelDir, PromptTask task, String text, int maxTokens, String selectedModel)
             throws InferenceException {
         validateT5ModelFiles(modelDir);
         long start = System.nanoTime();
@@ -325,7 +333,7 @@ public final class SummarizerPanel extends JPanel {
             long genStart = System.nanoTime();
             InferenceRequest request = InferenceRequest.builder()
                     .modelId(selectedModel)
-                    .systemPrompt(systemPrompt)
+                    .task(task)
                     .userPrompt(text)
                     .maxTokens(maxTokens)
                     .temperature(0.0f)
@@ -350,7 +358,7 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void runQwenGeneration(Path modelDir, String text, String systemPrompt, int maxTokens, String selectedModel)
+    private void runQwenGeneration(Path modelDir, PromptTask task, String text, int maxTokens, String selectedModel)
             throws InferenceException {
         String qwenModelFile = model.getQwenModelFile();
         validateQwenModelFiles(modelDir, qwenModelFile);
@@ -367,7 +375,7 @@ public final class SummarizerPanel extends JPanel {
             long genStart = System.nanoTime();
             InferenceRequest request = InferenceRequest.builder()
                     .modelId(selectedModel)
-                    .systemPrompt(systemPrompt)
+                    .task(task)
                     .userPrompt(text)
                     .maxTokens(maxTokens)
                     .temperature(0.0f)

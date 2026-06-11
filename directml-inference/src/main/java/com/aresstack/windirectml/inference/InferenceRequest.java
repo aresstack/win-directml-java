@@ -1,19 +1,21 @@
 package com.aresstack.windirectml.inference;
 
+import com.aresstack.windirectml.inference.prompt.PromptTask;
+
 import java.util.Objects;
 
 /**
  * A request to the local inference engine.
  * <p>
- * <b>V1 scope:</b> For the MNIST engine, {@code userPrompt} carries either
- * 784 comma-separated pixel floats (28×28 grayscale, 0.0–1.0) or an empty
- * string (defaults to all-zeros / test mode). The {@code systemPrompt},
- * {@code maxTokens}, and {@code temperature} fields are placeholders for
- * future text-generation models and are ignored by the MNIST engine.
+ * Carries the model-neutral {@link PromptTask} intent plus the raw user text and
+ * an optional free-form system override. Engines turn this into a model-correct
+ * prompt through their {@code PromptStrategy}; callers never build prompt
+ * strings themselves.
  */
 public class InferenceRequest {
 
     private final String modelId;
+    private final PromptTask task;
     private final String systemPrompt;
     private final String userPrompt;
     private final int maxTokens;
@@ -21,6 +23,7 @@ public class InferenceRequest {
 
     private InferenceRequest(Builder builder) {
         this.modelId = builder.modelId;
+        this.task = builder.task == null ? PromptTask.NONE : builder.task;
         this.systemPrompt = Objects.requireNonNull(builder.systemPrompt, "systemPrompt");
         this.userPrompt = Objects.requireNonNull(builder.userPrompt, "userPrompt");
         this.maxTokens = builder.maxTokens;
@@ -29,6 +32,10 @@ public class InferenceRequest {
 
     public String getModelId() {
         return modelId;
+    }
+
+    public PromptTask getTask() {
+        return task;
     }
 
     public String getSystemPrompt() {
@@ -63,6 +70,7 @@ public class InferenceRequest {
 
     public static class Builder {
         private String modelId;
+        private PromptTask task = PromptTask.NONE;
         private String systemPrompt = "";
         private String userPrompt = "";
         private int maxTokens = 256;
@@ -70,6 +78,11 @@ public class InferenceRequest {
 
         public Builder modelId(String modelId) {
             this.modelId = modelId;
+            return this;
+        }
+
+        public Builder task(PromptTask task) {
+            this.task = task;
             return this;
         }
 
@@ -100,7 +113,7 @@ public class InferenceRequest {
 
     @Override
     public String toString() {
-        return "InferenceRequest{modelId='" + modelId + "', userPrompt='" +
+        return "InferenceRequest{modelId='" + modelId + "', task=" + task + ", userPrompt='" +
                 (userPrompt.length() > 40 ? userPrompt.substring(0, 40) + "…" : userPrompt) +
                 "', maxTokens=" + maxTokens + ", temperature=" + temperature + "}";
     }
