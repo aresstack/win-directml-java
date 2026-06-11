@@ -74,8 +74,11 @@ public final class ChatMlPromptStrategy implements PromptStrategy {
     }
 
     /**
-     * Prepend the task instruction to the raw user text. When a system override is
-     * present it owns the directive, so the user turn stays the raw text.
+     * Place the raw user text first and the task instruction LAST, immediately
+     * before the assistant turn. Tiny instruction models are strongly recency-biased:
+     * the directive closest to the generation point is the one they actually act on.
+     * When a system override is present it owns the directive, so the user turn stays
+     * the raw text.
      */
     private String composeUserTurn(PromptTask task, String systemOverride, String userText) {
         String text = userText == null ? "" : userText;
@@ -86,7 +89,7 @@ public final class ChatMlPromptStrategy implements PromptStrategy {
         if (instruction.isBlank()) {
             return text;
         }
-        return instruction + "\n\n" + text;
+        return text + "\n\n" + instruction;
     }
 
     private static String render(ChatConversation conversation) {
