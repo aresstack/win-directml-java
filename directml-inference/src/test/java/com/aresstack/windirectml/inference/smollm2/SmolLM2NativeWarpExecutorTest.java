@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.inference.smollm2;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpKvCache;
 import com.aresstack.windirectml.inference.model.RuntimeTensor;
 import com.aresstack.windirectml.inference.model.SourceTensorDataType;
 import com.aresstack.windirectml.windows.WindowsBindings;
@@ -39,7 +40,7 @@ class SmolLM2NativeWarpExecutorTest {
         try (WindowsBindings bindings = new WindowsBindings()) {
             bindings.init("warp");
             try (SmolLM2WarpForwardPass warpForwardPass = new SmolLM2WarpForwardPass(bindings, weights)) {
-                SmolLM2WarpKvCache kvCache = SmolLM2WarpKvCache.create(weights.config(), tokenIds.size());
+                DecoderOnlyWarpKvCache kvCache = DecoderOnlyWarpKvCache.create(weights.config().toDecoderOnlyConfig(), tokenIds.size());
                 float[] warpLogits = warpForwardPass.logitsForLastToken(tokenIds, kvCache);
 
                 assertEquals(referenceLogits.length, warpLogits.length);
@@ -105,11 +106,11 @@ class SmolLM2NativeWarpExecutorTest {
             bindings.init("warp");
             try (SmolLM2WarpForwardPass warp = new SmolLM2WarpForwardPass(bindings, weights)) {
                 // Way A: one call over the whole block → batched prefill (projectSequenceInto).
-                SmolLM2WarpKvCache batchedCache = SmolLM2WarpKvCache.create(weights.config(), tokenIds.size());
+                DecoderOnlyWarpKvCache batchedCache = DecoderOnlyWarpKvCache.create(weights.config().toDecoderOnlyConfig(), tokenIds.size());
                 float[] batchedLogits = warp.logitsForLastToken(tokenIds, batchedCache);
 
                 // Way B: feed one token at a time → per-token decode path for every step.
-                SmolLM2WarpKvCache incrementalCache = SmolLM2WarpKvCache.create(weights.config(), tokenIds.size());
+                DecoderOnlyWarpKvCache incrementalCache = DecoderOnlyWarpKvCache.create(weights.config().toDecoderOnlyConfig(), tokenIds.size());
                 float[] incrementalLogits = null;
                 for (int n = 1; n <= tokenIds.size(); n++) {
                     incrementalLogits = warp.logitsForLastToken(tokenIds.subList(0, n), incrementalCache);

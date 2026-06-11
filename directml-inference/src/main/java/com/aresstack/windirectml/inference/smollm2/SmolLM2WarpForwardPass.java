@@ -6,6 +6,8 @@ import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyReferenceDense
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyRotaryEmbedding;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpDenseProjection;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpFusedDenseProjection;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpKvCache;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpLayerKvCache;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpMlpBlock;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpSwiGluKernel;
 import com.aresstack.windirectml.windows.GpuPipeline;
@@ -219,7 +221,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
      * projection. This is mathematically identical to the per-token loop (same RMSNorm/RoPE/causal-attention/SwiGLU)
      * but issues far fewer WARP dispatches. The single-token decode step keeps the per-token path.</p>
      */
-    float[] logitsForLastToken(List<Integer> tokenIds, SmolLM2WarpKvCache kvCache) {
+    float[] logitsForLastToken(List<Integer> tokenIds, DecoderOnlyWarpKvCache kvCache) {
         ensureOpen();
         Objects.requireNonNull(tokenIds, "tokenIds");
         Objects.requireNonNull(kvCache, "kvCache");
@@ -248,7 +250,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         return logits;
     }
 
-    private float[] logitsForToken(int tokenId, int position, SmolLM2WarpKvCache kvCache, boolean projectLogits) {
+    private float[] logitsForToken(int tokenId, int position, DecoderOnlyWarpKvCache kvCache, boolean projectLogits) {
         if (tokenId < 0 || tokenId >= config.vocabSize()) {
             throw new IllegalArgumentException("tokenId out of vocabulary range: " + tokenId);
         }
@@ -296,7 +298,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     }
 
     private void runLayerStepInPlace(float[] hidden, int layerIndex, WarpLayer layer,
-                                     SmolLM2WarpLayerKvCache layerCache, int position, boolean prof) {
+                                     DecoderOnlyWarpLayerKvCache layerCache, int position, boolean prof) {
         long t = prof ? System.nanoTime() : 0L;
         System.arraycopy(hidden, 0, scratchAttnNorm, 0, hiddenSize);
         DecoderOnlyMath.rmsNorm(scratchAttnNorm, layer.inputNorm, rmsNormEps);
@@ -333,7 +335,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     }
 
     private void runSelfAttentionStepInto(float[] input, WarpLayer layer,
-                                          SmolLM2WarpLayerKvCache layerCache, int position, boolean prof) {
+                                          DecoderOnlyWarpLayerKvCache layerCache, int position, boolean prof) {
         int numHeads = config.numAttentionHeads();
         int numKvHeads = config.effectiveKeyValueHeads();
         int headDim = config.effectiveHeadDim();
@@ -429,7 +431,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     // (RMSNorm, RoPE, causal grouped-query attention, SwiGLU, residuals) is identical to the per-token path, so the
     // batched prefill is numerically equivalent to the reference forward pass apart from GPU rounding.
 
-    private float[] prefillSequence(List<Integer> tokenIds, SmolLM2WarpKvCache kvCache, int startPosition) {
+    private float[] prefillSequence(List<Integer> tokenIds, DecoderOnlyWarpKvCache kvCache, int startPosition) {
         int hidden = config.hiddenSize();
         int seq = tokenIds.size() - startPosition;
         if (kvCache.layerCount() != layers.size()) {
@@ -460,7 +462,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     }
 
     private float[] runLayerPrefill(float[] hiddenSeq, int seq, int startPosition, WarpLayer layer,
-                                    SmolLM2WarpLayerKvCache layerCache) {
+                                    DecoderOnlyWarpLayerKvCache layerCache) {
         int hidden = config.hiddenSize();
         int numHeads = config.numAttentionHeads();
         int numKvHeads = config.effectiveKeyValueHeads();

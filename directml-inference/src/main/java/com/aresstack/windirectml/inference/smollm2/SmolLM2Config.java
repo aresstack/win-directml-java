@@ -1,5 +1,7 @@
 package com.aresstack.windirectml.inference.smollm2;
 
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyConfig;
+
 import java.util.List;
 
 /**
@@ -48,5 +50,25 @@ public record SmolLM2Config(
 
     public SmolLM2SpecialTokens specialTokens() {
         return new SmolLM2SpecialTokens(bosTokenId, eosTokenId, padTokenId);
+    }
+
+    /**
+     * Family-neutral shape view for the shared {@code decoderonly} runtime. The SmolLM2 record cannot implement
+     * {@link DecoderOnlyConfig} directly (its key-value-head / head-dim components are nullable {@link Integer} and its
+     * epsilons are {@code double}), so this is the explicit ModelConfig adapter point: it resolves the effective GQA
+     * head counts / head dim and narrows the epsilons to {@code float}.
+     */
+    public DecoderOnlyConfig toDecoderOnlyConfig() {
+        return DecoderOnlyConfig.of(
+                numHiddenLayers,
+                hiddenSize,
+                intermediateSize,
+                numAttentionHeads,
+                effectiveKeyValueHeads(),
+                effectiveHeadDim(),
+                maxPositionEmbeddings,
+                vocabSize,
+                (float) rmsNormEps,
+                (float) ropeTheta);
     }
 }

@@ -2,6 +2,7 @@ package com.aresstack.windirectml.inference.smollm2;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyGeneratedTokens;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyStopTokenPolicy;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpKvCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,7 +52,8 @@ final class SmolLM2WarpGenerationLoop {
         String finishReason = "length";
         SmolLM2TokenSampler tokenSampler = tokenSamplerFactory.create(request.options());
         int maxTokens = request.inputTokenIds().size() + request.maxNewTokens();
-        SmolLM2WarpKvCache kvCache = SmolLM2WarpKvCache.create(forwardPass.config(), maxTokens);
+        DecoderOnlyWarpKvCache kvCache = DecoderOnlyWarpKvCache.create(
+                forwardPass.config().toDecoderOnlyConfig(), maxTokens);
         List<String> stepTopK = new ArrayList<>();
         for (int i = 0; i < request.maxNewTokens(); i++) {
             long forwardStart = System.nanoTime();
