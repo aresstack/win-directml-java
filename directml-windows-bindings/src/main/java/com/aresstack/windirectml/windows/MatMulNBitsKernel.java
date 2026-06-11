@@ -891,8 +891,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     // FP32 single-row matvec shader (M=1 decode) for the WARP software rasterizer. One thread computes one
     // output row n: Y[n] = sum_k W[n,k] * X[k], reading the [N,K] row-major FP32 weight buffer and the [K]
     // input directly as UAVs. Fully parallel across N rows (no groupshared, contiguous per-row weight reads),
-    // which maps onto WARP's CPU threads far better than DirectML's GEMM for M=1. Numerically this is the same
-    // FP32 dot product as the DML GEMM path (the only differences are ordinary GPU floating-point rounding).
+    // which maps onto WARP's CPU threads far better than DirectML's GEMM for M=1. The K loop is vectorised with
+    // Load4/dot (4 floats per load) to cut load-instruction overhead in the bandwidth-bound inner loop.
+    // Numerically this is the same FP32 dot product as the DML GEMM path (only ordinary GPU FP rounding differs).
     private static final String FP32_MATVEC_WARP_HLSL = """
             RWByteAddressBuffer X : register(u0);
             RWByteAddressBuffer W : register(u1);
@@ -905,7 +906,14 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 if (n >= N) return;
                 uint base = n * K;
                 float sum = 0.0;
-                for (uint k = 0; k < K; k++) {
+                uint k = 0;
+                uint kVec = K & ~3u;
+                for (; k < kVec; k += 4) {
+                    float4 w = asfloat(W.Load4((base + k) * 4));
+                    float4 x = asfloat(X.Load4(k * 4));
+                    sum += dot(w, x);
+                }
+                for (; k < K; k++) {
                     sum += asfloat(W.Load((base + k) * 4)) * asfloat(X.Load(k * 4));
                 }
                 Y.Store(n * 4, asuint(sum));
