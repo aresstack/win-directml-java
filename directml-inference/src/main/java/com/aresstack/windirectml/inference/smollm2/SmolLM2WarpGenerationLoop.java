@@ -35,6 +35,7 @@ final class SmolLM2WarpGenerationLoop {
         long runtimeStart = System.nanoTime();
         long prefillNanos = 0L;
         long decoderStepNanos = 0L;
+        long lmHeadNanos = 0L;
         long tokenSelectNanos = 0L;
         List<Integer> fullTokenIds = new ArrayList<>(request.inputTokenIds());
         DecoderOnlyGeneratedTokens generatedTokens = new DecoderOnlyGeneratedTokens(request.maxNewTokens());
@@ -46,10 +47,14 @@ final class SmolLM2WarpGenerationLoop {
             long forwardStart = System.nanoTime();
             float[] logits = forwardPass.logitsForLastToken(fullTokenIds, kvCache);
             long forwardNanos = System.nanoTime() - forwardStart;
+            // Report the LM-head projection separately instead of silently folding it into prefill/decoder.
+            long stepLmHeadNanos = Math.min(forwardPass.lastCallLmHeadNanos(), forwardNanos);
+            lmHeadNanos += stepLmHeadNanos;
+            long computeNanos = forwardNanos - stepLmHeadNanos;
             if (i == 0) {
-                prefillNanos += forwardNanos;
+                prefillNanos += computeNanos;
             } else {
-                decoderStepNanos += forwardNanos;
+                decoderStepNanos += computeNanos;
             }
 
             if (DEBUG_TOP_K > 0 && i < DEBUG_STEPS) {
@@ -75,7 +80,7 @@ final class SmolLM2WarpGenerationLoop {
                 0L,
                 prefillNanos,
                 decoderStepNanos,
-                0L,
+                lmHeadNanos,
                 tokenSelectNanos,
                 0L,
                 SmolLM2ReferenceHotspotProfile.empty(),

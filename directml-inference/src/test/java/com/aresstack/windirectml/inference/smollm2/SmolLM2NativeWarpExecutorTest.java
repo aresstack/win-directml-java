@@ -95,6 +95,33 @@ class SmolLM2NativeWarpExecutorTest {
                 "WARP generate(request, consumer) must invoke onToken for every accepted token");
     }
 
+    @Test
+    void batchedPrefillMatchesIncrementalPerTokenPath() throws Exception {
+        assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12/DirectML");
+        SmolLM2Weights weights = syntheticWeights();
+        List<Integer> tokenIds = List.of(3, 7, 1, 5, 2, 9);
+
+        try (WindowsBindings bindings = new WindowsBindings()) {
+            bindings.init("warp");
+            try (SmolLM2WarpForwardPass warp = new SmolLM2WarpForwardPass(bindings, weights)) {
+                // Way A: one call over the whole block → batched prefill (projectSequenceInto).
+                SmolLM2ReferenceKvCache batchedCache = SmolLM2ReferenceKvCache.create(weights.config());
+                float[] batchedLogits = warp.logitsForLastToken(tokenIds, batchedCache);
+
+                // Way B: feed one token at a time → per-token decode path for every step.
+                SmolLM2ReferenceKvCache incrementalCache = SmolLM2ReferenceKvCache.create(weights.config());
+                float[] incrementalLogits = null;
+                for (int n = 1; n <= tokenIds.size(); n++) {
+                    incrementalLogits = warp.logitsForLastToken(tokenIds.subList(0, n), incrementalCache);
+                }
+
+                assertEquals(DecoderOnlyMath.argmax(incrementalLogits), DecoderOnlyMath.argmax(batchedLogits),
+                        "Batched prefill must select the same top-1 token as the incremental per-token path");
+                assertArrayEquals(incrementalLogits, batchedLogits, TOLERANCE);
+            }
+        }
+    }
+
     // ── Synthetic weights ─────────────────────────────────────────────────
 
     private static SmolLM2Config config() {
