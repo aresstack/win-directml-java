@@ -891,10 +891,11 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     // FP32 single-row matvec shader (M=1 decode) for the WARP software rasterizer. One thread computes one
     // output row n: Y[n] = sum_k W[n,k] * X[k], reading the [N,K] row-major FP32 weight buffer and the [K]
     // input directly as UAVs. Fully parallel across N rows (no groupshared, contiguous per-row weight reads),
-    // which maps onto WARP's CPU threads far better than DirectML's GEMM for M=1. The K loop is unrolled 8-wide
-    // with two independent float4 accumulators (Load4) to break the serial add dependency chain and cut load
-    // overhead in the bandwidth-bound inner loop; a scalar tail handles K not divisible by 8. Numerically this
-    // is the same FP32 dot product as the DML GEMM path (only ordinary GPU FP rounding differs).
+    // which maps onto WARP's CPU threads far better than DirectML's GEMM for M=1. The K loop is vectorised with
+    // Load4/dot (4 floats per load) to cut load-instruction overhead in the bandwidth-bound inner loop. (An
+    // 8-wide unroll with two float4 accumulators was measured ~15% SLOWER on WARP — the simple Load4/dot loop
+    // is what WARP's shader JIT handles best.) Numerically this is the same FP32 dot product as the DML GEMM
+    // path (only ordinary GPU FP rounding differs).
     private static final String FP32_MATVEC_WARP_HLSL = """
             RWByteAddressBuffer X : register(u0);
             RWByteAddressBuffer W : register(u1);
@@ -906,16 +907,14 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 uint n = dtid.x;
                 if (n >= N) return;
                 uint base = n * K;
-                float4 acc0 = float4(0.0, 0.0, 0.0, 0.0);
-                float4 acc1 = float4(0.0, 0.0, 0.0, 0.0);
+                float sum = 0.0;
                 uint k = 0;
-                uint k8 = K & ~7u;
-                for (; k < k8; k += 8) {
-                    acc0 += asfloat(W.Load4((base + k) * 4))     * asfloat(X.Load4(k * 4));
-                    acc1 += asfloat(W.Load4((base + k + 4) * 4)) * asfloat(X.Load4((k + 4) * 4));
+                uint kVec = K & ~3u;
+                for (; k < kVec; k += 4) {
+                    float4 w = asfloat(W.Load4((base + k) * 4));
+                    float4 x = asfloat(X.Load4(k * 4));
+                    sum += dot(w, x);
                 }
-                float4 acc = acc0 + acc1;
-                float sum = acc.x + acc.y + acc.z + acc.w;
                 for (; k < K; k++) {
                     sum += asfloat(W.Load((base + k) * 4)) * asfloat(X.Load(k * 4));
                 }
