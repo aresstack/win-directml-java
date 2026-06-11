@@ -282,6 +282,13 @@ public final class SummarizerPanel extends JPanel {
         appendResult("    avg/token runtime: " + profile.averageTokenRuntimeMillis(result.outputTokens()) + " ms");
         appendSmolLm2ReferenceHotspots(profile);
         appendResult("  Generated token IDs: " + result.diagnostics().generatedTokenIdsPreview(32));
+        List<String> stepTopK = result.diagnostics().profile().stepTopK();
+        if (!stepTopK.isEmpty()) {
+            appendResult("  Top-K raw logits (for numerical comparison vs Transformers):");
+            for (String line : stepTopK) {
+                appendResult("    " + line);
+            }
+        }
         if (result.diagnostics().immediateEos()) {
             appendResult("  Warning: generation stopped after an immediate EOS token.");
         }

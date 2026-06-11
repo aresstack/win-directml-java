@@ -1,5 +1,7 @@
 package com.aresstack.windirectml.inference.smollm2;
 
+import java.util.List;
+
 /**
  * Timing profile for one SmolLM2 generation run.
  */
@@ -10,7 +12,8 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
                                        long lmHeadNanos,
                                        long tokenSelectNanos,
                                        long detokenizeNanos,
-                                       SmolLM2ReferenceHotspotProfile referenceHotspots) {
+                                       SmolLM2ReferenceHotspotProfile referenceHotspots,
+                                       List<String> stepTopK) {
 
     public SmolLM2GenerationProfile {
         runtimeNanos = nonNegative(runtimeNanos);
@@ -23,6 +26,19 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
         referenceHotspots = referenceHotspots == null
                 ? SmolLM2ReferenceHotspotProfile.empty()
                 : referenceHotspots;
+        stepTopK = stepTopK == null ? List.of() : List.copyOf(stepTopK);
+    }
+
+    public SmolLM2GenerationProfile(long runtimeNanos,
+                                    long tokenizeNanos,
+                                    long prefillNanos,
+                                    long decoderStepNanos,
+                                    long lmHeadNanos,
+                                    long tokenSelectNanos,
+                                    long detokenizeNanos,
+                                    SmolLM2ReferenceHotspotProfile referenceHotspots) {
+        this(runtimeNanos, tokenizeNanos, prefillNanos, decoderStepNanos, lmHeadNanos,
+                tokenSelectNanos, detokenizeNanos, referenceHotspots, List.of());
     }
 
     public SmolLM2GenerationProfile(long runtimeNanos,
@@ -33,12 +49,12 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
                                     long tokenSelectNanos,
                                     long detokenizeNanos) {
         this(runtimeNanos, tokenizeNanos, prefillNanos, decoderStepNanos, lmHeadNanos,
-                tokenSelectNanos, detokenizeNanos, SmolLM2ReferenceHotspotProfile.empty());
+                tokenSelectNanos, detokenizeNanos, SmolLM2ReferenceHotspotProfile.empty(), List.of());
     }
 
     public static SmolLM2GenerationProfile empty() {
         return new SmolLM2GenerationProfile(0L, 0L, 0L, 0L, 0L, 0L, 0L,
-                SmolLM2ReferenceHotspotProfile.empty());
+                SmolLM2ReferenceHotspotProfile.empty(), List.of());
     }
 
     public SmolLM2GenerationProfile withTextTimings(long newRuntimeNanos,
@@ -52,7 +68,8 @@ public record SmolLM2GenerationProfile(long runtimeNanos,
                 lmHeadNanos,
                 tokenSelectNanos,
                 newDetokenizeNanos,
-                referenceHotspots);
+                referenceHotspots,
+                stepTopK);
     }
 
     public long runtimeMillis() {

@@ -54,6 +54,8 @@ public final class SmolLM2ReferenceGenerationLoop {
         String finishReason = "length";
         SmolLM2TokenSampler tokenSampler = tokenSamplerFactory.create(request.options());
         SmolLM2ReferenceKvCache kvCache = SmolLM2ReferenceKvCache.create(forwardPass.config());
+        List<String> stepTopK = new ArrayList<>();
+        int topKSteps = Math.max(DEBUG_STEPS, 3);
         for (int i = 0; i < request.maxNewTokens(); i++) {
             long lmHeadBefore = forwardPass.profile().lmHeadNanos();
             long forwardStart = System.nanoTime();
@@ -67,8 +69,15 @@ public final class SmolLM2ReferenceGenerationLoop {
                 decoderStepNanos += nonLmHeadForwardNanos;
             }
 
-            if (DEBUG_TOP_K > 0 && i < DEBUG_STEPS) {
-                logTopK(i, logits, DEBUG_TOP_K);
+            // Always capture the first few steps' top-K raw logits (pre-penalty) so the
+            // numerical comparison against a Hugging Face Transformers reference is visible
+            // in the workbench output without any VM flag.
+            if (i < topKSteps) {
+                String line = topKLine(i, logits, 10);
+                stepTopK.add(line);
+                if (DEBUG_TOP_K > 0 && i < DEBUG_STEPS) {
+                    log.info(line);
+                }
             }
 
             long tokenSelectStart = System.nanoTime();
@@ -93,7 +102,8 @@ public final class SmolLM2ReferenceGenerationLoop {
                 forwardPass.profile().lmHeadNanos(),
                 tokenSelectNanos,
                 0L,
-                forwardPass.profile().snapshot());
+                forwardPass.profile().snapshot(),
+                stepTopK);
         return new SmolLM2TokenRuntimeResult(
                 request.inputTokenIds(),
                 toList(generatedTokens),
@@ -115,11 +125,11 @@ public final class SmolLM2ReferenceGenerationLoop {
     }
 
     /**
-     * Log the top-{@code k} raw logits (pre-penalty) and their token IDs for one step.
-     * Used only when {@code -Dsmollm2.debug.topk} is set, to enable a numerical diff
-     * against a Hugging Face Transformers reference run on the same input token IDs.
+     * Build a "top-{@code k} raw logits (pre-penalty)" line for one step, listing token IDs
+     * and logit values. This is the seam for a numerical diff against a Hugging Face
+     * Transformers reference run on identical input token IDs.
      */
-    private static void logTopK(int step, float[] logits, int k) {
+    private static String topKLine(int step, float[] logits, int k) {
         int topK = Math.min(k, logits.length);
         int[] bestIds = new int[topK];
         float[] bestVals = new float[topK];
@@ -141,13 +151,13 @@ public final class SmolLM2ReferenceGenerationLoop {
             bestIds[pos] = id;
         }
         StringBuilder sb = new StringBuilder(64 + topK * 24);
-        sb.append("SmolLM2 top-").append(topK).append(" logits @ step ").append(step).append(" (pre-penalty): ");
+        sb.append("top-").append(topK).append(" @ step ").append(step).append(" (raw, pre-penalty): ");
         for (int rank = 0; rank < topK; rank++) {
             if (rank > 0) {
                 sb.append(", ");
             }
             sb.append('#').append(bestIds[rank]).append('=').append(String.format("%.4f", bestVals[rank]));
         }
-        log.info(sb.toString());
+        return sb.toString();
     }
 }
