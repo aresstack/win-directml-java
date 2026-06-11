@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -74,12 +75,17 @@ public final class SmolLM2Tokenizer {
     }
 
     public static SmolLM2Tokenizer load(Path tokenizerJson) throws IOException {
+        return load(tokenizerJson, null);
+    }
+
+    public static SmolLM2Tokenizer load(Path tokenizerJson, Path tokenizerConfigJson) throws IOException {
         Objects.requireNonNull(tokenizerJson, "tokenizerJson");
         ObjectMapper mapper = new ObjectMapper();
         JsonNode root = mapper.readTree(tokenizerJson.toFile());
         JsonNode model = requireObject(root, "model");
         Map<String, Integer> vocab = readVocab(model);
         Map<String, Integer> specialTokens = readSpecialTokens(root, vocab);
+        readTokenizerConfigSpecialTokens(mapper, tokenizerConfigJson, vocab, specialTokens);
         String[] idToToken = createIdToToken(vocab);
         Map<Long, Integer> mergeRanks = readMerges(model);
         return new SmolLM2Tokenizer(vocab, idToToken, mergeRanks, specialTokens);
@@ -255,18 +261,57 @@ public final class SmolLM2Tokenizer {
             return specialTokens;
         }
         for (JsonNode token : addedTokens) {
-            if (!token.has("content") || !token.has("id")) {
-                continue;
-            }
-            String content = token.get("content").asText();
-            int id = token.get("id").asInt();
-            boolean special = token.has("special") && token.get("special").asBoolean();
-            vocab.put(content, id);
-            if (special) {
-                specialTokens.put(content, id);
-            }
+            registerAddedToken(token, vocab, specialTokens);
         }
         return specialTokens;
+    }
+
+    private static void readTokenizerConfigSpecialTokens(ObjectMapper mapper,
+                                                        Path tokenizerConfigJson,
+                                                        Map<String, Integer> vocab,
+                                                        Map<String, Integer> specialTokens) throws IOException {
+        if (tokenizerConfigJson == null || !Files.isRegularFile(tokenizerConfigJson)) {
+            return;
+        }
+        JsonNode root = mapper.readTree(tokenizerConfigJson.toFile());
+        JsonNode addedTokensDecoder = root.get("added_tokens_decoder");
+        if (addedTokensDecoder == null || !addedTokensDecoder.isObject()) {
+            return;
+        }
+        addedTokensDecoder.fields().forEachRemaining(entry ->
+                registerAddedToken(entry.getValue(), parseTokenId(entry.getKey()), vocab, specialTokens));
+    }
+
+    private static void registerAddedToken(JsonNode token,
+                                           Map<String, Integer> vocab,
+                                           Map<String, Integer> specialTokens) {
+        if (!token.has("content") || !token.has("id")) {
+            return;
+        }
+        registerAddedToken(token, token.get("id").asInt(), vocab, specialTokens);
+    }
+
+    private static void registerAddedToken(JsonNode token,
+                                           int id,
+                                           Map<String, Integer> vocab,
+                                           Map<String, Integer> specialTokens) {
+        if (!token.has("content")) {
+            return;
+        }
+        String content = token.get("content").asText();
+        boolean special = token.has("special") && token.get("special").asBoolean();
+        vocab.put(content, id);
+        if (special) {
+            specialTokens.put(content, id);
+        }
+    }
+
+    private static int parseTokenId(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("Invalid SmolLM2 tokenizer_config.json token id: " + value, exception);
+        }
     }
 
     private static String[] createIdToToken(Map<String, Integer> vocab) {

@@ -37,6 +37,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
 
     private static final String DEFAULT_PACKAGE_FILE = "model.wdmlpack";
     private static final String TOKENIZER_FILE = "tokenizer.json";
+    private static final String TOKENIZER_CONFIG_FILE = "tokenizer_config.json";
 
     private final Path modelDir;
     private final SmolLM2WdmlPackCompiler compiler;
@@ -69,9 +70,10 @@ public final class SmolLM2WorkbenchRuntimeRunner {
 
         Path packagePath = ensureExecutablePackage();
         Path tokenizerPath = requireTokenizer();
+        Path tokenizerConfigPath = optionalTokenizerConfig();
 
         SmolLM2RuntimePackage runtimePackage = SmolLM2RuntimePackage.open(packagePath);
-        SmolLM2Tokenizer tokenizer = SmolLM2Tokenizer.load(tokenizerPath);
+        SmolLM2Tokenizer tokenizer = SmolLM2Tokenizer.load(tokenizerPath, tokenizerConfigPath);
         Optional<SmolLM2WarpReadinessReport> warpReadiness = inspectWarpReadinessIfRequested(runtimePackage, safeBackend);
         Optional<SmolLM2WarpExecutionStatus> warpStatus = warpReadiness.map(SmolLM2WorkbenchRuntimeRunner::toExecutionStatus);
         try (SmolLM2Runtime runtime = loadRuntime(runtimePackage, tokenizer, safeBackend, warpStatus)) {
@@ -211,6 +213,14 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     + ". Download the model first from the Download tab.");
         }
         return tokenizer;
+    }
+
+    private Path optionalTokenizerConfig() {
+        Path tokenizerConfig = modelDir.resolve(TOKENIZER_CONFIG_FILE);
+        if (Files.isRegularFile(tokenizerConfig)) {
+            return tokenizerConfig;
+        }
+        return null;
     }
 
     public record Result(String text,

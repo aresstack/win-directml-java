@@ -54,6 +54,22 @@ class SmolLM2TokenizerTest {
         assertEquals("ab", tokenizer.decode(new int[]{0, 3, 1}, true));
     }
 
+
+    @Test
+    void tokenizerLoadsSpecialTokensFromTokenizerConfig() throws Exception {
+        Path tokenizerJson = tempDir.resolve("tokenizer.json");
+        Path tokenizerConfigJson = tempDir.resolve("tokenizer_config.json");
+        writeTokenizerJsonWithoutAddedTokens(tokenizerJson);
+        writeTokenizerConfigWithChatTokens(tokenizerConfigJson);
+
+        SmolLM2Tokenizer tokenizer = SmolLM2Tokenizer.load(tokenizerJson, tokenizerConfigJson);
+
+        assertArrayEquals(new int[]{10, 0, 11}, tokenizer.encode("<|im_start|>a<|im_end|>"));
+        assertTrue(tokenizer.isSpecialToken(10));
+        assertTrue(tokenizer.isSpecialToken(11));
+        assertEquals("a", tokenizer.decode(new int[]{10, 0, 11}, true));
+    }
+
     @Test
     void tokenizerUsesGpt2NumberPreTokenizationWithoutThreeDigitSplit() throws Exception {
         Path tokenizerJson = tempDir.resolve("gpt2-number-tokenizer.json");
@@ -70,6 +86,38 @@ class SmolLM2TokenizerTest {
         SmolLM2Tokenizer tokenizer = SmolLM2Tokenizer.load(tokenizerJson);
 
         assertArrayEquals(new int[]{10, 15}, tokenizer.encode(".Hello"));
+    }
+
+
+    private static void writeTokenizerJsonWithoutAddedTokens(Path tokenizerJson) throws Exception {
+        Map<String, Object> model = new LinkedHashMap<>();
+        Map<String, Integer> vocab = new LinkedHashMap<>();
+        vocab.put("a", 0);
+        model.put("type", "BPE");
+        model.put("vocab", vocab);
+        model.put("merges", List.of());
+
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("model", model);
+        root.put("added_tokens", List.of());
+        Files.writeString(tokenizerJson, MAPPER.writeValueAsString(root), StandardCharsets.UTF_8);
+    }
+
+    private static void writeTokenizerConfigWithChatTokens(Path tokenizerConfigJson) throws Exception {
+        Map<String, Object> imStart = new LinkedHashMap<>();
+        imStart.put("content", "<|im_start|>");
+        imStart.put("special", true);
+        Map<String, Object> imEnd = new LinkedHashMap<>();
+        imEnd.put("content", "<|im_end|>");
+        imEnd.put("special", true);
+
+        Map<String, Object> decoder = new LinkedHashMap<>();
+        decoder.put("10", imStart);
+        decoder.put("11", imEnd);
+
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("added_tokens_decoder", decoder);
+        Files.writeString(tokenizerConfigJson, MAPPER.writeValueAsString(root), StandardCharsets.UTF_8);
     }
 
     private static void writeGpt2PreTokenizerFixture(Path tokenizerJson) throws Exception {
