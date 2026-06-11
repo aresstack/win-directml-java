@@ -76,7 +76,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
             SmolLM2RuntimeResult result = runtime.generate(new SmolLM2RuntimeRequest(
                     safeInput,
                     maxTokens,
-                    SmolLM2GenerationOptions.greedy()), sink);
+                    SmolLM2GenerationOptions.greedyChat()), sink);
             Optional<SmolLM2WarpExecutionStatus> effectiveWarpStatus = runtime.warpExecutionStatus().or(() -> warpStatus);
             return new Result(
                     result.generatedText(),

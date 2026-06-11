@@ -161,6 +161,25 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private static volatile Arena sharedBatchArena = null;
     private static final Object sharedArenaLock = new Object();
 
+    // ── Device ownership of the SHARED batch resources ────────────────────────
+    // The static shaders/buffers above are bound to ONE D3D12 device — the device
+    // of whichever model loaded first. They are intentionally retained for the JVM
+    // lifetime so a model with many layers compiles the batch shader only once.
+    //
+    // BUT when the workbench switches models, the previous model's WindowsBindings
+    // (and its D3D12 device) is closed. The static resources then dangle on a dead
+    // device. Re-using GPU buffers/shaders created on device A from a command queue
+    // on device B raises DXGI_ERROR_DEVICE_REMOVED — observed as the T5 "matvec
+    // failed" that only happens after another model (Qwen/Phi-3) ran first.
+    //
+    // We therefore record the owning device address. When a kernel on a DIFFERENT
+    // device asks for batch capacity, we release the stale static resources and
+    // rebuild them against the new device (see ensureBatchCapacity).
+    private static volatile long sharedBatchDeviceAddr = 0L;
+    // The JVM shutdown hook must be registered only once, even though the static
+    // arena may be re-created when the owning device changes.
+    private static volatile boolean batchShutdownHookRegistered = false;
+
     // ── Per-instance references to the shared buffers (for clean code) ─────────────
     // These are NOT allocated per-instance — they just point to the shared buffers.
     // Kept as instance fields so existing code (int4BatchInputBuf, etc.) still works.
@@ -1902,6 +1921,24 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                     "requiredM=" + requiredM + " exceeds MAX_BATCH_M=" + MAX_BATCH_M);
         }
 
+        // ── Device-ownership guard ────────────────────────────────────────
+        // If the static batch resources were built on a DIFFERENT (now-closed)
+        // device — e.g. a previous model in the workbench — reusing them would
+        // dispatch device-A buffers on device-B's command queue and remove the
+        // device. Release the stale resources so they get rebuilt below for THIS
+        // device.
+        long currentDeviceAddr = wb.getD3d12Device().address();
+        if (sharedBatchDeviceAddr != 0L && sharedBatchDeviceAddr != currentDeviceAddr) {
+            synchronized (batchBufferLock) {
+                if (sharedBatchDeviceAddr != 0L && sharedBatchDeviceAddr != currentDeviceAddr) {
+                    log.info("Batch resources owned by a different D3D12 device (0x{} -> 0x{}); "
+                                    + "releasing stale shared buffers/shaders and rebuilding for the new device",
+                            Long.toHexString(sharedBatchDeviceAddr), Long.toHexString(currentDeviceAddr));
+                    releaseStaticBatchResources();
+                }
+            }
+        }
+
         // ── If shared buffers already exist, just wire instance fields ──
         if (requiredM <= sharedBatchCapacityM && K <= sharedBatchMaxK && N <= sharedBatchMaxN) {
             synchronized (batchBufferLock) {
@@ -1980,14 +2017,23 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 synchronized (sharedArenaLock) {
                     if (sharedBatchArena == null) {
                         sharedBatchArena = Arena.ofShared();
-                        // Register shutdown hook to clean up static resources on JVM exit
-                        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                            log.info("Shutdown hook: releasing static batch resources");
-                            releaseStaticBatchResources();
-                        }));
+                        // Register shutdown hook to clean up static resources on JVM exit.
+                        // Registered only ONCE for the JVM — the arena may be re-created
+                        // when the owning device changes, but a single hook suffices.
+                        if (!batchShutdownHookRegistered) {
+                            batchShutdownHookRegistered = true;
+                            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                                log.info("Shutdown hook: releasing static batch resources");
+                                releaseStaticBatchResources();
+                            }));
+                        }
                     }
                 }
             }
+            // Record which device now owns the (re)built static batch resources so a
+            // later model on a different device triggers a rebuild instead of reusing
+            // these buffers cross-device.
+            sharedBatchDeviceAddr = dev.address();
 
             // Allocate SHARED scratch buffers (static — one set for all instances)
             // NOTE: Uses sharedBatchArena, NOT instance 'arena'!
@@ -2331,6 +2377,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             sharedBatchCapacityM = 0;
             sharedBatchMaxK = 0;
             sharedBatchMaxN = 0;
+            sharedBatchDeviceAddr = 0L;
 
             // Close static arena (releases all GPU resources allocated in it)
             if (sharedBatchArena != null) {

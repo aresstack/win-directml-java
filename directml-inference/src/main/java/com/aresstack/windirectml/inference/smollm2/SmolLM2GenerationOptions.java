@@ -10,6 +10,12 @@ public record SmolLM2GenerationOptions(Double temperature,
                                        Double repetitionPenalty) {
     private static final double GREEDY_TEMPERATURE = 0.0d;
     private static final double DEFAULT_REPETITION_PENALTY = 1.0d;
+    /**
+     * Repetition penalty for chat-style greedy decoding. Matches the value the
+     * Qwen reference runtime applies internally ({@code 1.2}); small instruction
+     * models otherwise loop on greedy decoding without any penalty.
+     */
+    public static final double CHAT_REPETITION_PENALTY = 1.2d;
 
     public SmolLM2GenerationOptions(Double temperature, Integer topK, Double topP) {
         this(temperature, topK, topP, null, DEFAULT_REPETITION_PENALTY);
@@ -37,6 +43,21 @@ public record SmolLM2GenerationOptions(Double temperature,
                 null,
                 null,
                 DEFAULT_REPETITION_PENALTY);
+    }
+
+    /**
+     * Greedy decoding tuned for chat-style generation: applies the Qwen-reference
+     * {@link #CHAT_REPETITION_PENALTY} so small instruction models (SmolLM2 135M/360M)
+     * stop looping on repeated tokens. Use this for interactive/translation prompts;
+     * use {@link #greedy()} for deterministic test fixtures that expect pure argmax.
+     */
+    public static SmolLM2GenerationOptions greedyChat() {
+        return new SmolLM2GenerationOptions(
+                GREEDY_TEMPERATURE,
+                null,
+                null,
+                null,
+                CHAT_REPETITION_PENALTY);
     }
 
     public static SmolLM2GenerationOptions sampling(double temperature, Integer topK, Double topP, long randomSeed) {
