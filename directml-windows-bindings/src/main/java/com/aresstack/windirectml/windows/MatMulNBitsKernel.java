@@ -124,6 +124,19 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     private long[] int4UavAddrs;           // pre-cached GPU VAs: [X, QW, Scales, ZP, Y]
     private int[] int4Constants;           // pre-cached constants: [N, K, blockSize]
 
+    // ── FP32 WARP matvec (numerics-neutral WARP speed-up for the dequantized FP32 path) ─────
+    // On the D3D12 WARP software rasterizer, DirectML's GEMM is very slow for the M=1 decode
+    // matvec (measured ~0.5 GFLOP/s on SmolLM2). A hand-written FP32 matvec compute shader
+    // (one thread per output row, fully parallel across N rows with contiguous row reads) maps
+    // far better onto WARP's CPU threads. It computes exactly the same FP32 dot products as the
+    // DML GEMM (no quantisation, no CPU-SIMD) — only the dispatch differs. Enabled only on the
+    // WARP backend for the FP32 path; disable with -Ddirectml.fp32.warpMatvec.disabled=true.
+    private final boolean useWarpParallelFp32Matvec;
+    private GpuComputeKernel fp32Shader;    // compiled HLSL FP32 MatVec kernel (WARP path only)
+    private long[] fp32UavAddrs;            // pre-cached GPU VAs: [X, W, Y]
+    private int[] fp32Constants;            // pre-cached constants: [N, K]
+    private static final int FP32_WARP_MATVEC_GROUP_SIZE = 64;
+
     // ── Batched matmul (Opt-A: prefill) — lazily allocated on first matmulBatch call ─────
     // Opt-A-2 v2 (2026-05-29): the batch *shaders* are SHARED across all kernel
     // instances. The HLSL source is identical for every layer × projection, so
@@ -875,6 +888,30 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             }
             """;
 
+    // FP32 single-row matvec shader (M=1 decode) for the WARP software rasterizer. One thread computes one
+    // output row n: Y[n] = sum_k W[n,k] * X[k], reading the [N,K] row-major FP32 weight buffer and the [K]
+    // input directly as UAVs. Fully parallel across N rows (no groupshared, contiguous per-row weight reads),
+    // which maps onto WARP's CPU threads far better than DirectML's GEMM for M=1. Numerically this is the same
+    // FP32 dot product as the DML GEMM path (the only differences are ordinary GPU floating-point rounding).
+    private static final String FP32_MATVEC_WARP_HLSL = """
+            RWByteAddressBuffer X : register(u0);
+            RWByteAddressBuffer W : register(u1);
+            RWByteAddressBuffer Y : register(u2);
+            cbuffer CB : register(b0) { uint N; uint K; };
+
+            [numthreads(64, 1, 1)]
+            void CSMain(uint3 dtid : SV_DispatchThreadID) {
+                uint n = dtid.x;
+                if (n >= N) return;
+                uint base = n * K;
+                float sum = 0.0;
+                for (uint k = 0; k < K; k++) {
+                    sum += asfloat(W.Load((base + k) * 4)) * asfloat(X.Load(k * 4));
+                }
+                Y.Store(n * 4, asuint(sum));
+            }
+            """;
+
     /**
      * Create a MatMulNBits kernel for a specific weight matrix.
      *
@@ -898,6 +935,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                 && wb.isWarpBackend()
                 && !Boolean.getBoolean("directml.int4.warpParallelMatvec.disabled");
         this.warpParallelInt4MatvecRows = selectWarpParallelRows(N, this.useWarpParallelInt4Matvec);
+        this.useWarpParallelFp32Matvec = !useInt4Gpu
+                && wb.isWarpBackend()
+                && !Boolean.getBoolean("directml.fp32.warpMatvec.disabled");
 
         try {
             if (useInt4Gpu) {
@@ -944,6 +984,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         this.useInt4Gpu = false;  // pre-dequantized path always uses DML FP32
         this.useWarpParallelInt4Matvec = false;
         this.warpParallelInt4MatvecRows = 1;
+        this.useWarpParallelFp32Matvec = wb.isWarpBackend()
+                && !Boolean.getBoolean("directml.fp32.warpMatvec.disabled");
 
         try {
             prepareGpu(fp32Weights);
@@ -1144,8 +1186,27 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         // ── Step 8: Pre-allocate execution infrastructure (V1.1) ──────
         prepareExecInfra(dev, dml, inputBytes, outputBytes);
 
+        // ── Step 9 (WARP only): compile the custom FP32 matvec shader ──
+        // On the WARP software rasterizer DirectML's GEMM is very slow for M=1; a hand-written FP32 matvec
+        // compute shader (one thread per output row) runs the same FP32 math far faster. The DML GEMM stays
+        // compiled above as the prefill/batched path and as a fallback. weightBuf is [N,K] row-major FP32.
+        if (useWarpParallelFp32Matvec) {
+            fp32Shader = new GpuComputeKernel(wb, execCmdList,
+                    FP32_MATVEC_WARP_HLSL, "fp32_matvec_warp",
+                    3,   // 3 UAVs: X, W, Y
+                    2,   // 2 constants: N, K
+                    FP32_WARP_MATVEC_GROUP_SIZE);
+            fp32UavAddrs = new long[]{
+                    D3D12Bindings.getGpuVirtualAddress(inputBuf),
+                    D3D12Bindings.getGpuVirtualAddress(weightBuf),
+                    D3D12Bindings.getGpuVirtualAddress(outputBuf)
+            };
+            fp32Constants = new int[]{N, K};
+        }
+
         prepared = true;
-        log.info("MatMulNBitsKernel ready: [{}, {}] on GPU (optimized single-submit)", N, K);
+        log.info("MatMulNBitsKernel ready: [{}, {}] on GPU ({})", N, K,
+                useWarpParallelFp32Matvec ? "WARP FP32 matvec shader" : "optimized single-submit DML GEMM");
     }
 
     private int matvecDispatchElementCount() {
@@ -1500,6 +1561,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             if (useInt4Gpu) {
                 // V3.0: custom HLSL INT4 compute dispatch — no descriptor heap needed
                 int4Shader.recordDispatch(execCmdList, int4UavAddrs, int4Constants, matvecDispatchElementCount());
+            } else if (useWarpParallelFp32Matvec) {
+                // WARP: custom FP32 matvec compute dispatch — no descriptor heap, same FP32 math as DML GEMM
+                fp32Shader.recordDispatch(execCmdList, fp32UavAddrs, fp32Constants, N);
             } else {
                 // Legacy: DML GEMM with FP32 weight buffer
                 mhSetDescriptorHeaps.invokeExact(execCmdList, 1, heapArrayPtr);
@@ -1573,6 +1637,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
             if (useInt4Gpu) {
                 int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
+            } else if (useWarpParallelFp32Matvec) {
+                fp32Shader.recordDispatch(cl, fp32UavAddrs, fp32Constants, N);
             } else {
                 mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
                 mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
@@ -1615,6 +1681,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
             if (useInt4Gpu) {
                 int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
+            } else if (useWarpParallelFp32Matvec) {
+                fp32Shader.recordDispatch(cl, fp32UavAddrs, fp32Constants, N);
             } else {
                 mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
                 mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
@@ -1668,6 +1736,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
             if (useInt4Gpu) {
                 int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
+            } else if (useWarpParallelFp32Matvec) {
+                fp32Shader.recordDispatch(cl, fp32UavAddrs, fp32Constants, N);
             } else {
                 mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
                 mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
@@ -1697,6 +1767,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
             if (useInt4Gpu) {
                 int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
+            } else if (useWarpParallelFp32Matvec) {
+                fp32Shader.recordDispatch(cl, fp32UavAddrs, fp32Constants, N);
             } else {
                 mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
                 mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
@@ -1722,6 +1794,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             var cl = pipeline.getCommandList();
             if (useInt4Gpu) {
                 int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
+            } else if (useWarpParallelFp32Matvec) {
+                fp32Shader.recordDispatch(cl, fp32UavAddrs, fp32Constants, N);
             } else {
                 mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
                 mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
@@ -2263,6 +2337,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
         // Release INT4 GPU mode resources (if active)
         if (int4Shader != null) int4Shader.close();
+
+        // Release the WARP FP32 matvec shader (if active)
+        if (fp32Shader != null) fp32Shader.close();
 
         // ── STATIC RESOURCES: intentionally NOT released here ─────────────
         // SHARED shaders + SHARED batch scratch buffers live for the JVM lifetime.
