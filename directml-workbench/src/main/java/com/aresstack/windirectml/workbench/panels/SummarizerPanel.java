@@ -261,6 +261,7 @@ public final class SummarizerPanel extends JPanel {
         }
         result.warpReadinessReport().ifPresent(this::appendSmolLm2WarpReadiness);
         appendResult("Runtime package: " + result.packagePath().getFileName());
+        appendResult("Effective config: " + result.effectiveConfig());
         if (result.text().isBlank()) {
             appendResult("  NOTE: generated text is empty after detokenization.");
         }

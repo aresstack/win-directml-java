@@ -88,8 +88,24 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                     warnings(effectiveWarpStatus),
                     packagePath,
                     result.diagnostics(),
-                    warpReadiness);
+                    warpReadiness,
+                    effectiveConfigSummary(runtimePackage.config()));
         }
+    }
+
+    private static String effectiveConfigSummary(com.aresstack.windirectml.inference.smollm2.SmolLM2Config cfg) {
+        return "hidden=" + cfg.hiddenSize()
+                + ", layers=" + cfg.numHiddenLayers()
+                + ", heads=" + cfg.numAttentionHeads()
+                + ", kvHeads=" + cfg.effectiveKeyValueHeads()
+                + ", headDim=" + cfg.effectiveHeadDim()
+                + ", ropeTheta=" + cfg.ropeTheta()
+                + ", rmsEps=" + cfg.rmsNormEps()
+                + ", maxPos=" + cfg.maxPositionEmbeddings()
+                + ", tieEmb=" + cfg.tieWordEmbeddings()
+                + ", vocab=" + cfg.vocabSize()
+                + ", bos=" + cfg.bosTokenId()
+                + ", eos=" + cfg.eosTokenId();
     }
 
     private SmolLM2Runtime loadRuntime(SmolLM2RuntimePackage runtimePackage,
@@ -223,7 +239,8 @@ public final class SmolLM2WorkbenchRuntimeRunner {
                          List<String> runtimeWarnings,
                          Path packagePath,
                          SmolLM2GenerationDiagnostics diagnostics,
-                         Optional<SmolLM2WarpReadinessReport> warpReadinessReport) {
+                         Optional<SmolLM2WarpReadinessReport> warpReadinessReport,
+                         String effectiveConfig) {
         public Result {
             text = text == null ? "" : text;
             finishReason = finishReason == null ? "" : finishReason;
@@ -234,6 +251,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
             packagePath = Objects.requireNonNull(packagePath, "packagePath");
             diagnostics = Objects.requireNonNull(diagnostics, "diagnostics");
             warpReadinessReport = warpReadinessReport == null ? Optional.empty() : warpReadinessReport;
+            effectiveConfig = effectiveConfig == null ? "" : effectiveConfig;
         }
     }
 }

@@ -202,12 +202,16 @@ public final class SmolLM2Runtime implements AutoCloseable {
         if (!log.isInfoEnabled()) {
             return;
         }
-        int preview = Math.min(24, inputTokenIds.size());
-        log.info("SmolLM2 prompt [task={}]: {} tokens; first {} ids={}; renderedPrompt=<<<{}>>>",
+        SmolLM2Config cfg = runtimePackage.config();
+        log.info("SmolLM2 effective config: hidden={}, layers={}, heads={}, kvHeads={}, headDim={}, "
+                        + "ropeTheta={}, rmsEps={}, maxPos={}, tieEmb={}, vocab={}, bos={}, eos={}",
+                cfg.hiddenSize(), cfg.numHiddenLayers(), cfg.numAttentionHeads(), cfg.effectiveKeyValueHeads(),
+                cfg.effectiveHeadDim(), cfg.ropeTheta(), cfg.rmsNormEps(), cfg.maxPositionEmbeddings(),
+                cfg.tieWordEmbeddings(), cfg.vocabSize(), cfg.bosTokenId(), cfg.eosTokenId());
+        log.info("SmolLM2 prompt [task={}]: {} tokens; promptTokenIds={}; renderedPrompt=<<<{}>>>",
                 request.prompt() == null ? null : request.prompt().task(),
                 inputTokenIds.size(),
-                preview,
-                inputTokenIds.subList(0, preview),
+                inputTokenIds,
                 renderedPrompt);
     }
 
