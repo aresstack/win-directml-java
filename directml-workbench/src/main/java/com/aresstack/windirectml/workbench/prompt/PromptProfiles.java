@@ -54,24 +54,16 @@ final class PromptProfiles {
         }
 
         @Override
-        public RenderedWorkbenchPrompt render(WorkbenchPromptTemplate template, String inputText) {
+        public final RenderedWorkbenchPrompt render(WorkbenchPromptTemplate template, String inputText) {
             WorkbenchPromptTemplate safeTemplate = template == null ? WorkbenchPromptTemplate.NONE : template;
             String safeInput = inputText == null ? "" : inputText;
             if (!supportedTemplates.contains(safeTemplate)) {
                 safeTemplate = WorkbenchPromptTemplate.NONE;
             }
-            String systemPrompt = renderSystemPrompt(safeTemplate, safeInput);
-            if (systemPrompt != null && !systemPrompt.isEmpty()) {
-                return new RenderedWorkbenchPrompt(safeInput, systemPrompt);
-            }
             return RenderedWorkbenchPrompt.userPromptOnly(renderUserPrompt(safeTemplate, safeInput));
         }
 
         protected abstract String renderUserPrompt(WorkbenchPromptTemplate template, String inputText);
-
-        protected String renderSystemPrompt(WorkbenchPromptTemplate template, String inputText) {
-            return "";
-        }
     }
 
     private static final class RawOnlyPromptProfile extends AbstractPromptProfile {
@@ -129,26 +121,16 @@ final class PromptProfiles {
 
         @Override
         protected String renderUserPrompt(WorkbenchPromptTemplate template, String inputText) {
-            // For SmolLM2 chat models, the task instruction goes into the system prompt
-            // (via renderSystemPrompt) so it lands in the <|im_start|>system block of the
-            // ChatML template. The user prompt stays raw.
-            // renderSystemPrompt returns a non-empty string for task templates, which
-            // causes AbstractPromptProfile.render() to use systemPrompt + raw userPrompt.
-            return inputText;
-        }
-
-        @Override
-        protected String renderSystemPrompt(WorkbenchPromptTemplate template, String inputText) {
             if (template == WorkbenchPromptTemplate.SUMMARIZE_DE) {
-                return "Fasse diesen Text kurz auf Deutsch zusammen. Gib nur die Zusammenfassung aus.";
+                return "Fasse diesen Text kurz auf Deutsch zusammen. Gib nur die Zusammenfassung aus.\n\n" + inputText;
             }
             if (template == WorkbenchPromptTemplate.TRANSLATE_TO_GERMAN) {
-                return "Translate to German. Output only the translation.";
+                return "Translate to German. Output only the translation.\n\n" + inputText;
             }
             if (template == WorkbenchPromptTemplate.TRANSLATE_TO_ENGLISH) {
-                return "Translate to English. Output only the translation.";
+                return "Translate to English. Output only the translation.\n\n" + inputText;
             }
-            return "";
+            return inputText;
         }
     }
 
