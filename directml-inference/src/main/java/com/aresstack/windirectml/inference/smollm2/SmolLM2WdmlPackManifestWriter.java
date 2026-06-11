@@ -33,6 +33,14 @@ public final class SmolLM2WdmlPackManifestWriter {
                                       SmolLM2Config config,
                                       SmolLM2LayoutReport layoutReport,
                                       SourceTensorCatalog catalog) throws IOException {
+        return writeWithDensePayload(output, config, layoutReport, catalog, null);
+    }
+
+    public Path writeWithDensePayload(Path output,
+                                      SmolLM2Config config,
+                                      SmolLM2LayoutReport layoutReport,
+                                      SourceTensorCatalog catalog,
+                                      SmolLM2ModelDirectory.SourceAggregate source) throws IOException {
         Objects.requireNonNull(output, "output");
         Objects.requireNonNull(catalog, "catalog");
         PayloadPlan payloadPlan = planPayload(catalog);
@@ -41,7 +49,8 @@ public final class SmolLM2WdmlPackManifestWriter {
                 layoutReport,
                 SmolLM2PayloadPolicy.DENSE_PAYLOAD,
                 catalog,
-                payloadPlan.tensorPlans());
+                payloadPlan.tensorPlans(),
+                source);
         return WdmlPackWriter.writeWithPayload(output, manifest, payloadPlan.payloadEntries(), payloadPlan.payloadLength());
     }
 

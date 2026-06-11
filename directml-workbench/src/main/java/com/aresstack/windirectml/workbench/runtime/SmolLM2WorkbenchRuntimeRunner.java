@@ -13,8 +13,10 @@ import com.aresstack.windirectml.inference.smollm2.SmolLM2RuntimeResult;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2WarpExecutionStatus;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2WarpRuntime;
+import com.aresstack.windirectml.inference.smollm2.SmolLM2ModelDirectory;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2Tokenizer;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2WdmlPackCompiler;
+import com.aresstack.windirectml.inference.smollm2.SmolLM2WdmlPackManifest;
 import com.aresstack.windirectml.runtime.facade.Backend;
 
 import java.io.IOException;
@@ -23,6 +25,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 /**
@@ -34,6 +37,8 @@ import java.util.stream.Stream;
  * and transparently fall back to the reference runtime otherwise.</p>
  */
 public final class SmolLM2WorkbenchRuntimeRunner {
+
+    private static final Logger LOG = Logger.getLogger(SmolLM2WorkbenchRuntimeRunner.class.getName());
 
     private static final String DEFAULT_PACKAGE_FILE = "model.wdmlpack";
     private static final String TOKENIZER_FILE = "tokenizer.json";
@@ -183,33 +188,76 @@ public final class SmolLM2WorkbenchRuntimeRunner {
 
     private Path ensureExecutablePackage() throws IOException {
         Path packagePath = modelDir.resolve(DEFAULT_PACKAGE_FILE);
-        if (isExecutablePackage(packagePath)) {
+        boolean hasSource = hasCompileSource();
+        Optional<String> existingReject = inspectExistingPackage(packagePath, hasSource);
+        if (existingReject.isEmpty()) {
             return packagePath;
         }
-        if (!hasCompileSource()) {
+        if (Files.isRegularFile(packagePath)) {
+            LOG.info(() -> "Rebuilding SmolLM2 package " + packagePath + ": " + existingReject.get());
+        }
+        if (!hasSource) {
             if (Files.isRegularFile(packagePath)) {
-                throw new IllegalStateException("Existing SmolLM2 package is not executable: " + packagePath
+                throw new IllegalStateException("Existing SmolLM2 package cannot be used (" + existingReject.get()
+                        + "): " + packagePath
                         + ". Put dense SafeTensors files into the model folder and retry so the package can be rebuilt.");
             }
             throw new IllegalStateException("Missing SmolLM2 runtime package and no SafeTensors source is available. "
                     + "Download the SmolLM2 model first from the Download tab.");
         }
         compiler.compile(new SmolLM2CompileOptions(modelDir, packagePath, false, true));
-        if (!isExecutablePackage(packagePath)) {
-            throw new IllegalStateException("Compiled SmolLM2 package is not executable: " + packagePath);
+        Optional<String> rebuiltReject = inspectExistingPackage(packagePath, true);
+        if (rebuiltReject.isPresent()) {
+            throw new IllegalStateException("Compiled SmolLM2 package is not usable (" + rebuiltReject.get()
+                    + "): " + packagePath);
         }
         return packagePath;
     }
 
-    private boolean isExecutablePackage(Path packagePath) {
+    /**
+     * Returns an empty optional when the existing package on disk is current and reusable.
+     * Otherwise the optional carries a human-readable reason it must be rebuilt (missing file,
+     * not executable, stale compiler/schema version, or changed source weights).
+     */
+    private Optional<String> inspectExistingPackage(Path packagePath, boolean hasSource) {
         if (!Files.isRegularFile(packagePath)) {
-            return false;
+            return Optional.of("package file is missing");
         }
         try {
-            return SmolLM2RuntimePackage.open(packagePath).executable();
-        } catch (Exception ignored) {
-            return false;
+            SmolLM2RuntimePackage runtimePackage = SmolLM2RuntimePackage.open(packagePath);
+            if (!runtimePackage.executable()) {
+                return Optional.of("package is not runtime-loadable: " + runtimePackage.runtimeLoadableReason());
+            }
+            if (runtimePackage.compilerVersion() != SmolLM2WdmlPackManifest.COMPILER_VERSION) {
+                return Optional.of("stale compilerVersion " + runtimePackage.compilerVersion()
+                        + " (expected " + SmolLM2WdmlPackManifest.COMPILER_VERSION + ")");
+            }
+            if (runtimePackage.schemaVersion() != SmolLM2WdmlPackManifest.SCHEMA_VERSION) {
+                return Optional.of("stale schemaVersion " + runtimePackage.schemaVersion()
+                        + " (expected " + SmolLM2WdmlPackManifest.SCHEMA_VERSION + ")");
+            }
+            if (hasSource) {
+                Optional<String> sourceMismatch = detectSourceMismatch(runtimePackage);
+                if (sourceMismatch.isPresent()) {
+                    return sourceMismatch;
+                }
+            }
+            return Optional.empty();
+        } catch (Exception e) {
+            return Optional.of("package could not be opened: " + e.getMessage());
         }
+    }
+
+    private Optional<String> detectSourceMismatch(SmolLM2RuntimePackage runtimePackage) throws IOException {
+        Optional<String> stored = runtimePackage.sourceFingerprint();
+        if (stored.isEmpty()) {
+            return Optional.of("package predates source fingerprinting");
+        }
+        String current = new SmolLM2ModelDirectory(modelDir).sourceAggregate().fingerprint();
+        if (!stored.get().equals(current)) {
+            return Optional.of("source SafeTensors changed since the package was built");
+        }
+        return Optional.empty();
     }
 
     private boolean hasCompileSource() throws IOException {

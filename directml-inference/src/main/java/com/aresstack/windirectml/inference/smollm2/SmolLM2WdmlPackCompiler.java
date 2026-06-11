@@ -48,7 +48,8 @@ public final class SmolLM2WdmlPackCompiler {
         }
         boolean payloadIncluded = false;
         if (!options.dryRun()) {
-            manifestWriter.writeWithDensePayload(output, config, layoutReport, catalog);
+            manifestWriter.writeWithDensePayload(output, config, layoutReport, catalog,
+                    modelDirectory.sourceAggregate());
             payloadIncluded = true;
         }
         SmolLM2RuntimeLoadability loadability = SmolLM2RuntimeLoadability.forPackage(layoutReport, payloadIncluded);

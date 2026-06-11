@@ -16,7 +16,7 @@ import java.util.Map;
 public final class SmolLM2WdmlPackManifest {
 
     public static final int SCHEMA_VERSION = WdmlPackWriter.VERSION;
-    public static final int COMPILER_VERSION = 41;
+    public static final int COMPILER_VERSION = 42;
 
     private SmolLM2WdmlPackManifest() {
     }
@@ -24,7 +24,7 @@ public final class SmolLM2WdmlPackManifest {
     public static Map<String, Object> build(SmolLM2Config config,
                                             SmolLM2LayoutReport layoutReport,
                                             SmolLM2PayloadPolicy payloadPolicy) {
-        return build(config, layoutReport, payloadPolicy, null, List.of());
+        return build(config, layoutReport, payloadPolicy, null, List.of(), null);
     }
 
     public static Map<String, Object> build(SmolLM2Config config,
@@ -32,6 +32,15 @@ public final class SmolLM2WdmlPackManifest {
                                             SmolLM2PayloadPolicy payloadPolicy,
                                             SourceTensorCatalog catalog,
                                             List<TensorPayloadPlan> payloadPlan) {
+        return build(config, layoutReport, payloadPolicy, catalog, payloadPlan, null);
+    }
+
+    public static Map<String, Object> build(SmolLM2Config config,
+                                            SmolLM2LayoutReport layoutReport,
+                                            SmolLM2PayloadPolicy payloadPolicy,
+                                            SourceTensorCatalog catalog,
+                                            List<TensorPayloadPlan> payloadPlan,
+                                            SmolLM2ModelDirectory.SourceAggregate source) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wdmlpack");
         root.put("version", SCHEMA_VERSION);
@@ -49,6 +58,9 @@ public final class SmolLM2WdmlPackManifest {
         root.put("runtimeLoadMode", loadability.runtimeLoadMode());
         root.put("runtimeLoadableReason", loadability.runtimeLoadableReason());
         root.put("layoutComplete", layoutReport.layoutComplete());
+        if (source != null) {
+            root.put("source", source.toManifest());
+        }
         root.put("model", SmolLM2PackageMetadata.from(config).toManifest());
         root.put("smollm2Layout", layoutReport.toManifest());
         root.put("tensorCatalog", tensorCatalog(layoutReport, catalog));

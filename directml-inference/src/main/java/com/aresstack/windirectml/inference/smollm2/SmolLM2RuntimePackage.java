@@ -65,6 +65,28 @@ public final class SmolLM2RuntimePackage {
         return executable;
     }
 
+    /** Compiler version stamped into the package manifest, or {@code -1} when absent. */
+    public int compilerVersion() {
+        return RuntimeModelPackage.intValue(modelPackage.manifest().get("compilerVersion"), -1);
+    }
+
+    /** Container/manifest schema version stamped into the package, or {@code -1} when absent. */
+    public int schemaVersion() {
+        return RuntimeModelPackage.intValue(modelPackage.manifest().get("schemaVersion"), -1);
+    }
+
+    /** Aggregated source fingerprint recorded at compile time, when the package carries one. */
+    public Optional<String> sourceFingerprint() {
+        Object source = modelPackage.manifest().get("source");
+        if (source instanceof Map<?, ?> sourceMap) {
+            String fingerprint = RuntimeModelPackage.stringValue(sourceMap.get("fingerprint"));
+            if (!fingerprint.isBlank()) {
+                return Optional.of(fingerprint);
+            }
+        }
+        return Optional.empty();
+    }
+
     public String runtimeLoadableReason() {
         Object value = modelPackage.manifest().get("runtimeLoadableReason");
         return value == null ? SmolLM2LayoutReport.RUNTIME_NOT_IMPLEMENTED : String.valueOf(value);
