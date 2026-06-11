@@ -32,6 +32,9 @@ final class SmolLM2WarpDecodeProfile {
     long outputProjection;
     long attentionResidual;
     long mlpNorm;
+    // Decode path: gate_up → WARP SwiGLU → down run as one GPU-resident submission, measured as a single timer.
+    long mlpPipeline;
+    // Individual MLP stage timers (populated only when the stages run separately, e.g. the batched prefill path).
     long gateUpProjection;
     long gateUpSlice;
     long swiglu;
@@ -61,6 +64,7 @@ final class SmolLM2WarpDecodeProfile {
         outputProjection = 0;
         attentionResidual = 0;
         mlpNorm = 0;
+        mlpPipeline = 0;
         gateUpProjection = 0;
         gateUpSlice = 0;
         swiglu = 0;
@@ -87,6 +91,7 @@ final class SmolLM2WarpDecodeProfile {
         lines.add(line("output projection", outputProjection));
         lines.add(line("attention residual", attentionResidual));
         lines.add(line("MLP RMSNorm", mlpNorm));
+        lines.add(line("MLP block (gate_up->SwiGLU->down)", mlpPipeline));
         lines.add(line("gate-up projection", gateUpProjection));
         lines.add(line("gate-up slice/copy", gateUpSlice));
         lines.add(line("SwiGLU", swiglu));
@@ -99,6 +104,6 @@ final class SmolLM2WarpDecodeProfile {
     }
 
     private static String line(String label, long nanos) {
-        return String.format("  %-22s %6d ms", label, nanos / 1_000_000L);
+        return String.format("  %-34s %6d ms", label, nanos / 1_000_000L);
     }
 }
