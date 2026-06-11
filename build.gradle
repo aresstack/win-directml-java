@@ -93,7 +93,10 @@ subprojects { sub ->
 
         dependencies {
             implementation 'org.slf4j:slf4j-api:2.0.13'
-            testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+            // JUnit BOM aligns all org.junit.* artifact versions, so junit-platform-launcher resolves to a
+            // concrete version (1.10.x) without a hard-coded pin and CLI test runs work offline.
+            testImplementation platform('org.junit:junit-bom:5.10.2')
+            testImplementation 'org.junit.jupiter:junit-jupiter'
             testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
             testRuntimeOnly 'ch.qos.logback:logback-classic:1.5.6'
         }
