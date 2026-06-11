@@ -32,11 +32,13 @@ class WorkbenchPromptTemplateTest {
                 WorkbenchPromptTemplate.TRANSLATE_TO_GERMAN,
                 input);
 
-        assertTrue(rendered.getUserPrompt().startsWith("Translate to German."));
-        assertTrue(rendered.getUserPrompt().contains(input));
+        // For SmolLM2 chat models, the task instruction goes into the system prompt
+        // so the ChatML template renders it in the <|im_start|>system block.
+        // The user prompt stays raw.
+        assertEquals(input, rendered.getUserPrompt());
+        assertEquals("Translate to German. Output only the translation.", rendered.getSystemPrompt());
         assertFalse(rendered.getUserPrompt().contains("<text>"));
         assertFalse(rendered.getUserPrompt().contains("</text>"));
-        assertEquals("", rendered.getSystemPrompt());
     }
 
     @Test
