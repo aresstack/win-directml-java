@@ -39,7 +39,7 @@ class SmolLM2NativeWarpExecutorTest {
         try (WindowsBindings bindings = new WindowsBindings()) {
             bindings.init("warp");
             try (SmolLM2WarpForwardPass warpForwardPass = new SmolLM2WarpForwardPass(bindings, weights)) {
-                SmolLM2ReferenceKvCache kvCache = SmolLM2ReferenceKvCache.create(weights.config());
+                SmolLM2WarpKvCache kvCache = SmolLM2WarpKvCache.create(weights.config(), tokenIds.size());
                 float[] warpLogits = warpForwardPass.logitsForLastToken(tokenIds, kvCache);
 
                 assertEquals(referenceLogits.length, warpLogits.length);
@@ -105,11 +105,11 @@ class SmolLM2NativeWarpExecutorTest {
             bindings.init("warp");
             try (SmolLM2WarpForwardPass warp = new SmolLM2WarpForwardPass(bindings, weights)) {
                 // Way A: one call over the whole block → batched prefill (projectSequenceInto).
-                SmolLM2ReferenceKvCache batchedCache = SmolLM2ReferenceKvCache.create(weights.config());
+                SmolLM2WarpKvCache batchedCache = SmolLM2WarpKvCache.create(weights.config(), tokenIds.size());
                 float[] batchedLogits = warp.logitsForLastToken(tokenIds, batchedCache);
 
                 // Way B: feed one token at a time → per-token decode path for every step.
-                SmolLM2ReferenceKvCache incrementalCache = SmolLM2ReferenceKvCache.create(weights.config());
+                SmolLM2WarpKvCache incrementalCache = SmolLM2WarpKvCache.create(weights.config(), tokenIds.size());
                 float[] incrementalLogits = null;
                 for (int n = 1; n <= tokenIds.size(); n++) {
                     incrementalLogits = warp.logitsForLastToken(tokenIds.subList(0, n), incrementalCache);

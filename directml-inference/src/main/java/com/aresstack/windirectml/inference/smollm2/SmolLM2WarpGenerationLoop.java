@@ -2,6 +2,8 @@ package com.aresstack.windirectml.inference.smollm2;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyGeneratedTokens;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyStopTokenPolicy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,6 +18,8 @@ import java.util.function.IntConsumer;
  * makes the numerical WARP-vs-reference comparison a pure forward-pass diff.</p>
  */
 final class SmolLM2WarpGenerationLoop {
+
+    private static final Logger log = LoggerFactory.getLogger(SmolLM2WarpGenerationLoop.class);
 
     private static final int DEBUG_TOP_K = Integer.getInteger("smollm2.debug.topk", 0);
     private static final int DEBUG_STEPS = Integer.getInteger("smollm2.debug.steps", 3);
@@ -37,11 +41,17 @@ final class SmolLM2WarpGenerationLoop {
         long decoderStepNanos = 0L;
         long lmHeadNanos = 0L;
         long tokenSelectNanos = 0L;
+        SmolLM2WarpDecodeProfile decodeProfile = forwardPass.decodeProfile();
+        boolean profileDecode = decodeProfile.enabled();
+        if (profileDecode) {
+            decodeProfile.reset();
+        }
         List<Integer> fullTokenIds = new ArrayList<>(request.inputTokenIds());
         DecoderOnlyGeneratedTokens generatedTokens = new DecoderOnlyGeneratedTokens(request.maxNewTokens());
         String finishReason = "length";
         SmolLM2TokenSampler tokenSampler = tokenSamplerFactory.create(request.options());
-        SmolLM2ReferenceKvCache kvCache = SmolLM2ReferenceKvCache.create(forwardPass.config());
+        int maxTokens = request.inputTokenIds().size() + request.maxNewTokens();
+        SmolLM2WarpKvCache kvCache = SmolLM2WarpKvCache.create(forwardPass.config(), maxTokens);
         List<String> stepTopK = new ArrayList<>();
         for (int i = 0; i < request.maxNewTokens(); i++) {
             long forwardStart = System.nanoTime();
@@ -63,16 +73,29 @@ final class SmolLM2WarpGenerationLoop {
 
             long tokenSelectStart = System.nanoTime();
             int nextToken = tokenSampler.selectNextToken(logits, generatedTokens);
-            tokenSelectNanos += System.nanoTime() - tokenSelectStart;
+            long tokenSelectStep = System.nanoTime() - tokenSelectStart;
+            tokenSelectNanos += tokenSelectStep;
+            if (profileDecode) {
+                decodeProfile.tokenSelect += tokenSelectStep;
+            }
 
             generatedTokens.add(nextToken);
             fullTokenIds.add(nextToken);
             if (generatedTokenConsumer != null && !tokenSampler.shouldStop(nextToken)) {
+                long streamStart = System.nanoTime();
                 generatedTokenConsumer.accept(nextToken);
+                if (profileDecode) {
+                    decodeProfile.streamingCallback += System.nanoTime() - streamStart;
+                }
             }
             if (tokenSampler.shouldStop(nextToken)) {
                 finishReason = "eos_token";
                 break;
+            }
+        }
+        if (profileDecode && log.isInfoEnabled()) {
+            for (String line : decodeProfile.format()) {
+                log.info(line);
             }
         }
         SmolLM2GenerationProfile profile = new SmolLM2GenerationProfile(

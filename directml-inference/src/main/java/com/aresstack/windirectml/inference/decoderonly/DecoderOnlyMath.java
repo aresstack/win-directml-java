@@ -30,13 +30,30 @@ public final class DecoderOnlyMath {
         if (values.length != weight.length) {
             throw new IllegalArgumentException("values and weight must have the same length");
         }
+        rmsNorm(values, 0, values.length, weight, eps);
+    }
+
+    /**
+     * In-place RMSNorm over a {@code length}-wide slice of {@code values} starting at {@code offset}, using the same
+     * formula as {@link #rmsNorm(float[], float[], float)}. Lets callers normalise a row inside a packed sequence
+     * buffer without allocating a temporary row array.
+     */
+    public static void rmsNorm(float[] values, int offset, int length, float[] weight, float eps) {
+        if (weight.length != length) {
+            throw new IllegalArgumentException("weight length must equal the slice length");
+        }
+        if (offset < 0 || offset + length > values.length) {
+            throw new IllegalArgumentException("slice out of range: offset=" + offset + ", length=" + length
+                    + ", values=" + values.length);
+        }
         float sumSq = 0;
-        for (float value : values) {
+        for (int i = 0; i < length; i++) {
+            float value = values[offset + i];
             sumSq += value * value;
         }
-        float rms = (float) (1.0 / Math.sqrt(sumSq / values.length + eps));
-        for (int i = 0; i < values.length; i++) {
-            values[i] = values[i] * rms * weight[i];
+        float rms = (float) (1.0 / Math.sqrt(sumSq / length + eps));
+        for (int i = 0; i < length; i++) {
+            values[offset + i] = values[offset + i] * rms * weight[i];
         }
     }
 

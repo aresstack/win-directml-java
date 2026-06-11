@@ -38,6 +38,33 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     private final List<WarpLayer> layers;
     private final DecoderOnlyWarpDenseProjection lmHead;
 
+    // Decode dimensions (identical across layers for SmolLM2).
+    private final int hiddenSize;
+    private final int qSize;
+    private final int kvSize;
+    private final int intermediateSize;
+
+    // Reusable per-instance scratch buffers for the single-token decode path. Generation is sequential per session,
+    // so these are reused across decode steps instead of allocating fresh arrays every token/layer.
+    private final float[] scratchHidden;
+    private final float[] scratchAttnNorm;
+    private final float[] scratchQkv;
+    private final float[] scratchQuery;
+    private final float[] scratchKey;
+    private final float[] scratchValue;
+    private final float[] scratchContext;
+    private final float[] scratchAttnOut;
+    private final float[] scratchMlpNorm;
+    private final float[] scratchGateUp;
+    private final float[] scratchGate;
+    private final float[] scratchUp;
+    private final float[] scratchDown;
+    private final float[] scratchFinalNorm;
+    private final float[] scratchScores;
+
+    /** Fine-grained decode timings, only populated when {@code -Dsmollm2.profile.decode=true}. */
+    private final SmolLM2WarpDecodeProfile decodeProfile = new SmolLM2WarpDecodeProfile();
+
     /** LM-head projection time accumulated during the most recent {@link #logitsForLastToken} call. */
     private long lastCallLmHeadNanos;
 
@@ -72,6 +99,34 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
             throw e;
         }
         this.layers = List.copyOf(builtLayers);
+
+        this.hiddenSize = config.hiddenSize();
+        this.qSize = config.numAttentionHeads() * config.effectiveHeadDim();
+        this.kvSize = config.effectiveKeyValueHeads() * config.effectiveHeadDim();
+        WarpLayer firstLayer = this.layers.get(0);
+        this.intermediateSize = firstLayer.gateUpProjection.sliceSize(WarpLayer.GATE_UP_GATE);
+        int qkvTotal = firstLayer.qkvProjection.totalOutputSize();
+        int gateUpTotal = firstLayer.gateUpProjection.totalOutputSize();
+
+        this.scratchHidden = new float[hiddenSize];
+        this.scratchAttnNorm = new float[hiddenSize];
+        this.scratchQkv = new float[qkvTotal];
+        this.scratchQuery = new float[qSize];
+        this.scratchKey = new float[kvSize];
+        this.scratchValue = new float[kvSize];
+        this.scratchContext = new float[hiddenSize];
+        this.scratchAttnOut = new float[hiddenSize];
+        this.scratchMlpNorm = new float[hiddenSize];
+        this.scratchGateUp = new float[gateUpTotal];
+        this.scratchGate = new float[intermediateSize];
+        this.scratchUp = new float[intermediateSize];
+        this.scratchDown = new float[hiddenSize];
+        this.scratchFinalNorm = new float[hiddenSize];
+        this.scratchScores = new float[config.maxPositionEmbeddings()];
+    }
+
+    SmolLM2WarpDecodeProfile decodeProfile() {
+        return decodeProfile;
     }
 
     SmolLM2Config config() {
@@ -96,7 +151,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
      * projection. This is mathematically identical to the per-token loop (same RMSNorm/RoPE/causal-attention/SwiGLU)
      * but issues far fewer WARP dispatches. The single-token decode step keeps the per-token path.</p>
      */
-    float[] logitsForLastToken(List<Integer> tokenIds, SmolLM2ReferenceKvCache kvCache) {
+    float[] logitsForLastToken(List<Integer> tokenIds, SmolLM2WarpKvCache kvCache) {
         ensureOpen();
         Objects.requireNonNull(tokenIds, "tokenIds");
         Objects.requireNonNull(kvCache, "kvCache");
@@ -125,7 +180,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         return logits;
     }
 
-    private float[] logitsForToken(int tokenId, int position, SmolLM2ReferenceKvCache kvCache, boolean projectLogits) {
+    private float[] logitsForToken(int tokenId, int position, SmolLM2WarpKvCache kvCache, boolean projectLogits) {
         if (tokenId < 0 || tokenId >= config.vocabSize()) {
             throw new IllegalArgumentException("tokenId out of vocabulary range: " + tokenId);
         }
@@ -137,91 +192,181 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
             throw new IllegalArgumentException("KV cache layer count mismatch: expected "
                     + layers.size() + " but got " + kvCache.layerCount());
         }
-        float[] hidden = tokenEmbedding.copyRow(tokenId);
+        boolean prof = decodeProfile.enabled();
+        if (prof) {
+            decodeProfile.decodeSteps++;
+        }
+        long t = prof ? System.nanoTime() : 0L;
+        tokenEmbedding.copyRowInto(tokenId, scratchHidden);
+        if (prof) {
+            decodeProfile.embedding += System.nanoTime() - t;
+        }
         for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
-            hidden = runLayerStep(hidden, layers.get(layerIndex), kvCache.layer(layerIndex), position);
+            runLayerStepInPlace(scratchHidden, layers.get(layerIndex), kvCache.layer(layerIndex), position, prof);
         }
         if (!projectLogits) {
             return null;
         }
-        return projectLogits(hidden);
+        return projectLogits(scratchHidden);
     }
 
     /** Apply the final RMSNorm and project the LM head, accumulating the LM-head time separately. */
     private float[] projectLogits(float[] hidden) {
-        float[] normalized = hidden.clone();
-        DecoderOnlyMath.rmsNorm(normalized, finalNorm, rmsNormEps);
+        System.arraycopy(hidden, 0, scratchFinalNorm, 0, hiddenSize);
+        DecoderOnlyMath.rmsNorm(scratchFinalNorm, finalNorm, rmsNormEps);
         long lmHeadStart = System.nanoTime();
-        float[] logits = lmHead.project(normalized);
-        lastCallLmHeadNanos += System.nanoTime() - lmHeadStart;
+        float[] logits = lmHead.project(scratchFinalNorm);
+        long elapsed = System.nanoTime() - lmHeadStart;
+        lastCallLmHeadNanos += elapsed;
+        if (decodeProfile.enabled()) {
+            decodeProfile.lmHead += elapsed;
+        }
         return logits;
     }
 
-    private float[] runLayerStep(float[] hidden, WarpLayer layer,
-                                 SmolLM2ReferenceLayerKvCache layerCache, int position) {
-        float[] attentionInput = hidden.clone();
-        DecoderOnlyMath.rmsNorm(attentionInput, layer.inputNorm, rmsNormEps);
-        float[] attentionOutput = runSelfAttentionStep(attentionInput, layer, layerCache, position);
-        float[] afterAttention = add(hidden, attentionOutput);
+    private void runLayerStepInPlace(float[] hidden, WarpLayer layer,
+                                     SmolLM2WarpLayerKvCache layerCache, int position, boolean prof) {
+        long t = prof ? System.nanoTime() : 0L;
+        System.arraycopy(hidden, 0, scratchAttnNorm, 0, hiddenSize);
+        DecoderOnlyMath.rmsNorm(scratchAttnNorm, layer.inputNorm, rmsNormEps);
+        if (prof) {
+            decodeProfile.attentionNorm += System.nanoTime() - t;
+        }
 
-        float[] mlpInput = afterAttention.clone();
-        DecoderOnlyMath.rmsNorm(mlpInput, layer.postAttentionNorm, rmsNormEps);
-        float[] mlpOutput = runMlpStep(mlpInput, layer);
-        return add(afterAttention, mlpOutput);
+        runSelfAttentionStepInto(scratchAttnNorm, layer, layerCache, position, prof); // writes scratchAttnOut
+
+        t = prof ? System.nanoTime() : 0L;
+        for (int i = 0; i < hiddenSize; i++) {
+            hidden[i] += scratchAttnOut[i];
+        }
+        if (prof) {
+            decodeProfile.attentionResidual += System.nanoTime() - t;
+        }
+
+        t = prof ? System.nanoTime() : 0L;
+        System.arraycopy(hidden, 0, scratchMlpNorm, 0, hiddenSize);
+        DecoderOnlyMath.rmsNorm(scratchMlpNorm, layer.postAttentionNorm, rmsNormEps);
+        if (prof) {
+            decodeProfile.mlpNorm += System.nanoTime() - t;
+        }
+
+        runMlpStepInto(scratchMlpNorm, layer, prof); // writes scratchDown
+
+        t = prof ? System.nanoTime() : 0L;
+        for (int i = 0; i < hiddenSize; i++) {
+            hidden[i] += scratchDown[i];
+        }
+        if (prof) {
+            decodeProfile.mlpResidual += System.nanoTime() - t;
+        }
     }
 
-    private float[] runSelfAttentionStep(float[] input, WarpLayer layer,
-                                         SmolLM2ReferenceLayerKvCache layerCache, int position) {
-        int hiddenSize = config.hiddenSize();
+    private void runSelfAttentionStepInto(float[] input, WarpLayer layer,
+                                          SmolLM2WarpLayerKvCache layerCache, int position, boolean prof) {
         int numHeads = config.numAttentionHeads();
         int numKvHeads = config.effectiveKeyValueHeads();
         int headDim = config.effectiveHeadDim();
 
-        float[] qkv = layer.qkvProjection.project(input);
-        float[] query = new float[numHeads * headDim];
-        float[] key = new float[numKvHeads * headDim];
-        float[] value = new float[numKvHeads * headDim];
-        layer.qkvProjection.copySlice(qkv, WarpLayer.QKV_QUERY, query);
-        layer.qkvProjection.copySlice(qkv, WarpLayer.QKV_KEY, key);
-        layer.qkvProjection.copySlice(qkv, WarpLayer.QKV_VALUE, value);
+        long t = prof ? System.nanoTime() : 0L;
+        layer.qkvProjection.projectInto(input, scratchQkv);
+        if (prof) {
+            decodeProfile.qkvProjection += System.nanoTime() - t;
+        }
+
+        t = prof ? System.nanoTime() : 0L;
+        layer.qkvProjection.copySlice(scratchQkv, WarpLayer.QKV_QUERY, scratchQuery);
+        layer.qkvProjection.copySlice(scratchQkv, WarpLayer.QKV_KEY, scratchKey);
+        layer.qkvProjection.copySlice(scratchQkv, WarpLayer.QKV_VALUE, scratchValue);
+        if (prof) {
+            decodeProfile.qkvSlice += System.nanoTime() - t;
+        }
+
+        t = prof ? System.nanoTime() : 0L;
         for (int head = 0; head < numHeads; head++) {
-            rotaryEmbedding.apply(query, head * headDim, position);
+            rotaryEmbedding.apply(scratchQuery, head * headDim, position);
         }
         for (int head = 0; head < numKvHeads; head++) {
-            rotaryEmbedding.apply(key, head * headDim, position);
+            rotaryEmbedding.apply(scratchKey, head * headDim, position);
         }
-        layerCache.append(key, value);
+        if (prof) {
+            decodeProfile.rope += System.nanoTime() - t;
+        }
 
-        float[] context = new float[hiddenSize];
+        t = prof ? System.nanoTime() : 0L;
+        layerCache.append(scratchKey, scratchValue);
+        if (prof) {
+            decodeProfile.kvAppend += System.nanoTime() - t;
+        }
+
+        Arrays.fill(scratchContext, 0, hiddenSize, 0.0f);
+        float[] keys = layerCache.keys();
+        float[] values = layerCache.values();
+        int keyWidth = layerCache.keyWidth();
         int sourceCount = layerCache.size();
         for (int queryHead = 0; queryHead < numHeads; queryHead++) {
             int kvHead = attentionLayout.kvHeadForQueryHead(queryHead);
-            float[] scores = new float[sourceCount];
+            int queryOffset = queryHead * headDim;
+            int kvHeadOffset = kvHead * headDim;
+
+            long ts = prof ? System.nanoTime() : 0L;
             for (int sourcePosition = 0; sourcePosition < sourceCount; sourcePosition++) {
-                scores[sourcePosition] = dotHead(
-                        query, queryHead,
-                        layerCache.keyAt(sourcePosition), kvHead,
+                scratchScores[sourcePosition] = dotOffset(
+                        scratchQuery, queryOffset,
+                        keys, sourcePosition * keyWidth + kvHeadOffset,
                         headDim) * attentionScale;
             }
-            DecoderOnlyMath.softmax(scores, scores.length);
-            int contextOffset = queryHead * headDim;
+            if (prof) {
+                decodeProfile.attentionScore += System.nanoTime() - ts;
+            }
+
+            long tsm = prof ? System.nanoTime() : 0L;
+            DecoderOnlyMath.softmax(scratchScores, sourceCount);
+            if (prof) {
+                decodeProfile.softmax += System.nanoTime() - tsm;
+            }
+
+            long tc = prof ? System.nanoTime() : 0L;
             for (int sourcePosition = 0; sourcePosition < sourceCount; sourcePosition++) {
-                addHeadWeighted(context, contextOffset, layerCache.valueAt(sourcePosition), kvHead, headDim,
-                        scores[sourcePosition]);
+                addWeightedOffset(scratchContext, queryOffset,
+                        values, sourcePosition * keyWidth + kvHeadOffset, headDim, scratchScores[sourcePosition]);
+            }
+            if (prof) {
+                decodeProfile.attentionContext += System.nanoTime() - tc;
             }
         }
-        return layer.outputProjection.project(context);
+
+        t = prof ? System.nanoTime() : 0L;
+        layer.outputProjection.projectInto(scratchContext, scratchAttnOut);
+        if (prof) {
+            decodeProfile.outputProjection += System.nanoTime() - t;
+        }
     }
 
-    private float[] runMlpStep(float[] input, WarpLayer layer) {
-        float[] gateUp = layer.gateUpProjection.project(input);
-        int intermediate = layer.gateUpProjection.sliceSize(WarpLayer.GATE_UP_GATE);
-        float[] gate = new float[intermediate];
-        float[] up = new float[intermediate];
-        layer.gateUpProjection.copySlice(gateUp, WarpLayer.GATE_UP_GATE, gate);
-        layer.gateUpProjection.copySlice(gateUp, WarpLayer.GATE_UP_UP, up);
-        DecoderOnlyReferenceDenseOps.gatedSiluMultiply(gate, up);
-        return layer.downProjection.project(gate);
+    private void runMlpStepInto(float[] input, WarpLayer layer, boolean prof) {
+        long t = prof ? System.nanoTime() : 0L;
+        layer.gateUpProjection.projectInto(input, scratchGateUp);
+        if (prof) {
+            decodeProfile.gateUpProjection += System.nanoTime() - t;
+        }
+
+        t = prof ? System.nanoTime() : 0L;
+        layer.gateUpProjection.copySlice(scratchGateUp, WarpLayer.GATE_UP_GATE, scratchGate);
+        layer.gateUpProjection.copySlice(scratchGateUp, WarpLayer.GATE_UP_UP, scratchUp);
+        if (prof) {
+            decodeProfile.gateUpSlice += System.nanoTime() - t;
+        }
+
+        t = prof ? System.nanoTime() : 0L;
+        DecoderOnlyReferenceDenseOps.gatedSiluMultiply(scratchGate, scratchUp);
+        if (prof) {
+            decodeProfile.swiglu += System.nanoTime() - t;
+        }
+
+        t = prof ? System.nanoTime() : 0L;
+        layer.downProjection.projectInto(scratchGate, scratchDown);
+        if (prof) {
+            decodeProfile.downProjection += System.nanoTime() - t;
+        }
     }
 
     // ── Batched prefill ───────────────────────────────────────────────────
@@ -230,7 +375,7 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     // (RMSNorm, RoPE, causal grouped-query attention, SwiGLU, residuals) is identical to the per-token path, so the
     // batched prefill is numerically equivalent to the reference forward pass apart from GPU rounding.
 
-    private float[] prefillSequence(List<Integer> tokenIds, SmolLM2ReferenceKvCache kvCache, int startPosition) {
+    private float[] prefillSequence(List<Integer> tokenIds, SmolLM2WarpKvCache kvCache, int startPosition) {
         int hidden = config.hiddenSize();
         int seq = tokenIds.size() - startPosition;
         if (kvCache.layerCount() != layers.size()) {
@@ -249,78 +394,79 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
             if (tokenId < 0 || tokenId >= config.vocabSize()) {
                 throw new IllegalArgumentException("tokenId out of vocabulary range: " + tokenId);
             }
-            float[] row = tokenEmbedding.copyRow(tokenId);
-            System.arraycopy(row, 0, hiddenSeq, j * hidden, hidden);
+            tokenEmbedding.copyRowInto(tokenId, scratchAttnNorm);
+            System.arraycopy(scratchAttnNorm, 0, hiddenSeq, j * hidden, hidden);
         }
         for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
             hiddenSeq = runLayerPrefill(hiddenSeq, seq, startPosition, layers.get(layerIndex),
                     kvCache.layer(layerIndex));
         }
-        float[] last = new float[hidden];
-        System.arraycopy(hiddenSeq, (seq - 1) * hidden, last, 0, hidden);
-        return projectLogits(last);
+        System.arraycopy(hiddenSeq, (seq - 1) * hidden, scratchFinalNorm, 0, hidden);
+        return projectLogits(scratchFinalNorm);
     }
 
     private float[] runLayerPrefill(float[] hiddenSeq, int seq, int startPosition, WarpLayer layer,
-                                    SmolLM2ReferenceLayerKvCache layerCache) {
+                                    SmolLM2WarpLayerKvCache layerCache) {
         int hidden = config.hiddenSize();
         int numHeads = config.numAttentionHeads();
         int numKvHeads = config.effectiveKeyValueHeads();
         int headDim = config.effectiveHeadDim();
-        int qSize = numHeads * headDim;
-        int kvSize = numKvHeads * headDim;
+        int qWidth = numHeads * headDim;
+        int kvWidth = numKvHeads * headDim;
 
-        // 1. attention RMSNorm per row (on a copy, identical to the reference).
+        // 1. attention RMSNorm per row (on a copy, identical to the reference; no per-row temp).
         float[] normSeq = hiddenSeq.clone();
         for (int j = 0; j < seq; j++) {
-            rmsNormRow(normSeq, j * hidden, layer.inputNorm, hidden);
+            DecoderOnlyMath.rmsNorm(normSeq, j * hidden, hidden, layer.inputNorm, rmsNormEps);
         }
 
         // 2. Q/K/V projection, fused and batched over the whole block (one WARP dispatch).
-        float[] querySeq = new float[seq * qSize];
-        float[] keySeq = new float[seq * kvSize];
-        float[] valueSeq = new float[seq * kvSize];
+        float[] querySeq = new float[seq * qWidth];
+        float[] keySeq = new float[seq * kvWidth];
+        float[] valueSeq = new float[seq * kvWidth];
         float[] qkvSeq = new float[seq * layer.qkvProjection.totalOutputSize()];
         layer.qkvProjection.projectSequenceInto(normSeq, seq, qkvSeq);
         layer.qkvProjection.copySliceSequence(qkvSeq, seq, WarpLayer.QKV_QUERY, querySeq);
         layer.qkvProjection.copySliceSequence(qkvSeq, seq, WarpLayer.QKV_KEY, keySeq);
         layer.qkvProjection.copySliceSequence(qkvSeq, seq, WarpLayer.QKV_VALUE, valueSeq);
 
-        // 3. RoPE per position, then append all K/V to the cache (in order).
+        // 3. RoPE per position, then append all K/V to the contiguous cache (in order, by offset).
         for (int j = 0; j < seq; j++) {
             int position = startPosition + j;
             for (int head = 0; head < numHeads; head++) {
-                rotaryEmbedding.apply(querySeq, j * qSize + head * headDim, position);
+                rotaryEmbedding.apply(querySeq, j * qWidth + head * headDim, position);
             }
             for (int head = 0; head < numKvHeads; head++) {
-                rotaryEmbedding.apply(keySeq, j * kvSize + head * headDim, position);
+                rotaryEmbedding.apply(keySeq, j * kvWidth + head * headDim, position);
             }
         }
         for (int j = 0; j < seq; j++) {
-            float[] key = Arrays.copyOfRange(keySeq, j * kvSize, (j + 1) * kvSize);
-            float[] value = Arrays.copyOfRange(valueSeq, j * kvSize, (j + 1) * kvSize);
-            layerCache.append(key, value);
+            layerCache.append(keySeq, j * kvWidth, valueSeq, j * kvWidth);
         }
 
         // 4. Causal grouped-query attention per position (CPU), context packed [seq * hidden].
+        float[] keys = layerCache.keys();
+        float[] values = layerCache.values();
+        int keyWidth = layerCache.keyWidth();
         float[] contextSeq = new float[seq * hidden];
         for (int j = 0; j < seq; j++) {
             int position = startPosition + j;
             int sourceCount = position + 1; // attend to sources 0..position (inclusive)
             for (int queryHead = 0; queryHead < numHeads; queryHead++) {
                 int kvHead = attentionLayout.kvHeadForQueryHead(queryHead);
+                int kvHeadOffset = kvHead * headDim;
                 float[] scores = new float[sourceCount];
                 for (int sourcePosition = 0; sourcePosition < sourceCount; sourcePosition++) {
-                    scores[sourcePosition] = dotHeadSeq(
-                            querySeq, j * qSize, queryHead,
-                            layerCache.keyAt(sourcePosition), kvHead,
+                    scores[sourcePosition] = dotOffset(
+                            querySeq, j * qWidth + queryHead * headDim,
+                            keys, sourcePosition * keyWidth + kvHeadOffset,
                             headDim) * attentionScale;
                 }
                 DecoderOnlyMath.softmax(scores, scores.length);
                 int contextOffset = j * hidden + queryHead * headDim;
                 for (int sourcePosition = 0; sourcePosition < sourceCount; sourcePosition++) {
-                    addHeadWeighted(contextSeq, contextOffset, layerCache.valueAt(sourcePosition), kvHead, headDim,
-                            scores[sourcePosition]);
+                    addWeightedOffset(contextSeq, contextOffset,
+                            values, sourcePosition * keyWidth + kvHeadOffset, headDim, scores[sourcePosition]);
                 }
             }
         }
@@ -335,10 +481,10 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
             afterAttention[i] = hiddenSeq[i] + attentionOut[i];
         }
 
-        // 7. MLP RMSNorm per row.
+        // 7. MLP RMSNorm per row (no per-row temp).
         float[] mlpNorm = afterAttention.clone();
         for (int j = 0; j < seq; j++) {
-            rmsNormRow(mlpNorm, j * hidden, layer.postAttentionNorm, hidden);
+            DecoderOnlyMath.rmsNorm(mlpNorm, j * hidden, hidden, layer.postAttentionNorm, rmsNormEps);
         }
 
         // 8. Gate/Up projection, fused and batched (one WARP dispatch).
@@ -365,24 +511,6 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         return result;
     }
 
-    private void rmsNormRow(float[] sequence, int offset, float[] weight, int hidden) {
-        float[] row = new float[hidden];
-        System.arraycopy(sequence, offset, row, 0, hidden);
-        DecoderOnlyMath.rmsNorm(row, weight, rmsNormEps);
-        System.arraycopy(row, 0, sequence, offset, hidden);
-    }
-
-    private static float dotHeadSeq(float[] left, int leftBase, int leftHead,
-                                    float[] right, int rightHead, int headDim) {
-        int leftOffset = leftBase + leftHead * headDim;
-        int rightOffset = rightHead * headDim;
-        float sum = 0.0f;
-        for (int i = 0; i < headDim; i++) {
-            sum += left[leftOffset + i] * right[rightOffset + i];
-        }
-        return sum;
-    }
-
     private void ensureOpen() {
         if (closed) {
             throw new IllegalStateException("SmolLM2 WARP forward pass is closed");
@@ -401,33 +529,19 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         lmHead.close();
     }
 
-    private static float dotHead(float[] left, int leftHead, float[] right, int rightHead, int headDim) {
-        int leftOffset = leftHead * headDim;
-        int rightOffset = rightHead * headDim;
+    private static float dotOffset(float[] left, int leftOffset, float[] right, int rightOffset, int length) {
         float sum = 0.0f;
-        for (int i = 0; i < headDim; i++) {
+        for (int i = 0; i < length; i++) {
             sum += left[leftOffset + i] * right[rightOffset + i];
         }
         return sum;
     }
 
-    private static void addHeadWeighted(float[] target, int targetOffset,
-                                        float[] source, int sourceHead, int headDim, float weight) {
-        int sourceOffset = sourceHead * headDim;
-        for (int i = 0; i < headDim; i++) {
+    private static void addWeightedOffset(float[] target, int targetOffset,
+                                          float[] source, int sourceOffset, int length, float weight) {
+        for (int i = 0; i < length; i++) {
             target[targetOffset + i] += weight * source[sourceOffset + i];
         }
-    }
-
-    private static float[] add(float[] left, float[] right) {
-        if (left.length != right.length) {
-            throw new IllegalArgumentException("hidden size mismatch");
-        }
-        float[] result = new float[left.length];
-        for (int i = 0; i < left.length; i++) {
-            result[i] = left[i] + right[i];
-        }
-        return result;
     }
 
     private static DecoderOnlyWarpDenseProjection projection(WindowsBindings windowsBindings,

@@ -68,6 +68,21 @@ public final class SmolLM2DenseTensor {
         return Arrays.copyOfRange(values, rowIndex * cols, rowIndex * cols + cols);
     }
 
+    /** Copy row {@code rowIndex} into {@code target[0..cols)} without allocating a new array. */
+    public void copyRowInto(int rowIndex, float[] target) {
+        requireRank(2);
+        int rows = dim(0);
+        int cols = dim(1);
+        if (rowIndex < 0 || rowIndex >= rows) {
+            throw new IllegalArgumentException("rowIndex out of range for " + name + ": " + rowIndex);
+        }
+        if (target.length < cols) {
+            throw new IllegalArgumentException("target too small for row of " + name
+                    + ": target=" + target.length + ", expected at least=" + cols);
+        }
+        System.arraycopy(values, rowIndex * cols, target, 0, cols);
+    }
+
     public float[] multiplyVector(float[] input) {
         requireRank(2);
         Objects.requireNonNull(input, "input");
