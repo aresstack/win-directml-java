@@ -5,6 +5,7 @@ import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyReferenceDenseOps;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyRotaryEmbedding;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpDenseProjection;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpFusedDenseProjection;
 import com.aresstack.windirectml.windows.WindowsBindings;
 
 import java.util.ArrayList;
@@ -176,9 +177,13 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         int numKvHeads = config.effectiveKeyValueHeads();
         int headDim = config.effectiveHeadDim();
 
-        float[] query = layer.queryProjection.project(input);
-        float[] key = layer.keyProjection.project(input);
-        float[] value = layer.valueProjection.project(input);
+        float[] qkv = layer.qkvProjection.project(input);
+        float[] query = new float[numHeads * headDim];
+        float[] key = new float[numKvHeads * headDim];
+        float[] value = new float[numKvHeads * headDim];
+        layer.qkvProjection.copySlice(qkv, WarpLayer.QKV_QUERY, query);
+        layer.qkvProjection.copySlice(qkv, WarpLayer.QKV_KEY, key);
+        layer.qkvProjection.copySlice(qkv, WarpLayer.QKV_VALUE, value);
         for (int head = 0; head < numHeads; head++) {
             rotaryEmbedding.apply(query, head * headDim, position);
         }
@@ -209,11 +214,12 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     }
 
     private float[] runMlpStep(float[] input, WarpLayer layer) {
-        float[] gate = layer.gateProjection.project(input);
-        float[] up = layer.upProjection.project(input);
-        if (gate.length != up.length) {
-            throw new IllegalStateException("SmolLM2 gate and up projections must have the same width");
-        }
+        float[] gateUp = layer.gateUpProjection.project(input);
+        int intermediate = layer.gateUpProjection.sliceSize(WarpLayer.GATE_UP_GATE);
+        float[] gate = new float[intermediate];
+        float[] up = new float[intermediate];
+        layer.gateUpProjection.copySlice(gateUp, WarpLayer.GATE_UP_GATE, gate);
+        layer.gateUpProjection.copySlice(gateUp, WarpLayer.GATE_UP_UP, up);
         DecoderOnlyReferenceDenseOps.gatedSiluMultiply(gate, up);
         return layer.downProjection.project(gate);
     }
@@ -270,13 +276,15 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
             rmsNormRow(normSeq, j * hidden, layer.inputNorm, hidden);
         }
 
-        // 2. Q/K/V projections, batched over the whole block.
+        // 2. Q/K/V projection, fused and batched over the whole block (one WARP dispatch).
         float[] querySeq = new float[seq * qSize];
         float[] keySeq = new float[seq * kvSize];
         float[] valueSeq = new float[seq * kvSize];
-        layer.queryProjection.projectSequenceInto(normSeq, seq, querySeq);
-        layer.keyProjection.projectSequenceInto(normSeq, seq, keySeq);
-        layer.valueProjection.projectSequenceInto(normSeq, seq, valueSeq);
+        float[] qkvSeq = new float[seq * layer.qkvProjection.totalOutputSize()];
+        layer.qkvProjection.projectSequenceInto(normSeq, seq, qkvSeq);
+        layer.qkvProjection.copySliceSequence(qkvSeq, seq, WarpLayer.QKV_QUERY, querySeq);
+        layer.qkvProjection.copySliceSequence(qkvSeq, seq, WarpLayer.QKV_KEY, keySeq);
+        layer.qkvProjection.copySliceSequence(qkvSeq, seq, WarpLayer.QKV_VALUE, valueSeq);
 
         // 3. RoPE per position, then append all K/V to the cache (in order).
         for (int j = 0; j < seq; j++) {
@@ -333,15 +341,14 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
             rmsNormRow(mlpNorm, j * hidden, layer.postAttentionNorm, hidden);
         }
 
-        // 8. Gate/Up projections, batched.
-        int intermediate = layer.gateProjection.outputSize();
-        if (layer.upProjection.outputSize() != intermediate) {
-            throw new IllegalStateException("SmolLM2 gate and up projections must have the same width");
-        }
+        // 8. Gate/Up projection, fused and batched (one WARP dispatch).
+        int intermediate = layer.gateUpProjection.sliceSize(WarpLayer.GATE_UP_GATE);
         float[] gateSeq = new float[seq * intermediate];
         float[] upSeq = new float[seq * intermediate];
-        layer.gateProjection.projectSequenceInto(mlpNorm, seq, gateSeq);
-        layer.upProjection.projectSequenceInto(mlpNorm, seq, upSeq);
+        float[] gateUpSeq = new float[seq * layer.gateUpProjection.totalOutputSize()];
+        layer.gateUpProjection.projectSequenceInto(mlpNorm, seq, gateUpSeq);
+        layer.gateUpProjection.copySliceSequence(gateUpSeq, seq, WarpLayer.GATE_UP_GATE, gateSeq);
+        layer.gateUpProjection.copySliceSequence(gateUpSeq, seq, WarpLayer.GATE_UP_UP, upSeq);
 
         // 9. SwiGLU (element-wise, so applying over the whole packed buffer equals per-row).
         DecoderOnlyReferenceDenseOps.gatedSiluMultiply(gateSeq, upSeq);
@@ -437,64 +444,67 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
     }
 
     /**
-     * GPU-resident projections + CPU-resident norm vectors for a single decoder layer.
+     * GPU-resident projections + CPU-resident norm vectors for a single decoder layer. The q/k/v matrices are fused
+     * into one {@code qkv_proj} dispatch and gate/up into one {@code gate_up_proj} dispatch, halving the per-token
+     * projection count from seven to four (qkv, o, gate_up, down).
      */
     private static final class WarpLayer implements AutoCloseable {
+        static final int QKV_QUERY = 0;
+        static final int QKV_KEY = 1;
+        static final int QKV_VALUE = 2;
+        static final int GATE_UP_GATE = 0;
+        static final int GATE_UP_UP = 1;
+
         private final float[] inputNorm;
         private final float[] postAttentionNorm;
-        private final DecoderOnlyWarpDenseProjection queryProjection;
-        private final DecoderOnlyWarpDenseProjection keyProjection;
-        private final DecoderOnlyWarpDenseProjection valueProjection;
+        private final DecoderOnlyWarpFusedDenseProjection qkvProjection;
         private final DecoderOnlyWarpDenseProjection outputProjection;
-        private final DecoderOnlyWarpDenseProjection gateProjection;
-        private final DecoderOnlyWarpDenseProjection upProjection;
+        private final DecoderOnlyWarpFusedDenseProjection gateUpProjection;
         private final DecoderOnlyWarpDenseProjection downProjection;
 
         private WarpLayer(float[] inputNorm,
                           float[] postAttentionNorm,
-                          DecoderOnlyWarpDenseProjection queryProjection,
-                          DecoderOnlyWarpDenseProjection keyProjection,
-                          DecoderOnlyWarpDenseProjection valueProjection,
+                          DecoderOnlyWarpFusedDenseProjection qkvProjection,
                           DecoderOnlyWarpDenseProjection outputProjection,
-                          DecoderOnlyWarpDenseProjection gateProjection,
-                          DecoderOnlyWarpDenseProjection upProjection,
+                          DecoderOnlyWarpFusedDenseProjection gateUpProjection,
                           DecoderOnlyWarpDenseProjection downProjection) {
             this.inputNorm = inputNorm;
             this.postAttentionNorm = postAttentionNorm;
-            this.queryProjection = queryProjection;
-            this.keyProjection = keyProjection;
-            this.valueProjection = valueProjection;
+            this.qkvProjection = qkvProjection;
             this.outputProjection = outputProjection;
-            this.gateProjection = gateProjection;
-            this.upProjection = upProjection;
+            this.gateUpProjection = gateUpProjection;
             this.downProjection = downProjection;
         }
 
         static WarpLayer build(WindowsBindings windowsBindings, SmolLM2ReferenceLayerWeights layer) {
             int index = layer.layerIndex();
-            List<DecoderOnlyWarpDenseProjection> built = new ArrayList<>(7);
+            DecoderOnlyWarpFusedDenseProjection qkv = null;
+            DecoderOnlyWarpDenseProjection o = null;
+            DecoderOnlyWarpFusedDenseProjection gateUp = null;
+            DecoderOnlyWarpDenseProjection down = null;
             try {
-                DecoderOnlyWarpDenseProjection q = projection(windowsBindings, "layer." + index + ".q_proj", layer.queryProjection());
-                built.add(q);
-                DecoderOnlyWarpDenseProjection k = projection(windowsBindings, "layer." + index + ".k_proj", layer.keyProjection());
-                built.add(k);
-                DecoderOnlyWarpDenseProjection v = projection(windowsBindings, "layer." + index + ".v_proj", layer.valueProjection());
-                built.add(v);
-                DecoderOnlyWarpDenseProjection o = projection(windowsBindings, "layer." + index + ".o_proj", layer.outputProjection());
-                built.add(o);
-                DecoderOnlyWarpDenseProjection gate = projection(windowsBindings, "layer." + index + ".gate_proj", layer.gateProjection());
-                built.add(gate);
-                DecoderOnlyWarpDenseProjection up = projection(windowsBindings, "layer." + index + ".up_proj", layer.upProjection());
-                built.add(up);
-                DecoderOnlyWarpDenseProjection down = projection(windowsBindings, "layer." + index + ".down_proj", layer.downProjection());
-                built.add(down);
+                qkv = fusedProjection(windowsBindings, "layer." + index + ".qkv_proj",
+                        layer.queryProjection(), layer.keyProjection(), layer.valueProjection());
+                o = projection(windowsBindings, "layer." + index + ".o_proj", layer.outputProjection());
+                gateUp = fusedProjection(windowsBindings, "layer." + index + ".gate_up_proj",
+                        layer.gateProjection(), layer.upProjection());
+                down = projection(windowsBindings, "layer." + index + ".down_proj", layer.downProjection());
                 return new WarpLayer(
                         layer.inputNorm().copyValues(),
                         layer.postAttentionNorm().copyValues(),
-                        q, k, v, o, gate, up, down);
+                        qkv, o, gateUp, down);
             } catch (RuntimeException e) {
-                for (DecoderOnlyWarpDenseProjection projection : built) {
-                    projection.close();
+                if (down != null) {
+                    down.close();
+                }
+                if (gateUp != null) {
+                    gateUp.close();
+                }
+                if (o != null) {
+                    o.close();
+                }
+                if (qkv != null) {
+                    qkv.close();
                 }
                 throw e;
             }
@@ -502,13 +512,33 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
 
         @Override
         public void close() {
-            queryProjection.close();
-            keyProjection.close();
-            valueProjection.close();
+            qkvProjection.close();
             outputProjection.close();
-            gateProjection.close();
-            upProjection.close();
+            gateUpProjection.close();
             downProjection.close();
         }
+    }
+
+    private static DecoderOnlyWarpFusedDenseProjection fusedProjection(WindowsBindings windowsBindings,
+                                                                       String name,
+                                                                       SmolLM2DenseTensor... tensors) {
+        int inputSize = -1;
+        List<DecoderOnlyWarpFusedDenseProjection.Part> parts = new ArrayList<>(tensors.length);
+        for (SmolLM2DenseTensor tensor : tensors) {
+            if (tensor.rank() != 2) {
+                throw new IllegalStateException("SmolLM2 WARP fused projection '" + name + "' part '" + tensor.name()
+                        + "' must be rank-2 but was rank " + tensor.rank());
+            }
+            int partOutputSize = tensor.dim(0);
+            int partInputSize = tensor.dim(1);
+            if (inputSize == -1) {
+                inputSize = partInputSize;
+            } else if (inputSize != partInputSize) {
+                throw new IllegalStateException("SmolLM2 WARP fused projection '" + name
+                        + "' parts must share input width: expected " + inputSize + " but got " + partInputSize);
+            }
+            parts.add(new DecoderOnlyWarpFusedDenseProjection.Part(tensor.name(), partOutputSize, tensor.copyValues()));
+        }
+        return DecoderOnlyWarpFusedDenseProjection.fromRowMajorParts(windowsBindings, name, inputSize, parts);
     }
 }
