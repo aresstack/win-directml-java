@@ -31,15 +31,17 @@ class PromptStrategiesTest {
     }
 
     @Test
-    void smolLm2TranslationPutsTaskInSystemTurnAndKeepsUserTextRaw() {
+    void smolLm2TranslationPutsTaskInUserTurnBeforeText() {
         String input = "The quick brown fox.";
 
         String prompt = PromptStrategies.forModel("HuggingFaceTB/SmolLM2-360M-Instruct")
                 .renderPrompt(PromptInput.of(PromptTask.TRANSLATE_TO_GERMAN, input));
 
-        assertTrue(prompt.startsWith("<|im_start|>system\n"));
-        assertTrue(prompt.contains("Translate the user's text into German."));
-        assertTrue(prompt.contains("<|im_start|>user\n" + input + "<|im_end|>\n"));
+        // No system turn: the task instruction is prepended to the user text so tiny
+        // instruction models actually follow it instead of echoing the raw input.
+        assertFalse(prompt.contains("<|im_start|>system"));
+        assertTrue(prompt.contains("<|im_start|>user\nTranslate the user's text into German."));
+        assertTrue(prompt.contains(input + "<|im_end|>\n"));
         assertTrue(prompt.endsWith("<|im_start|>assistant\n"));
     }
 
@@ -112,8 +114,9 @@ class PromptStrategiesTest {
 
         String prompt = PromptStrategies.forModel("Qwen/Qwen2.5-Coder-0.5B-Instruct")
                 .renderPrompt(PromptInput.of(PromptTask.EXPLAIN_CODE, "class A {}"));
-        assertTrue(prompt.startsWith("<|im_start|>system\n"));
-        assertTrue(prompt.contains("<|im_start|>user\nclass A {}<|im_end|>\n"));
+        assertFalse(prompt.contains("<|im_start|>system"));
+        assertTrue(prompt.contains("<|im_start|>user\nExplain the user's code"));
+        assertTrue(prompt.contains("class A {}<|im_end|>\n"));
     }
 
     // ---- Phi-3 ------------------------------------------------------------

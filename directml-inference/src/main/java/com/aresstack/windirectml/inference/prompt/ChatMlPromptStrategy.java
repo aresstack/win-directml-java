@@ -17,12 +17,14 @@ import java.util.Set;
  *
  * <p>Key design points:</p>
  * <ul>
- *   <li><b>No hard-coded default system prompt.</b> The system turn is the
- *       caller's override, or the task instruction, or nothing. This removes the
- *       old "You are a helpful AI assistant" fallback that competed with the
- *       selected task.</li>
- *   <li>The task instruction goes into the <em>system</em> turn; the user turn
- *       stays the raw text.</li>
+ *   <li><b>No hard-coded default system prompt.</b> The system turn carries only
+ *       the caller's explicit override (or nothing). This removes the old
+ *       "You are a helpful AI assistant" fallback that competed with the task.</li>
+ *   <li><b>Task instruction lives in the <em>user</em> turn</b>, prepended to the
+ *       raw text. Tiny instruction models (SmolLM2 135M/360M) barely attend to a
+ *       system-turn directive and tend to echo or ignore it; placing the
+ *       instruction immediately before the text — as real instruct usage does —
+ *       makes them actually follow the task.</li>
  *   <li>Already-rendered ChatML input is passed through untouched.</li>
  * </ul>
  */
@@ -51,19 +53,40 @@ public final class ChatMlPromptStrategy implements PromptStrategy {
             return input.userText();
         }
         PromptTask task = supportedTasks.contains(input.task()) ? input.task() : PromptTask.NONE;
-        String system = resolveSystemTurn(task, input.systemOverride());
+        String system = resolveSystemTurn(input.systemOverride());
+        String userTurn = composeUserTurn(task, input.systemOverride(), input.userText());
         ChatConversation conversation = ChatConversation.builder()
                 .system(system)
-                .user(input.userText())
+                .user(userTurn)
                 .build();
         return render(conversation);
     }
 
-    private String resolveSystemTurn(PromptTask task, String systemOverride) {
+    /**
+     * The system turn carries only an explicit caller override. Task instructions
+     * go into the user turn (see {@link #composeUserTurn}).
+     */
+    private static String resolveSystemTurn(String systemOverride) {
         if (systemOverride != null && !systemOverride.isBlank()) {
             return systemOverride.trim();
         }
-        return instructions.instructionFor(task);
+        return "";
+    }
+
+    /**
+     * Prepend the task instruction to the raw user text. When a system override is
+     * present it owns the directive, so the user turn stays the raw text.
+     */
+    private String composeUserTurn(PromptTask task, String systemOverride, String userText) {
+        String text = userText == null ? "" : userText;
+        if (systemOverride != null && !systemOverride.isBlank()) {
+            return text;
+        }
+        String instruction = instructions.instructionFor(task);
+        if (instruction.isBlank()) {
+            return text;
+        }
+        return instruction + "\n\n" + text;
     }
 
     private static String render(ChatConversation conversation) {
