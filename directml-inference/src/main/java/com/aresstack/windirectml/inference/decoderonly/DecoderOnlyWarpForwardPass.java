@@ -562,18 +562,55 @@ public final class DecoderOnlyWarpForwardPass implements AutoCloseable, DecoderO
         }
     }
 
+    /** Whether {@link #close()} has been called. */
+    public boolean isClosed() {
+        return closed;
+    }
+
+    /**
+     * Idempotent close of every native/GPU resource this pass owns after a successful constructor:
+     * the per-layer projections, the WARP LM head, the shared WARP SwiGLU kernel and the GPU-resident MLP pipeline.
+     *
+     * <p>Ownership note: {@code mlpBlocks} hold no own native resources — their barriers live in the
+     * {@link #mlpPipeline}'s arena (freed by {@code mlpPipeline.close()}) and their gate-up/down kernels are owned by
+     * the {@link #layers} (freed by {@code layer.close()}), so they need no separate close. {@code lmHeadReference} is
+     * a CPU-only reference projection with no native resources.</p>
+     *
+     * <p>Every resource is closed even if an earlier close throws; the first failure is rethrown with the rest
+     * attached as suppressed exceptions, so nothing leaks after the first error.</p>
+     */
     @Override
     public void close() {
         if (closed) {
             return;
         }
         closed = true;
+        RuntimeException failure = null;
+        // Reverse build order: SwiGLU + MLP pipeline first (built last), then layers, then the LM head.
+        failure = closeResource(failure, swiGluKernel);
+        failure = closeResource(failure, mlpPipeline);
         for (DecoderOnlyWarpLayer layer : layers) {
-            layer.close();
+            failure = closeResource(failure, layer);
         }
-        if (lmHead != null) {
-            lmHead.close();
+        failure = closeResource(failure, lmHead); // null when the dev reference LM head is in use
+        if (failure != null) {
+            throw failure;
         }
+    }
+
+    private static RuntimeException closeResource(RuntimeException failure, AutoCloseable resource) {
+        if (resource == null) {
+            return failure;
+        }
+        try {
+            resource.close();
+        } catch (Exception e) {
+            if (failure == null) {
+                return new RuntimeException("Decoder-only WARP forward pass close() failed", e);
+            }
+            failure.addSuppressed(e);
+        }
+        return failure;
     }
 
     private static float dotOffset(float[] left, int leftOffset, float[] right, int rightOffset, int length) {

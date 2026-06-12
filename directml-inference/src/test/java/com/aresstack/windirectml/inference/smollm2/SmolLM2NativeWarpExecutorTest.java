@@ -16,6 +16,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
@@ -116,6 +118,27 @@ class SmolLM2NativeWarpExecutorTest {
                         "Batched prefill must select the same top-1 token as the incremental per-token path");
                 assertArrayEquals(incrementalLogits, batchedLogits, TOLERANCE);
             }
+        }
+    }
+
+    @Test
+    void warpForwardPassCloseIsIdempotentAndClosesDelegate() throws Exception {
+        assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12/DirectML");
+        SmolLM2Weights weights = syntheticWeights();
+        try (WindowsBindings bindings = new WindowsBindings()) {
+            bindings.init("warp");
+            SmolLM2WarpForwardPass warp = new SmolLM2WarpForwardPass(bindings, weights);
+            var delegate = warp.delegate();
+            assertFalse(delegate.isClosed(), "delegate must be open before close()");
+
+            warp.close();
+            assertTrue(delegate.isClosed(), "close() must close the shared DecoderOnlyWarpForwardPass delegate "
+                    + "(layers, LM head, SwiGLU kernel, MLP pipeline)");
+
+            // Idempotent: closing again (directly and via the wrapper) must not throw or double-free.
+            delegate.close();
+            warp.close();
+            assertTrue(delegate.isClosed());
         }
     }
 
