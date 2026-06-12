@@ -51,7 +51,7 @@ import java.util.stream.IntStream;
  *       {@link QwenGpuKernels}</li>
  * </ul>
  */
-public final class Qwen2Runtime {
+public final class Qwen2Runtime implements QwenDecodeSteps {
 
     private static final Logger log = LoggerFactory.getLogger(Qwen2Runtime.class);
 
@@ -376,6 +376,26 @@ public final class Qwen2Runtime {
         cachedSeqLen = 0;
         for (float[][] layer : kvCacheK) Arrays.fill(layer, null);
         for (float[][] layer : kvCacheV) Arrays.fill(layer, null);
+    }
+
+    // ── Experimental decoder-only session seam (QwenDecodeSteps) ──────────
+    // Thin delegations that expose the existing step-wise decode primitives to the experimental
+    // DecoderOnlyDecodeSession adapter. They do NOT change the production generateStreaming path; the underlying
+    // prefill() / decodeSingleToken() stay private and unchanged, and Qwen keeps its own (GPU-resident) KV cache.
+
+    @Override
+    public void resetDecodeState() {
+        resetCache();
+    }
+
+    @Override
+    public float[] decodePrefill(int[] promptTokenIds) {
+        return prefill(promptTokenIds);
+    }
+
+    @Override
+    public float[] decodeNextToken(int tokenId) {
+        return decodeSingleToken(tokenId);
     }
 
     // ── Prefill (process all prompt tokens) ──────────────────────────────
