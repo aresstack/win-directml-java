@@ -5,6 +5,7 @@ import com.aresstack.windirectml.windows.WindowsBindings;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -90,6 +91,26 @@ public final class WarpDenseProjection implements AutoCloseable {
         }
         return fromDequantizedWeights(windowsBindings, source.name(),
                 source.outputRows(), source.inputColumns(), source.dequantizedRowMajor());
+    }
+
+    /**
+     * Build a fused projection ({@code [outputSize, inputSize]} = several vertically-stacked FP32 parts) from raw
+     * little-endian {@link ByteBuffer} part slices, without a host {@code float[]} concatenation (slice item 3). Each
+     * part is uploaded directly into its row-region of the device weight buffer. Numerically identical to building the
+     * same matrix from one concatenated FP32 array.
+     */
+    public static WarpDenseProjection fromFusedFp32(WindowsBindings windowsBindings, String name,
+                                                    int outputSize, int inputSize, List<ByteBuffer> partsLe) {
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(windowsBindings, "windowsBindings");
+        Objects.requireNonNull(partsLe, "partsLe");
+        if (outputSize < 1 || inputSize < 1) {
+            throw new IllegalArgumentException("fused projection " + name + " dims must be positive: "
+                    + outputSize + "x" + inputSize);
+        }
+        MatMulNBitsKernel kernel = MatMulNBitsKernel.fromFusedFp32ByteBuffers(
+                windowsBindings, outputSize, inputSize, partsLe);
+        return new WarpDenseProjection(name, inputSize, outputSize, kernel);
     }
 
     public String name() {

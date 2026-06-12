@@ -185,7 +185,9 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
                                                                        String name,
                                                                        SmolLM2DenseTensor... tensors) {
         int inputSize = -1;
-        List<DecoderOnlyWarpFusedDenseProjection.Part> parts = new ArrayList<>(tensors.length);
+        // Shared weight-source contract: when every part is FP32-ByteBuffer-capable the fused matrix is assembled
+        // directly on the device (no Java-heap float[] concatenation); FP16/BF16 parts fall back to float[] concat.
+        List<com.aresstack.windirectml.inference.warp.WarpWeightSource> parts = new ArrayList<>(tensors.length);
         for (SmolLM2DenseTensor tensor : tensors) {
             if (tensor.rank() != 2) {
                 throw new IllegalStateException("SmolLM2 WARP fused projection '" + name + "' part '" + tensor.name()
@@ -199,8 +201,9 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
                 throw new IllegalStateException("SmolLM2 WARP fused projection '" + name
                         + "' parts must share input width: expected " + inputSize + " but got " + partInputSize);
             }
-            parts.add(new DecoderOnlyWarpFusedDenseProjection.Part(tensor.name(), partOutputSize, tensor.copyValues()));
+            parts.add(com.aresstack.windirectml.inference.warp.WarpWeightSource.of(
+                    tensor.name(), partOutputSize, partInputSize, tensor.fp32LittleEndianSource(), tensor::copyValues));
         }
-        return DecoderOnlyWarpFusedDenseProjection.fromRowMajorParts(windowsBindings, name, inputSize, parts);
+        return DecoderOnlyWarpFusedDenseProjection.fromWeightSourceParts(windowsBindings, name, inputSize, parts);
     }
 }

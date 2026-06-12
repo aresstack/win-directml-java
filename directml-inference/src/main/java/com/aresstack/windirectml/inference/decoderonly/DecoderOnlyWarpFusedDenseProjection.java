@@ -1,7 +1,10 @@
 package com.aresstack.windirectml.inference.decoderonly;
 
+import com.aresstack.windirectml.inference.warp.WarpWeightSource;
 import com.aresstack.windirectml.windows.WindowsBindings;
 
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -87,6 +90,68 @@ public final class DecoderOnlyWarpFusedDenseProjection implements AutoCloseable 
 
         DecoderOnlyWarpDenseProjection projection = DecoderOnlyWarpDenseProjection.fromRowMajorWeights(
                 windowsBindings, name, totalOutputSize, inputSize, fusedWeights);
+        return new DecoderOnlyWarpFusedDenseProjection(name, inputSize, totalOutputSize,
+                sliceSizes, sliceOffsets, projection);
+    }
+
+    /**
+     * Heap-light variant of {@link #fromRowMajorParts}: build a fused projection from the shared
+     * {@link WarpWeightSource} contract. When <b>all</b> parts expose an FP32 little-endian ByteBuffer the fused weight
+     * matrix is assembled directly on the device (region-by-region upload, slice item 3) with <b>no</b> Java-heap
+     * {@code float[]} concatenation. If any part has no ByteBuffer source (FP16/BF16/reference) it falls back to the
+     * previous {@code float[]} concatenation. Slice order/offsets and {@code copySlice} semantics are identical.
+     */
+    public static DecoderOnlyWarpFusedDenseProjection fromWeightSourceParts(WindowsBindings windowsBindings,
+                                                                            String name,
+                                                                            int inputSize,
+                                                                            List<WarpWeightSource> parts) {
+        Objects.requireNonNull(windowsBindings, "windowsBindings");
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(parts, "parts");
+        if (parts.isEmpty()) {
+            throw new IllegalArgumentException("fused projection " + name + " requires at least one part");
+        }
+        if (inputSize < 1) {
+            throw new IllegalArgumentException("inputSize must be positive: " + inputSize);
+        }
+        int partCount = parts.size();
+        int[] sliceSizes = new int[partCount];
+        int[] sliceOffsets = new int[partCount];
+        int totalOutputSize = 0;
+        boolean allByteBuffer = true;
+        for (int i = 0; i < partCount; i++) {
+            WarpWeightSource part = parts.get(i);
+            if (part.inputColumns() != inputSize) {
+                throw new IllegalArgumentException("fused projection " + name + " part '" + part.name()
+                        + "' input width mismatch: expected " + inputSize + " but got " + part.inputColumns());
+            }
+            sliceSizes[i] = part.outputRows();
+            sliceOffsets[i] = totalOutputSize;
+            totalOutputSize = Math.addExact(totalOutputSize, part.outputRows());
+            allByteBuffer &= part.hasFp32LittleEndian();
+        }
+
+        DecoderOnlyWarpDenseProjection projection;
+        if (allByteBuffer) {
+            // Heap-light: stack the FP32 slices straight into the device weight buffer.
+            List<ByteBuffer> partsLe = new ArrayList<>(partCount);
+            for (WarpWeightSource part : parts) {
+                partsLe.add(part.fp32LittleEndian());
+            }
+            projection = DecoderOnlyWarpDenseProjection.fromFusedFp32(
+                    windowsBindings, name, totalOutputSize, inputSize, partsLe);
+        } else {
+            // Fallback: row-major float[] concatenation (FP16/BF16/reference parts).
+            float[] fusedWeights = new float[Math.multiplyExact(totalOutputSize, inputSize)];
+            int destination = 0;
+            for (WarpWeightSource part : parts) {
+                float[] partWeights = part.dequantizedRowMajor();
+                System.arraycopy(partWeights, 0, fusedWeights, destination, partWeights.length);
+                destination += partWeights.length;
+            }
+            projection = DecoderOnlyWarpDenseProjection.fromRowMajorWeights(
+                    windowsBindings, name, totalOutputSize, inputSize, fusedWeights);
+        }
         return new DecoderOnlyWarpFusedDenseProjection(name, inputSize, totalOutputSize,
                 sliceSizes, sliceOffsets, projection);
     }

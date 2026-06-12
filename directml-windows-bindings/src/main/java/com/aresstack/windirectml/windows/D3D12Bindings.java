@@ -1007,12 +1007,27 @@ public final class D3D12Bindings {
     public static void uploadBytes(MemorySegment device, MemorySegment queue,
                                    MemorySegment dstResource, ByteBuffer data,
                                    Arena arena) throws WindowsNativeException {
+        uploadBytes(device, queue, dstResource, 0L, data, arena);
+    }
+
+    /**
+     * Region variant of {@link #uploadBytes(MemorySegment, MemorySegment, MemorySegment, ByteBuffer, Arena)}: copies the
+     * buffer's {@code [position, limit)} verbatim into {@code dstResource} starting at byte offset
+     * {@code dstByteOffset}. Used to assemble a vertically-stacked fused weight matrix from several FP32 slices without
+     * a host {@code float[]} concatenation (slice item 3). LITTLE_ENDIAN is enforced; position/limit are not modified.
+     */
+    public static void uploadBytes(MemorySegment device, MemorySegment queue,
+                                   MemorySegment dstResource, long dstByteOffset, ByteBuffer data,
+                                   Arena arena) throws WindowsNativeException {
         if (data == null) {
             throw new IllegalArgumentException("data ByteBuffer must not be null");
         }
         if (data.order() != ByteOrder.LITTLE_ENDIAN) {
             throw new IllegalArgumentException(
                     "ByteBuffer upload requires LITTLE_ENDIAN order, got " + data.order());
+        }
+        if (dstByteOffset < 0L) {
+            throw new IllegalArgumentException("dstByteOffset must be >= 0: " + dstByteOffset);
         }
         long sizeBytes = data.remaining();
         if (sizeBytes <= 0L) {
@@ -1030,7 +1045,7 @@ public final class D3D12Bindings {
 
             allocator = createCommandAllocator(device, D3D12_COMMAND_LIST_TYPE_DIRECT, arena);
             cmdList = createCommandList(device, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, arena);
-            copyBufferRegion(cmdList, dstResource, 0, uploadBuf, 0, sizeBytes);
+            copyBufferRegion(cmdList, dstResource, dstByteOffset, uploadBuf, 0, sizeBytes);
             executeAndWait(device, queue, cmdList, arena);
         } finally {
             if (cmdList != null) DxgiBindings.release(cmdList);

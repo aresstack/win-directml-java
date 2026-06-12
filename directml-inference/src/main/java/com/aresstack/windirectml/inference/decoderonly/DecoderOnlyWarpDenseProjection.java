@@ -49,6 +49,17 @@ public final class DecoderOnlyWarpDenseProjection implements DecoderOnlyDensePro
     }
 
     /**
+     * Build a fused decoder-only projection from vertically-stacked FP32 little-endian {@link ByteBuffer} parts,
+     * without a host {@code float[]} concatenation (slice item 3). Delegates to {@link WarpDenseProjection#fromFusedFp32}.
+     */
+    public static DecoderOnlyWarpDenseProjection fromFusedFp32(WindowsBindings windowsBindings, String name,
+                                                               int outputSize, int inputSize,
+                                                               java.util.List<ByteBuffer> partsLe) {
+        return new DecoderOnlyWarpDenseProjection(
+                WarpDenseProjection.fromFusedFp32(windowsBindings, name, outputSize, inputSize, partsLe));
+    }
+
+    /**
      * Build a decoder-only projection from the shared {@link WarpWeightSource} contract (heap-light ByteBuffer when
      * available, else {@code float[]} fallback) — same seam T5 uses, so families don't duplicate the upload decision.
      */

@@ -9,6 +9,7 @@ import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.List;
 
 /**
  * GPU-accelerated MatMulNBits kernel for AWQ INT4 block-128 quantized weights.
@@ -1005,6 +1006,73 @@ public final class MatMulNBitsKernel implements AutoCloseable {
                                                            int N, int K,
                                                            ByteBuffer fp32WeightsLe) {
         return new MatMulNBitsKernel(wb, N, K, fp32WeightsLe);
+    }
+
+    /**
+     * Create a kernel for a vertically-stacked fused FP32 weight matrix supplied as several raw little-endian
+     * {@link ByteBuffer} slices (row-major parts, all of width {@code K}, stacked in order), <b>without</b> building a
+     * host {@code float[]} concatenation (slice item 3).
+     *
+     * <p>The parts are uploaded region-by-region into the {@code [N, K]} device weight buffer at running byte offsets;
+     * the result is identical to uploading one concatenated FP32 array. Each part must be LITTLE_ENDIAN; the parts'
+     * total {@code remaining()} must equal {@code N*K*4}.</p>
+     *
+     * @param wb       initialized WindowsBindings
+     * @param N        total output rows (sum of the parts' rows)
+     * @param K        shared input width
+     * @param partsLe  ordered FP32 little-endian part slices to stack vertically
+     */
+    public static MatMulNBitsKernel fromFusedFp32ByteBuffers(WindowsBindings wb, int N, int K,
+                                                             List<ByteBuffer> partsLe) {
+        return new MatMulNBitsKernel(wb, N, K, partsLe, true);
+    }
+
+    /** Package-private constructor for a fused FP32 ByteBuffer stack (the {@code marker} disambiguates the overload). */
+    private MatMulNBitsKernel(WindowsBindings wb, int N, int K, List<ByteBuffer> partsLe, boolean fusedMarker) {
+        if (partsLe == null || partsLe.isEmpty()) {
+            throw new IllegalArgumentException("fused FP32 parts must not be empty");
+        }
+        long totalBytes = 0L;
+        final ByteBuffer[] parts = new ByteBuffer[partsLe.size()];
+        for (int i = 0; i < partsLe.size(); i++) {
+            ByteBuffer part = partsLe.get(i);
+            if (part == null) {
+                throw new IllegalArgumentException("fused FP32 part " + i + " is null");
+            }
+            if (part.order() != ByteOrder.LITTLE_ENDIAN) {
+                throw new IllegalArgumentException("fused FP32 part " + i + " must be LITTLE_ENDIAN, got " + part.order());
+            }
+            // Duplicate so the upload is independent of the caller's position/limit.
+            parts[i] = part.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+            totalBytes += parts[i].remaining();
+        }
+        long expectedBytes = (long) N * K * Float.BYTES;
+        if (totalBytes != expectedBytes) {
+            throw new IllegalArgumentException("fused FP32 parts size mismatch for [" + N + ", " + K
+                    + "]: total=" + totalBytes + ", expected=" + expectedBytes);
+        }
+        this.wb = wb;
+        this.arena = Arena.ofShared();
+        this.N = N;
+        this.K = K;
+        this.useInt4Gpu = false;
+        this.useWarpParallelInt4Matvec = false;
+        this.warpParallelInt4MatvecRows = 1;
+        this.useWarpParallelFp32Matvec = wb.isWarpBackend()
+                && !Boolean.getBoolean("directml.fp32.warpMatvec.disabled");
+        try {
+            prepareGpu((dev, queue, weightBuffer) -> {
+                long offset = 0L;
+                for (ByteBuffer part : parts) {
+                    long partBytes = part.remaining();
+                    D3D12Bindings.uploadBytes(dev, queue, weightBuffer, offset, part, arena);
+                    offset += partBytes;
+                }
+            });
+        } catch (WindowsNativeException e) {
+            arena.close();
+            throw new RuntimeException("MatMulNBitsKernel preparation failed (fused FP32 ByteBuffer path)", e);
+        }
     }
 
     /**

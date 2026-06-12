@@ -1,8 +1,11 @@
 package com.aresstack.windirectml.inference.decoderonly;
 
+import com.aresstack.windirectml.inference.warp.WarpWeightSource;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import org.junit.jupiter.api.Test;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -102,6 +105,51 @@ class DecoderOnlyWarpFusedDenseProjectionTest {
                 assertArrayEquals(upRef.project(input), up, TOLERANCE, "fused up slice");
             }
         }
+    }
+
+    @Test
+    void heapLightByteBufferFusedStackMatchesFloatArrayConcat() throws Exception {
+        assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12/DirectML");
+        int inputSize = 5;
+        int qOut = 6, kOut = 3, vOut = 3;
+        float[] q = weights(1, qOut * inputSize);
+        float[] k = weights(2, kOut * inputSize);
+        float[] v = weights(3, vOut * inputSize);
+        float[] input = weights(10, inputSize);
+
+        try (WindowsBindings bindings = new WindowsBindings()) {
+            bindings.init("warp");
+            // All-ByteBuffer parts -> heap-light device-region stack (fallback must not be touched).
+            List<WarpWeightSource> sources = List.of(
+                    WarpWeightSource.of("q", qOut, inputSize, le(q), failingFallback()),
+                    WarpWeightSource.of("k", kOut, inputSize, le(k), failingFallback()),
+                    WarpWeightSource.of("v", vOut, inputSize, le(v), failingFallback()));
+            try (DecoderOnlyWarpFusedDenseProjection viaBytes = DecoderOnlyWarpFusedDenseProjection.fromWeightSourceParts(
+                    bindings, "qkvBytes", inputSize, sources);
+                 DecoderOnlyWarpFusedDenseProjection viaFloats = DecoderOnlyWarpFusedDenseProjection.fromRowMajorParts(
+                         bindings, "qkvFloats", inputSize, List.of(
+                                 new DecoderOnlyWarpFusedDenseProjection.Part("q", qOut, q),
+                                 new DecoderOnlyWarpFusedDenseProjection.Part("k", kOut, k),
+                                 new DecoderOnlyWarpFusedDenseProjection.Part("v", vOut, v)))) {
+                assertArrayEquals(viaFloats.project(input), viaBytes.project(input), 0.0f,
+                        "heap-light fused ByteBuffer stack must be byte-identical to the float[] concat");
+            }
+        }
+    }
+
+    private static ByteBuffer le(float[] values) {
+        ByteBuffer b = ByteBuffer.allocate(values.length * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        for (float v : values) {
+            b.putFloat(v);
+        }
+        b.flip();
+        return b;
+    }
+
+    private static java.util.function.Supplier<float[]> failingFallback() {
+        return () -> {
+            throw new AssertionError("float[] fallback must not be used when every part has a ByteBuffer");
+        };
     }
 
     /** Deterministic small pseudo-random weights in roughly [-0.5, 0.5]. */
