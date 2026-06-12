@@ -155,3 +155,45 @@ deckungsgleich mit der produktiven `Qwen2Runtime`):
 Folge: Im Qwen-Session-E2E stimmen `generatedTokenIds`, gestreamte Tokens **und** Finish-Reason ohne Sonderbeziehung
 direkt mit der Produktion überein. SmolLM2 erhält denselben Vertrag (Stop-Token nicht mehr im Output) — reine
 Result-Bookkeeping-Angleichung, keine Numerik-/Laufzeitänderung.
+
+## 8. Slice 9 — Kontrollierter Benchmark (Session vs. Produktion)
+
+Harness: `QwenDecoderOnlySessionBenchmarkTest` (manuell, gated, läuft nie in normaler CI). Misst die produktive
+`Qwen2Runtime` gegen den experimentellen Session-Pfad auf **demselben** geladenen Modell, identischem Prompt,
+`maxTokens` und Greedy + Penalty. Warmup-Läufe vor den Messläufen; Messläufe **alternierend** (Produktion, Session)
+pro Runde, damit Warmup-Bias sichtbar wird.
+
+### Reproduktion
+
+```bash
+./gradlew :directml-inference:test --tests "*.qwen.QwenDecoderOnlySessionBenchmarkTest" \
+  -Dqwen.decoderonly.benchmark=true -Dqwen.decoderonly.experimental=true \
+  -Dqwen.enable.experimental.runtime=true \
+  -Dqwen.model.dir=<dir>/qwen2.5-coder-0.5b-directml-int4 \
+  -Dqwen.harness.modelfile=model_q4f16.onnx -Dqwen.harness.maxtokens=64 --info
+```
+Tunables: `qwen.harness.warmup` (Default 1), `qwen.harness.runs` (Default 3), `qwen.harness.maxtokens`,
+`qwen.harness.penalty`, `qwen.harness.backend`. Hinweis: dichtes `model.onnx` braucht erhöhten Test-Heap (`-Xmx`);
+der Lauf nutzte daher `model_q4f16.onnx` (INT4).
+
+### Ergebnis (2026-06-12, Qwen2.5-Coder-0.5B `model_q4f16.onnx` INT4, backend `auto` → WARP, 24/24 Layer GPU)
+
+Prompt = 23 Tokens, `maxTokens=64`, `penalty=1.0`, warmup=1, runs=3. Beide Pfade erzeugten **64 token-identische**
+Tokens, `finish=length`.
+
+| Run | Produktion | Session (prefill / decode) |
+|-----|-----------|-----------------------------|
+| 0 (Warmup-Bias) | 560 ms · 114.3 tok/s | 647 ms · 98.9 tok/s (197 / 443 ms) |
+| 1 | 592 ms · 108.1 tok/s | 529 ms · 121.0 tok/s (139 / 386 ms) |
+| 2 | 540 ms · 118.5 tok/s | 524 ms · 122.1 tok/s (133 / 387 ms) |
+| **Mittel** | **564 ms/Lauf · 113.5 tok/s** | **566 ms/Lauf · 112.9 tok/s** |
+
+**Befund:** Beide Pfade sind **gleichauf** (~0.5 % Mittelwertdifferenz, im Messrauschen). Der Session-Pfad reicht
+Qwens reale Pipeline 1:1 durch (gleiche `prefill`/`decodeSingleToken`, GPU-resident), daher **keine
+Performance-Regression**. Run 0 zeigt den erwarteten Warmup-Bias (erster Session-Lauf langsamer, höheres Prefill),
+der sich ab Run 1 stabilisiert. Token-Gleichheit + identischer Finish-Reason bleiben Gate (Test schlägt sonst fehl).
+
+**Fazit Slice 1–9:** Der gemeinsame decoder-only Session-Pfad ist für Qwen **token-äquivalent, vertragsgleich und
+performance-neutral**. Eine echte Migration / Default-Umschaltung ist damit technisch tragfähig — die Entscheidung
+(nur vorbereitet / optional schaltbar / später Default) bleibt bewusst dem nächsten, separat freizugebenden Schritt
+überlassen.
