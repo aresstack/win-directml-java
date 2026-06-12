@@ -41,7 +41,7 @@ class T5SafeTensorsLayoutCompilerTest {
     }
 
     @Test
-    void completeCodeT5DenseLayoutIsRuntimeLoadableButNotExecutableYet() throws Exception {
+    void completeCodeT5DenseLayoutIsRuntimeLoadableAndExecutableViaReferenceEngine() throws Exception {
         T5Config config = tinyConfig(false);
         Map<String, OnnxTensor> tensors = completeDenseT5Tensors(config);
         T5ModelImport imported = imported(tensors);
@@ -49,10 +49,11 @@ class T5SafeTensorsLayoutCompilerTest {
         T5LayoutManifest manifest = T5SafeTensorsLayoutCompiler.analyze(imported, config);
 
         assertTrue(manifest.complete(), manifest.missingRequired().toString());
-        // T5-1: a complete, supported layout is honestly runtime-loadable (not "runtime not implemented").
+        // T5-1/T5-2: a complete, supported layout is runtime-loadable and executable via the verified reference engine
+        // (not "runtime not implemented" and not "loadable but not executable").
         assertTrue(manifest.runtimeLoadable());
-        assertEquals(T5ManifestPayloadPolicy.MODE_RUNTIME_LOADABLE_NOT_EXECUTABLE, manifest.runtimeLoadMode());
-        assertEquals(T5ManifestPayloadPolicy.REASON_RUNTIME_LOADABLE_NOT_EXECUTABLE, manifest.reason());
+        assertEquals(T5ManifestPayloadPolicy.MODE_EXECUTABLE, manifest.runtimeLoadMode());
+        assertEquals(T5ManifestPayloadPolicy.REASON_EXECUTABLE, manifest.reason());
         assertEquals(27, manifest.roleCount());
         assertTrue(manifest.roles().stream().anyMatch(role -> "lm_head".equals(role.role()) && role.tied()));
         assertTrue(manifest.roles().stream().anyMatch(role ->

@@ -164,14 +164,15 @@ final class T5SafeTensorsLayoutCompiler {
 
         private T5LayoutManifest finish() {
             boolean complete = missingRequired.isEmpty() && shapeErrors.isEmpty();
-            // A complete layout with only supported runtime dtypes can produce a runtime-loadable package
-            // (weights + structures build); generation itself is not yet certified (executable handled at package level).
+            // A complete layout with only supported runtime dtypes can produce a runtime-loadable package. Since T5-2
+            // verifies the default reference engine end-to-end, the resulting payload package is executable via that
+            // reference engine. The separate WARP T5 path remains unsupported and is reported independently.
             boolean runtimeLoadable = complete && unsupportedRuntimeDtypes.isEmpty();
             String runtimeLoadMode = runtimeLoadable
-                    ? T5ManifestPayloadPolicy.MODE_RUNTIME_LOADABLE_NOT_EXECUTABLE
+                    ? T5ManifestPayloadPolicy.MODE_EXECUTABLE
                     : T5ManifestPayloadPolicy.MODE_WEIGHTS_NOT_LOADABLE;
             String reason = runtimeLoadable
-                    ? T5ManifestPayloadPolicy.REASON_RUNTIME_LOADABLE_NOT_EXECUTABLE
+                    ? T5ManifestPayloadPolicy.REASON_EXECUTABLE
                     : T5ManifestPayloadPolicy.REASON_WEIGHTS_NOT_LOADABLE;
             return new T5LayoutManifest(LAYOUT_SCHEMA, COMPILER_VERSION, "huggingface-t5-dense", true, complete,
                     runtimeLoadable, runtimeLoadMode, reason,

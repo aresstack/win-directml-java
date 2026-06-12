@@ -80,24 +80,25 @@ baut; (c) getrennte LM-Head-INT4-Analyse.
 (Token-Identität) und brauchen das echte Qwen-0.5B-Modell zur Verifikation.
 **Alternative:** Eigener Qwen-INT4-Slice mit dem lokalen `qwen2.5-coder-0.5b-directml-int4` als Paritäts-Gate.
 
-## Item 6 — T5 Manifest/Runtime-Status: ERLEDIGT (Slice T5-1)
+## Item 6 — T5 Manifest/Runtime-Status: ERLEDIGT (Slice T5-1/T5-2)
 
 Ehrliche Trennung statt pauschalem `runtimeLoadable=false`/„runtime not implemented":
 - **weightsLoadable** = Payload + komplettes Layout + unterstützte Runtime-Dtypes (unverändert berechnet).
 - **runtimeLoadable** = `weightsLoadable` — `T5RuntimePackage.open()` baut bei ladbaren Gewichten `T5Weights` + die
   Runtime-Strukturen, also IST das Paket runtime-loadable (vorher hart `false`).
-- **executable** = neues Manifest-Feld + `T5RuntimePackage.executable()`; bleibt **false**, weil T5-Generierung noch
-  nicht zertifiziert ist (Item 7). So wird „noch nicht produktionsreif" **nicht** mehr hinter `runtimeLoadable=false`
-  versteckt.
+- **executable** = neues Manifest-Feld + `T5RuntimePackage.executable()`; ist für komplette, runtime-ladbare Payloads
+  **true**, weil die Default-Reference-Engine in T5-2 end-to-end auf einem echten lokalen `t5-small` verifiziert wurde
+  (nicht-leere, EOS-terminierte Ausgabe).
 - **runtimeLoadMode/reason** (zentral in `T5ManifestPayloadPolicy`): `t5-manifest-only` /
-  `t5-weights-not-loadable` / `t5-runtime-loadable-not-executable` / (reserviert) `t5-executable` — mit klaren Gründen.
-  Die alten Strings „not-implemented"/„t5-weights-loaded-runtime-not-implemented"/„T5 runtime is not implemented yet"
-  sind aus Writer, `T5SafeTensorsLayoutCompiler`, `T5LayoutManifest` und `T5RuntimePackage.fromMetadata` entfernt.
+  `t5-weights-not-loadable` / `t5-executable` — mit klaren Gründen. Die alten Strings
+  „not-implemented"/„t5-weights-loaded-runtime-not-implemented"/„T5 runtime is not implemented yet" sind aus Writer,
+  `T5SafeTensorsLayoutCompiler`, `T5LayoutManifest` und `T5RuntimePackage.fromMetadata` entfernt.
 
-Verhaltensneutral: kein T5-Consumer startet Generierung anhand `runtimeLoadable` (nur Report-Printer/Anzeige), Workbench
-kompiliert unverändert. Tests umgestellt: `T5RuntimePackageLoadabilityTest`, `T5RuntimeTest`,
+Der `executable=true`-Claim ist ausdrücklich auf die Default-Reference-Engine begrenzt. `T5Runtime.UNSUPPORTED_MESSAGE`
+(WARP-Pfad) bleibt bewusst unverändert — das ist die separate Item-7-Restbaustelle und blockiert nicht die verifizierte
+Reference-Ausführung. Tests umgestellt: `T5RuntimePackageLoadabilityTest`, `T5RuntimeTest`,
 `T5SafeTensorsLayoutCompilerTest`, `T5WdmlPackCompilerTest` (Dry-Run-Tool-Test bleibt `runtimeLoadable=no`, da Dry-Run
-kein Payload schreibt). `T5Runtime.UNSUPPORTED_MESSAGE` (WARP-Pfad) bewusst unverändert — Item-7-Thema.
+kein Payload schreibt).
 
 ## Item 7 — T5 Engine (teilweise: Reference verifiziert, WARP offen)
 

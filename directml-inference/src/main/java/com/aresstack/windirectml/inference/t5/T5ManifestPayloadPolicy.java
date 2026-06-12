@@ -24,9 +24,7 @@ final class T5ManifestPayloadPolicy {
     static final String MODE_MANIFEST_ONLY = "t5-manifest-only";
     /** Payload present but weights are not loadable (incomplete layout or unsupported runtime dtype). */
     static final String MODE_WEIGHTS_NOT_LOADABLE = "t5-weights-not-loadable";
-    /** Weights + runtime structures load, but generation is not yet certified. */
-    static final String MODE_RUNTIME_LOADABLE_NOT_EXECUTABLE = "t5-runtime-loadable-not-executable";
-    /** Reserved for when T5 generation is certified (set by a later T5-engine slice). */
+    /** Complete payload: weights/runtime structures load and reference generation is verified. */
     static final String MODE_EXECUTABLE = "t5-executable";
 
     // ── reason strings ──────────────────────────────────────────────────────
@@ -34,8 +32,6 @@ final class T5ManifestPayloadPolicy {
             "manifest-only package: weights payload not included";
     static final String REASON_WEIGHTS_NOT_LOADABLE =
             "weights not loadable: incomplete T5 layout or unsupported runtime dtype";
-    static final String REASON_RUNTIME_LOADABLE_NOT_EXECUTABLE =
-            "runtime loads weights and structures, but T5 generation is not yet certified";
     static final String REASON_EXECUTABLE =
             "T5 reference generation verified end-to-end (non-empty, EOS-terminated output)";
 }
