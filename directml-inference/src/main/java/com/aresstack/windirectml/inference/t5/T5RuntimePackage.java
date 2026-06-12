@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.t5;
 
+import com.aresstack.windirectml.inference.model.RuntimeLoadability;
 import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
 import com.aresstack.windirectml.inference.model.RuntimeTensor;
 import com.aresstack.windirectml.inference.model.RuntimeTensorCatalog;
@@ -110,6 +111,21 @@ public final class T5RuntimePackage {
 
     public boolean runtimeLoadable() {
         return Boolean.TRUE.equals(manifest.get("runtimeLoadable"));
+    }
+
+    /**
+     * Family-neutral {@link RuntimeLoadability} view, derived faithfully from this package's manifest fields
+     * ({@code runtimeLoadable}/{@code runtimeLoadMode}/{@code reason}). This is the same shared report shape the
+     * decoder-only family uses, so callers can read loadability uniformly. (Note: the T5 manifest's
+     * {@code runtimeLoadable} flag is a pre-existing manifest value and is independent of this view.)
+     */
+    public RuntimeLoadability loadability() {
+        String mode = stringValue(manifest.get("runtimeLoadMode"));
+        String reason = stringValue(manifest.get("reason"));
+        return new RuntimeLoadability(
+                runtimeLoadable(),
+                mode.isBlank() ? "unknown" : mode,
+                reason.isBlank() ? (runtimeLoadable() ? "runtime-loadable" : "runtime-not-loadable") : reason);
     }
 
     public T5Weights weights() throws IOException {

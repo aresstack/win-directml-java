@@ -162,3 +162,38 @@ decoderonly auslesen können — **ohne** dieselbe Loop und **ohne** T5-Enum-Umb
 Mapping T5-FinishReason → gemeinsamer Vertrag: `stop_token`→`STOP_TOKEN`, `max_tokens`→`LENGTH`,
 `unsupported`→`UNSUPPORTED`. Tests gerätefrei (`t5/T5RuntimeResultSummaryTest`, `generation/GenerationSummaryTest`):
 Stop-Fall, length-Fall, `finishTokenId`, Output-Token-Count, Timing-Mapping, decoderonly-Mapping.
+
+## 11. Slice T5-5 — Compile-/Package-Lifecycle (Befund + Loadability-Report)
+
+**Wichtigster Befund:** der Compile-/Package-Lifecycle ist **bereits gemeinsam** im `model/`-Paket und T5 nutzt ihn
+schon: `RuntimeModelPackage` (Manifest/Payload/`runtimeLoadable`/`runtimeLoadMode`/`validateSourceFingerprint`),
+`WdmlPackWriter`/`WdmlPackReader`/`WdmlPackManifest`, `SourceFingerprint`, `SourceTensorCatalog`/`RuntimeTensorCatalog`,
+`SafeTensorsReader`/`TorchCheckpoint*`. `T5RuntimePackage` delegiert daran (`RuntimeModelPackage.open(...)`,
+`runtimeTensorCatalog()`, `dimsValue(...)`, `WdmlPackWriter.VERSION`). Es gab hier also **wenig zu vereinheitlichen** —
+der Lifecycle ist bereits geteilt.
+
+**Familienspezifisch (bleibt in `t5/`):** `T5TensorRole`/`T5TensorNameMapper` (Rollen/Namen), `T5LayoutManifest`/
+`T5LayoutReport`/`T5LayoutIssue` (Layout-/Shape-Validierung), `T5ManifestPayloadPolicy`, `T5WdmlPackManifestWriter`,
+`T5WdmlPackCompiler`/`T5SafeTensorsLayoutCompiler`/`T5ModelImport`, `T5PackageMetadata`, `T5WeightResolver`,
+`T5RuntimePackage` (T5-Manifest-Validierung + T5-Rollen-Auflösung über der geteilten Schicht). Korrekt familienlokal.
+
+**Neu gemeinsam (kleiner fehlender Baustein): `model/RuntimeLoadability`** — neutraler Loadability-Report
+`(runtimeLoadable, runtimeLoadMode, runtimeLoadableReason)`, **deckungsgleich** mit `SmolLM2RuntimeLoadability`.
+`T5RuntimePackage.loadability()` liefert ihn als faithfulen View über die Manifest-Felder. **decoderonly bleibt
+unverändert**; `SmolLM2RuntimeLoadability` ist feld-identisch und mappt 1:1 (device-frei im Test belegt) — eine
+produktive Vereinheitlichung (SmolLM2 delegiert/adoptiert) ist ein trivialer späterer Slice.
+
+> Hinweis (vorbestehend, nicht in diesem Slice geändert): T5s Manifest-Feld `runtimeLoadable=false`/reason
+> „T5 runtime is not implemented yet" ist veraltet (die T5-Runtime läuft real). `loadability()` spiegelt das
+> Manifest faithfully; das Korrigieren des Manifest-Flags wäre eine `.wdmlpack`-/Format-Änderung → eigener Slice.
+
+**T5-wdmlpack-Ladepfad:** unverändert — `T5RuntimePackage.open(...)` → `RuntimeModelPackage.open` → Manifest-Validierung
+→ Rollen/Weights; `loadability()` ist nur ein zusätzlicher read-only Accessor.
+
+**Risiken für späteres heap-light `.wdmlpack`:** der geteilte `model/`-Layer ist der richtige Hebelpunkt
+(`RuntimeModelPackage`/`WdmlPackReader`/`RuntimeTensorCatalog`), aber `T5Weights`/`T5TensorData` kopieren Payloads
+heute in `float[]` (FP32-host) — heap-light (mmap → DeviceBuffer ohne Zwischenkopie) muss in der geteilten Schicht
+ansetzen und betrifft dann T5 **und** decoderonly gemeinsam; separater Block, nicht jetzt.
+
+Tests gerätefrei: `model/RuntimeLoadabilityTest` (Factories/Validierung + SmolLM2-Mapping) und
+`t5/T5RuntimePackageLoadabilityTest` (metadata-only Package → Loadability über den gemeinsamen Report).
