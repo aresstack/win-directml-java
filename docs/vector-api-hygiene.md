@@ -43,8 +43,14 @@ Die rechenintensiven Matmuls des Produktpfads laufen **nativ** über `MatMulNBit
 - **SmolLM2 WARP:** ja — kein ausgeführter Vector-Code; `DecoderOnlyReferenceDenseOps` lädt via Fallback.
 - **T5 WARP:** ja — kein Vector-Import im T5-WARP-Pfad.
 
-**Es gibt keine harte Modulabhängigkeit zum Starten.** Das Modul ist ein **Performance-Enabler** für CPU-Math
-(Qwen-Attention, Reference-Pfade), kein Start-Erfordernis.
+> ⚠️ **KORREKTUR durch Slice V2 (empirisch):** Diese V1-Annahme ist **falsch**. Siehe §9 — ohne das Modul wirft der
+> Start `NoClassDefFoundError: jdk/incubator/vector/Vector`. Der `try/catch`-Fallback greift nicht, weil bereits das
+> **Linken** der Klasse die Vector-Typen auflöst (Felder/Signaturen), bevor der Static-Init läuft. Der Produktstart
+> **kann derzeit NICHT** ohne das Modul laufen, solange die Klassen Vector-Typen direkt referenzieren.
+
+~~**Es gibt keine harte Modulabhängigkeit zum Starten.**~~ (durch V2 widerlegt — es ist eine harte Lade-Abhängigkeit.)
+Das Modul ist Performance-Enabler für CPU-Math **und** — wie V2 zeigt — eine harte Klassen-Lade-Abhängigkeit der drei
+Vector-Klassen.
 
 Wichtige Unterscheidung:
 - **Runtime ohne Modul = möglich** (Fallback existiert). Betrifft Launcher/`JavaExec`/Test-JVM-Flags.
@@ -111,3 +117,51 @@ sodass auch der **Compile** das Modul nicht mehr braucht und die Vector-API wirk
 - **Workbench ohne `--add-modules` grundsätzlich möglich?** Ja (graceful Fallback); Compile braucht das Flag weiter.
 - **Risiken?** Modest Qwen-CPU-Attention-Perf; CPU-Test-Rundung; Compile bleibt modulabhängig bis zur Isolierung.
 - **Sinnvoller V2?** Empirischer No-Modul-Smoke-Test → Flag in Produkt-Launchern optional/entfernen → Compile/Test behalten.
+  → **Durch V2 revidiert:** Der Smoke-Test ist **rot** (NoClassDefFoundError). Flag bleibt überall gesetzt; das Ziel
+  „Produktstart ohne Modul" braucht zuerst die Vector-Isolierung (ehemals V3, jetzt zwingende Voraussetzung). Siehe §9.
+
+## 9. Slice V2 — empirisches Ergebnis: Produktstart OHNE Modul ist (noch) NICHT möglich
+
+**Smoke-Test (auf der WARP-Maschine):** Test-JVM **ohne** `--add-modules=jdk.incubator.vector` (Compile-Flag blieb).
+Ausgeführt: `SmolLM2NativeWarpExecutorTest` (synthetische Gewichte, echtes WARP) und `QwenDecoderOnlySessionE2eTest`
+(Qwen2.5-Coder-0.5B INT4, WARP).
+
+**Ergebnis: ROT.** Alle 4 SmolLM2-Native-Fälle + der Qwen-E2E scheitern mit:
+
+```text
+java.lang.NoClassDefFoundError: jdk/incubator/vector/Vector
+```
+
+**Ursache:** Der graceful `try { FloatVector.SPECIES_PREFERRED } catch (Throwable)`-Fallback greift **nicht** für den
+Fall „Modul fehlt". Schon das **Laden/Linken** von `SimdOps` / `DecoderOnlyReferenceDenseOps` muss die Vector-Typen
+(Feld `VectorSpecies<Float>`, Methoden-Signaturen mit `FloatVector`) auflösen → `NoClassDefFoundError` **vor** dem
+Static-Init → nicht abfangbar durch den Static-Init der Klasse. Der `catch` schützt nur den Laufzeit-Fall
+„Modul da, aber CPU/SPECIES nicht verfügbar".
+
+**Betroffen (laden eine Vector-Klasse, daher harter Fehler ohne Modul):**
+- **SmolLM2 WARP** — Prefill ruft `DecoderOnlyReferenceDenseOps.gatedSiluMultiply` → lädt `DecoderOnlyReferenceDenseOps`.
+- **Qwen** (Default session **und** legacy) — `Qwen2Runtime` → `SimdOps`.
+- alle Reference-/Diagnostic-Pfade.
+- **T5 WARP** importiert keine Vector-API (V1) → würde vermutlich ohne Modul starten, ist aber hier nicht der relevante
+  Pfad und wurde **nicht** separat getestet (kein automatischer T5-WARP-Test; bräuchte Modell + GUI).
+
+**Konsequenz / Entscheidung:**
+- **Flag bleibt überall gesetzt** (Produkt-Launcher `WorkbenchLauncher.java` / `packaging/launcher.ps1`, Compile, Test) —
+  **nichts entfernt**, weil ein Entfernen das Produkt mit `NoClassDefFoundError` brechen würde.
+- Das V2-Ziel „Produktstart ohne Modul" ist im erlaubten V2-Rahmen **nicht erreichbar** (es bräuchte das Entfernen der
+  direkten Vector-Referenzen aus immer-geladenen Klassen — d. h. die V3-Isolierung, die in V2 ausgeschlossen war).
+- **V3 ist damit von „optional" zu „erforderlich" hochgestuft**, falls der modullose Produktstart wirklich gewünscht
+  ist.
+
+### Korrigierte Empfehlung (für V3)
+Vector-API-Nutzung hinter eine **isolierte, optional/reflektiv geladene** Implementierung legen, sodass die
+immer-geladenen Klassen (`SimdOps`-Aufrufstellen, `DecoderOnlyReferenceDenseOps`) **keine** `jdk.incubator.vector`-Typen
+mehr in Feldern/Signaturen referenzieren:
+- z. B. ein Interface `DenseSimd` mit zwei Impls: `ScalarDenseSimd` (immer ladbar) und `VectorDenseSimd`
+  (lädt Vector-API), per `try { Class.forName(...) } catch` ausgewählt — so scheitert nur das Laden der **Vector-Impl**
+  (abfangbar), nicht der Aufrufer.
+- Danach erst Flag aus Produkt-Launchern entfernen + erneuter Smoke-Test (jetzt grün erwartet).
+- Compile/Test behalten das Flag, solange die Vector-Impl existiert.
+
+**Status V2:** abgeschlossen als **Befund/Korrektur** — keine Launcher-/Flag-Änderung (bewusst), Doku korrigiert.
+Compile/Test laufen unverändert mit Modul; alle Suiten + `SmolLM2NativeWarpExecutorTest` grün (mit Flag).
