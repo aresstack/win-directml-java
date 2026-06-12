@@ -48,6 +48,10 @@ public final class QwenGpuKernels implements AutoCloseable {
     static final int DOWN_PROJ = 3;
     static final int KERNELS_PER_LAYER = 4;
 
+    // Fusion diagnostics counters (todo item 5): indices into the per-build int[2] accumulator.
+    private static final int FUSION_INT4 = 0;
+    private static final int FUSION_FP32 = 1;
+
     private final int gpuLayers;
     private final MatMulNBitsKernel[][] layerKernels;  // [layer][kernel]
     private final MatMulNBitsKernel lmHeadKernel;      // nullable
@@ -102,14 +106,18 @@ public final class QwenGpuKernels implements AutoCloseable {
                 qkvFusedN, hidden, gateUpFusedN, hidden, gpuLmHead);
         long t0 = System.currentTimeMillis();
 
+        // Diagnostics (todo item 5): count INT4-rowwise fused vs FP32 dequant+concat fallback so a silent,
+        // heap-heavy FP32 fallback in the product path is always visible.
+        int[] fusionStats = new int[2];
+
         MatMulNBitsKernel[][] kernels = new MatMulNBitsKernel[layers][];
         for (int l = 0; l < layers; l++) {
             Qwen2Weights.LayerWeights lw = weights.layers[l];
             MatMulNBitsKernel[] k = new MatMulNBitsKernel[KERNELS_PER_LAYER];
 
-            k[QKV_FUSED] = createFusedQKV(wb, lw, qSize, kvSize, hidden, l);
+            k[QKV_FUSED] = createFusedQKV(wb, lw, qSize, kvSize, hidden, l, fusionStats);
             k[O_PROJ] = createFromWeight(wb, lw.oProj(), "layer." + l + ".o_proj");
-            k[GATE_UP_FUSED] = createFusedGateUp(wb, lw, inter, hidden, l);
+            k[GATE_UP_FUSED] = createFusedGateUp(wb, lw, inter, hidden, l, fusionStats);
             k[DOWN_PROJ] = createFromWeight(wb, lw.downProj(), "layer." + l + ".down_proj");
             kernels[l] = k;
 
@@ -130,6 +138,19 @@ public final class QwenGpuKernels implements AutoCloseable {
         log.info("QwenGpuKernels ready: {} kernels ({} layers) in {} ms",
                 total, layers, System.currentTimeMillis() - t0);
 
+        // Fusion diagnostics: INT4-rowwise is the heap-light/fast path; FP32 fallback materialises a full host
+        // dequant+concat per fused projection. Surfacing the split prevents a silent product-path regression.
+        int int4Fused = fusionStats[FUSION_INT4];
+        int fp32Fused = fusionStats[FUSION_FP32];
+        log.info("Qwen GPU fused projections: INT4-rowwise={}, FP32-fallback={} (of {} fused projections)",
+                int4Fused, fp32Fused, int4Fused + fp32Fused);
+        if (fp32Fused > 0) {
+            log.warn("Qwen GPU: {} of {} fused projections fell back to FP32 dequant+concat "
+                            + "(larger host heap + slower build). Common cause: non-byte-aligned INT4 zero-points "
+                            + "(packed-nibble shift path not implemented) or a dense (non-INT4) source.",
+                    fp32Fused, int4Fused + fp32Fused);
+        }
+
         return new QwenGpuKernels(layers, kernels, lmHead, qkvFusedN, gateUpFusedN);
     }
 
@@ -141,7 +162,7 @@ public final class QwenGpuKernels implements AutoCloseable {
     private static MatMulNBitsKernel createFusedQKV(WindowsBindings wb,
                                                     Qwen2Weights.LayerWeights lw,
                                                     int qSize, int kvSize, int hidden,
-                                                    int layerIdx) {
+                                                    int layerIdx, int[] fusionStats) {
         int fusedN = qSize + 2 * kvSize;
 
         // Opt-A-3: try INT4-rowwise concat first
@@ -149,11 +170,13 @@ public final class QwenGpuKernels implements AutoCloseable {
                 lw.qProj(), lw.kProj(), lw.vProj());
         if (fusedQ != null) {
             log.debug("layer.{} QKV fused INT4 [{}, {}] (Opt-A-3)", layerIdx, fusedN, hidden);
+            fusionStats[FUSION_INT4]++;
             return new MatMulNBitsKernel(wb, fusedQ.N(), fusedQ.K(),
                     fusedQ.qWeight(), fusedQ.scales(), fusedQ.zeroPoints(), fusedQ.blockSize());
         }
 
         // Fallback: FP32 dequant + concat (legacy path)
+        fusionStats[FUSION_FP32]++;
         float[] qDeq = dequantOrExtract(lw.qProj());
         float[] kDeq = dequantOrExtract(lw.kProj());
         float[] vDeq = dequantOrExtract(lw.vProj());
@@ -172,7 +195,7 @@ public final class QwenGpuKernels implements AutoCloseable {
     private static MatMulNBitsKernel createFusedGateUp(WindowsBindings wb,
                                                        Qwen2Weights.LayerWeights lw,
                                                        int intermediate, int hidden,
-                                                       int layerIdx) {
+                                                       int layerIdx, int[] fusionStats) {
         int fusedN = 2 * intermediate;
 
         // Opt-A-3: try INT4-rowwise concat first
@@ -180,11 +203,13 @@ public final class QwenGpuKernels implements AutoCloseable {
                 lw.gateProj(), lw.upProj());
         if (fusedQ != null) {
             log.debug("layer.{} gate+up fused INT4 [{}, {}] (Opt-A-3)", layerIdx, fusedN, hidden);
+            fusionStats[FUSION_INT4]++;
             return new MatMulNBitsKernel(wb, fusedQ.N(), fusedQ.K(),
                     fusedQ.qWeight(), fusedQ.scales(), fusedQ.zeroPoints(), fusedQ.blockSize());
         }
 
         // Fallback: FP32 dequant + concat (legacy path)
+        fusionStats[FUSION_FP32]++;
         float[] gDeq = dequantOrExtract(lw.gateProj());
         float[] uDeq = dequantOrExtract(lw.upProj());
         float[] fused = new float[fusedN * hidden];
