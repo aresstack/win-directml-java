@@ -112,3 +112,13 @@ Adapter über `MatMulNBitsKernel` (`y = W*x`, rank-2 `[output, input]`). API ist
   eigener Slice darauf gehoben werden, ohne den abgeschlossenen Block jetzt zu berühren.
 - Tests: `warp/WarpDenseProjectionTest` (device-frei: Shape-Validierung; gated WARP: matvec/sequence == Referenz) und
   `t5/T5WarpLinearProjectionTest` (device-frei: rank-2-Check; gated WARP: apply/applySequence == Referenz).
+
+## 8. Slice T5-2b — decoderonly adoptiert den gemeinsamen Baustein (erledigt)
+
+`DecoderOnlyWarpDenseProjection` ist jetzt ebenfalls ein **dünner Adapter** über `WarpDenseProjection` — damit ist der
+Baustein **real gemeinsam** (T5 **und** decoderonly), nicht nur T5-intern. Die `DecoderOnlyDenseProjection`-API für
+Aufrufer (Qwen/SmolLM2) ist unverändert: `fromRowMajorWeights`, `project`/`projectInto`/`projectSequenceInto`,
+`kernel()`, `close`/`isClosed` verhalten sich identisch (gleiche Kernel-Aufrufe, gleicher Per-Row-Fallback, gleiches
+`kernel()` für das MLP-Block-Chaining). `DecoderOnlyWarpFusedDenseProjection` und der MLP-Block wurden **nicht**
+geändert. Verifiziert: `SmolLM2NativeWarpExecutorTest` (numerisch gleich) + decoderonly/qwen/smollm2/t5-Suiten grün;
+device-freie Shape-Validierung ergänzt. Qwen-Default (decoder-only session) + Legacy-Fallback unverändert.

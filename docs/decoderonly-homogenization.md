@@ -90,3 +90,7 @@ phi3/:    bleibt vorerst eigenständig; Migration zuletzt.
 Fertig: Qwen+SmolLM2 auf gemeinsamer decoder-only-Schicht, Qwen-Default = session mit legacy-Fallback, Vertrag
 harmonisiert, verifiziert, dokumentiert. **Nächste größere Blöcke separat:** T5/seq2seq-Homogenisierung oder
 Vector-API-Hygiene.
+
+> Nachtrag (Slice T5-2b, verhaltensneutral): `DecoderOnlyWarpDenseProjection` ist nun ein dünner Adapter über den
+> gemeinsamen `inference/warp/WarpDenseProjection` (denselben Baustein nutzt T5). Aufrufer-API und Numerik unverändert;
+> `SmolLM2NativeWarpExecutorTest` grün. Siehe `docs/concept-t5-seq2seq-homogenization.md` §7–§8.

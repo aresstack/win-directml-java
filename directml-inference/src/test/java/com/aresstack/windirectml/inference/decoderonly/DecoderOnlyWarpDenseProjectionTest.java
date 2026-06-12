@@ -4,9 +4,21 @@ import com.aresstack.windirectml.windows.WindowsBindings;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class DecoderOnlyWarpDenseProjectionTest {
+
+    @Test
+    void rejectsInvalidShapesWithoutNeedingNativeBindings() {
+        // Shape is validated by the shared WarpDenseProjection before native bindings are required → device-free.
+        assertThrows(IllegalArgumentException.class,
+                () -> DecoderOnlyWarpDenseProjection.fromRowMajorWeights(null, "w", 0, 3, new float[0]));
+        assertThrows(IllegalArgumentException.class,
+                () -> DecoderOnlyWarpDenseProjection.fromRowMajorWeights(null, "w", 2, 0, new float[0]));
+        assertThrows(IllegalArgumentException.class,
+                () -> DecoderOnlyWarpDenseProjection.fromRowMajorWeights(null, "w", 2, 3, new float[5]));
+    }
 
     @Test
     void warpProjectionMatchesReferenceProjection() throws Exception {
