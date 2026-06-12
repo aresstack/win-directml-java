@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.inference.decoderonly;
 
 import com.aresstack.windirectml.inference.warp.WarpDenseProjection;
+import com.aresstack.windirectml.inference.warp.WarpWeightSource;
 import com.aresstack.windirectml.windows.MatMulNBitsKernel;
 import com.aresstack.windirectml.windows.WindowsBindings;
 
@@ -45,6 +46,15 @@ public final class DecoderOnlyWarpDenseProjection implements DecoderOnlyDensePro
                                                                       ByteBuffer fp32WeightsLe) {
         return new DecoderOnlyWarpDenseProjection(WarpDenseProjection.fromDequantizedWeights(
                 windowsBindings, name, outputSize, inputSize, fp32WeightsLe));
+    }
+
+    /**
+     * Build a decoder-only projection from the shared {@link WarpWeightSource} contract (heap-light ByteBuffer when
+     * available, else {@code float[]} fallback) — same seam T5 uses, so families don't duplicate the upload decision.
+     */
+    public static DecoderOnlyWarpDenseProjection fromWeightSource(WindowsBindings windowsBindings,
+                                                                  WarpWeightSource source) {
+        return new DecoderOnlyWarpDenseProjection(WarpDenseProjection.fromWeightSource(windowsBindings, source));
     }
 
     @Override

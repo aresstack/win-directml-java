@@ -76,6 +76,22 @@ public final class WarpDenseProjection implements AutoCloseable {
         return new WarpDenseProjection(name, inputSize, outputSize, kernel);
     }
 
+    /**
+     * Build a projection from a {@link WarpWeightSource} — the single shared seam that picks the heap-light FP32
+     * ByteBuffer upload when available and otherwise the {@code float[]} fallback. Families (T5, SmolLM2, …) build a
+     * {@code WarpWeightSource} instead of duplicating the "ByteBuffer if present, else float[]" decision.
+     */
+    public static WarpDenseProjection fromWeightSource(WindowsBindings windowsBindings, WarpWeightSource source) {
+        Objects.requireNonNull(source, "source");
+        ByteBuffer fp32 = source.fp32LittleEndian();
+        if (fp32 != null) {
+            return fromDequantizedWeights(windowsBindings, source.name(),
+                    source.outputRows(), source.inputColumns(), fp32);
+        }
+        return fromDequantizedWeights(windowsBindings, source.name(),
+                source.outputRows(), source.inputColumns(), source.dequantizedRowMajor());
+    }
+
     public String name() {
         return name;
     }
