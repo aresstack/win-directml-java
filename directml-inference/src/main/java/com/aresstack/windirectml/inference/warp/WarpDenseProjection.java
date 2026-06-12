@@ -3,6 +3,8 @@ package com.aresstack.windirectml.inference.warp;
 import com.aresstack.windirectml.windows.MatMulNBitsKernel;
 import com.aresstack.windirectml.windows.WindowsBindings;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Objects;
 
 /**
@@ -48,6 +50,29 @@ public final class WarpDenseProjection implements AutoCloseable {
         Objects.requireNonNull(windowsBindings, "windowsBindings");
         MatMulNBitsKernel kernel = MatMulNBitsKernel.fromDequantizedWeights(
                 windowsBindings, outputSize, inputSize, weights);
+        return new WarpDenseProjection(name, inputSize, outputSize, kernel);
+    }
+
+    /**
+     * Heap-light variant of {@link #fromDequantizedWeights(WindowsBindings, String, int, int, float[])}: build a
+     * projection from dequantized row-major {@code [output, input]} FP32 weights supplied as a raw little-endian
+     * {@link ByteBuffer}, without first materialising a host {@code float[]}.
+     *
+     * <p>Slice H2a upload seam — accepts read-only direct {@code MappedByteBuffer} slices (e.g. a {@code .wdmlpack}
+     * payload) and heap buffers; the buffer's {@code [position, limit)} region is uploaded verbatim and its
+     * position/limit are not modified. Numerically identical to the {@code float[]} overload for the same
+     * little-endian FP32 bytes. The existing {@code float[]} path is unchanged.</p>
+     */
+    public static WarpDenseProjection fromDequantizedWeights(WindowsBindings windowsBindings,
+                                                             String name,
+                                                             int outputSize,
+                                                             int inputSize,
+                                                             ByteBuffer fp32WeightsLe) {
+        // Validate the (pure) shape + endianness first so errors fail fast without needing native bindings.
+        validateShape(name, outputSize, inputSize, fp32WeightsLe);
+        Objects.requireNonNull(windowsBindings, "windowsBindings");
+        MatMulNBitsKernel kernel = MatMulNBitsKernel.fromDequantizedWeights(
+                windowsBindings, outputSize, inputSize, fp32WeightsLe);
         return new WarpDenseProjection(name, inputSize, outputSize, kernel);
     }
 
@@ -177,6 +202,26 @@ public final class WarpDenseProjection implements AutoCloseable {
         if (weights.length != expected) {
             throw new IllegalArgumentException("WARP dense projection weight length mismatch for " + name
                     + ": weights=" + weights.length + ", expected=" + expected);
+        }
+    }
+
+    private static void validateShape(String name, int outputSize, int inputSize, ByteBuffer fp32WeightsLe) {
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(fp32WeightsLe, "fp32WeightsLe");
+        if (outputSize < 1) {
+            throw new IllegalArgumentException("outputSize must be positive for " + name + ": " + outputSize);
+        }
+        if (inputSize < 1) {
+            throw new IllegalArgumentException("inputSize must be positive for " + name + ": " + inputSize);
+        }
+        if (fp32WeightsLe.order() != ByteOrder.LITTLE_ENDIAN) {
+            throw new IllegalArgumentException("WARP dense projection ByteBuffer must be LITTLE_ENDIAN for "
+                    + name + ", got " + fp32WeightsLe.order());
+        }
+        long expectedBytes = (long) outputSize * inputSize * Float.BYTES;
+        if (fp32WeightsLe.remaining() != expectedBytes) {
+            throw new IllegalArgumentException("WARP dense projection weight size mismatch for " + name
+                    + ": remaining=" + fp32WeightsLe.remaining() + " bytes, expected=" + expectedBytes);
         }
     }
 }

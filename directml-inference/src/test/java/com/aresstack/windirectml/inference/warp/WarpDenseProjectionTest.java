@@ -27,6 +27,61 @@ class WarpDenseProjectionTest {
     }
 
     @Test
+    void byteBufferOverloadRejectsInvalidShapeAndEndiannessWithoutNativeBindings() {
+        // Wrong remaining size (2x3 = 6 floats = 24 bytes expected).
+        java.nio.ByteBuffer tooSmall = java.nio.ByteBuffer.allocate(20).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        assertThrows(IllegalArgumentException.class,
+                () -> WarpDenseProjection.fromDequantizedWeights(null, "w", 2, 3, tooSmall));
+        // Correct size but big-endian -> rejected as a contract violation.
+        java.nio.ByteBuffer bigEndian = java.nio.ByteBuffer.allocate(24).order(java.nio.ByteOrder.BIG_ENDIAN);
+        assertThrows(IllegalArgumentException.class,
+                () -> WarpDenseProjection.fromDequantizedWeights(null, "w", 2, 3, bigEndian));
+        // Degenerate shapes rejected before native bindings.
+        java.nio.ByteBuffer any = java.nio.ByteBuffer.allocate(0).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        assertThrows(IllegalArgumentException.class,
+                () -> WarpDenseProjection.fromDequantizedWeights(null, "w", 0, 3, any));
+    }
+
+    @Test
+    void warpByteBufferUploadMatchesFloatArrayUpload() throws Exception {
+        assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12/DirectML");
+        int outputSize = 2;
+        int inputSize = 3;
+        float[] weights = {
+                1.0f, 2.0f, 3.0f,
+                -1.0f, 0.5f, 4.0f
+        };
+        float[] input = {2.0f, -1.0f, 0.25f};
+
+        try (WindowsBindings windowsBindings = new WindowsBindings()) {
+            windowsBindings.init("warp");
+            // Direct, read-only LE buffer to mirror an mmap .wdmlpack slice.
+            java.nio.ByteBuffer le = java.nio.ByteBuffer.allocateDirect(weights.length * Float.BYTES)
+                    .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            for (float w : weights) {
+                le.putFloat(w);
+            }
+            le.flip();
+            java.nio.ByteBuffer readOnly = le.asReadOnlyBuffer().order(java.nio.ByteOrder.LITTLE_ENDIAN);
+
+            try (WarpDenseProjection viaFloats = WarpDenseProjection.fromDequantizedWeights(
+                    windowsBindings, "floats", outputSize, inputSize, weights);
+                 WarpDenseProjection viaBytes = WarpDenseProjection.fromDequantizedWeights(
+                         windowsBindings, "bytes", outputSize, inputSize, readOnly)) {
+
+                float[] expected = viaFloats.project(input);
+                float[] actual = viaBytes.project(input);
+                assertArrayEquals(expected, actual, 0.0f,
+                        "ByteBuffer upload must produce byte-identical results to the float[] upload");
+
+                // The source buffer's position/limit must be untouched by the upload.
+                assertEquals(0, readOnly.position());
+                assertEquals(weights.length * Float.BYTES, readOnly.limit());
+            }
+        }
+    }
+
+    @Test
     void warpProjectionMatchesReferenceMatVec() throws Exception {
         assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12/DirectML");
         int outputSize = 2;

@@ -5,6 +5,8 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /**
  * Java 21 FFM bindings for {@code d3d12.dll} – Direct3D 12 device and resource management.
@@ -969,6 +971,61 @@ public final class D3D12Bindings {
         try {
             MemorySegment mapped = mapResource(uploadBuf, arena);
             MemorySegment.copy(data, 0, mapped, ValueLayout.JAVA_BYTE, 0, data.length);
+            unmapResource(uploadBuf);
+
+            allocator = createCommandAllocator(device, D3D12_COMMAND_LIST_TYPE_DIRECT, arena);
+            cmdList = createCommandList(device, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, arena);
+            copyBufferRegion(cmdList, dstResource, 0, uploadBuf, 0, sizeBytes);
+            executeAndWait(device, queue, cmdList, arena);
+        } finally {
+            if (cmdList != null) DxgiBindings.release(cmdList);
+            if (allocator != null) DxgiBindings.release(allocator);
+            DxgiBindings.release(uploadBuf);
+        }
+    }
+
+    /**
+     * Upload raw bytes from a {@link ByteBuffer} to a GPU default-heap buffer, without first
+     * materialising a host {@code byte[]}/{@code float[]}.
+     * <p>
+     * Heap-light upload seam (slice H2a): the {@code [position, limit)} region of {@code data} is copied
+     * <b>verbatim</b> into the upload heap and then into {@code dstResource}. This accepts direct buffers
+     * (including read-only {@code MappedByteBuffer} slices from {@code .wdmlpack}) and heap buffers alike;
+     * the buffer's position/limit are not modified.
+     * <p>
+     * <b>Endianness:</b> bytes are copied byte-for-byte, so the payload must already be in the on-device
+     * byte order. For the FP32 weight path that means little-endian; {@code data.order()} must be
+     * {@link ByteOrder#LITTLE_ENDIAN} (enforced) to make that contract explicit and prevent accidental
+     * big-endian sources. After this call {@code dstResource} is in COMMON state (buffer decay rule).
+     *
+     * @param device      D3D12 device
+     * @param queue       command queue
+     * @param dstResource destination GPU buffer (default heap, COMMON state)
+     * @param data        source buffer; {@code [position, limit)} is uploaded, order must be LITTLE_ENDIAN
+     * @param arena       lifetime arena for temporary objects
+     */
+    public static void uploadBytes(MemorySegment device, MemorySegment queue,
+                                   MemorySegment dstResource, ByteBuffer data,
+                                   Arena arena) throws WindowsNativeException {
+        if (data == null) {
+            throw new IllegalArgumentException("data ByteBuffer must not be null");
+        }
+        if (data.order() != ByteOrder.LITTLE_ENDIAN) {
+            throw new IllegalArgumentException(
+                    "ByteBuffer upload requires LITTLE_ENDIAN order, got " + data.order());
+        }
+        long sizeBytes = data.remaining();
+        if (sizeBytes <= 0L) {
+            throw new IllegalArgumentException("ByteBuffer has no remaining bytes to upload");
+        }
+        MemorySegment uploadBuf = createUploadBuffer(device, sizeBytes, arena);
+        MemorySegment allocator = null;
+        MemorySegment cmdList = null;
+        try {
+            MemorySegment mapped = mapResource(uploadBuf, arena);
+            // ofBuffer covers exactly [position, limit); read-only direct (mmap) and heap buffers are both fine.
+            MemorySegment src = MemorySegment.ofBuffer(data);
+            MemorySegment.copy(src, 0L, mapped, 0L, sizeBytes);
             unmapResource(uploadBuf);
 
             allocator = createCommandAllocator(device, D3D12_COMMAND_LIST_TYPE_DIRECT, arena);

@@ -132,3 +132,41 @@ FP32-Pilot** (kleinste, am klarsten gekapselte Familie über `T5WarpLinearProjec
 
 **Keine Formatänderung nötig.** **Reihenfolge der Heap-Ersparnis:** FP32-Familien (T5/SmolLM2) zuerst (direkter
 ByteBuffer-Upload eliminiert 1–2 volle FP32-Kopien), Qwen-INT4-Fusion zuletzt (komplexer, eigener Slice).
+
+## 12. Slice H2a — ByteBuffer-Upload-Naht (additiv, nur die Naht)
+
+**Umgesetzt (rein additiv, keine Familienmigration, kein Format-/Runtime-Change):** Ein heap-leichter Upload-Pfad
+existiert jetzt von einem `ByteBuffer` (inkl. read-only direkter mmap-Slices) bis in den Device-FP32-Buffer, ohne
+vorher ein volles `float[]` zu materialisieren. Die bestehenden `float[]`-Pfade sind unverändert nutzbar.
+
+| Schicht | Neue API (additiv) | Verhalten |
+|---------|--------------------|-----------|
+| `windows/D3D12Bindings` | `uploadBytes(device, queue, dst, ByteBuffer data, arena)` | mappt den Upload-Heap, kopiert `[position,limit)` **verbatim** via `MemorySegment.ofBuffer` → `copy` → `CopyBufferRegion`; position/limit unverändert; LE erzwungen |
+| `windows/MatMulNBitsKernel` | `fromDequantizedWeights(wb, N, K, ByteBuffer fp32WeightsLe)` | FP32-ByteBuffer-Ctor; `prepareGpu` teilt sich jetzt einen `WeightUploader`-Body (float[]- **und** ByteBuffer-Upload identisch) |
+| `inference/warp/WarpDenseProjection` | `fromDequantizedWeights(wb, name, out, in, ByteBuffer fp32WeightsLe)` | Shape+LE gerätefrei validiert, delegiert an den Kernel-ByteBuffer-Ctor |
+
+**Upload-Mechanik:** direkter Byte-Copy aus dem `ByteBuffer` (keine temporäre `byte[]`/`float[]`-Host-Kopie). Der
+Kernel `duplicate()`t den übergebenen Buffer, damit der Upload unabhängig von Position/Limit/Mark des Aufrufers ist
+(kein Datenkopieren — nur ein leichter Buffer-View).
+
+**Read-only mmap-Slices:** unterstützt — `MemorySegment.ofBuffer` akzeptiert read-only direkte Buffer; der Test nutzt
+bewusst einen `allocateDirect(...).asReadOnlyBuffer()` als mmap-Stellvertreter.
+
+**Endianness:** explizit behandelt — `uploadBytes(ByteBuffer)` und beide ByteBuffer-Overloads **verlangen
+`LITTLE_ENDIAN`** (sonst `IllegalArgumentException`); Bytes werden verbatim kopiert, daher auf x86 byte-identisch zum
+`float[]`-Pfad.
+
+**Verifikation:**
+- gerätefrei: `WarpDenseProjectionTest.byteBufferOverloadRejectsInvalidShapeAndEndianness…` (falsche Größe, BE,
+  degenerierte Shape → IAE).
+- WARP: `WarpDenseProjectionTest.warpByteBufferUploadMatchesFloatArrayUpload` — `float[]`-Upload vs ByteBuffer-Upload
+  erzeugen **byte-identische** Projektionsergebnisse (Toleranz `0.0f`); Quell-Buffer-Position/Limit bleiben unberührt.
+- Regression: windows-bindings + inference (qwen/decoderonly/smollm2/t5/generation/model/warp/phi3 + SmolLM2-Native) +
+  encoder-Suiten grün; der geteilte `prepareGpu`-Body hält den bestehenden FP32-`float[]`-Pfad numerisch identisch.
+
+**`WarpDenseProjection` ist damit bereit für den T5-FP32-Piloten (H2b):** der mmap-`ByteBuffer`-Slice eines FP32-T5-
+Gewichts kann direkt an `fromDequantizedWeights(..., ByteBuffer)` gereicht werden. **Sicherste nächste Familie:** T5
+(kleinste, klar gekapselt über `T5WarpLinearProjection`/`T5WarpLmHead`, FP32-Quelle) — mit mmap-Lifetime-Garantie und
+Byte-Identitäts-Test gegen den alten Pfad. SmolLM2 danach (zusätzlich Doppel-`clone()` entschärfen); Qwen-INT4 zuletzt.
+
+**Noch NICHT in H2a:** keine Familie nutzt die ByteBuffer-Naht produktiv — T5/SmolLM2/Qwen laden weiter über `float[]`.

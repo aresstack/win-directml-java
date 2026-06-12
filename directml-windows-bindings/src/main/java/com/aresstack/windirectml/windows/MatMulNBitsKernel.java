@@ -7,6 +7,8 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /**
  * GPU-accelerated MatMulNBits kernel for AWQ INT4 block-128 quantized weights.
@@ -984,6 +986,28 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     }
 
     /**
+     * Create a kernel from pre-dequantized FP32 weights supplied as a raw little-endian
+     * {@link ByteBuffer} ({@code N*K} float32 values, row-major), without first materialising a
+     * host {@code float[]}.
+     * <p>
+     * Heap-light upload seam (slice H2a): the buffer's {@code [position, limit)} region is uploaded
+     * verbatim to the GPU FP32 weight buffer. It accepts read-only direct {@code MappedByteBuffer}
+     * slices (e.g. a {@code .wdmlpack} payload) as well as heap buffers; position/limit are not
+     * modified. The numeric result is identical to {@link #fromDequantizedWeights(WindowsBindings, int, int, float[])}
+     * for the same little-endian FP32 bytes.
+     *
+     * @param wb              initialized WindowsBindings
+     * @param N               output features (rows)
+     * @param K               input features (cols)
+     * @param fp32WeightsLe   {@code N*K} little-endian float32 values; {@code remaining()} must equal {@code N*K*4}
+     */
+    public static MatMulNBitsKernel fromDequantizedWeights(WindowsBindings wb,
+                                                           int N, int K,
+                                                           ByteBuffer fp32WeightsLe) {
+        return new MatMulNBitsKernel(wb, N, K, fp32WeightsLe);
+    }
+
+    /**
      * Package-private constructor for pre-dequantized FP32 weights.
      */
     private MatMulNBitsKernel(WindowsBindings wb, int N, int K, float[] fp32Weights) {
@@ -996,12 +1020,49 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         this.warpParallelInt4MatvecRows = 1;
         this.useWarpParallelFp32Matvec = wb.isWarpBackend()
                 && !Boolean.getBoolean("directml.fp32.warpMatvec.disabled");
-
         try {
-            prepareGpu(fp32Weights);
+            prepareGpu((dev, queue, weightBuffer) ->
+                    D3D12Bindings.uploadFloats(dev, queue, weightBuffer, fp32Weights, arena));
         } catch (WindowsNativeException e) {
             arena.close();
             throw new RuntimeException("MatMulNBitsKernel preparation failed (FP32 path)", e);
+        }
+    }
+
+    /**
+     * Package-private constructor for pre-dequantized FP32 weights from a little-endian ByteBuffer.
+     */
+    private MatMulNBitsKernel(WindowsBindings wb, int N, int K, ByteBuffer fp32WeightsLe) {
+        // Pure validation first, so shape / endianness errors fail without touching native bindings.
+        if (fp32WeightsLe == null) {
+            throw new IllegalArgumentException("fp32WeightsLe must not be null");
+        }
+        if (fp32WeightsLe.order() != ByteOrder.LITTLE_ENDIAN) {
+            throw new IllegalArgumentException(
+                    "fp32WeightsLe must be LITTLE_ENDIAN, got " + fp32WeightsLe.order());
+        }
+        long expectedBytes = (long) N * K * Float.BYTES;
+        if (fp32WeightsLe.remaining() != expectedBytes) {
+            throw new IllegalArgumentException("fp32WeightsLe size mismatch for [" + N + ", " + K
+                    + "]: remaining=" + fp32WeightsLe.remaining() + ", expected=" + expectedBytes);
+        }
+        // Duplicate so this kernel's upload is independent of the caller's position/limit/mark.
+        ByteBuffer payload = fp32WeightsLe.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+        this.wb = wb;
+        this.arena = Arena.ofShared();
+        this.N = N;
+        this.K = K;
+        this.useInt4Gpu = false;  // pre-dequantized path always uses DML FP32
+        this.useWarpParallelInt4Matvec = false;
+        this.warpParallelInt4MatvecRows = 1;
+        this.useWarpParallelFp32Matvec = wb.isWarpBackend()
+                && !Boolean.getBoolean("directml.fp32.warpMatvec.disabled");
+        try {
+            prepareGpu((dev, queue, weightBuffer) ->
+                    D3D12Bindings.uploadBytes(dev, queue, weightBuffer, payload, arena));
+        } catch (WindowsNativeException e) {
+            arena.close();
+            throw new RuntimeException("MatMulNBitsKernel preparation failed (FP32 ByteBuffer path)", e);
         }
     }
 
@@ -1124,7 +1185,20 @@ public final class MatMulNBitsKernel implements AutoCloseable {
      * GPU setup: create buffers, upload weights, compile GEMM, pre-allocate
      * execution infrastructure.  Called by both constructors.
      */
+    /** Uploads the [N,K] FP32 weight matrix into the (already created) {@code weightBuf}. */
+    @FunctionalInterface
+    private interface WeightUploader {
+        void upload(MemorySegment device, MemorySegment queue, MemorySegment weightBuffer)
+                throws WindowsNativeException;
+    }
+
+    /** Legacy/host-array weight upload: delegates to the shared preparation with a {@code float[]} uploader. */
     private void prepareGpu(float[] dequantized) throws WindowsNativeException {
+        prepareGpu((dev, queue, weightBuffer) ->
+                D3D12Bindings.uploadFloats(dev, queue, weightBuffer, dequantized, arena));
+    }
+
+    private void prepareGpu(WeightUploader weightUploader) throws WindowsNativeException {
         var dev = wb.getD3d12Device();
         var queue = wb.getCommandQueue();
         var dml = wb.getDmlDevice();
@@ -1142,8 +1216,8 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         inputBuf = D3D12Bindings.createDefaultBuffer(dev, inputBytes, arena);
         outputBuf = D3D12Bindings.createDefaultBuffer(dev, outputBytes, arena);
 
-        // ── Step 2: Upload weight data to GPU ─────────────────────────
-        D3D12Bindings.uploadFloats(dev, queue, weightBuf, dequantized, arena);
+        // ── Step 2: Upload weight data to GPU (host float[] or ByteBuffer, per uploader) ──
+        weightUploader.upload(dev, queue, weightBuf);
         float[] zeroBias = new float[N]; // GEMM C tensor = zero bias
         D3D12Bindings.uploadFloats(dev, queue, biasBuf, zeroBias, arena);
         log.info("Uploaded weight [{}, {}] to GPU ({} MB)",
