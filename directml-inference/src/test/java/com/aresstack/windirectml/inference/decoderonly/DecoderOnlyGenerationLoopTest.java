@@ -105,13 +105,12 @@ class DecoderOnlyGenerationLoopTest {
         return logits;
     }
 
-    /** Returns canned logits per step; ignores the KV cache (loop control-flow only). */
+    /** Vends a fresh fake session per run; the session owns its own state (here just a step counter). */
     private static final class FakeForwardPass implements DecoderOnlyForwardPass {
         private final DecoderOnlyConfig config =
                 DecoderOnlyConfig.of(1, 4, 8, 1, 1, 2, 64, VOCAB, 1e-5f, 10000.0f);
         private final DecoderOnlyWarpDecodeProfile profile;
         private final List<float[]> logitsPerStep;
-        private int call;
 
         FakeForwardPass(DecoderOnlyWarpDecodeProfile profile, float[]... logitsPerStep) {
             this.profile = profile;
@@ -129,13 +128,37 @@ class DecoderOnlyGenerationLoopTest {
         }
 
         @Override
+        public DecoderOnlyDecodeSession newDecodeSession(int maxTokens) {
+            return new FakeSession(logitsPerStep);
+        }
+    }
+
+    /** Returns canned logits per step: prefill yields step 0, each decodeNext the next step. */
+    private static final class FakeSession implements DecoderOnlyDecodeSession {
+        private final List<float[]> logitsPerStep;
+        private int call;
+
+        FakeSession(List<float[]> logitsPerStep) {
+            this.logitsPerStep = logitsPerStep;
+        }
+
+        @Override
+        public float[] prefill(List<Integer> promptTokenIds) {
+            return logitsPerStep.get(call++);
+        }
+
+        @Override
+        public float[] decodeNext(int tokenId) {
+            return logitsPerStep.get(call++);
+        }
+
+        @Override
         public long lastCallLmHeadNanos() {
             return 0L;
         }
 
         @Override
-        public float[] logitsForLastToken(List<Integer> tokenIds, DecoderOnlyWarpKvCache kvCache) {
-            return logitsPerStep.get(call++);
+        public void close() {
         }
     }
 

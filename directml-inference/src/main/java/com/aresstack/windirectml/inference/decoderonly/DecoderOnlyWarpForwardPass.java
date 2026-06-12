@@ -187,6 +187,12 @@ public final class DecoderOnlyWarpForwardPass implements AutoCloseable, DecoderO
         return decodeProfile;
     }
 
+    @Override
+    public DecoderOnlyDecodeSession newDecodeSession(int maxTokens) {
+        ensureOpen();
+        return new DecoderOnlyWarpDecodeSession(this, maxTokens);
+    }
+
     /**
      * LM-head projection time (nanoseconds) measured during the most recent {@link #logitsForLastToken} call. The
      * generation loop reports this separately so the LM-head cost is not silently folded into prefill/decoder timings.

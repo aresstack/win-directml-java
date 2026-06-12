@@ -12,8 +12,9 @@ import java.util.function.IntConsumer;
 /**
  * Family-neutral token generation loop for decoder-only WARP runtimes.
  *
- * <p>Drives the {@link DecoderOnlyForwardPass} step by step: forward pass → next-token selection → optional streaming
- * → stop check, with an incremental {@link DecoderOnlyWarpKvCache} and per-stage timing. The numerical decisions
+ * <p>Drives a per-run {@link DecoderOnlyDecodeSession} (obtained from the {@link DecoderOnlyForwardPass}) step by
+ * step: prefill → next-token selection → optional streaming → stop check → decodeNext, with per-stage timing. The
+ * session owns its KV cache, so the loop never creates or passes one. The numerical decisions
  * (sampling, repetition penalty, stop tokens) live entirely in the supplied {@link DecoderOnlyTokenSelector}, so this
  * loop is identical for every decoder-only family; only the selector and the result mapping differ.</p>
  *
@@ -67,46 +68,52 @@ public final class DecoderOnlyGenerationLoop {
         DecoderOnlyGeneratedTokens generatedTokens = new DecoderOnlyGeneratedTokens(maxNewTokens);
         String finishReason = "length";
         int maxTokens = inputTokenIds.size() + maxNewTokens;
-        DecoderOnlyWarpKvCache kvCache = DecoderOnlyWarpKvCache.create(forwardPass.config(), maxTokens);
         List<String> stepTopK = new ArrayList<>();
-        for (int i = 0; i < maxNewTokens; i++) {
-            long forwardStart = System.nanoTime();
-            float[] logits = forwardPass.logitsForLastToken(fullTokenIds, kvCache);
-            long forwardNanos = System.nanoTime() - forwardStart;
-            // Report the LM-head projection separately instead of silently folding it into prefill/decoder.
-            long stepLmHeadNanos = Math.min(forwardPass.lastCallLmHeadNanos(), forwardNanos);
-            lmHeadNanos += stepLmHeadNanos;
-            long computeNanos = forwardNanos - stepLmHeadNanos;
-            if (i == 0) {
-                prefillNanos += computeNanos;
-            } else {
-                decoderStepNanos += computeNanos;
-            }
-
-            if (debugTopK > 0 && i < debugSteps) {
-                stepTopK.add(topKLine(i, logits, debugTopK));
-            }
-
-            long tokenSelectStart = System.nanoTime();
-            int nextToken = selector.selectNextToken(logits, generatedTokens);
-            long tokenSelectStep = System.nanoTime() - tokenSelectStart;
-            tokenSelectNanos += tokenSelectStep;
-            if (profileDecode) {
-                decodeProfile.tokenSelect += tokenSelectStep;
-            }
-
-            generatedTokens.add(nextToken);
-            fullTokenIds.add(nextToken);
-            if (generatedTokenConsumer != null && !selector.shouldStop(nextToken)) {
-                long streamStart = System.nanoTime();
-                generatedTokenConsumer.accept(nextToken);
-                if (profileDecode) {
-                    decodeProfile.streamingCallback += System.nanoTime() - streamStart;
+        // The session owns its decode state / KV cache; the loop never creates or passes a cache. Step 0 prefills the
+        // prompt; every later step feeds the token selected in the previous step. This is the same processing as the
+        // earlier cache-in-parameter loop (prefill of the whole prompt, then one new token per decode step).
+        try (DecoderOnlyDecodeSession session = forwardPass.newDecodeSession(maxTokens)) {
+            int pendingToken = -1;
+            for (int i = 0; i < maxNewTokens; i++) {
+                long forwardStart = System.nanoTime();
+                float[] logits = (i == 0) ? session.prefill(inputTokenIds) : session.decodeNext(pendingToken);
+                long forwardNanos = System.nanoTime() - forwardStart;
+                // Report the LM-head projection separately instead of silently folding it into prefill/decoder.
+                long stepLmHeadNanos = Math.min(session.lastCallLmHeadNanos(), forwardNanos);
+                lmHeadNanos += stepLmHeadNanos;
+                long computeNanos = forwardNanos - stepLmHeadNanos;
+                if (i == 0) {
+                    prefillNanos += computeNanos;
+                } else {
+                    decoderStepNanos += computeNanos;
                 }
-            }
-            if (selector.shouldStop(nextToken)) {
-                finishReason = "eos_token";
-                break;
+
+                if (debugTopK > 0 && i < debugSteps) {
+                    stepTopK.add(topKLine(i, logits, debugTopK));
+                }
+
+                long tokenSelectStart = System.nanoTime();
+                int nextToken = selector.selectNextToken(logits, generatedTokens);
+                long tokenSelectStep = System.nanoTime() - tokenSelectStart;
+                tokenSelectNanos += tokenSelectStep;
+                if (profileDecode) {
+                    decodeProfile.tokenSelect += tokenSelectStep;
+                }
+
+                generatedTokens.add(nextToken);
+                fullTokenIds.add(nextToken);
+                pendingToken = nextToken;
+                if (generatedTokenConsumer != null && !selector.shouldStop(nextToken)) {
+                    long streamStart = System.nanoTime();
+                    generatedTokenConsumer.accept(nextToken);
+                    if (profileDecode) {
+                        decodeProfile.streamingCallback += System.nanoTime() - streamStart;
+                    }
+                }
+                if (selector.shouldStop(nextToken)) {
+                    finishReason = "eos_token";
+                    break;
+                }
             }
         }
         List<String> microProfileLines = List.of();
