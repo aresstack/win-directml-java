@@ -95,3 +95,20 @@ Daraus folgt für dieses Slice (bewusst „nicht alles blind anlegen"):
 
 Kein Runtime-Tausch, kein geteilter Baustein extrahiert, keine T5-Klasse umgehängt, keine decoderonly-Änderung. Nur
 Inventur + `seq2seq`-Paketgrenze + Slice-Plan.
+
+## 7. Slice T5-2 — erster gemeinsamer WARP-Baustein (erledigt)
+
+Erster geteilter unterer Baustein eingeführt: **`inference/warp/WarpDenseProjection`** — der modellfamilien-neutrale
+Adapter über `MatMulNBitsKernel` (`y = W*x`, rank-2 `[output, input]`). API ist die Vereinigung der Familienbedarfe:
+`project`/`projectInto` (matvec), `projectSequence`/`projectSequenceInto` (batched + per-row-Fallback), `kernel()`
+(für späteres GPU-resident-Chaining), `close`/`isClosed`.
+
+- **`T5WarpLinearProjection` ist jetzt ein dünner Adapter** darüber (behält die `T5LinearProjection`-API und die
+  rank-2-/Größen-Validierungen). Verhalten unverändert: gleiche Shapes, gleicher Batch-Fallback, gleiche matvec-
+  Ergebnisse (gleiche Kernel-Aufrufe in gleicher Reihenfolge). Die `T5WarpLinearProjectionFactory` (plain + fused
+  self-/cross-attention) baut unverändert darüber.
+- **decoderonly bleibt unangetastet** — `DecoderOnlyWarpDenseProjection` ist API-deckungsgleich mit dem neuen Baustein
+  (selber Kernel, selbe Methoden `project/projectInto/projectSequenceInto/kernel/close`) und kann später **1:1** als
+  eigener Slice darauf gehoben werden, ohne den abgeschlossenen Block jetzt zu berühren.
+- Tests: `warp/WarpDenseProjectionTest` (device-frei: Shape-Validierung; gated WARP: matvec/sequence == Referenz) und
+  `t5/T5WarpLinearProjectionTest` (device-frei: rank-2-Check; gated WARP: apply/applySequence == Referenz).
