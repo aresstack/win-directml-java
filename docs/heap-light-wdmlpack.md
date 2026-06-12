@@ -1,0 +1,134 @@
+# heap-light `.wdmlpack` — H1: Bestandsaufnahme + Load-Path-Mapping
+
+> **Status:** reine Analyse/Doku. Kein Code geändert, kein Format geändert, kein Runtime-Verhalten geändert.
+> **Frage:** Wo entstehen auf dem `.wdmlpack`-Ladepfad vermeidbare Host-Heap-Kopien, und welche Familie lässt sich
+> am risikoärmsten zuerst heap-light machen?
+
+## 1. Zielbild (langfristig, NICHT H1)
+
+```
+.wdmlpack  →  FileChannel/mmap ByteBuffer-Region  →  UploadBuffer  →  DeviceBuffer  →  WARP/DirectML
+```
+
+statt heute:
+
+```
+.wdmlpack  →  mmap ByteBuffer  →  float[] (decode/dequantize, teils + clone)  →  uploadFloats(float[])  →  DeviceBuffer
+```
+
+## 2. Wer öffnet/liest `.wdmlpack`
+
+| Klasse | Rolle | Heap? |
+|--------|-------|-------|
+| `model/WdmlPackReader` | einzige Klasse, die das Paket **mmappt** und Payload-Offsets interpretiert | **zero-copy** (mmap `MappedByteBuffer`, read-only Slices) |
+| `model/RuntimeModelPackage` | schlanker Deskriptor (Header + Manifest + Größe) | kein Payload-Heap |
+| `model/WdmlPackManifest` | Manifest-Zugriff (`tensors[]`: name, dataType, dims, byteLength, payloadOffset, payloadLength) | klein (JSON-Maps) |
+| `model/RuntimeTensor` | benannter Tensor = `name`, `dims`, `dataType`, **read-only `ByteBuffer`-View** + `rawByteLength` | **zero-copy** (View auf mmap) |
+| `model/RuntimeTensorCatalog` | Name→`RuntimeTensor`; `payloadBytes()`; Adapter `toSourceTensorCatalog()`/`toTensorCatalog()` | Adapter erzeugen `SourceTensor.inline(... ByteBuffer)` — weiterhin **zero-copy** |
+
+**Befund:** Die gemeinsame `model/`-Lese-/Katalogschicht ist bereits heap-light. `WdmlPackReader.mapPayloadTensors`
+liefert `RuntimeTensor` mit `ByteBuffer`-Slices direkt in die gemappte Datei (kein `byte[]`/`float[]`). Auch die
+Adapter (`SourceTensor`, Qwens `OnnxTensor`-Adaption in `QwenWdmlPackModelSource.adaptRuntimeTensors`) reichen nur
+`ByteBuffer`-Views weiter.
+
+## 3. Wo die Host-Kopien wirklich entstehen (Familie → Kernel-Boundary)
+
+| Familie | Klasse / Stelle | Materialisierung | Quell-dtype |
+|---------|------------------|------------------|-------------|
+| **SmolLM2** | `smollm2/SmolLM2DenseTensor.decodeValues` | mmap `ByteBuffer` → **`float[elementCount]`** (Element-für-Element FLOAT/FP16/BF16-Decode) … | FP32/FP16/BF16 |
+| **SmolLM2** | `smollm2/SmolLM2DenseTensor` ctor (`values.clone()`) | … danach **zweite** volle `float[]`-Kopie (defensiv) | — |
+| **T5** | `t5/T5TensorData.readFloatValues` | mmap `ByteBuffer` → **`float[expectedElements]`** (FP32/FP16-Decode) | FP32/FP16 |
+| **Qwen** | `qwen/QwenGpuKernels` (fused QKV / gate-up) → `MatMulNBitsKernel.dequantizeInt4` | INT4 → **`float[N*K]`** (+ Konkatenation für Fusion) | INT4 (AWQ block-128) |
+| **alle WARP-Dense** | `warp/WarpDenseProjection.fromDequantizedWeights(float[])` → `MatMulNBitsKernel.fromDequantizedWeights` | nimmt **volle FP32-`float[output×input]`**, lädt sie via `D3D12Bindings.uploadFloats(float[])` in einen **Device-FP32-Buffer** | FP32 |
+
+Decoder-only teilt sich diesen Pfad: `DecoderOnlyWarpDenseProjection.fromRowMajorWeights(float[])` /
+`DecoderOnlyWarpFusedDenseProjection` und `SmolLM2WarpForwardPass` rufen alle `WarpDenseProjection.fromDequantizedWeights`.
+T5 nutzt `T5WarpLinearProjection`/`T5WarpLmHead` über denselben `fromDequantizedWeights`-Eingang.
+
+### Upload-Boundary (DirectML)
+- `MatMulNBitsKernel`:
+  - **FP32-Pfad** (`fromDequantizedWeights`, `useInt4Gpu=false`): Host-`float[]` → `uploadFloats(...)` → Device-FP32
+    `weightBuf [N,K]`. (Doku im Kernel: „Dequantize INT4→FP32 once at preparation time, upload".)
+  - **INT4-GPU-Pfad** (`new MatMulNBitsKernel(wb,N,K,qWeight,scales,zp,…)`): gepackte INT4 + FP32-Scales + ZP direkt
+    auf Device (`int4WeightBuf`/`int4ScalesBuf`/`int4ZpBuf`) — **deutlich heap-leichter**, kein voller FP32-`float[]`.
+- Die Upload-API ist heute `D3D12Bindings.uploadFloats(float[])` / `uploadBytes(byte[])` — sie **erzwingt ein
+  Host-Array**; es gibt (noch) keine `upload(ByteBuffer)`/`upload(MemorySegment)`-Variante.
+
+## 4. Größte Heap-Treiber (Reihenfolge)
+
+1. **Volle FP32-`float[output×input]` pro Projektion** an `fromDequantizedWeights` — der dominante Treiber. Für jede
+   Linear-/LM-Head-Projektion wird die komplette Gewichtsmatrix als FP32 auf dem Host gehalten, bis sie hochgeladen ist.
+2. **SmolLM2 doppelte Kopie**: `decodeValues` (`new float[]`) **plus** ctor-`values.clone()` → 2× volle FP32-Matrix.
+3. **Qwen-Fusion**: `dequantizeInt4` dreier Projektionen → `float[]` + Konkatenation (QKV, gate-up) vor dem Upload.
+4. **FP16/BF16→FP32-Decode** (SmolLM2/T5): Element-für-Element-Schleife erzeugt eine FP32-Matrix, obwohl die Quelle
+   halb so groß ist.
+
+Der Reader/Katalog selbst trägt **nichts** dazu bei (zero-copy mmap).
+
+## 5. Welche Familien betroffen sind
+
+- **Qwen, SmolLM2, T5** liegen auf dem `.wdmlpack`-Pfad und sind betroffen.
+- **MiniLM / Reranker / E5** laden **SafeTensors direkt** (`encoder/...`, `BertCpuEncoderWeights.load(modelDir,cfg)`)
+  und berühren `.wdmlpack` **nicht** → für diesen Block **nicht relevant** (eigener, späterer Pfad falls je nötig).
+
+## 6. Absichernde Tests (Ist-Ladepfad)
+
+- `model/WdmlPackReaderTest`, `model/WdmlPackWriterTest`, `model/RuntimeModelPackageTest`,
+  `model/SourceTensorCatalogTest`, `model/RuntimeLoadabilityTest` — Format/Lesepfad.
+- `smollm2/SmolLM2RuntimePackageWeightsTest`, `smollm2/SmolLM2WdmlPackCompileToolTest`,
+  `smollm2/SmolLM2NativeWarpExecutorTest`, `smollm2/SmolLM2PackageStalenessTest` — SmolLM2-Last/WARP.
+- `qwen/QwenWdmlPackModelSourceTest`, `qwen/QwenWdmlPackCompilerTest`, `qwen/QwenWdmlPackCompileToolTest`,
+  `qwen/QwenWdmlPackModelSourceTest` — Qwen-Paket/Source.
+- T5: `t5/*` Compile-/Runtime-Package-Tests.
+
+Diese Tests fixieren Manifest-Felder, Offsets und Token-/Numerik-Ergebnisse — ein heap-light-Umbau muss sie
+unverändert grün lassen (Numerik byte-identisch).
+
+## 7. Dateiformat-/Manifest-Annahmen (bleiben in H2 unverändert)
+
+- Header trägt `payloadOffset`/`payloadLength`; pro Tensor im Manifest: `name`, `dataType` (ONNX-Code),
+  `dims`, `byteLength`, `payloadOffset` (relativ zum Payload), `payloadLength`.
+- Payload ist **roh little-endian** abgelegt (kein Container-internes Re-Encoding); deshalb ist der mmap-Slice bereits
+  das exakte Upload-Byte-Bild für FP32-Tensoren.
+- Reader-Limit: aktuell `fileSize > Integer.MAX_VALUE` nicht unterstützt (mmap als ein `MappedByteBuffer`).
+
+**Folge:** Heap-light braucht **keine Formatänderung** — nur die Host-Konsumseite (Decode/Upload) muss den mmap-Slice
+direkt verwenden statt ihn in `float[]` zu materialisieren.
+
+## 8. Sichere Low-Risk-Slices (Vorschlag, additiv)
+
+1. **Upload-Seam additiv erweitern (shared, gerätenah):** `D3D12Bindings.uploadFloats(ByteBuffer)` /
+   `upload(MemorySegment)` **zusätzlich** zur `float[]`-Variante; `MatMulNBitsKernel.fromDequantizedWeights(ByteBuffer)`
+   + `WarpDenseProjection.fromDequantizedWeights(ByteBuffer)` als **Overloads**. Bestehende `float[]`-Pfade bleiben.
+2. **FP32-Pilotfamilie (T5 oder SmolLM2):** für den **FP32**-Fall den mmap-`ByteBuffer`-Slice direkt hochladen statt
+   `float[]`-Decode + `clone()`. FP16/BF16 und Qwen-INT4 bleiben zunächst auf dem `float[]`-Pfad.
+3. **SmolLM2 Doppel-`clone()` entschärfen** (nur für den Upload-Pfad), ohne den Reference/CPU-`float[]`-Pfad zu entfernen.
+
+## 9. Risiken
+
+- **mmap-Lebensdauer:** Heute wird sofort in `float[]` dekodiert, die Mapping-Lebensdauer ist irrelevant. Beim
+  Direkt-Upload aus dem mmap-Slice muss das Mapping **bis zum Abschluss des GPU-Uploads** leben (FileChannel/Mapping
+  nicht vorzeitig freigeben). Klare Lifetime-Verantwortung nötig.
+- **Endianness:** mmap-Slices sind `LITTLE_ENDIAN`; `uploadFloats` schreibt heute Host-nativ. Eine `ByteBuffer`-Upload-
+  Variante muss LE garantieren (x86 = LE, dennoch explizit prüfen) → Numerik byte-identisch.
+- **Numerik-Gleichheit:** FP32-Direkt-Upload muss dasselbe Device-Bild erzeugen wie `float[]`→`uploadFloats`
+  (identische LE-FP32-Bytes — erfüllt). FP16/BF16-Decode darf bei späterer Migration nicht abweichen.
+- **Qwen-INT4-Fusion:** QKV/gate-up brauchen FP32-Konkatenation; nicht trivial auf `ByteBuffer` umstellbar → später.
+- **Reference-/CPU-Pfade** (`SmolLM2DenseTensor.multiplyVector/dotRow`, T5-Reference) brauchen weiter `float[]` →
+  `float[]`-Pfad **nicht entfernen** (ist auch Nicht-Ziel/verboten).
+
+## 10. Nicht-Ziele (H-Block insgesamt, bestätigt für H1)
+
+- Keine `.wdmlpack`-Formatänderung. Kein Entfernen bestehender `float[]`-Pfade. Kein mmap-Umbau in H1.
+- Keine Kernel-/Runtime-Verhaltensänderung, keine Performance-Optimierung, keine Qwen-Legacy-Entfernung.
+
+## 11. Empfehlung für H2
+
+**Start an der gemeinsamen Schicht, nicht in einer Familie:** zuerst den **additiven Upload-Seam**
+(`D3D12Bindings.upload(ByteBuffer)` + `MatMulNBitsKernel.fromDequantizedWeights(ByteBuffer)` +
+`WarpDenseProjection.fromDequantizedWeights(ByteBuffer)` als Overloads, `float[]`-Pfade bleiben). Danach **T5 als
+FP32-Pilot** (kleinste, am klarsten gekapselte Familie über `T5WarpLinearProjection`/`T5WarpLmHead`) auf den
+`ByteBuffer`-Upload umstellen — nur FP32, mit Lifetime-Garantie und Byte-Identitäts-Test gegen den alten Pfad.
+
+**Keine Formatänderung nötig.** **Reihenfolge der Heap-Ersparnis:** FP32-Familien (T5/SmolLM2) zuerst (direkter
+ByteBuffer-Upload eliminiert 1–2 volle FP32-Kopien), Qwen-INT4-Fusion zuletzt (komplexer, eigener Slice).
