@@ -45,7 +45,10 @@ class T5RuntimeTest {
 
         assertTrue(runtimePackage.payloadIncluded());
         assertTrue(runtimePackage.weightsLoadable());
-        assertFalse(runtimePackage.runtimeLoadable());
+        // T5-1: weights-loadable package is now honestly runtime-loadable (loader builds weights + structures),
+        // but generation is not yet certified -> not executable.
+        assertTrue(runtimePackage.runtimeLoadable());
+        assertFalse(runtimePackage.executable());
         assertEquals(27, weights.tensorCount());
         assertTrue(weights.payloadBytes() > 0);
         assertArrayEquals(new long[]{6, 4}, weights.sharedEmbedding().dims());
@@ -89,7 +92,7 @@ class T5RuntimeTest {
         manifest.put("runtimeLoadable", false);
         manifest.put("weightsLoadable", false);
         manifest.put("payloadIncluded", false);
-        manifest.put("runtimeLoadMode", "not-implemented");
+        manifest.put("runtimeLoadMode", T5ManifestPayloadPolicy.MODE_MANIFEST_ONLY);
         manifest.put("t5", T5PackageMetadata.from(T5TestFixtures.tinyConfig(false)).toManifest());
         WdmlPackWriter.writeManifestOnly(pack, manifest);
         return pack;

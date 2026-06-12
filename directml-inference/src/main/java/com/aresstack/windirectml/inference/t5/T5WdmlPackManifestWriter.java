@@ -59,6 +59,23 @@ final class T5WdmlPackManifestWriter {
 
         boolean payloadIncluded = payloadPlan != null && payloadPlan.payloadLength() > 0;
         boolean weightsLoadable = payloadIncluded && layout.complete() && layout.unsupportedRuntimeDtypes().isEmpty();
+        // T5RuntimePackage.open() builds T5Weights + the runtime structures whenever the weights load, so a
+        // weights-loadable package IS runtime-loadable. Generation is not yet certified, so executable stays false
+        // (T5-1: don't hide "not production-ready" behind runtimeLoadable=false).
+        boolean runtimeLoadable = weightsLoadable;
+        boolean executable = false;
+        String runtimeLoadMode;
+        String reason;
+        if (!payloadIncluded) {
+            runtimeLoadMode = T5ManifestPayloadPolicy.MODE_MANIFEST_ONLY;
+            reason = T5ManifestPayloadPolicy.REASON_MANIFEST_ONLY;
+        } else if (!weightsLoadable) {
+            runtimeLoadMode = T5ManifestPayloadPolicy.MODE_WEIGHTS_NOT_LOADABLE;
+            reason = T5ManifestPayloadPolicy.REASON_WEIGHTS_NOT_LOADABLE;
+        } else {
+            runtimeLoadMode = T5ManifestPayloadPolicy.MODE_RUNTIME_LOADABLE_NOT_EXECUTABLE;
+            reason = T5ManifestPayloadPolicy.REASON_RUNTIME_LOADABLE_NOT_EXECUTABLE;
+        }
 
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wdmlpack");
@@ -71,9 +88,10 @@ final class T5WdmlPackManifestWriter {
         root.put("mode", payloadIncluded ? "payload" : "manifest-only");
         root.put("payloadIncluded", payloadIncluded);
         root.put("weightsLoadable", weightsLoadable);
-        root.put("runtimeLoadable", false);
-        root.put("runtimeLoadMode", weightsLoadable ? "t5-weights-loaded-runtime-not-implemented" : T5ManifestPayloadPolicy.RUNTIME_LOAD_MODE);
-        root.put("reason", T5ManifestPayloadPolicy.REASON);
+        root.put("runtimeLoadable", runtimeLoadable);
+        root.put("executable", executable);
+        root.put("runtimeLoadMode", runtimeLoadMode);
+        root.put("reason", reason);
         if (payloadIncluded) {
             root.put("payloadAlignment", WdmlPackWriter.PAYLOAD_ALIGNMENT);
             root.put("payloadBytes", payloadPlan.payloadLength());

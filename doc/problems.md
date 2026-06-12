@@ -40,7 +40,7 @@ bilden und `WarpDenseProjection.fromFusedFp32(...)` nutzen (statt `T5TensorData.
 | 3 Fused heap-light | **teilweise** | e55b524 (decoder-only/SmolLM2 fertig; T5-fused offen, s.o.) |
 | 4 Decoder-only Grenzen | **erledigt** | WARP+Reference auf geteiltem DecoderOnlyGenerationLoop; SmolLM2StopTokenPolicy entfernt |
 | 5 Qwen INT4/Fusion | **teilweise** | 30e2274 (Diagnostik fertig; bit-shift/ByteBuffer-Fusion offen) |
-| 6 T5 Manifest-Status | **offen** | s.u. (hängt an Item 7) |
+| 6 T5 Manifest-Status | **erledigt** | T5-1: weightsLoadable/runtimeLoadable/executable getrennt; keine „runtime not implemented"-Lüge mehr |
 | 7 T5 Engine | **offen** | s.u. (groß, braucht Modell + Korrektheit) |
 | 8 Generation-Contract Workbench | **offen** | s.u. (medium, Workbench-Panels) |
 | 9 model/wdmlpack-Lifecycle | **weitgehend erfüllt** | s.u. (durch H-Block) |
@@ -80,13 +80,31 @@ baut; (c) getrennte LM-Head-INT4-Analyse.
 (Token-Identität) und brauchen das echte Qwen-0.5B-Modell zur Verifikation.
 **Alternative:** Eigener Qwen-INT4-Slice mit dem lokalen `qwen2.5-coder-0.5b-directml-int4` als Paritäts-Gate.
 
-## Items 6 + 7 — T5 Manifest-Status + Engine
+## Item 6 — T5 Manifest/Runtime-Status: ERLEDIGT (Slice T5-1)
 
-**Warum zusammen offen:** Item 6 (Manifest `runtimeLoadable`/`runtimeLoadMode`/`reason` korrigieren) hängt direkt an
-Item 7: ob `runtimeLoadable=true` ehrlich gesetzt werden darf, hängt davon ab, ob die T5-Engine den jeweiligen
-Kandidaten **wirklich** ausführen kann. Item 7 (T5 Encoder/Decoder/Cross-Attention/Cache fachlich fertigstellen oder
+Ehrliche Trennung statt pauschalem `runtimeLoadable=false`/„runtime not implemented":
+- **weightsLoadable** = Payload + komplettes Layout + unterstützte Runtime-Dtypes (unverändert berechnet).
+- **runtimeLoadable** = `weightsLoadable` — `T5RuntimePackage.open()` baut bei ladbaren Gewichten `T5Weights` + die
+  Runtime-Strukturen, also IST das Paket runtime-loadable (vorher hart `false`).
+- **executable** = neues Manifest-Feld + `T5RuntimePackage.executable()`; bleibt **false**, weil T5-Generierung noch
+  nicht zertifiziert ist (Item 7). So wird „noch nicht produktionsreif" **nicht** mehr hinter `runtimeLoadable=false`
+  versteckt.
+- **runtimeLoadMode/reason** (zentral in `T5ManifestPayloadPolicy`): `t5-manifest-only` /
+  `t5-weights-not-loadable` / `t5-runtime-loadable-not-executable` / (reserviert) `t5-executable` — mit klaren Gründen.
+  Die alten Strings „not-implemented"/„t5-weights-loaded-runtime-not-implemented"/„T5 runtime is not implemented yet"
+  sind aus Writer, `T5SafeTensorsLayoutCompiler`, `T5LayoutManifest` und `T5RuntimePackage.fromMetadata` entfernt.
+
+Verhaltensneutral: kein T5-Consumer startet Generierung anhand `runtimeLoadable` (nur Report-Printer/Anzeige), Workbench
+kompiliert unverändert. Tests umgestellt: `T5RuntimePackageLoadabilityTest`, `T5RuntimeTest`,
+`T5SafeTensorsLayoutCompilerTest`, `T5WdmlPackCompilerTest` (Dry-Run-Tool-Test bleibt `runtimeLoadable=no`, da Dry-Run
+kein Payload schreibt). `T5Runtime.UNSUPPORTED_MESSAGE` (WARP-Pfad) bewusst unverändert — Item-7-Thema.
+
+## Item 7 — T5 Engine (offen)
+
+**Warum offen:** Item 7 (T5 Encoder/Decoder/Cross-Attention/Cache fachlich fertigstellen oder
 klar abgrenzen) ist die größte verbleibende Engine-Baustelle und braucht ein lokales T5-Modell (flan-t5-small/t5-small
-liegen vor) plus echte Ausgabe-Verifikation.
+liegen vor) plus echte Ausgabe-Verifikation. Erst wenn Generierung zertifiziert ist, darf `executable=true` gesetzt
+werden (das Feld + der Modus `t5-executable` stehen bereits bereit).
 **Warum nicht jetzt:** Groß, korrektheits- und modellabhängig; nicht in einem additiven Schritt sicher machbar, ohne
 T5-Generierung zu riskieren. Außerhalb des sicheren Rahmens dieser autonomen Abarbeitung.
 **Alternative (empfohlene Slice-Folge):**

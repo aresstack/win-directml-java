@@ -72,8 +72,9 @@ public final class T5RuntimePackage {
             manifest.put("payloadIncluded", false);
             manifest.put("weightsLoadable", false);
             manifest.put("runtimeLoadable", false);
-            manifest.put("runtimeLoadMode", T5ManifestPayloadPolicy.RUNTIME_LOAD_MODE);
-            manifest.put("reason", T5ManifestPayloadPolicy.REASON);
+            manifest.put("executable", false);
+            manifest.put("runtimeLoadMode", T5ManifestPayloadPolicy.MODE_MANIFEST_ONLY);
+            manifest.put("reason", T5ManifestPayloadPolicy.REASON_MANIFEST_ONLY);
             manifest.put("t5", metadata.toManifest());
             return new T5RuntimePackage(null, null, manifest, metadata, RuntimeTensorCatalog.empty(), List.of(), false);
         } catch (IOException e) {
@@ -111,6 +112,15 @@ public final class T5RuntimePackage {
 
     public boolean runtimeLoadable() {
         return Boolean.TRUE.equals(manifest.get("runtimeLoadable"));
+    }
+
+    /**
+     * Whether the engine can run a <em>certified</em> generation for this package. T5 generation is not yet certified,
+     * so this is {@code false} even for runtime-loadable packages — see {@link #runtimeLoadable()} for "the loader can
+     * build the runtime structures". A later T5-engine slice flips this once generation is verified.
+     */
+    public boolean executable() {
+        return Boolean.TRUE.equals(manifest.get("executable"));
     }
 
     /**

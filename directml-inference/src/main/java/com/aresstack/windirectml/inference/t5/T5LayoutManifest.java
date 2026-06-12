@@ -24,8 +24,6 @@ record T5LayoutManifest(
         List<String> shapeErrors,
         List<String> unsupportedRuntimeDtypes
 ) {
-    static final String RUNTIME_NOT_IMPLEMENTED_REASON = "T5 runtime is not implemented yet";
-
     static T5LayoutManifest notSafeTensors(String sourceFormat) {
         return new T5LayoutManifest(T5SafeTensorsLayoutCompiler.LAYOUT_SCHEMA,
                 T5SafeTensorsLayoutCompiler.COMPILER_VERSION,

@@ -164,8 +164,17 @@ final class T5SafeTensorsLayoutCompiler {
 
         private T5LayoutManifest finish() {
             boolean complete = missingRequired.isEmpty() && shapeErrors.isEmpty();
-            return new T5LayoutManifest(LAYOUT_SCHEMA, COMPILER_VERSION, "huggingface-t5-dense", true, complete, false,
-                    "not-implemented", T5LayoutManifest.RUNTIME_NOT_IMPLEMENTED_REASON,
+            // A complete layout with only supported runtime dtypes can produce a runtime-loadable package
+            // (weights + structures build); generation itself is not yet certified (executable handled at package level).
+            boolean runtimeLoadable = complete && unsupportedRuntimeDtypes.isEmpty();
+            String runtimeLoadMode = runtimeLoadable
+                    ? T5ManifestPayloadPolicy.MODE_RUNTIME_LOADABLE_NOT_EXECUTABLE
+                    : T5ManifestPayloadPolicy.MODE_WEIGHTS_NOT_LOADABLE;
+            String reason = runtimeLoadable
+                    ? T5ManifestPayloadPolicy.REASON_RUNTIME_LOADABLE_NOT_EXECUTABLE
+                    : T5ManifestPayloadPolicy.REASON_WEIGHTS_NOT_LOADABLE;
+            return new T5LayoutManifest(LAYOUT_SCHEMA, COMPILER_VERSION, "huggingface-t5-dense", true, complete,
+                    runtimeLoadable, runtimeLoadMode, reason,
                     roles.size(), tensors.size(), rolePayloadBytes, List.copyOf(roles),
                     List.copyOf(missingRequired), List.copyOf(shapeErrors), List.copyOf(unsupportedRuntimeDtypes));
         }

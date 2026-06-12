@@ -19,10 +19,11 @@ class T5RuntimePackageLoadabilityTest {
 
         RuntimeLoadability loadability = runtimePackage.loadability();
 
-        // Faithful view of the (pre-existing) manifest fields for a manifest-only package.
+        // Manifest-only package: no payload -> not runtime-loadable, not executable, honest mode/reason (T5-1).
         assertFalse(loadability.runtimeLoadable());
-        assertEquals("not-implemented", loadability.runtimeLoadMode());
-        assertEquals("T5 runtime is not implemented yet", loadability.runtimeLoadableReason());
+        assertFalse(runtimePackage.executable());
+        assertEquals(T5ManifestPayloadPolicy.MODE_MANIFEST_ONLY, loadability.runtimeLoadMode());
+        assertEquals(T5ManifestPayloadPolicy.REASON_MANIFEST_ONLY, loadability.runtimeLoadableReason());
         assertEquals(runtimePackage.runtimeLoadable(), loadability.runtimeLoadable());
     }
 }

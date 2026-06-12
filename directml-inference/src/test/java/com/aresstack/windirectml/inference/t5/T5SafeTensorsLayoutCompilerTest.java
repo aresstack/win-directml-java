@@ -35,13 +35,13 @@ class T5SafeTensorsLayoutCompilerTest {
         assertEquals(T5SafeTensorsLayoutCompiler.LAYOUT_SCHEMA, manifest.schema());
         assertFalse(manifest.complete());
         assertFalse(manifest.runtimeLoadable());
-        assertEquals("not-implemented", manifest.runtimeLoadMode());
+        assertEquals(T5ManifestPayloadPolicy.MODE_WEIGHTS_NOT_LOADABLE, manifest.runtimeLoadMode());
         assertTrue(manifest.missingRequired().contains("encoder.final_layer_norm.weight"));
         assertEquals(1, manifest.roles().size());
     }
 
     @Test
-    void completeCodeT5DenseLayoutIsCompleteButNotRuntimeLoadableYet() throws Exception {
+    void completeCodeT5DenseLayoutIsRuntimeLoadableButNotExecutableYet() throws Exception {
         T5Config config = tinyConfig(false);
         Map<String, OnnxTensor> tensors = completeDenseT5Tensors(config);
         T5ModelImport imported = imported(tensors);
@@ -49,9 +49,10 @@ class T5SafeTensorsLayoutCompilerTest {
         T5LayoutManifest manifest = T5SafeTensorsLayoutCompiler.analyze(imported, config);
 
         assertTrue(manifest.complete(), manifest.missingRequired().toString());
-        assertFalse(manifest.runtimeLoadable());
-        assertEquals("not-implemented", manifest.runtimeLoadMode());
-        assertEquals(T5LayoutManifest.RUNTIME_NOT_IMPLEMENTED_REASON, manifest.reason());
+        // T5-1: a complete, supported layout is honestly runtime-loadable (not "runtime not implemented").
+        assertTrue(manifest.runtimeLoadable());
+        assertEquals(T5ManifestPayloadPolicy.MODE_RUNTIME_LOADABLE_NOT_EXECUTABLE, manifest.runtimeLoadMode());
+        assertEquals(T5ManifestPayloadPolicy.REASON_RUNTIME_LOADABLE_NOT_EXECUTABLE, manifest.reason());
         assertEquals(27, manifest.roleCount());
         assertTrue(manifest.roles().stream().anyMatch(role -> "lm_head".equals(role.role()) && role.tied()));
         assertTrue(manifest.roles().stream().anyMatch(role ->
@@ -93,7 +94,7 @@ class T5SafeTensorsLayoutCompilerTest {
 
         assertEquals("huggingface-t5-dense", out.get("sourceLayout"));
         assertEquals(T5SafeTensorsLayoutCompiler.COMPILER_VERSION, out.get("compilerVersion"));
-        assertEquals(false, out.get("runtimeLoadable"));
+        assertEquals(true, out.get("runtimeLoadable"));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> roles = (List<Map<String, Object>>) out.get("roles");
         assertEquals(27, roles.size());
@@ -106,7 +107,7 @@ class T5SafeTensorsLayoutCompilerTest {
         T5LayoutManifest manifest = T5SafeTensorsLayoutCompiler.analyze(imported(completeDenseT5Tensors(config)), config);
 
         assertTrue(manifest.complete(), manifest.missingRequired().toString());
-        assertFalse(manifest.runtimeLoadable());
+        assertTrue(manifest.runtimeLoadable());
         assertTrue(manifest.roles().stream().anyMatch(role -> "encoder.layer.0.ffn.wi_0".equals(role.role())));
         assertTrue(manifest.roles().stream().anyMatch(role -> "decoder.layer.0.ffn.wi_1".equals(role.role())));
     }

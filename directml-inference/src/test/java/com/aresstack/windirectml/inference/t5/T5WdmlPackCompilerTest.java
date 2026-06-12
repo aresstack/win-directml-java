@@ -51,17 +51,19 @@ class T5WdmlPackCompilerTest {
     }
 
     @Test
-    void marksPackageAsWeightsLoadableButGenerationNotRuntimeLoadable() throws Exception {
+    void marksPackageAsRuntimeLoadableButNotExecutable() throws Exception {
         Path modelDir = createModelDir(T5TestFixtures.tinyConfig(false));
         Path output = tempDir.resolve("t5.wdmlpack");
 
         T5WdmlPackCompiler.compile(new T5CompileOptions(modelDir, output, false, false));
         Map<String, Object> manifest = WdmlPackWriter.readManifest(output);
 
-        assertEquals(false, manifest.get("runtimeLoadable"));
+        // T5-1: honest status — weights load and the runtime can build structures, but generation is not certified.
         assertEquals(true, manifest.get("payloadIncluded"));
         assertEquals(true, manifest.get("weightsLoadable"));
-        assertEquals("t5-weights-loaded-runtime-not-implemented", manifest.get("runtimeLoadMode"));
+        assertEquals(true, manifest.get("runtimeLoadable"));
+        assertEquals(false, manifest.get("executable"));
+        assertEquals(T5ManifestPayloadPolicy.MODE_RUNTIME_LOADABLE_NOT_EXECUTABLE, manifest.get("runtimeLoadMode"));
     }
 
     @Test
@@ -91,7 +93,7 @@ class T5WdmlPackCompilerTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> layout = (Map<String, Object>) manifest.get("layout");
         assertEquals(true, layout.get("complete"));
-        assertEquals(false, layout.get("runtimeLoadable"));
+        assertEquals(true, layout.get("runtimeLoadable"));
         assertEquals(27, layout.get("roleCount"));
     }
 
