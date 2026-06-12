@@ -221,3 +221,47 @@ Projektionen + Reference-Tensoren bleiben unverändert.
 Naht; zusätzlich `SmolLM2DenseTensor`'s Doppel-`clone()` entschärfbar). **Qwen** zuletzt (INT4-Fusion + gepackter
 INT4-GPU-Pfad sind komplexer und brauchen einen eigenen Slice). FP16/BF16-Tensoren bleiben in allen Familien zunächst
 auf dem `float[]`-Decode.
+
+## 14. Slice H2c — SmolLM2 FP32 ByteBuffer-Pilot
+
+**Umgesetzt:** SmolLM2 lädt FP32-Projektionsgewichte für die **nicht-fusionierten** WARP-Linears über die
+ByteBuffer-Naht; der `float[]`-Fallback bleibt voll erhalten. Keine Generierungs-/Format-/Qwen-/T5-Änderung.
+
+**Geänderte SmolLM2/decoderonly-Klassen:**
+- `smollm2/SmolLM2DenseTensor` — FP32-Decode jetzt **lazy** + trägt den LE-mmap-Slice (`fp32LittleEndianSource()`);
+  Validierung (Shape, Payload-Länge) bleibt eager. FLOAT16/BFLOAT16 → eager `float[]`, kein Source. **Doppel-/
+  Dreifach-Kopie entfällt:** vorher `decodeValues()`-`float[]` + ctor-`values.clone()` (+ `copyValues()`-`clone()` an der
+  Projektionsstelle); jetzt für FP32-WARP **0** Host-`float[]`. Alle `float[]`-Accessoren (`copyValues`, `value`,
+  `copyRow(Into)`, `multiplyVector`, `dotRow`) laufen über einen einmaligen lazy Decode (Reference/Diagnostic intakt).
+- `decoderonly/DecoderOnlyWarpDenseProjection` — additive Overload
+  `fromRowMajorWeights(wb, name, out, in, ByteBuffer)` → `WarpDenseProjection`-ByteBuffer-Naht. `float[]`-Overload
+  unverändert (Qwen nutzt weiter `float[]` → **keine Qwen-Migration**).
+- `smollm2/SmolLM2WarpForwardPass.projection` — nutzt bei vorhandenem FP32-Source den ByteBuffer-Pfad, sonst
+  `copyValues()`.
+
+**Abgedeckt vom ByteBuffer-Pfad:** die nicht-fusionierten SmolLM2-Linears **`o_proj`** und **`down_proj`**. Die
+**fusionierten** `qkv` und `gate_up` bleiben `float[]` (Konkatenation braucht ein Host-Array, wie T5/Qwen-Fusion);
+Norm-Gewichte (klein) und der **LM-Head/Embedding** bleiben `float[]` — der LM-Head liegt im **geteilten**
+`DecoderOnlyWarpForwardPass`-Delegate und wäre ein decoderonly-Slice (beträfe auch Qwen), bewusst NICHT in H2c.
+
+**`SmolLM2DenseTensor` dekodiert jetzt lazy** (vorher eager). Der **Doppel-`clone()` ist entfernt/vermieden** (kein
+ctor-`clone()` mehr; `copyValues()` liefert weiterhin eine defensive Kopie — per Test abgesichert).
+
+**Lifetime:** `SmolLM2DenseTensor` hält den `fp32SourceLe`-View (→ mmap-Mapping bleibt am Leben); jeder
+`fp32LittleEndianSource()`-Aufruf liefert einen unabhängigen `duplicate()`-View; der Upload ist synchron im
+Kernel-Konstruktor während des Ladens.
+
+**Heap strukturell reduziert?** Ja — für `o_proj`/`down_proj` (FP32) entfällt die volle Host-`float[]`-Kopie komplett
+(vorher bis zu 3 Kopien pro Gewicht: decode + ctor-clone + copyValues-clone → jetzt 0).
+
+**Verifikation:**
+- gerätefrei: `SmolLM2DenseTensorTest` (FP32 → LE-Source + lazy Decode == Originalwerte; `multiplyVector`/`dotRow`
+  korrekt; unabhängige Views; `copyValues()` defensiv; FP16 → kein Source, korrekt dekodiert).
+- WARP: `DecoderOnlyWarpDenseProjectionTest.byteBufferOverloadMatchesFloatArrayOverloadOnWarp` — ByteBuffer- vs
+  `float[]`-Upload **byte-identisch** (Toleranz `0.0f`), read-only-Slice, Position/Limit unberührt.
+- Regression: **`SmolLM2NativeWarpExecutorTest` grün** (Top-1/Logits/greedy/Streaming) + smollm2/decoderonly/qwen/t5/
+  generation/model/warp + encoder.
+
+**Qwen als Nächstes?** Erst **später** — Qwen braucht wegen INT4-Fusion (QKV/gate-up dequantize→concat) und dem
+gepackten INT4-GPU-Pfad einen **eigenen** Slice; der reine FP32-ByteBuffer-Trick greift dort nur begrenzt. Vorher ggf.
+der geteilte decoderonly-LM-Head/Embedding-Pfad (beträfe Qwen + SmolLM2 gemeinsam) als eigener Slice.

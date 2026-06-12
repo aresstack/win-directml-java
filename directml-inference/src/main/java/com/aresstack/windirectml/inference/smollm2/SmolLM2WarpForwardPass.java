@@ -173,6 +173,13 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         }
         int outputSize = tensor.dim(0);
         int inputSize = tensor.dim(1);
+        // Heap-light FP32 path: upload the mmap ByteBuffer slice directly when available (no host float[]).
+        // FLOAT16/BFLOAT16 expose no FP32 source -> fall back to the float[] path (copyValues()).
+        java.nio.ByteBuffer fp32 = tensor.fp32LittleEndianSource();
+        if (fp32 != null) {
+            return DecoderOnlyWarpDenseProjection.fromRowMajorWeights(
+                    windowsBindings, name, outputSize, inputSize, fp32);
+        }
         return DecoderOnlyWarpDenseProjection.fromRowMajorWeights(
                 windowsBindings, name, outputSize, inputSize, tensor.copyValues());
     }

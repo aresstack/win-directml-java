@@ -10,24 +10,49 @@ import java.util.Objects;
 
 /**
  * Float32 view over a SmolLM2 runtime tensor payload.
+ *
+ * <p><b>Heap-light FP32 path (slice H2c):</b> when the payload is FLOAT32, the float decode is <em>deferred</em>:
+ * the raw little-endian mmap {@link ByteBuffer} slice is retained via {@link #fp32LittleEndianSource()} so the WARP
+ * dense projections can upload it directly (no host {@code float[]}). The {@code float[]} is only materialised on first
+ * access ({@link #copyValues()}, {@link #value(int)}, {@link #multiplyVector(float[])}, {@link #dotRow(int, float[])},
+ * row copies) — i.e. for reference/diagnostic/CPU paths and fused projections. Validation (shape, payload length) stays
+ * eager. FLOAT16/BFLOAT16 tensors keep an eager {@code float[]} and expose no FP32 source. This also removes the former
+ * double copy (decode {@code float[]} + ctor {@code clone()}).</p>
  */
 public final class SmolLM2DenseTensor {
 
     private final String name;
     private final long[] dims;
-    private final float[] values;
+    private final int elementCount;
+    private final ByteBuffer fp32SourceLe;   // nullable: present only for FLOAT32 mmap-backed tensors
+    private volatile float[] values;         // lazily decoded for fp32SourceLe; eager for FP16/BF16
 
-    private SmolLM2DenseTensor(String name, long[] dims, float[] values) {
+    private SmolLM2DenseTensor(String name, long[] dims, int elementCount, ByteBuffer fp32SourceLe, float[] values) {
         this.name = Objects.requireNonNull(name, "name");
         this.dims = dims.clone();
-        this.values = values.clone();
+        this.elementCount = elementCount;
+        this.fp32SourceLe = fp32SourceLe;
+        this.values = values;
     }
 
     public static SmolLM2DenseTensor from(SmolLM2WeightTensor tensor) {
         Objects.requireNonNull(tensor, "tensor");
         long[] dims = tensor.dims();
         int elementCount = checkedElementCount(dims);
-        return new SmolLM2DenseTensor(tensor.tensorName(), dims, decodeValues(tensor, elementCount));
+        SourceTensorDataType dataType = SourceTensorDataType.fromOnnxCode(tensor.dataType());
+        ByteBuffer raw = tensor.rawDataBuffer().order(ByteOrder.LITTLE_ENDIAN);
+        int expectedBytes = Math.multiplyExact(elementCount, dataType.bytesPerElement());
+        if (raw.remaining() < expectedBytes) {
+            throw new IllegalStateException("Tensor payload is shorter than its shape requires: "
+                    + tensor.tensorName());
+        }
+        if ("FLOAT".equals(dataType.name())) {
+            // Heap-light: keep the LE slice, decode lazily only if a float[] is actually requested.
+            return new SmolLM2DenseTensor(tensor.tensorName(), dims, elementCount, raw, null);
+        }
+        // FLOAT16 / BFLOAT16: eager conversion to FP32 (no direct FP32 source buffer for upload).
+        float[] decoded = decode(raw, dataType, elementCount, tensor.tensorName());
+        return new SmolLM2DenseTensor(tensor.tensorName(), dims, elementCount, null, decoded);
     }
 
     public String name() {
@@ -47,15 +72,16 @@ public final class SmolLM2DenseTensor {
     }
 
     public int elementCount() {
-        return values.length;
+        return elementCount;
     }
 
     public float value(int index) {
-        return values[index];
+        return ensureValues()[index];
     }
 
     public float[] copyValues() {
-        return values.clone();
+        float[] decoded = ensureValues();
+        return Arrays.copyOf(decoded, decoded.length);
     }
 
     public float[] copyRow(int rowIndex) {
@@ -65,7 +91,8 @@ public final class SmolLM2DenseTensor {
         if (rowIndex < 0 || rowIndex >= rows) {
             throw new IllegalArgumentException("rowIndex out of range for " + name + ": " + rowIndex);
         }
-        return Arrays.copyOfRange(values, rowIndex * cols, rowIndex * cols + cols);
+        float[] decoded = ensureValues();
+        return Arrays.copyOfRange(decoded, rowIndex * cols, rowIndex * cols + cols);
     }
 
     /** Copy row {@code rowIndex} into {@code target[0..cols)} without allocating a new array. */
@@ -80,7 +107,7 @@ public final class SmolLM2DenseTensor {
             throw new IllegalArgumentException("target too small for row of " + name
                     + ": target=" + target.length + ", expected at least=" + cols);
         }
-        System.arraycopy(values, rowIndex * cols, target, 0, cols);
+        System.arraycopy(ensureValues(), rowIndex * cols, target, 0, cols);
     }
 
     public float[] multiplyVector(float[] input) {
@@ -93,7 +120,7 @@ public final class SmolLM2DenseTensor {
                     + ": expected " + cols + " but got " + input.length);
         }
         float[] output = new float[rows];
-        DecoderOnlyReferenceDenseOps.multiplyRows(values, rows, cols, input, output);
+        DecoderOnlyReferenceDenseOps.multiplyRows(ensureValues(), rows, cols, input, output);
         return output;
     }
 
@@ -109,7 +136,31 @@ public final class SmolLM2DenseTensor {
             throw new IllegalArgumentException("Input width mismatch for " + name
                     + ": expected " + cols + " but got " + input.length);
         }
-        return DecoderOnlyReferenceDenseOps.dot(values, rowIndex * cols, input, 0, cols);
+        return DecoderOnlyReferenceDenseOps.dot(ensureValues(), rowIndex * cols, input, 0, cols);
+    }
+
+    /**
+     * The raw little-endian FP32 payload slice for direct (heap-light) WARP upload, or {@code null} when this tensor
+     * is not FLOAT32 (FLOAT16/BFLOAT16). Each call returns an independent view (own position/limit) over the shared
+     * mmap region; the caller must not rely on the mapping outliving the runtime tensor catalog.
+     */
+    ByteBuffer fp32LittleEndianSource() {
+        return fp32SourceLe == null ? null : fp32SourceLe.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    private float[] ensureValues() {
+        float[] v = values;
+        if (v == null) {
+            // Idempotent lazy FP32 decode (load-time / single-threaded use); publication via the volatile field.
+            ByteBuffer src = fp32SourceLe.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+            float[] decoded = new float[elementCount];
+            for (int i = 0; i < elementCount; i++) {
+                decoded[i] = src.getFloat();
+            }
+            v = decoded;
+            values = v;
+        }
+        return v;
     }
 
     private void requireRank(int expectedRank) {
@@ -119,14 +170,7 @@ public final class SmolLM2DenseTensor {
         }
     }
 
-    private static float[] decodeValues(SmolLM2WeightTensor tensor, int elementCount) {
-        ByteBuffer raw = tensor.rawDataBuffer().order(ByteOrder.LITTLE_ENDIAN);
-        SourceTensorDataType dataType = SourceTensorDataType.fromOnnxCode(tensor.dataType());
-        int expectedBytes = Math.multiplyExact(elementCount, dataType.bytesPerElement());
-        if (raw.remaining() < expectedBytes) {
-            throw new IllegalStateException("Tensor payload is shorter than its shape requires: "
-                    + tensor.tensorName());
-        }
+    private static float[] decode(ByteBuffer raw, SourceTensorDataType dataType, int elementCount, String tensorName) {
         float[] values = new float[elementCount];
         for (int i = 0; i < elementCount; i++) {
             values[i] = switch (dataType.name()) {
@@ -134,7 +178,7 @@ public final class SmolLM2DenseTensor {
                 case "FLOAT16" -> halfToFloat(raw.getShort());
                 case "BFLOAT16" -> Float.intBitsToFloat((raw.getShort() & 0xFFFF) << 16);
                 default -> throw new IllegalStateException("Unsupported SmolLM2 runtime dtype "
-                        + dataType.name() + " for tensor " + tensor.tensorName());
+                        + dataType.name() + " for tensor " + tensorName);
             };
         }
         return values;

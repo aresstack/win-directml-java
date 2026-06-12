@@ -4,6 +4,7 @@ import com.aresstack.windirectml.inference.warp.WarpDenseProjection;
 import com.aresstack.windirectml.windows.MatMulNBitsKernel;
 import com.aresstack.windirectml.windows.WindowsBindings;
 
+import java.nio.ByteBuffer;
 import java.util.Objects;
 
 /**
@@ -28,6 +29,22 @@ public final class DecoderOnlyWarpDenseProjection implements DecoderOnlyDensePro
                                                                       float[] weights) {
         return new DecoderOnlyWarpDenseProjection(WarpDenseProjection.fromDequantizedWeights(
                 windowsBindings, name, outputSize, inputSize, weights));
+    }
+
+    /**
+     * Heap-light variant: build the projection from a raw little-endian FP32 {@link ByteBuffer} (e.g. a {@code .wdmlpack}
+     * mmap slice) without first materialising a host {@code float[]}. Delegates to the shared
+     * {@link WarpDenseProjection} ByteBuffer seam (slice H2a); numerically identical to the {@code float[]} overload for
+     * the same little-endian FP32 bytes. The {@code float[]} overload stays available for FP16/BF16, fused and
+     * reference/CPU paths.
+     */
+    public static DecoderOnlyWarpDenseProjection fromRowMajorWeights(WindowsBindings windowsBindings,
+                                                                      String name,
+                                                                      int outputSize,
+                                                                      int inputSize,
+                                                                      ByteBuffer fp32WeightsLe) {
+        return new DecoderOnlyWarpDenseProjection(WarpDenseProjection.fromDequantizedWeights(
+                windowsBindings, name, outputSize, inputSize, fp32WeightsLe));
     }
 
     @Override
