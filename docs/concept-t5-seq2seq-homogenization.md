@@ -122,3 +122,21 @@ Aufrufer (Qwen/SmolLM2) ist unverändert: `fromRowMajorWeights`, `project`/`proj
 `kernel()` für das MLP-Block-Chaining). `DecoderOnlyWarpFusedDenseProjection` und der MLP-Block wurden **nicht**
 geändert. Verifiziert: `SmolLM2NativeWarpExecutorTest` (numerisch gleich) + decoderonly/qwen/smollm2/t5-Suiten grün;
 device-freie Shape-Validierung ergänzt. Qwen-Default (decoder-only session) + Legacy-Fallback unverändert.
+
+## 9. Slice T5-3 — Stop-Token-Ergebnisvertrag angeglichen (erledigt)
+
+T5 nutzt jetzt denselben **Stop-Token-Ergebnisvertrag** wie decoderonly. Geändert wurde nur die Buchführung in
+`T5GenerationLoop` (Stop-Check vor add/stream/cache-append) + ein Feld in `T5RuntimeResult`; Encoder/Decoder/Cross-
+Attention/Token-Selektor/Stop-Policy bleiben unangetastet.
+
+- **Stop-Token** beendet die Generierung, landet aber **nicht** mehr in `outputTokenIds`, wird **nicht** gestreamt.
+- **Finish reason** bleibt `FinishReason.stop_token` (T5s eos-Äquivalent; das Enum wurde nicht umbenannt).
+- **`T5RuntimeResult.finishTokenId()`** trägt das terminierende Stop-Token separat (sonst `NO_FINISH_TOKEN` = -1).
+- Seams sind die bereits vorhandenen `T5TokenSelector` (greedy/argmax) + `T5StopTokenPolicy` (`shouldStop`); keine neue
+  Klasse nötig, kein generischer Seq2Seq-Loop.
+
+**Sichtbarer Output ist bei EOS jetzt ein Token kürzer** (das EOS-Token entfällt) — analog decoderonly/Qwen. Der
+`max_tokens`-Fall ist unverändert (alle Tokens, `finishTokenId = -1`). `T5InferenceEngine` nutzt `greedyText`
+(EOS-Unterdrückung für Mindestschritte), daher bleibt `completionTokens ≥ 1`. Gerätefreie Tests in
+`T5GenerationLoopTest` decken greedy-Selektion, Stop-Erkennung, Nicht-Emission/Nicht-Streaming des Stop-Tokens und den
+`length`-Fall ab.

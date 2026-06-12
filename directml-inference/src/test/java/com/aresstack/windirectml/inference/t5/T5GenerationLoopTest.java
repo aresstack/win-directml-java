@@ -26,9 +26,11 @@ class T5GenerationLoopTest {
 
         T5RuntimeResult result = runtime.generate(request);
 
+        // Harmonised contract: the stop token (eos) ends generation but is not an output token; it is in finishTokenId.
         assertEquals(T5RuntimeResult.FinishReason.stop_token, result.finishReason());
-        assertEquals(1, result.generatedTokens());
-        assertArrayEquals(new int[]{config.eosTokenId()}, result.outputTokenIds());
+        assertEquals(0, result.generatedTokens());
+        assertArrayEquals(new int[0], result.outputTokenIds());
+        assertEquals(config.eosTokenId(), result.finishTokenId());
         assertTrue(result.generationMetrics().runtimeNanos() > 0L);
         assertTrue(result.generationMetrics().encoderNanos() > 0L);
         assertTrue(result.generationMetrics().decodeNanos() > 0L);
@@ -72,7 +74,8 @@ class T5GenerationLoopTest {
         T5RuntimeResult result = loop.generate(request);
 
         assertEquals(T5RuntimeResult.FinishReason.stop_token, result.finishReason());
-        assertArrayEquals(new int[]{config.eosTokenId()}, result.outputTokenIds());
+        assertArrayEquals(new int[0], result.outputTokenIds());
+        assertEquals(config.eosTokenId(), result.finishTokenId());
     }
 
     @Test
@@ -126,7 +129,8 @@ class T5GenerationLoopTest {
                 T5StopTokenPolicy.stopAtEos(1), 0, 0.0f, 0));
 
         assertEquals(T5RuntimeResult.FinishReason.stop_token, result.finishReason());
-        assertArrayEquals(new int[]{1}, result.outputTokenIds());
+        assertArrayEquals(new int[0], result.outputTokenIds());
+        assertEquals(1, result.finishTokenId());
     }
 
 
@@ -138,10 +142,12 @@ class T5GenerationLoopTest {
 
         T5RuntimeResult result = runtime.generate(request);
 
+        // Harmonised contract: the first (suppressed-EOS) step emits a real token; the EOS at the next step stops
+        // without being emitted. Visible output is therefore one token shorter on EOS.
         assertEquals(T5RuntimeResult.FinishReason.stop_token, result.finishReason());
-        assertEquals(2, result.generatedTokens());
+        assertEquals(1, result.generatedTokens());
         assertNotEquals(config.decoderStartTokenId(), result.outputTokenIds()[0]);
-        assertEquals(config.eosTokenId(), result.outputTokenIds()[1]);
+        assertEquals(config.eosTokenId(), result.finishTokenId());
     }
 
     @Test

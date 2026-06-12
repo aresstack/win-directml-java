@@ -74,28 +74,32 @@ public final class T5GenerationLoop {
                 int nextTokenId = tokenSelector.select(logits);
                 metrics.addTokenSelectionNanos(System.nanoTime() - tokenSelectionStart);
 
+                // Harmonised stop-token contract (matches decoder-only): the stop token ends generation but is NOT
+                // recorded as an output token and is NOT streamed; it is reported via finishTokenId instead.
+                if (request.stopTokenPolicy().shouldStop(nextTokenId)) {
+                    return result(generated, generatedTokens, T5RuntimeResult.FinishReason.stop_token,
+                            nextTokenId, metrics, runtimeStart);
+                }
+
                 generated[generatedTokens] = nextTokenId;
                 generatedTokens++;
                 if (sink != null) {
                     sink.onToken(new GeneratedToken(nextTokenId, "", ""));
                 }
                 cache = cache.append(decoderTokenId, state);
-                if (request.stopTokenPolicy().shouldStop(nextTokenId)) {
-                    return result(generated, generatedTokens, T5RuntimeResult.FinishReason.stop_token,
-                            metrics, runtimeStart);
-                }
                 decoderTokenId = nextTokenId;
             }
-            return result(generated, generatedTokens, T5RuntimeResult.FinishReason.max_tokens, metrics, runtimeStart);
+            return result(generated, generatedTokens, T5RuntimeResult.FinishReason.max_tokens,
+                    T5RuntimeResult.NO_FINISH_TOKEN, metrics, runtimeStart);
         }
     }
 
     private static T5RuntimeResult result(int[] generated, int generatedTokens,
-                                          T5RuntimeResult.FinishReason finishReason,
+                                          T5RuntimeResult.FinishReason finishReason, int finishTokenId,
                                           T5GenerationMetricsCollector metrics, long runtimeStart) {
         T5GenerationMetrics generationMetrics = metrics.finish(System.nanoTime() - runtimeStart, generatedTokens);
         return new T5RuntimeResult(Arrays.copyOf(generated, generatedTokens),
-                finishReason, generatedTokens, generationMetrics);
+                finishReason, generatedTokens, finishTokenId, generationMetrics);
     }
 
     private static void suppressControlTokens(float[] logits, T5RuntimeRequest request, int step) {
