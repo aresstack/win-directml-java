@@ -224,3 +224,6 @@ Aktivierung (nur per System-Property, keine Workbench-/Default-Änderung):
 Verifikation: `QwenSessionRoutingE2eTest` (gated, fährt denselben Einstieg einmal legacy, einmal session und
 vergleicht Token-IDs/Text/Finish). Device-frei deckt `QwenDecoderOnlyAdapterTest` ab, dass `qwen.runtime` allein die
 Factory aktiviert.
+
+Für echte Läufe auf realen Maschinen (Workbench-Startbefehle inkl. Launcher-Stolperfalle, Erfassungstabelle,
+Bewertungskriterien) siehe **`docs/runbook-qwen-decoderonly-session.md`**.
