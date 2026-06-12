@@ -3,6 +3,7 @@ package com.aresstack.windirectml.inference.t5;
 import com.aresstack.windirectml.windows.MatMulNBitsKernel;
 import com.aresstack.windirectml.windows.WindowsBindings;
 
+import java.nio.ByteBuffer;
 import java.util.Objects;
 
 /**
@@ -47,8 +48,12 @@ public final class T5WarpLmHead implements T5LogitProjector, AutoCloseable {
         }
         int vocabularySize = lmHead.dim(0);
         int hiddenSize = lmHead.dim(1);
-        MatMulNBitsKernel kernel = MatMulNBitsKernel.fromDequantizedWeights(
-                windowsBindings, vocabularySize, hiddenSize, lmHead.values());
+        // Heap-light FP32 path: upload the mmap ByteBuffer slice of the (largest) LM-head matrix directly,
+        // skipping the host float[]. FLOAT16 LM heads fall back to the float[] path.
+        ByteBuffer fp32 = lmHead.fp32LittleEndianSource();
+        MatMulNBitsKernel kernel = (fp32 != null)
+                ? MatMulNBitsKernel.fromDequantizedWeights(windowsBindings, vocabularySize, hiddenSize, fp32)
+                : MatMulNBitsKernel.fromDequantizedWeights(windowsBindings, vocabularySize, hiddenSize, lmHead.values());
         return new T5WarpLmHead(kernel, hiddenSize, vocabularySize);
     }
 

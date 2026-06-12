@@ -3,6 +3,7 @@ package com.aresstack.windirectml.inference.t5;
 import com.aresstack.windirectml.inference.warp.WarpDenseProjection;
 import com.aresstack.windirectml.windows.WindowsBindings;
 
+import java.nio.ByteBuffer;
 import java.util.Objects;
 
 /**
@@ -28,8 +29,15 @@ public final class T5WarpLinearProjection implements T5LinearProjection {
         Objects.requireNonNull(windowsBindings, "windowsBindings");
         int outputSize = weight.dim(0);
         int inputSize = weight.dim(1);
-        return new T5WarpLinearProjection(WarpDenseProjection.fromDequantizedWeights(
-                windowsBindings, weight.name(), outputSize, inputSize, weight.values()));
+        // Heap-light FP32 path: upload the mmap ByteBuffer slice directly when available (no host float[]).
+        // FLOAT16 and fused/reference tensors expose no FP32 source -> fall back to the float[] path.
+        ByteBuffer fp32 = weight.fp32LittleEndianSource();
+        WarpDenseProjection projection = (fp32 != null)
+                ? WarpDenseProjection.fromDequantizedWeights(
+                        windowsBindings, weight.name(), outputSize, inputSize, fp32)
+                : WarpDenseProjection.fromDequantizedWeights(
+                        windowsBindings, weight.name(), outputSize, inputSize, weight.values());
+        return new T5WarpLinearProjection(projection);
     }
 
     @Override

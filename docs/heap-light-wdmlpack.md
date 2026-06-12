@@ -170,3 +170,54 @@ Gewichts kann direkt an `fromDequantizedWeights(..., ByteBuffer)` gereicht werde
 Byte-Identitäts-Test gegen den alten Pfad. SmolLM2 danach (zusätzlich Doppel-`clone()` entschärfen); Qwen-INT4 zuletzt.
 
 **Noch NICHT in H2a:** keine Familie nutzt die ByteBuffer-Naht produktiv — T5/SmolLM2/Qwen laden weiter über `float[]`.
+
+## 13. Slice H2b — T5 FP32 ByteBuffer-Pilot
+
+**Umgesetzt:** T5 ist die erste Familie, die FP32-Gewichte über die H2a-ByteBuffer-Naht hochlädt. Keine
+Pipeline-/Generierungs-/Encoder-/Decoder-/Cross-Attention-Änderung, kein Format-Change, `float[]`-Fallback erhalten.
+
+**Geänderte T5-Klassen (WARP-Upload nutzt ByteBuffer):**
+- `t5/T5TensorData` — FP32-Decode ist jetzt **lazy**: aus einem FLOAT32-`RuntimeTensor` wird der rohe LE-mmap-Slice
+  behalten (`fp32LittleEndianSource()`); das `float[]` entsteht erst bei `values()`/`at()`. **Validierung bleibt
+  eager** (payload vorhanden, dtype, Länge → gleiche Exceptions wie bisher). FLOAT16- und `reference(...)`-Tensoren
+  behalten eager `float[]` und liefern **kein** FP32-Source (→ float[]-Fallback).
+- `t5/T5WarpLinearProjection.from` — nutzt bei vorhandenem `fp32LittleEndianSource()` den
+  `WarpDenseProjection.fromDequantizedWeights(…, ByteBuffer)`-Pfad, sonst `weight.values()` (unverändert).
+- `t5/T5WarpLmHead.from` — gleicher FP32-ByteBuffer-Pfad für die **größte** Matrix (vocab×hidden), FP16-Fallback.
+
+**Welche T5-WARP-Gewichte jetzt ByteBuffer-Upload nutzen:** alle **nicht-fusionierten** FP32-Linears (Attention-Output
+„o", Feed-Forward „wi/wo") **und der LM-Head**. **Fusionierte** Projektionen (Self-Attn Q/K/V, Cross-Attn K/V) gehen
+weiter über `float[]`, weil die Konkatenation (`T5Fused…Projection.fuseWeights` → `T5TensorData.reference`) ein
+zusammengesetztes Host-Array braucht — wie Qwens INT4-Fusion. LayerNorm/Bias/Embedding nutzen weiter `float[]`
+(kleine Tensoren, Reference-Math).
+
+**`float[]`-Fallback erhalten:** der alte Pfad bleibt voll funktionsfähig und wird genutzt, sobald kein FP32-Source
+vorliegt (FP16, fusionierte/Reference-Tensoren) oder im Reference-Runtime (dort liefert die Factory weiter
+`float[]`-basierte Projektionen).
+
+**Wird `T5TensorData.readFloatValues` im WARP-Pfad noch gebraucht?** Für nicht-fusionierte FP32-Linears + LM-Head:
+**nein** — durch den lazy Decode wird ihr `float[]` nie materialisiert. Für fusionierte Projektionen und für
+LayerNorm/Bias/Embedding: ja (dort wird `values()`/`at()` aufgerufen und der lazy Decode greift).
+
+**mmap-/Buffer-Lifetime abgesichert:** `T5TensorData` hält den `fp32SourceLe`-View (und damit das mmap-Mapping über die
+geteilte Backing) am Leben; jeder `fp32LittleEndianSource()`-Aufruf liefert einen **unabhängigen** `duplicate()`-View
+(Position/Limit isoliert). Der Upload ist **synchron** im Kernel-Konstruktor (`uploadBytes` → `executeAndWait`),
+solange die `T5TensorData`/der Tensor-Katalog während des Ladens erreichbar ist — danach besitzt der Device-Buffer die
+Daten. Kein vorzeitiges Freigeben des Mappings.
+
+**Heap-Kopien messbar reduziert oder nur strukturell?** **Messbar reduziert** für die abgedeckten Gewichte: deren volle
+FP32-`float[]`-Host-Kopie entfällt vollständig (vorher: 1× Decode-`float[]` + 1× `values()`-`Arrays.copyOf` vor dem
+Upload → jetzt 0). Der LM-Head (größte Einzelmatrix) und alle nicht-fusionierten Linears profitieren. Fusionierte
+Projektionen + Reference-Tensoren bleiben unverändert.
+
+**Verifikation:**
+- gerätefrei: `T5TensorDataTest` (FP32 → LE-Source + lazy Decode == Originalwerte; unabhängige Views; reference →
+  kein Source, aber `values()` korrekt).
+- WARP: `T5WarpLinearProjectionTest.fp32RuntimeTensorTakesByteBufferPathAndMatchesFloatArrayPath` — ByteBuffer-Pfad
+  **byte-identisch** zum `float[]`-Pfad (Toleranz `0.0f`); rank-2-Validierung device-frei erhalten.
+- Regression: t5/qwen/decoderonly/smollm2/generation/model/warp + encoder + SmolLM2-Native grün.
+
+**Nächste Familie:** **SmolLM2** ist sinnvoll als Nächstes (FP32-Quelle, dieselbe `DecoderOnlyWarpDenseProjection`-
+Naht; zusätzlich `SmolLM2DenseTensor`'s Doppel-`clone()` entschärfbar). **Qwen** zuletzt (INT4-Fusion + gepackter
+INT4-GPU-Pfad sind komplexer und brauchen einen eigenen Slice). FP16/BF16-Tensoren bleiben in allen Familien zunächst
+auf dem `float[]`-Decode.
