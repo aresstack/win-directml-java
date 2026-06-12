@@ -256,9 +256,10 @@ public final class Qwen2Runtime implements QwenDecodeSteps {
                 System.getProperty("java.vm.name"), System.getProperty("java.version"));
         if (!SimdOps.enabled()) {
             log.warn("Qwen2Runtime: SIMD path DISABLED — jdk.incubator.vector module not loaded. "
-                    + "CPU matvec will be 4–16× slower than expected. Re-launch with "
-                    + "`--add-modules=jdk.incubator.vector` (the Workbench launcher adds it "
-                    + "automatically; direct `java -jar` invocations must add it explicitly).");
+                    + "CPU matvec falls back to scalar (4–16× slower). This is the default for the "
+                    + "product launcher, which no longer requires the incubator module. To opt into "
+                    + "the Vector-API SIMD speed-up, add `--add-modules=jdk.incubator.vector` via "
+                    + "JAVA_TOOL_OPTIONS or a direct `java -jar` invocation.");
         }
         if (fjp < 2) {
             log.warn("Qwen2Runtime: ForkJoinPool parallelism={} — CPU prefill/decode will be "

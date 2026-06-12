@@ -64,16 +64,7 @@ public final class WorkbenchLauncher {
             System.exit(1);
         }
 
-        List<String> command = new ArrayList<String>();
-        command.add(javaExe);
-        command.add("--enable-preview");
-        command.add("--enable-native-access=ALL-UNNAMED");
-        command.add("--add-modules=jdk.incubator.vector");
-        command.add("-jar");
-        command.add(workbenchJar.getAbsolutePath());
-        for (String arg : args) {
-            command.add(arg);
-        }
+        List<String> command = buildCommand(javaExe, workbenchJar.getAbsolutePath(), args);
 
         System.out.println("[Launcher] Starting Workbench with: " + javaExe);
         System.out.println("[Launcher] Jar: " + workbenchJar.getAbsolutePath());
@@ -89,6 +80,32 @@ public final class WorkbenchLauncher {
             e.printStackTrace();
             System.exit(1);
         }
+    }
+
+    /**
+     * Builds the child-JVM command line for the Workbench.
+     *
+     * <p>Intentionally does <b>not</b> add {@code --add-modules=jdk.incubator.vector}:
+     * the product classes are loadable without the incubator module (the Vector-API
+     * is isolated behind a reflectively-loaded implementation, so the CPU SIMD paths
+     * fall back to scalar when the module is absent). Compile and test still use the
+     * module (see {@code build.gradle}). To opt back into the Vector-API SIMD speed-up
+     * at runtime, pass {@code --add-modules=jdk.incubator.vector} via
+     * {@code JAVA_TOOL_OPTIONS} or a direct {@code java -jar} invocation.</p>
+     */
+    static List<String> buildCommand(String javaExe, String jarPath, String[] args) {
+        List<String> command = new ArrayList<String>();
+        command.add(javaExe);
+        command.add("--enable-preview");
+        command.add("--enable-native-access=ALL-UNNAMED");
+        command.add("-jar");
+        command.add(jarPath);
+        if (args != null) {
+            for (String arg : args) {
+                command.add(arg);
+            }
+        }
+        return command;
     }
 
     /**

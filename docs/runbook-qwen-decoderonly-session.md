@@ -33,13 +33,18 @@ Workbench-JVM NICHT.** Zwei funktionierende Wege:
 **A) Workbench-Jar direkt starten (empfohlen, eindeutig):**
 
 ```powershell
-java --enable-preview --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector `
+java --enable-preview --enable-native-access=ALL-UNNAMED `
   -Dqwen.runtime=decoderonly-session `
   -jar directml-workbench-all.jar
 ```
 
 (Ohne Property läuft seit Slice 11a der **Session-Pfad** als Default; für den alten Pfad explizit
 `-Dqwen.runtime=legacy` setzen.)
+
+> **Vector-Modul (seit Slice V3b optional):** Der Produktstart braucht `--add-modules=jdk.incubator.vector`
+> **nicht** mehr (CPU-Math fällt sauber auf Skalar zurück). Für die FMA-SIMD-Beschleunigung der CPU-Pfade das Flag
+> optional ergänzen: `java --enable-preview --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector
+> -Dqwen.runtime=decoderonly-session -jar directml-workbench-all.jar`. Compile/Test verwenden das Modul weiterhin.
 
 **B) Über den Launcher mit `JAVA_TOOL_OPTIONS` (wird an die Kind-JVM vererbt):**
 

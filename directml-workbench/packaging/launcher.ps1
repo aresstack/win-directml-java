@@ -99,5 +99,10 @@ if (-not $SelectedJava) {
 }
 
 Write-Host "Starting DirectML Workbench with Java $SelectedMajor from: $SelectedJava"
-& $SelectedJava --enable-preview --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector -jar $Jar @args
+# Note: --add-modules=jdk.incubator.vector is intentionally NOT passed. The product
+# classes load without the incubator module (the Vector-API is isolated behind a
+# reflectively-loaded impl; CPU SIMD paths fall back to scalar when it is absent).
+# Compile/test still use the module. To opt into the Vector-API SIMD speed-up at
+# runtime, add --add-modules=jdk.incubator.vector here or via JAVA_TOOL_OPTIONS.
+& $SelectedJava --enable-preview --enable-native-access=ALL-UNNAMED -jar $Jar @args
 exit $LASTEXITCODE

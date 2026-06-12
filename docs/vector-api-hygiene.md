@@ -216,3 +216,54 @@ solange `VectorFloatMathOps` existiert).
 
 **Status V3a:** abgeschlossen — Vector-API isoliert, immer-geladene Klassen modullos ladbar, No-Modul-Smoke grün,
 mit-Modul-Suiten grün, Produkt-Launcher unverändert.
+
+## 11. Slice V3b — Produkt-Launcher ohne Vector-Modul
+
+**Ziel umgesetzt:** Der produktive Workbench-/Launcher-Start läuft **ohne** `--add-modules=jdk.incubator.vector`.
+Compile und Test behalten das Modul.
+
+**Geänderte produktive Launcher/Skripte (Flag entfernt):**
+- `directml-workbench-launcher/.../WorkbenchLauncher.java` — Kind-JVM-Kommando jetzt über die testbare
+  `buildCommand(javaExe, jarPath, args)`, **ohne** `--add-modules=jdk.incubator.vector`.
+- `directml-workbench/packaging/launcher.ps1` — `--add-modules=jdk.incubator.vector` aus der `java`-Zeile entfernt
+  (mit Kommentar, wie man SIMD optional wieder aktiviert).
+
+**Bewusst behalten (mit Modul):**
+- `build.gradle` `compileJava`/`compileTestJava` `compilerArgs` (Compile braucht das Modul, solange
+  `VectorFloatMathOps` existiert).
+- `build.gradle` `tasks.withType(Test)` `jvmArgs` (CI/Tests laufen mit Modul → SIMD-Pfad bleibt getestet).
+- `build.gradle` `tasks.withType(JavaExec)` `jvmArgs` (Dev-Run via `gradle run`, kein ausgeliefertes Startskript) —
+  bewusst unverändert gelassen.
+
+**Begleitende Meldungs-Korrektur:** `Qwen2Runtime`'s „SIMD DISABLED"-Warnung sagte fälschlich, der Launcher füge das
+Flag automatisch hinzu. Sie sagt jetzt wahrheitsgemäß: scalar fallback ist der Default des Produkt-Launchers; SIMD ist
+optional via `--add-modules=jdk.incubator.vector` (JAVA_TOOL_OPTIONS oder direktes `java -jar`).
+
+**Opt-in für SIMD im Produkt:** `--add-modules=jdk.incubator.vector` über `JAVA_TOOL_OPTIONS` setzen oder direkt an
+`java -jar directml-workbench-all.jar` übergeben. Dann ist `SimdOps.enabled()==true` und die CPU-Math nutzt FMA-SIMD.
+
+**No-Modul-Smoke (Test-JVM ohne `--add-modules`, Compile-Flag blieb) — alle grün:**
+
+| Pfad | Test | Ergebnis |
+|------|------|----------|
+| Loadability | `simd/NoVectorModuleLoadabilityTest` | 1/1 |
+| SmolLM2 WARP | `SmolLM2NativeWarpExecutorTest` | 4/4 |
+| Qwen decoder-only session WARP | `QwenDecoderOnlySessionE2eTest` | 1/1 |
+| MiniLM Embedding WARP | `DirectMlMiniLmEmbeddingReferenceTest` | 5/5 |
+| Reranker WARP (inkl. batch=5) | `RerankerRealModelReferenceTest` | 6/6 |
+
+T5-WARP hat keinen automatischen Smoke-Test (Modell + GUI nötig), importiert die Vector-API aber nicht (V1/§2) und
+startet daher ebenfalls ohne Modul. Die GUI selbst (`java -jar directml-workbench-all.jar`) konnte in der
+Test-/Sandbox-Umgebung nicht headless gefahren werden; die obigen programmatischen WARP-Smokes decken dieselben
+Lade-/Generierungs-/Embedding-/Reranking-Pfade ab.
+
+**Regressionstest:** `WorkbenchLauncherTest.buildCommand_doesNotRequireIncubatorVectorModule` schützt davor, dass das
+Flag wieder in den Produkt-Launcher zurückwandert.
+
+**V4 (optional, später):** Vollständiges Entfernen von `--add-modules=jdk.incubator.vector` aus **Compile** (und damit
+aus Test). Das erfordert, `VectorFloatMathOps` aus dem normalen `compileJava` herauszuhalten (z. B. eigener
+Source-Set/Modul-Build mit dem Incubator-Flag, separat kompiliert und reflektiv geladen). **Nur nice-to-have** — der
+produktive Start ist mit V3b bereits modullos; V4 würde nur die Incubator-Warnung beim Bauen beseitigen.
+
+**Status V3b:** abgeschlossen — Produkt-Launcher modullos, Compile/Test behalten das Modul, No-Modul-Smokes grün,
+mit-Modul-Suiten grün.

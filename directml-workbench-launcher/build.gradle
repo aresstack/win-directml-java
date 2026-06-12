@@ -34,7 +34,10 @@ tasks.withType(Test).configureEach {
 
 dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // This module is a java8Module and so does not inherit the root junit-bom
+    // platform constraint; pin junit-platform-launcher to the matching version
+    // explicitly so it resolves (incl. offline CLI test runs).
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
 }
 
 shadowJar {

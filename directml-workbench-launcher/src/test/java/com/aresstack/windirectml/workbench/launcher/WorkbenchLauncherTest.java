@@ -104,4 +104,27 @@ class WorkbenchLauncherTest {
     void minJavaVersion_is21() {
         assertEquals(21, WorkbenchLauncher.MIN_JAVA_VERSION);
     }
+
+    @Test
+    void buildCommand_doesNotRequireIncubatorVectorModule() {
+        // V3b: the product launcher must start without --add-modules=jdk.incubator.vector;
+        // the Vector-API is isolated and falls back to scalar when the module is absent.
+        List<String> command = WorkbenchLauncher.buildCommand("java", "workbench.jar", new String[0]);
+        assertFalse(command.stream().anyMatch(c -> c.contains("jdk.incubator.vector")),
+                "launcher must not force the incubator vector module: " + command);
+    }
+
+    @Test
+    void buildCommand_keepsPreviewNativeAccessAndJarAndArgs() {
+        List<String> command = WorkbenchLauncher.buildCommand("java", "workbench.jar",
+                new String[]{"--flag", "value"});
+        assertTrue(command.contains("--enable-preview"));
+        assertTrue(command.contains("--enable-native-access=ALL-UNNAMED"));
+        assertEquals("java", command.get(0));
+        int jarIdx = command.indexOf("-jar");
+        assertTrue(jarIdx >= 0 && command.get(jarIdx + 1).equals("workbench.jar"),
+                "jar must follow -jar: " + command);
+        assertTrue(command.contains("--flag") && command.contains("value"),
+                "passthrough args must be appended: " + command);
+    }
 }
