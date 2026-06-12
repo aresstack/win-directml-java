@@ -1,5 +1,7 @@
 package com.aresstack.windirectml.inference.smollm2;
 
+import com.aresstack.windirectml.inference.model.RuntimeLoadability;
+
 import java.util.Objects;
 
 /**
@@ -32,6 +34,14 @@ public record SmolLM2RuntimeLoadability(
 
     public static SmolLM2RuntimeLoadability notLoadable(String mode, String reason) {
         return new SmolLM2RuntimeLoadability(false, mode, reason);
+    }
+
+    /**
+     * Map onto the model-family-neutral {@link RuntimeLoadability} report (field-identical). Additive view; SmolLM2's
+     * own behaviour is unchanged.
+     */
+    public RuntimeLoadability toRuntimeLoadability() {
+        return new RuntimeLoadability(runtimeLoadable, runtimeLoadMode, runtimeLoadableReason);
     }
 
     private static String requireText(String value, String name) {

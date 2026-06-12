@@ -35,8 +35,7 @@ class RuntimeLoadabilityTest {
     @Test
     void decoderOnlyLoadabilityMapsOntoTheNeutralReport() {
         SmolLM2RuntimeLoadability smol = SmolLM2RuntimeLoadability.loadable("reference", "ref ok");
-        RuntimeLoadability mapped = new RuntimeLoadability(
-                smol.runtimeLoadable(), smol.runtimeLoadMode(), smol.runtimeLoadableReason());
+        RuntimeLoadability mapped = smol.toRuntimeLoadability();
 
         assertTrue(mapped.runtimeLoadable());
         assertEquals("reference", mapped.runtimeLoadMode());

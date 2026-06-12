@@ -21,7 +21,8 @@ public enum GenerationFinishReason {
 
     /**
      * Map a decoder-only finish-reason string ({@code "eos_token"} / {@code "length"}) onto the shared enum. Pure
-     * string mapping; introduces no dependency on the decoder-only package.
+     * string mapping; introduces no dependency on the decoder-only package. An unrecognised value maps to
+     * {@link #UNSUPPORTED}.
      */
     public static GenerationFinishReason fromDecoderOnlyReason(String reason) {
         if ("eos_token".equals(reason)) {
@@ -30,6 +31,6 @@ public enum GenerationFinishReason {
         if ("length".equals(reason)) {
             return LENGTH;
         }
-        throw new IllegalArgumentException("Unknown decoder-only finish reason: " + reason);
+        return UNSUPPORTED;
     }
 }

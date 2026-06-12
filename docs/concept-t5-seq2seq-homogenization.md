@@ -197,3 +197,28 @@ ansetzen und betrifft dann T5 **und** decoderonly gemeinsam; separater Block, ni
 
 Tests gerätefrei: `model/RuntimeLoadabilityTest` (Factories/Validierung + SmolLM2-Mapping) und
 `t5/T5RuntimePackageLoadabilityTest` (metadata-only Package → Loadability über den gemeinsamen Report).
+
+## 12. Slice T5-6 — neutrale Typen auch decoderonly-seitig adoptiert (Blockabschluss)
+
+Die in T5-4/T5-5 eingeführten neutralen Typen werden jetzt **auch produktiv decoderonly-seitig** angebunden — rein
+additiv (read-only Mapping), kein Runtime-/Generierungsverhalten geändert:
+
+- **`DecoderOnlyGenerationResult.toSummary()`** → `GenerationSummary` (finishReason via `fromDecoderOnlyReason`:
+  `eos_token`→`STOP_TOKEN`, `length`→`LENGTH`, unbekannt→`UNSUPPORTED`; `finishTokenId`; prompt = `inputTokenIds.size()`;
+  Timings prefill/decode/lmHead). `fromDecoderOnlyReason` ist jetzt lenient (unbekannt→`UNSUPPORTED`).
+- **`SmolLM2RuntimeLoadability.toRuntimeLoadability()`** → `model/RuntimeLoadability` (feld-identisch).
+- **Qwen:** keine analoge Loadability-/Result-Struktur, die trivial/verhaltensneutral anbindbar wäre
+  (`QwenModelDirValidator` ist ein Verzeichnis-Validator, kein Report). Qwens Session-Result läuft bereits über
+  `DecoderOnlyGenerationResult` (Slice 3/8), nutzt also `toSummary()` mit. Bewusst nicht weiter angefasst.
+
+**Damit sind die neutralen Typen wirklich familienübergreifend nutzbar:** `GenerationSummary` von T5
+(`T5RuntimeResult.toSummary`) **und** decoderonly/Qwen/SmolLM2 (`DecoderOnlyGenerationResult.toSummary`);
+`RuntimeLoadability` von T5 (`T5RuntimePackage.loadability`) **und** SmolLM2 (`SmolLM2RuntimeLoadability.toRuntimeLoadability`).
+
+**Workbench/API später:** kann mit geringem Aufwand auf `GenerationSummary`/`RuntimeLoadability` umstellen (beide
+Familien liefern die Felder bereits über die additiven Methoden) — bewusst **nicht** Teil dieses Slices.
+
+**Status: T5-/Cross-Family-Homogenisierungsblock abgeschlossen.** Geteilte familienübergreifende Bausteine:
+`warp/WarpDenseProjection`, `generation/GenerationSummary`+`GenerationFinishReason`, `model/RuntimeLoadability`
+(+ die bereits geteilte `model/`-Lifecycle-Schicht); harmonisierter Stop-Token-Vertrag. Nächster großer Block:
+**Vector-API-Hygiene**.

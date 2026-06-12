@@ -1,5 +1,8 @@
 package com.aresstack.windirectml.inference.decoderonly;
 
+import com.aresstack.windirectml.inference.generation.GenerationFinishReason;
+import com.aresstack.windirectml.inference.generation.GenerationSummary;
+
 import java.util.List;
 
 /**
@@ -35,5 +38,24 @@ public record DecoderOnlyGenerationResult(
         finishReason = finishReason == null ? "" : finishReason;
         stepTopK = stepTopK == null ? List.of() : List.copyOf(stepTopK);
         decodeMicroProfile = decodeMicroProfile == null ? List.of() : List.copyOf(decodeMicroProfile);
+    }
+
+    /**
+     * Map this decoder-only result onto the model-family-neutral {@link GenerationSummary} so callers can read the same
+     * fields as the seq2seq (T5) runtime. Additive read-only view: nothing in the generation behaviour changes. The
+     * prefill stage is reported as the neutral prefill time; decoder-only-specific diagnostics (top-K, micro-profile)
+     * stay on this result.
+     */
+    public GenerationSummary toSummary() {
+        return new GenerationSummary(
+                generatedTokenIds,
+                GenerationFinishReason.fromDecoderOnlyReason(finishReason),
+                finishTokenId,
+                inputTokenIds.size(),
+                tokensGenerated,
+                runtimeNanos,
+                prefillNanos,
+                decoderStepNanos,
+                lmHeadNanos);
     }
 }

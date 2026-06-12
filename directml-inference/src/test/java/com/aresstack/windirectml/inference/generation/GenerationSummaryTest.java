@@ -19,7 +19,7 @@ class GenerationSummaryTest {
     void mapsDecoderOnlyFinishReasons() {
         assertEquals(GenerationFinishReason.STOP_TOKEN, GenerationFinishReason.fromDecoderOnlyReason("eos_token"));
         assertEquals(GenerationFinishReason.LENGTH, GenerationFinishReason.fromDecoderOnlyReason("length"));
-        assertThrows(IllegalArgumentException.class, () -> GenerationFinishReason.fromDecoderOnlyReason("nope"));
+        assertEquals(GenerationFinishReason.UNSUPPORTED, GenerationFinishReason.fromDecoderOnlyReason("nope"));
     }
 
     @Test
@@ -38,21 +38,12 @@ class GenerationSummaryTest {
 
     @Test
     void decoderOnlyResultMapsOntoTheSharedSummary() {
-        // Proves usability by the decoder-only family without touching its (frozen) result type.
+        // Uses the additive DecoderOnlyGenerationResult.toSummary() so both families produce GenerationSummary.
         DecoderOnlyGenerationResult result = new DecoderOnlyGenerationResult(
                 List.of(1, 2, 3), List.of(4, 5), List.of(1, 2, 3, 4, 5), 2, "eos_token", 9, 16,
                 1000L, 400L, 300L, 100L, 5L, List.of(), List.of());
 
-        GenerationSummary summary = new GenerationSummary(
-                result.generatedTokenIds(),
-                GenerationFinishReason.fromDecoderOnlyReason(result.finishReason()),
-                result.finishTokenId(),
-                result.inputTokenIds().size(),
-                result.tokensGenerated(),
-                result.runtimeNanos(),
-                result.prefillNanos(),
-                result.decoderStepNanos(),
-                result.lmHeadNanos());
+        GenerationSummary summary = result.toSummary();
 
         assertEquals(GenerationFinishReason.STOP_TOKEN, summary.finishReason());
         assertEquals(9, summary.finishTokenId());
