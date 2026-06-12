@@ -303,7 +303,7 @@ public final class DirectMlLinearKernel implements LinearKernel, AutoCloseable {
                 // ctx.getSharedTempBuffer() liefert den einmalig alloziierten Buffer
                 // (siehe DirectMlContextImpl.registerTempSize).
                 MemorySegment sharedTmp = ctx.getSharedTempBuffer();
-                if (!sharedTmp.equals(MemorySegment.NULL)) {
+                if (tempSize > 0 && !sharedTmp.equals(MemorySegment.NULL)) {
                     MemorySegment bbTmp = DirectMlBindings.allocBufferBinding(scratch,
                             sharedTmp, 0, tempSize);
                     DirectMlBindings.bindTemporaryResource(bt,

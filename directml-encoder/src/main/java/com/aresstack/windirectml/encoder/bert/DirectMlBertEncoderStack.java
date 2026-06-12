@@ -175,32 +175,59 @@ public final class DirectMlBertEncoderStack implements AutoCloseable {
             throw new DirectMlRuntimeException("stack built with hasMask=false but mask!=null");
         }
 
-        // ── Submission coalescing ──────────────────────────────────────────
+        // ── Submission coalescing (opt-in) ─────────────────────────────────
         // Every per-kernel dispatch below would normally pay its own fence
         // wait inside D3D12Bindings.executeAndWait (~80–100 fences/text for
-        // MiniLM, which dominates the ~44 ms/text baseline). By wrapping the
-        // whole forward pass in a DirectMlGpuBatch, all kernels submit their
-        // command lists fire-and-forget; a single fence drain happens once
-        // in the try-with-resources close at the end.
-        try (DirectMlGpuBatch batch = DirectMlGpuBatch.begin(ctx.bindings())) {
-            // 1. Embedding-LN: xIn → scratchA
-            DirectMlTensor curT = hidden2D(scratchA);
-            embeddingLayerNorm.dispatch(xIn, embLnGamma, embLnBeta, curT, eps);
+        // MiniLM, which dominates the ~44 ms/text baseline). When coalescing
+        // is enabled, wrapping the whole forward pass in a DirectMlGpuBatch
+        // makes all kernels submit fire-and-forget with one fence drain at
+        // the end, and each layer additionally folds its sub-ops into a
+        // single command list.
+        //
+        // This path is OFF by default after a WARP dispatch regression
+        // (bucket=64) – see DirectMlBertEncoderLayerBlock.COALESCED_DISPATCH.
+        // When disabled we run the forward pass with no batch open, so every
+        // kernel falls back to its own command list + fence wait (the stable
+        // pre-coalescing behaviour). Opt in with
+        // -Dwindirectml.bert.coalescedDispatch=true.
+        if (DirectMlBertEncoderLayerBlock.coalescedDispatchEnabled()) {
+            try (DirectMlGpuBatch batch = DirectMlGpuBatch.begin(ctx.bindings())) {
+                runForward(xIn, embLnGamma, embLnBeta, layerWeights, mask, xOut);
+                if (log.isDebugEnabled()) {
+                    log.debug("DirectMlBertEncoderStack.dispatch coalesced {} GPU submissions",
+                            batch.submissions());
+                }
+            }
+        } else {
+            runForward(xIn, embLnGamma, embLnBeta, layerWeights, mask, xOut);
+        }
+    }
 
-            // 2. Layer cascade with ping-pong
-            GpuBuffer curBuf = scratchA;
-            for (int i = 0; i < numLayers; i++) {
-                boolean last = (i == numLayers - 1);
-                GpuBuffer nextBuf = last ? null : (curBuf == scratchA ? scratchB : scratchA);
-                DirectMlTensor inT = hidden2D(curBuf);
-                DirectMlTensor outT = last ? xOut : hidden2D(nextBuf);
-                blocks.get(i).dispatch(inT, layerWeights.get(i), mask, outT);
-                curBuf = nextBuf;
-            }
-            if (log.isDebugEnabled()) {
-                log.debug("DirectMlBertEncoderStack.dispatch coalesced {} GPU submissions",
-                        batch.submissions());
-            }
+    /**
+     * Embedding-LN followed by the ping-pong layer cascade. Submission/fence
+     * granularity is decided by the caller: under a {@link DirectMlGpuBatch}
+     * the kernels submit fire-and-forget, otherwise each one waits on its own
+     * fence.
+     */
+    private void runForward(DirectMlTensor xIn,
+                            DirectMlTensor embLnGamma,
+                            DirectMlTensor embLnBeta,
+                            List<BertGpuLayerWeights> layerWeights,
+                            DirectMlTensor mask,
+                            DirectMlTensor xOut) throws DirectMlRuntimeException {
+        // 1. Embedding-LN: xIn → scratchA
+        DirectMlTensor curT = hidden2D(scratchA);
+        embeddingLayerNorm.dispatch(xIn, embLnGamma, embLnBeta, curT, eps);
+
+        // 2. Layer cascade with ping-pong
+        GpuBuffer curBuf = scratchA;
+        for (int i = 0; i < numLayers; i++) {
+            boolean last = (i == numLayers - 1);
+            GpuBuffer nextBuf = last ? null : (curBuf == scratchA ? scratchB : scratchA);
+            DirectMlTensor inT = hidden2D(curBuf);
+            DirectMlTensor outT = last ? xOut : hidden2D(nextBuf);
+            blocks.get(i).dispatch(inT, layerWeights.get(i), mask, outT);
+            curBuf = nextBuf;
         }
     }
 

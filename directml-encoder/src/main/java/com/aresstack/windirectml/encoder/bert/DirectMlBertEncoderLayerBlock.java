@@ -55,6 +55,37 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(DirectMlBertEncoderLayerBlock.class);
 
+    /**
+     * Kill-switch for per-layer command-list coalescing (and the matching
+     * cross-layer {@link DirectMlGpuBatch} submission batching in
+     * {@link DirectMlBertEncoderStack}).
+     * <p>
+     * <b>Default ON.</b> The {@code bucket=64} WARP dispatch regression that
+     * broke MiniLM embeddings and the cross-encoder reranker was <em>not</em>
+     * caused by coalescing – it was a stale temporary-resource binding in the
+     * row-wise kernels (see {@code DirectMlLinearKernel}/{@code
+     * DirectMlLayerNormKernel}: a shared temp buffer was bound even when the
+     * operator reported {@code tempSize == 0}). With that fixed, both the
+     * coalesced and the serialized paths pass, so coalescing stays on to keep
+     * its ~80–100-fewer-fence-waits-per-text speed-up.
+     * <p>
+     * This flag is retained as a safety/diagnostic lever: set
+     * {@code -Dwindirectml.bert.coalescedDispatch=false} to fall back to the
+     * fully serialized per-kernel path (each sub-op its own command list +
+     * fence wait) when triaging future GPU dispatch issues on unusual adapters.
+     */
+    private static final boolean COALESCED_DISPATCH =
+            Boolean.parseBoolean(System.getProperty("windirectml.bert.coalescedDispatch", "true"));
+
+    /**
+     * Whether per-layer command-list coalescing + cross-layer submission
+     * batching is enabled. Read once at class load from
+     * {@code -Dwindirectml.bert.coalescedDispatch} (default {@code true}).
+     */
+    public static boolean coalescedDispatchEnabled() {
+        return COALESCED_DISPATCH;
+    }
+
     private final DirectMlContextImpl ctx;
     private final int batch;
     private final int seq;
@@ -301,6 +332,13 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
         DirectMlTensor mlpOutT = hidden2D(mlpOutBuf);
         DirectMlTensor residual2T = hidden2D(residual2);
 
+        if (!COALESCED_DISPATCH) {
+            dispatchPerKernel(xIn, w, mask, xOut,
+                    qT, kT, vT, qHT, kHT, vHT, attnHT, attnMergedT,
+                    attnOutT, residual1T, xMidT, interT, mlpOutT, residual2T);
+            return;
+        }
+
         // ── Per-layer command-list coalescing ─────────────────────────────
         // Fold all ~15 sub-ops into ONE command list. Without this we'd
         // pay ~15 ExecuteCommandLists (and ~15 SetDescriptorHeaps flushes)
@@ -386,6 +424,67 @@ public final class DirectMlBertEncoderLayerBlock implements AutoCloseable {
             throw new DirectMlRuntimeException(
                     "DirectMlBertEncoderLayerBlock.dispatch failed", e);
         }
+    }
+
+    /**
+     * Stable non-coalesced forward: each sub-op submits its own command list
+     * via the kernel's own {@code dispatch(...)}. Outside a
+     * {@link DirectMlGpuBatch} (the stack does not open one when coalescing is
+     * disabled) every dispatch waits on its own fence, fully draining the GPU
+     * before the next op records – so descriptor heaps and the shared temp
+     * buffer are never reused mid-flight and no manual UAV barriers are needed.
+     * Mirrors the coalesced op sequence exactly; only the submission/fence
+     * granularity differs.
+     */
+    private void dispatchPerKernel(DirectMlTensor xIn,
+                                   BertGpuLayerWeights w,
+                                   DirectMlTensor mask,
+                                   DirectMlTensor xOut,
+                                   DirectMlTensor qT, DirectMlTensor kT, DirectMlTensor vT,
+                                   DirectMlTensor qHT, DirectMlTensor kHT, DirectMlTensor vHT,
+                                   DirectMlTensor attnHT, DirectMlTensor attnMergedT,
+                                   DirectMlTensor attnOutT, DirectMlTensor residual1T,
+                                   DirectMlTensor xMidT, DirectMlTensor interT,
+                                   DirectMlTensor mlpOutT, DirectMlTensor residual2T)
+            throws DirectMlRuntimeException {
+        float scale = (float) (1.0 / Math.sqrt(headDim));
+
+        // Q, K, V projections.
+        qLinear.dispatch(xIn, weight2D(w.qWeight(), hidden, hidden), bias1D(w.qBias(), hidden), qT);
+        kLinear.dispatch(xIn, weight2D(w.kWeight(), hidden, hidden), bias1D(w.kBias(), hidden), kT);
+        vLinear.dispatch(xIn, weight2D(w.vWeight(), hidden, hidden), bias1D(w.vBias(), hidden), vT);
+
+        // Layout SEQ→HEAD for each of Q, K, V.
+        layoutSeqToHeadQ.dispatch(qT, qHT);
+        layoutSeqToHeadK.dispatch(kT, kHT);
+        layoutSeqToHeadV.dispatch(vT, vHT);
+
+        // Multi-head attention.
+        attention.dispatch(qHT, kHT, vHT, mask, attnHT, scale);
+
+        // Layout HEAD→SEQ.
+        layoutHeadToSeq.dispatch(attnHT, attnMergedT);
+
+        // Attention output projection.
+        attnOutLinear.dispatch(attnMergedT,
+                weight2D(w.attnOutWeight(), hidden, hidden), bias1D(w.attnOutBias(), hidden), attnOutT);
+
+        // First residual + LayerNorm (post-attention).
+        residualAdd1.dispatch(xIn, attnOutT, residual1T);
+        attnLayerNorm.dispatch(residual1T,
+                bias1D(w.attnLnGamma(), hidden), bias1D(w.attnLnBeta(), hidden), xMidT, eps);
+
+        // MLP: intermediate Linear → GELU → out Linear.
+        mlpInterLinear.dispatch(xMidT,
+                weight2D(w.mlpInterWeight(), intermediate, hidden), bias1D(w.mlpInterBias(), intermediate), interT);
+        gelu.dispatch(interT, interT);
+        mlpOutLinear.dispatch(interT,
+                weight2D(w.mlpOutWeight(), hidden, intermediate), bias1D(w.mlpOutBias(), hidden), mlpOutT);
+
+        // Second residual + LayerNorm (post-MLP) – writes xOut.
+        residualAdd2.dispatch(xMidT, mlpOutT, residual2T);
+        outLayerNorm.dispatch(residual2T,
+                bias1D(w.outLnGamma(), hidden), bias1D(w.outLnBeta(), hidden), xOut, eps);
     }
 
     private DirectMlTensor hidden2D(GpuBuffer buf) {

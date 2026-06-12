@@ -327,7 +327,7 @@ public final class DirectMlLayerNormKernel implements LayerNormKernel, AutoClose
                 // ctx.getSharedTempBuffer() liefert den einmalig alloziierten Buffer
                 // (siehe DirectMlContextImpl.registerTempSize).
                 MemorySegment sharedTmp = ctx.getSharedTempBuffer();
-                if (!sharedTmp.equals(MemorySegment.NULL)) {
+                if (tempSize > 0 && !sharedTmp.equals(MemorySegment.NULL)) {
                     MemorySegment binding = DirectMlBindings.allocBufferBinding(scratch,
                             sharedTmp, 0, tempSize);
                     DirectMlBindings.bindTemporaryResource(bt,

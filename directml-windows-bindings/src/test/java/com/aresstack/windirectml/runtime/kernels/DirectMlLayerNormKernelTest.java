@@ -86,6 +86,83 @@ class DirectMlLayerNormKernelTest {
         }
     }
 
+    /**
+     * Regression guard for the {@code bucket=64} WARP device-removal that broke
+     * MiniLM embeddings and the cross-encoder reranker.
+     * <p>
+     * Root cause: a row-wise kernel whose operator reports {@code tempSize == 0}
+     * (LayerNorm via MVN0) still bound the context's shared temporary buffer as
+     * a {@code DML_BINDING_TYPE_BUFFER} of size 0 once <em>another</em> kernel
+     * (a Linear with {@code tempSize > 0}) had caused that buffer to be
+     * allocated. Binding a temporary to an operator that needs none removed the
+     * device. The bug was invisible at the tiny synthetic dims of the other
+     * tests because their GEMMs report {@code tempSize == 0}, so the shared
+     * buffer never existed.
+     * <p>
+     * This test forces the shared temp buffer to exist (via a Linear with a
+     * non-zero {@code tempSize}) and then runs a {@code tempSize == 0} LayerNorm
+     * on the same context, asserting it still produces the correct result.
+     */
+    @Test
+    void layerNormRunsWhenSharedTempBufferExists() throws DirectMlRuntimeException {
+        assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12");
+
+        final int lnM = 64, lnH = 384;   // real BERT-ish dims (MiniLM embedding LayerNorm)
+        DirectMlContextImpl ctx = new DirectMlContextImpl("directml");
+        try {
+            try {
+                ctx.initialize();
+            } catch (DirectMlRuntimeException e) {
+                assumeTrue(false, "D3D12/DML stack not available: " + e.getMessage());
+                return;
+            }
+            assumeTrue(ctx.isReady() && ctx.bindings().hasDirectMl(),
+                    "Skipping: no DirectML device on this adapter");
+
+            // Force allocation of the context's shared temp buffer via a GEMM
+            // whose operator reports tempSize > 0 (mirrors a BERT MLP Linear).
+            try (DirectMlLinearKernel forcer = new DirectMlLinearKernel(ctx, lnM, lnH, 1536, true)) {
+                assumeTrue(ctx.getSharedTempSize() > 0,
+                        "this adapter reports tempSize==0 for the GEMM; regression not reproducible here");
+
+                Random rng = new Random(0x10E0);
+                float[] xData = randomFloats(rng, lnM * lnH);
+                float[] gammaData = randomFloats(rng, lnH);
+                float[] betaData = randomFloats(rng, lnH);
+                float[] expected = cpuLayerNorm(xData, gammaData, betaData, lnM, lnH, EPS);
+
+                CpuTensor xCpu = CpuTensor.float32(TensorShape.of(lnM, lnH), xData);
+                CpuTensor gCpu = CpuTensor.float32(TensorShape.of(lnH), gammaData);
+                CpuTensor bCpu = CpuTensor.float32(TensorShape.of(lnH), betaData);
+
+                try (GpuBuffer xBuf = ctx.allocateBufferFor(xCpu, GpuBuffer.BufferUsage.ACTIVATION);
+                     GpuBuffer gBuf = ctx.allocateBufferFor(gCpu, GpuBuffer.BufferUsage.WEIGHT);
+                     GpuBuffer bBuf = ctx.allocateBufferFor(bCpu, GpuBuffer.BufferUsage.WEIGHT);
+                     GpuBuffer yBuf = ctx.allocateBuffer((long) lnM * lnH * Float.BYTES,
+                             GpuBuffer.BufferUsage.ACTIVATION);
+                     DirectMlLayerNormKernel kernel = new DirectMlLayerNormKernel(ctx, lnM, lnH, EPS)) {
+
+                    xBuf.upload(xCpu);
+                    gBuf.upload(gCpu);
+                    bBuf.upload(bCpu);
+
+                    // Pre-fix this dispatch removed the device (DXGI_ERROR_DEVICE_REMOVED
+                    // surfaced at the next CreateBindingTable).
+                    kernel.dispatch(tensor2D(xBuf, lnM, lnH), tensor1D(gBuf, lnH),
+                            tensor1D(bBuf, lnH), tensor2D(yBuf, lnM, lnH), EPS);
+
+                    CpuTensor yOut = emptyCpu(lnM * lnH);
+                    yBuf.download(yOut);
+                    float[] actual = readFloats(yOut, lnM * lnH);
+                    assertArrayEquals(expected, actual, 1e-4f,
+                            "LayerNorm (tempSize==0) must run correctly while the shared temp buffer exists");
+                }
+            }
+        } finally {
+            ctx.close();
+        }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private static DirectMlTensor tensor2D(GpuBuffer buf, int m, int h) {
