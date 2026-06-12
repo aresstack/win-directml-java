@@ -1,6 +1,11 @@
 package com.aresstack.windirectml.inference.t5;
 
+import com.aresstack.windirectml.inference.generation.GenerationFinishReason;
+import com.aresstack.windirectml.inference.generation.GenerationSummary;
+
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -66,5 +71,41 @@ public final class T5RuntimeResult {
 
     public T5GenerationMetrics generationMetrics() {
         return generationMetrics;
+    }
+
+    /**
+     * Map this seq2seq result onto the model-family-neutral {@link GenerationSummary} so callers can read the same
+     * fields as the decoder-only runtime. T5's finish-reason enum and its full {@link T5GenerationMetrics} are
+     * preserved; the summary only selects the shared subset (encoder time is reported as the neutral prefill stage).
+     *
+     * @param promptTokenCount the input/prompt token count (T5RuntimeResult does not carry the input itself)
+     */
+    public GenerationSummary toSummary(int promptTokenCount) {
+        List<Integer> ids = new ArrayList<>(outputTokenIds.length);
+        for (int id : outputTokenIds) {
+            ids.add(id);
+        }
+        return new GenerationSummary(
+                ids,
+                toGenerationFinishReason(finishReason),
+                finishTokenId,
+                promptTokenCount,
+                generatedTokens,
+                generationMetrics.runtimeNanos(),
+                generationMetrics.encoderNanos(),
+                generationMetrics.decodeNanos(),
+                generationMetrics.lmHeadNanos());
+    }
+
+    private static GenerationFinishReason toGenerationFinishReason(FinishReason finishReason) {
+        switch (finishReason) {
+            case stop_token:
+                return GenerationFinishReason.STOP_TOKEN;
+            case max_tokens:
+                return GenerationFinishReason.LENGTH;
+            case unsupported:
+            default:
+                return GenerationFinishReason.UNSUPPORTED;
+        }
     }
 }

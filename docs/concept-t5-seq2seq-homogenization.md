@@ -140,3 +140,25 @@ Attention/Token-Selektor/Stop-Policy bleiben unangetastet.
 (EOS-Unterdrückung für Mindestschritte), daher bleibt `completionTokens ≥ 1`. Gerätefreie Tests in
 `T5GenerationLoopTest` decken greedy-Selektion, Stop-Erkennung, Nicht-Emission/Nicht-Streaming des Stop-Tokens und den
 `length`-Fall ab.
+
+## 10. Slice T5-4 — Result-/Profiling-Angleichung (erledigt)
+
+Kleine gemeinsame, modellfamilien-neutrale Schicht eingeführt, damit Workbench/API künftig dieselben Felder von T5 und
+decoderonly auslesen können — **ohne** dieselbe Loop und **ohne** T5-Enum-Umbenennung:
+
+- `inference/generation/GenerationFinishReason` (Enum `STOP_TOKEN`/`LENGTH`/`UNSUPPORTED`) + reiner String-Parser
+  `fromDecoderOnlyReason("eos_token"|"length")`.
+- `inference/generation/GenerationSummary` (Record): `generatedTokenIds`, `finishReason`, `finishTokenId`,
+  `promptTokenCount`, `outputTokenCount`, `totalNanos`, `prefillNanos` (= seq2seq-Encoder / decoder-only-Prefill),
+  `decodeNanos`, `lmHeadNanos` + ms-Helfer.
+- **`T5RuntimeResult.toSummary(promptTokenCount)`** mappt T5 auf diese Sicht: `FinishReason` → neutrales Enum
+  (`stop_token→STOP_TOKEN`, `max_tokens→LENGTH`, `unsupported→UNSUPPORTED`), Timings aus `T5GenerationMetrics`
+  (`encoderNanos→prefillNanos`). **T5-Enum und das volle `T5GenerationMetrics`** (tokenization, cross-attention-prepare,
+  token-selection, detokenize) **bleiben erhalten** — die Summary wählt nur die gemeinsame Teilmenge.
+- **decoderonly bleibt unverändert** (Frozen-Block). Die Nutzbarkeit durch decoderonly ist device-frei belegt
+  (`generation/GenerationSummaryTest` mappt einen `DecoderOnlyGenerationResult` 1:1 auf `GenerationSummary`). Eine
+  produktive decoderonly-`toSummary()`-Methode ist ein trivialer späterer Zusatz, sobald Workbench/API sie konsumiert.
+
+Mapping T5-FinishReason → gemeinsamer Vertrag: `stop_token`→`STOP_TOKEN`, `max_tokens`→`LENGTH`,
+`unsupported`→`UNSUPPORTED`. Tests gerätefrei (`t5/T5RuntimeResultSummaryTest`, `generation/GenerationSummaryTest`):
+Stop-Fall, length-Fall, `finishTokenId`, Output-Token-Count, Timing-Mapping, decoderonly-Mapping.
