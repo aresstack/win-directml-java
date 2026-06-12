@@ -38,7 +38,7 @@ bilden und `WarpDenseProjection.fromFusedFp32(...)` nutzen (statt `T5TensorData.
 | 1 Lifecycle/close() | **erledigt** | 96d92fb |
 | 2 Weight-Source-Vertrag | **erledigt** | 1babd51 |
 | 3 Fused heap-light | **teilweise** | e55b524 (decoder-only/SmolLM2 fertig; T5-fused offen, s.o.) |
-| 4 Decoder-only Grenzen | **teilweise** | s.u. (Qwen geteilt; SmolLM2-Loop/Stop noch family-local) |
+| 4 Decoder-only Grenzen | **erledigt** | WARP+Reference auf geteiltem DecoderOnlyGenerationLoop; SmolLM2StopTokenPolicy entfernt |
 | 5 Qwen INT4/Fusion | **teilweise** | 30e2274 (Diagnostik fertig; bit-shift/ByteBuffer-Fusion offen) |
 | 6 T5 Manifest-Status | **offen** | s.u. (hängt an Item 7) |
 | 7 T5 Engine | **offen** | s.u. (groß, braucht Modell + Korrektheit) |
@@ -50,21 +50,25 @@ bilden und `WarpDenseProjection.fromFusedFp32(...)` nutzen (statt `T5TensorData.
 
 ---
 
-## Item 4 — SmolLM2 hat noch family-local Generation-Loop/Stop-Vertrag
+## Item 4 — Decoder-only Engine-Grenzen: ERLEDIGT
 
-**Stand:** Qwen nutzt den geteilten `DecoderOnlyGenerationLoop` (+ `DecoderOnlyGenerationResult`) im Default
-`decoder-only session`. **SmolLM2 dagegen** hat eigene `SmolLM2WarpGenerationLoop`, `SmolLM2ReferenceGenerationLoop`
-und `SmolLM2StopTokenPolicy` — also eine zweite Loop-/Stop-Implementierung.
+**Stand:** SmolLM2 hat **keine zweite Generation-/Stop-Engine** mehr.
+- **WARP:** `SmolLM2WarpGenerationLoop` ist (war bereits) ein dünner Adapter über `DecoderOnlyGenerationLoop`
+  (`new DecoderOnlyGenerationLoop(forwardPass.delegate(), ...)`).
+- **Reference:** `SmolLM2ReferenceGenerationLoop` enthält **keine eigene for-Schleife** mehr — neuer Adapter
+  `SmolLM2ReferenceDecoderOnlyForwardPass implements DecoderOnlyForwardPass` + `SmolLM2ReferenceDecodeSession
+  implements DecoderOnlyDecodeSession` (prefill/decodeNext geben die **volle** Sequenz an
+  `SmolLM2ReferenceForwardPass.logitsForLastToken(tokenIds, kvCache)`, wegen `kvCache.completedTokenCount()`;
+  `lastCallLmHeadNanos` = LM-Head-Delta; idempotenter close). Der Loop wird vom geteilten
+  `DecoderOnlyGenerationLoop` gefahren; das Ergebnis wird auf `SmolLM2TokenRuntimeResult` gemappt.
+- **Stop:** beide nutzen `DecoderOnlyStopTokenPolicy`. `SmolLM2StopTokenPolicy` (produktiv tot) wurde **gelöscht**;
+  der einzige Test (`SmolLM2RuntimeTest.stopTokenPolicyStopsOnEosToken`) auf `DecoderOnlyStopTokenPolicy` umgestellt.
 
-**Warum nicht erledigt:** Die Migration von SmolLM2 auf `DecoderOnlyGenerationLoop` + den geteilten Stop-Vertrag ist
-ein **verhaltenssensitiver Refactor** (Token-Sampling, Stop-Handling, Streaming-Callback). Akzeptanz verlangt
-„kein Verhalten ändert sich in den SmolLM2-Smokes" (greedy token-für-token + Streaming identisch). Das sauber +
-verifiziert umzubauen ist eine eigene Slice-Serie; ein Teilumbau würde die SmolLM2-Generierung gefährden.
-
-**Lösungsalternative:** Eigener Slice „SmolLM2 → DecoderOnlyGenerationLoop": SmolLM2-Sampler/Stop hinter die
-decoderonly-Typen (`DecoderOnlyTokenSelector`, `DecoderOnlyStopTokenPolicy`) adaptieren, dann
-`SmolLM2WarpGenerationLoop`/`SmolLM2ReferenceGenerationLoop` durch den geteilten Loop ersetzen, abgesichert über
-`SmolLM2NativeWarpExecutorTest` (token-/streaming-identisch). Qwen dient als Vorlage (bereits migriert).
+SmolLM2-spezifisch bleiben nur Sampler-Factory/Options, Result-Mapping, ForwardPass-/DecodeSession-Adapter und das
+Reference-Hotspot-Profil-Mapping. **Verifikation grün:** `SmolLM2NativeWarpExecutorTest` (Top-1/Logits/greedy/Streaming
++ close-Idempotenz), `SmolLM2ReferenceGenerationLoopTest`, `SmolLM2RuntimeTest`, smollm2/decoderonly/generation +
+qwen/t5/model/warp + encoder. Qwen Default decoder-only session + Legacy unverändert; Produktstart ohne Vector-Modul
+weiterhin möglich.
 
 ## Item 5 — Qwen INT4 Restarbeiten (über Diagnostik hinaus)
 

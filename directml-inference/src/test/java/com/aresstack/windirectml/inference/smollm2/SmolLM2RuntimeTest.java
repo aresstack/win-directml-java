@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.smollm2;
 
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyStopTokenPolicy;
 import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.prompt.RawPromptStrategy;
 import org.junit.jupiter.api.Test;
@@ -101,7 +102,8 @@ class SmolLM2RuntimeTest {
 
     @Test
     void stopTokenPolicyStopsOnEosToken() {
-        SmolLM2StopTokenPolicy policy = new SmolLM2StopTokenPolicy(2);
+        // SmolLM2 now uses the shared DecoderOnlyStopTokenPolicy (no family-local stop policy).
+        DecoderOnlyStopTokenPolicy policy = DecoderOnlyStopTokenPolicy.fromTokenIds(List.of(2));
 
         assertTrue(policy.shouldStop(2));
         assertFalse(policy.shouldStop(1));
