@@ -51,19 +51,20 @@ class T5WdmlPackCompilerTest {
     }
 
     @Test
-    void marksPackageAsRuntimeLoadableButNotExecutable() throws Exception {
+    void marksPackageAsRuntimeLoadableAndExecutable() throws Exception {
         Path modelDir = createModelDir(T5TestFixtures.tinyConfig(false));
         Path output = tempDir.resolve("t5.wdmlpack");
 
         T5WdmlPackCompiler.compile(new T5CompileOptions(modelDir, output, false, false));
         Map<String, Object> manifest = WdmlPackWriter.readManifest(output);
 
-        // T5-1: honest status — weights load and the runtime can build structures, but generation is not certified.
+        // T5-1/T5-2: honest status — weights load, runtime builds structures, and the reference engine is verified
+        // end-to-end, so the package is executable via the reference engine.
         assertEquals(true, manifest.get("payloadIncluded"));
         assertEquals(true, manifest.get("weightsLoadable"));
         assertEquals(true, manifest.get("runtimeLoadable"));
-        assertEquals(false, manifest.get("executable"));
-        assertEquals(T5ManifestPayloadPolicy.MODE_RUNTIME_LOADABLE_NOT_EXECUTABLE, manifest.get("runtimeLoadMode"));
+        assertEquals(true, manifest.get("executable"));
+        assertEquals(T5ManifestPayloadPolicy.MODE_EXECUTABLE, manifest.get("runtimeLoadMode"));
     }
 
     @Test

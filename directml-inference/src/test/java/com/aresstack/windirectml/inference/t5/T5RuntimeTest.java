@@ -45,10 +45,10 @@ class T5RuntimeTest {
 
         assertTrue(runtimePackage.payloadIncluded());
         assertTrue(runtimePackage.weightsLoadable());
-        // T5-1: weights-loadable package is now honestly runtime-loadable (loader builds weights + structures),
-        // but generation is not yet certified -> not executable.
+        // T5-1/T5-2: weights-loadable package is runtime-loadable (loader builds weights + structures) and, since the
+        // reference engine is verified end-to-end (T5RealModelReferenceTest), executable via the reference engine.
         assertTrue(runtimePackage.runtimeLoadable());
-        assertFalse(runtimePackage.executable());
+        assertTrue(runtimePackage.executable());
         assertEquals(27, weights.tensorCount());
         assertTrue(weights.payloadBytes() > 0);
         assertArrayEquals(new long[]{6, 4}, weights.sharedEmbedding().dims());

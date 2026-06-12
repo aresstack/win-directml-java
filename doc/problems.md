@@ -41,7 +41,7 @@ bilden und `WarpDenseProjection.fromFusedFp32(...)` nutzen (statt `T5TensorData.
 | 4 Decoder-only Grenzen | **erledigt** | WARP+Reference auf geteiltem DecoderOnlyGenerationLoop; SmolLM2StopTokenPolicy entfernt |
 | 5 Qwen INT4/Fusion | **teilweise** | 30e2274 (Diagnostik fertig; bit-shift/ByteBuffer-Fusion offen) |
 | 6 T5 Manifest-Status | **erledigt** | T5-1: weightsLoadable/runtimeLoadable/executable getrennt; keine „runtime not implemented"-Lüge mehr |
-| 7 T5 Engine | **offen** | s.u. (groß, braucht Modell + Korrektheit) |
+| 7 T5 Engine | **teilweise** | T5-2: Reference-Engine end-to-end auf echtem t5-small verifiziert → executable=true (Reference); WARP-T5-Pfad offen, s.u. |
 | 8 Generation-Contract Workbench | **offen** | s.u. (medium, Workbench-Panels) |
 | 9 model/wdmlpack-Lifecycle | **weitgehend erfüllt** | s.u. (durch H-Block) |
 | 10 Encoder/Reranker-Status | **weitgehend erfüllt** | s.u. (durch ER-2) |
@@ -99,20 +99,34 @@ kompiliert unverändert. Tests umgestellt: `T5RuntimePackageLoadabilityTest`, `T
 `T5SafeTensorsLayoutCompilerTest`, `T5WdmlPackCompilerTest` (Dry-Run-Tool-Test bleibt `runtimeLoadable=no`, da Dry-Run
 kein Payload schreibt). `T5Runtime.UNSUPPORTED_MESSAGE` (WARP-Pfad) bewusst unverändert — Item-7-Thema.
 
-## Item 7 — T5 Engine (offen)
+## Item 7 — T5 Engine (teilweise: Reference verifiziert, WARP offen)
 
-**Warum offen:** Item 7 (T5 Encoder/Decoder/Cross-Attention/Cache fachlich fertigstellen oder
-klar abgrenzen) ist die größte verbleibende Engine-Baustelle und braucht ein lokales T5-Modell (flan-t5-small/t5-small
-liegen vor) plus echte Ausgabe-Verifikation. Erst wenn Generierung zertifiziert ist, darf `executable=true` gesetzt
-werden (das Feld + der Modus `t5-executable` stehen bereits bereit).
-**Warum nicht jetzt:** Groß, korrektheits- und modellabhängig; nicht in einem additiven Schritt sicher machbar, ohne
-T5-Generierung zu riskieren. Außerhalb des sicheren Rahmens dieser autonomen Abarbeitung.
+**Erledigt (Slice T5-2):** Die **Reference**-T5-Engine ist end-to-end auf einem **echten lokalen t5-small** verifiziert.
+Neuer gegateter Test `T5RealModelReferenceTest.t5SmallReferenceProducesNonEmptySummary` (`@EnabledIf`, Pfad via
+`-Dt5.testModelDir` oder `model/t5-small`) fährt den vollen Pfad `T5InferenceEngine` (reference) → Tokenizer →
+`T5Runtime`/`T5RuntimePackage` → Encoder (input ids/mask) → Decoder-Step-Schleife → Cross-Attention → LM-Head-Logits →
+Greedy-Token-Auswahl → EOS/Stop → Detokenisierung. Ergebnis: **echte, nicht-leere, EOS-terminierte Ausgabe**
+(`"the quick brown fox jumps over the lazy dog ."`, 13 Tokens, FinishReason EOS) für Eingabe
+`"summarize: The quick brown fox jumps over the lazy dog."`. Damit ist **Akzeptanz A** erfüllt.
+
+Folge: `executable=true` wird jetzt für runtime-ladbare Pakete sauber begründet gesetzt (`T5WdmlPackManifestWriter`:
+`executable = runtimeLoadable`, Modus `t5-executable`, Reason „T5 reference generation verified end-to-end (non-empty,
+EOS-terminated output)"). Der Claim ist **auf die Default-Reference-Engine** begrenzt; der separate **WARP-T5-Pfad**
+(`T5Runtime.UNSUPPORTED_MESSAGE`) bleibt bewusst **nicht** zertifiziert und berührt diesen Paket-Status nicht.
+Tests umgestellt: `T5RuntimeTest` (runtimeLoadable+executable true), `T5WdmlPackCompilerTest`
+(`marksPackageAsRuntimeLoadableAndExecutable`). Manifest-only-/Dry-Run-Pfade bleiben `executable=false`.
+
+**Offen (WARP-T5-Engine):** Der WARP-(GPU/DirectML-)Pfad für T5 ist weiterhin nicht implementiert
+(`T5Runtime.UNSUPPORTED_MESSAGE`). Das ist die große, korrektheits- und performance-kritische Restbaustelle —
+WARP-Encoder/Decoder/Cross-Attention + Cache mit Paritäts-Gate gegen die jetzt verifizierte Reference-Ausgabe.
+**Warum nicht jetzt:** Groß, nativ, paritäts-kritisch; nicht in einem additiven Schritt sicher machbar. Erst dann darf
+`executable` auch für den WARP-Pfad beansprucht werden.
 **Alternative (empfohlene Slice-Folge):**
-1. T5 Statusmodell schärfen: getrennte Flags `weightsLoadable`/`runtimeLoadable`/`executable` + ehrlicher `reason`
-   (statt „runtime not implemented" pauschal in `runtimeLoadable=false` zu verstecken). Tests entsprechend.
-2. Einen konkreten lokalen T5-Kandidaten end-to-end verifizieren (echte, nicht-leere Ausgabe), Grenze WARP vs
-   Reference dokumentieren/testen.
-3. Erst dann T5-fused heap-light (Item 3 Rest) mitziehen.
+1. ✅ (T5-1) Statusmodell geschärft: `weightsLoadable`/`runtimeLoadable`/`executable` + ehrlicher `reason`.
+2. ✅ (T5-2) Reference end-to-end auf lokalem t5-small verifiziert (echte, nicht-leere Ausgabe); Grenze WARP vs
+   Reference dokumentiert/getestet.
+3. T5-fused heap-light (Item 3 Rest) im WARP-Zug mitziehen, sobald die WARP-T5-Engine angegangen wird.
+4. WARP-T5-Engine mit Paritäts-Gate gegen die Reference-Ausgabe.
 
 ## Item 8 — Gemeinsamer Generation-Contract in Workbench/API
 

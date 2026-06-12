@@ -115,9 +115,10 @@ public final class T5RuntimePackage {
     }
 
     /**
-     * Whether the engine can run a <em>certified</em> generation for this package. T5 generation is not yet certified,
-     * so this is {@code false} even for runtime-loadable packages — see {@link #runtimeLoadable()} for "the loader can
-     * build the runtime structures". A later T5-engine slice flips this once generation is verified.
+     * Whether the engine can run a generation for this package. The reference T5 engine is verified end-to-end
+     * (slice T5-2: {@code T5RealModelReferenceTest} drives a real t5-small to a non-empty, EOS-terminated output), so a
+     * runtime-loadable package compiled by the current writer is {@code executable} via the default reference engine.
+     * The separate WARP T5 path ({@link T5Runtime#UNSUPPORTED_MESSAGE}) does not affect this reference-engine claim.
      */
     public boolean executable() {
         return Boolean.TRUE.equals(manifest.get("executable"));

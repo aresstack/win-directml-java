@@ -6,9 +6,10 @@ package com.aresstack.windirectml.inference.t5;
  * <p>Replaces the previous blanket {@code runtimeLoadable=false} / "T5 runtime is not implemented yet" with a clear
  * separation: a package can be <b>weightsLoadable</b> (payload + complete layout + supported dtypes),
  * <b>runtimeLoadable</b> (the loader opens it and builds the runtime structures — for T5 this holds whenever the
- * weights load), and <b>executable</b> (the engine can run a certified generation). T5 generation is not yet certified,
- * so {@code executable} stays {@code false}; the runtime-load status is no longer hidden behind a false
- * {@code runtimeLoadable}.</p>
+ * weights load), and <b>executable</b> (the engine can run a certified generation). As of slice T5-2 the reference T5
+ * engine is verified end-to-end ({@code T5RealModelReferenceTest} drives a real t5-small to a non-empty, EOS-terminated
+ * output), so a runtime-loadable package is also {@code executable} via the default reference engine. The separate WARP
+ * T5 path ({@link T5Runtime#UNSUPPORTED_MESSAGE}) is not yet certified and does not affect this reference-engine claim.</p>
  */
 final class T5ManifestPayloadPolicy {
 
@@ -35,5 +36,6 @@ final class T5ManifestPayloadPolicy {
             "weights not loadable: incomplete T5 layout or unsupported runtime dtype";
     static final String REASON_RUNTIME_LOADABLE_NOT_EXECUTABLE =
             "runtime loads weights and structures, but T5 generation is not yet certified";
-    static final String REASON_EXECUTABLE = "T5 generation certified";
+    static final String REASON_EXECUTABLE =
+            "T5 reference generation verified end-to-end (non-empty, EOS-terminated output)";
 }

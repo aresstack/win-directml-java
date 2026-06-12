@@ -60,10 +60,12 @@ final class T5WdmlPackManifestWriter {
         boolean payloadIncluded = payloadPlan != null && payloadPlan.payloadLength() > 0;
         boolean weightsLoadable = payloadIncluded && layout.complete() && layout.unsupportedRuntimeDtypes().isEmpty();
         // T5RuntimePackage.open() builds T5Weights + the runtime structures whenever the weights load, so a
-        // weights-loadable package IS runtime-loadable. Generation is not yet certified, so executable stays false
-        // (T5-1: don't hide "not production-ready" behind runtimeLoadable=false).
+        // weights-loadable package IS runtime-loadable. The reference T5 engine is verified end-to-end (slice T5-2:
+        // T5RealModelReferenceTest drives a real t5-small to a non-empty, EOS-terminated output), so a runtime-loadable
+        // package is also executable via the (default) reference engine. (The WARP T5 path remains separate — see
+        // T5Runtime.UNSUPPORTED_MESSAGE — and does not affect this package-level, reference-engine claim.)
         boolean runtimeLoadable = weightsLoadable;
-        boolean executable = false;
+        boolean executable = runtimeLoadable;
         String runtimeLoadMode;
         String reason;
         if (!payloadIncluded) {
@@ -73,8 +75,8 @@ final class T5WdmlPackManifestWriter {
             runtimeLoadMode = T5ManifestPayloadPolicy.MODE_WEIGHTS_NOT_LOADABLE;
             reason = T5ManifestPayloadPolicy.REASON_WEIGHTS_NOT_LOADABLE;
         } else {
-            runtimeLoadMode = T5ManifestPayloadPolicy.MODE_RUNTIME_LOADABLE_NOT_EXECUTABLE;
-            reason = T5ManifestPayloadPolicy.REASON_RUNTIME_LOADABLE_NOT_EXECUTABLE;
+            runtimeLoadMode = T5ManifestPayloadPolicy.MODE_EXECUTABLE;
+            reason = T5ManifestPayloadPolicy.REASON_EXECUTABLE;
         }
 
         Map<String, Object> root = new LinkedHashMap<>();
