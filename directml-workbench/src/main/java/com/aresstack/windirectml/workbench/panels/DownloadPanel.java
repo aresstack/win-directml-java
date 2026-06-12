@@ -545,6 +545,14 @@ public final class DownloadPanel extends JPanel {
                             message -> publish(DownloadUiEvent.message(message)),
                             event -> publish(progressTracker.update(event)),
                             model.getProxyConfiguration());
+                    List<String> missing = ModelDownloader.missingRequiredFiles(manifest, targetDir);
+                    if (missing.isEmpty()) {
+                        publish(DownloadUiEvent.message("  Verified: all required files present in " + targetDir));
+                    } else {
+                        publish(DownloadUiEvent.message("  WARNING: download incomplete - missing/empty "
+                                + "required file(s) " + missing + " in " + targetDir
+                                + ". Re-run with 'Force re-download' enabled, or delete the folder and retry."));
+                    }
                     publish(DownloadUiEvent.progress(100, "Done"));
                     return true;
                 } catch (Exception ex) {

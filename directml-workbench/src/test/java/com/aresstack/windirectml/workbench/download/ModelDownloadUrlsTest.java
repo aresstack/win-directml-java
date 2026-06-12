@@ -30,6 +30,39 @@ class ModelDownloadUrlsTest {
                 "https://huggingface.co/intfloat/e5-small-v2/resolve/main/tokenizer_config.json"));
     }
 
+    /**
+     * Regression for ER-2: the E5 small-v2 and cross-encoder reranker download
+     * manifests used by the Download tab must mark config.json, tokenizer.json
+     * and model.safetensors as <em>required</em>, and their local directory
+     * names must match the folders the workbench / loaders resolve against.
+     */
+    @Test
+    void e5SmallV2ManifestRequiresConfigTokenizerAndWeights() {
+        var manifest = ModelDownloadUrls.manifestForEmbedding("intfloat/e5-small-v2", "e5-small-v2");
+        assertEquals("e5-small-v2", manifest.localDirName());
+        assertRequired(manifest, "config.json");
+        assertRequired(manifest, "tokenizer.json");
+        assertRequired(manifest, "model.safetensors");
+    }
+
+    @Test
+    void rerankerManifestRequiresConfigTokenizerAndWeights() {
+        var manifest = ModelDownloadUrls.manifestForEmbedding(
+                "cross-encoder/ms-marco-MiniLM-L-6-v2", "cross-encoder-ms-marco-MiniLM-L-6-v2");
+        assertEquals("cross-encoder-ms-marco-MiniLM-L-6-v2", manifest.localDirName());
+        assertRequired(manifest, "config.json");
+        assertRequired(manifest, "tokenizer.json");
+        assertRequired(manifest, "model.safetensors");
+    }
+
+    private static void assertRequired(ModelDownloadManifest manifest, String localFilename) {
+        ModelFileDescriptor descriptor = manifest.files().stream()
+                .filter(f -> f.localFilename().equals(localFilename))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("manifest has no file " + localFilename));
+        assertTrue(descriptor.required(), localFilename + " must be a required file");
+    }
+
     @Test
     void phi3UrlsContainOnnxFiles() {
         var urls = ModelDownloadUrls.forPhi3();

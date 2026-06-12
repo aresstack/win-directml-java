@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.encoder.e5;
 
 import com.aresstack.windirectml.encoder.EmbeddingException;
+import com.aresstack.windirectml.encoder.ModelAssetValidation;
 import com.aresstack.windirectml.encoder.PoolingStrategy;
 import com.aresstack.windirectml.encoder.bert.BertConfigJson;
 import com.aresstack.windirectml.encoder.bert.BertCpuEncoderWeights;
@@ -12,6 +13,7 @@ import com.aresstack.windirectml.runtime.DirectMlContextImpl;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * Family-specific convenience loaders for E5 sentence-embedding models.
@@ -164,31 +166,43 @@ public final class E5Encoders {
 
     public static BertEncoderConfig resolveConfig(Path modelDir, E5Variant variant)
             throws EmbeddingException {
+        String repairHint = e5RepairHint(variant);
+        if (modelDir == null || !Files.isDirectory(modelDir)) {
+            throw new EmbeddingException("E5 model directory not found - it has not been "
+                    + "downloaded yet: " + modelDir + ". " + repairHint);
+        }
         BertEncoderConfig declared = variant.config();
         Path configJson = modelDir.resolve("config.json");
-        if (!Files.exists(configJson)) {
-            throw new EmbeddingException(
-                    "E5 model directory is missing config.json: " + modelDir
-                            + " (E5 requires config.json so path and -De5.model="
-                            + variant.token() + " can be verified against each other; "
-                            + "re-run scripts/download-e5.ps1 -Variant " + variant.token() + ")");
+        if (!Files.isRegularFile(configJson)) {
+            throw new EmbeddingException("E5 model directory is incomplete - missing config.json "
+                    + "(required so the directory and -De5.model=" + variant.token()
+                    + " can be verified against each other): " + modelDir
+                    + " - a previous download was interrupted or partial. " + repairHint);
         }
         BertEncoderConfig onDisk = BertConfigJson.read(modelDir, declared.modelName(),
                 PoolingStrategy.MEAN, /* normalize */ true);
+        // Shape-axis mismatch here is the "wrong variant for this directory" case.
         BertConfigJson.verifyMatches(declared, onDisk, modelDir);
         return onDisk;
     }
 
+    /** Required artefacts (besides config.json, handled in {@link #resolveConfig}). */
+    private static final List<String> REQUIRED_FILES =
+            List.of("model.safetensors", "tokenizer.json");
+
+    private static final String REPAIR_HINT_GENERIC =
+            "Repair: re-download via the workbench Download tab (\"Download E5 <variant>\") with "
+                    + "\"Force re-download\" enabled, run scripts/download-e5.ps1 -Variant <variant> -Force, "
+                    + "or delete the folder and download again.";
+
+    private static String e5RepairHint(E5Variant variant) {
+        return "Repair: re-download via the workbench Download tab (\"Download E5 " + variant.token()
+                + "\") with \"Force re-download\" enabled, run scripts/download-e5.ps1 -Variant "
+                + variant.token() + " -Force, or delete the folder and download again.";
+    }
+
     private static void verifyDir(Path modelDir) throws EmbeddingException {
-        if (modelDir == null || !Files.isDirectory(modelDir)) {
-            throw new EmbeddingException("E5 model directory not found: " + modelDir);
-        }
-        if (!Files.exists(modelDir.resolve("model.safetensors"))) {
-            throw new EmbeddingException("E5 model directory missing model.safetensors: " + modelDir);
-        }
-        if (!Files.exists(modelDir.resolve("tokenizer.json"))) {
-            throw new EmbeddingException("E5 model directory missing tokenizer.json: " + modelDir);
-        }
+        ModelAssetValidation.requireModelFiles(modelDir, "E5", REQUIRED_FILES, REPAIR_HINT_GENERIC);
     }
 }
 

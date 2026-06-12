@@ -1,14 +1,15 @@
 package com.aresstack.windirectml.encoder.reranker;
 
 import com.aresstack.windirectml.encoder.EmbeddingException;
+import com.aresstack.windirectml.encoder.ModelAssetValidation;
 import com.aresstack.windirectml.encoder.PoolingStrategy;
 import com.aresstack.windirectml.encoder.bert.BertConfigJson;
 import com.aresstack.windirectml.encoder.bert.BertEncoderConfig;
 import com.aresstack.windirectml.encoder.tokenizer.WordPieceTokenizer;
 import com.aresstack.windirectml.runtime.DirectMlContextImpl;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * Family-specific convenience loaders for BERT-based cross-encoder
@@ -110,19 +111,17 @@ public final class BertCrossEncoderRerankers {
                 PoolingStrategy.MEAN, /* normalize */ false);
     }
 
+    /** Required artefacts for a BERT-WordPiece cross-encoder reranker directory. */
+    private static final List<String> REQUIRED_FILES =
+            List.of("model.safetensors", "tokenizer.json", "config.json");
+
+    private static final String REPAIR_HINT =
+            "Repair: re-download via the workbench Download tab (\"Download Reranker "
+                    + "(ms-marco-MiniLM-L-6-v2)\") with \"Force re-download\" enabled, run "
+                    + "scripts/download-reranker.ps1 -Force, or delete the folder and download again.";
+
     private static void verifyDir(Path modelDir) throws EmbeddingException {
-        if (modelDir == null || !Files.isDirectory(modelDir)) {
-            throw new EmbeddingException("Reranker model directory not found: " + modelDir);
-        }
-        if (!Files.exists(modelDir.resolve("model.safetensors"))) {
-            throw new EmbeddingException("Reranker model directory missing model.safetensors: " + modelDir);
-        }
-        if (!Files.exists(modelDir.resolve("tokenizer.json"))) {
-            throw new EmbeddingException("Reranker model directory missing tokenizer.json: " + modelDir);
-        }
-        if (!Files.exists(modelDir.resolve("config.json"))) {
-            throw new EmbeddingException("Reranker model directory missing config.json: " + modelDir);
-        }
+        ModelAssetValidation.requireModelFiles(modelDir, "Reranker", REQUIRED_FILES, REPAIR_HINT);
     }
 }
 

@@ -267,6 +267,39 @@ public final class ModelDownloader {
         }
     }
 
+    /**
+     * Returns the required local file names declared by {@code manifest} that are
+     * absent or zero-byte under {@code targetDir}.
+     *
+     * <p>Used after a download to detect an interrupted / partial install: an
+     * empty result means every required artefact is present and non-empty.
+     * Optional files are ignored.</p>
+     *
+     * @param manifest  the model download manifest
+     * @param targetDir the local directory the model was downloaded into
+     * @return the missing or zero-byte required local filenames (never {@code null})
+     */
+    public static List<String> missingRequiredFiles(ModelDownloadManifest manifest, Path targetDir) {
+        java.util.ArrayList<String> missing = new java.util.ArrayList<String>();
+        if (manifest == null || targetDir == null) {
+            return missing;
+        }
+        for (ModelFileDescriptor descriptor : manifest.files()) {
+            if (!descriptor.required()) {
+                continue;
+            }
+            Path file = targetDir.resolve(descriptor.localFilename());
+            try {
+                if (!Files.isRegularFile(file) || Files.size(file) == 0L) {
+                    missing.add(descriptor.localFilename());
+                }
+            } catch (IOException e) {
+                missing.add(descriptor.localFilename());
+            }
+        }
+        return missing;
+    }
+
     private static HttpClient createHttpClient(ProxyConfiguration proxyConfiguration) {
         ProxyConfiguration configuration = proxyConfiguration == null
                 ? ProxyConfiguration.defaults() : proxyConfiguration;
