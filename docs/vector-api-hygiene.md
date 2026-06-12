@@ -165,3 +165,54 @@ mehr in Feldern/Signaturen referenzieren:
 
 **Status V2:** abgeschlossen als **Befund/Korrektur** — keine Launcher-/Flag-Änderung (bewusst), Doku korrigiert.
 Compile/Test laufen unverändert mit Modul; alle Suiten + `SmolLM2NativeWarpExecutorTest` grün (mit Flag).
+
+## 10. Slice V3a — Vector-API isoliert: immer-geladene Klassen sind jetzt ohne Modul ladbar
+
+**Ziel umgesetzt:** Die in V2 als hart modulabhängig identifizierten Klassen referenzieren keine
+`jdk.incubator.vector`-Typen mehr in Feldern/Signaturen. Die Vector-Nutzung liegt in **einer** isolierten Klasse,
+die **reflektiv** geladen wird; fehlt das Modul, greift sauber der Skalar-Fallback.
+
+**Neue, neutrale SIMD-Schicht (`inference/simd`):**
+
+| Klasse | Vector-Import? | Rolle |
+|--------|----------------|-------|
+| `simd/FloatMathOps` | nein | neutrales Interface: `enabled()`, `dot()`, `axpy()` |
+| `simd/ScalarFloatMathOps` | nein | immer ladbarer Skalar-Impl (`enabled()==false`) |
+| `simd/SimdMath` | nein | reflektiver Loader: `Class.forName(VectorFloatMathOps)` + `catch (Throwable)` → sonst Skalar |
+| `simd/vector/VectorFloatMathOps` | **ja (einzige)** | FMA-Dot/Broadcast-AXPY; public no-arg ctor; `enabled = lanes>=4` |
+
+**Umgebaute Fassaden (jetzt ohne Vector-Import, delegieren an `SimdMath.provider()`):**
+- `qwen/SimdOps` — package-private Fassade, stabil; delegiert `enabled/dot/axpy`.
+- `phi3/SimdOps` — identische Fassade (Phi3 nutzt nur `dot`).
+- `decoderonly/DecoderOnlyReferenceDenseOps` — `OPS = SimdMath.provider()`; Parallel-/IntStream-Logik,
+  `multiplyRows`, `gatedSiluMultiply`, `silu` unverändert.
+
+**Verifikation:** `grep "import jdk.incubator.vector"` über `src/main` → **nur** `VectorFloatMathOps.java`.
+
+**Empirischer No-Modul-Lauf (WARP-Maschine, Test-JVM ohne `--add-modules`, Compile-Flag blieb):**
+
+| Test | V2 (vor Isolierung) | V3a (nach Isolierung) |
+|------|---------------------|------------------------|
+| `simd/NoVectorModuleLoadabilityTest` (neu) | — | **grün** (1/1; Fassaden ladbar, `provider().enabled()==false`, Skalar korrekt) |
+| `SmolLM2NativeWarpExecutorTest` | **rot** (4/4 `NoClassDefFoundError`) | **grün** (4/4) |
+| `QwenDecoderOnlySessionE2eTest` | **rot** (`NoClassDefFoundError`) | **grün** (1/1) |
+
+→ Der `NoClassDefFoundError: jdk/incubator/vector/Vector` beim Laden der immer-geladenen Klassen ist **weg**.
+Qwen-`decoder-only session` (Default) und SmolLM2-WARP starten jetzt **ohne** das Modul (skalarer CPU-Pfad).
+
+**Mit Modul (CI-Default) unverändert grün:** generation/model/decoderonly/smollm2/qwen/t5/phi3/simd +
+`SmolLM2NativeWarpExecutorTest`. Numerik bei vorhandenem Modul identisch (gleicher FMA-/Broadcast-Code in
+`VectorFloatMathOps`).
+
+**Neue Test-Schalter:** `-Dwindirectml.test.noVectorModule=true` aktiviert `NoVectorModuleLoadabilityTest`
+(sonst `assumeTrue`-Skip). `FloatMathOpsTest` läuft immer (geräte-frei, mit/ohne Modul).
+
+**Bewusst NICHT geändert in V3a:** Produkt-Launcher-Flags (`WorkbenchLauncher.java`, `packaging/launcher.ps1`),
+Compile-Flag, Test-jvmArgs-Flag — alle bleiben gesetzt. Das Entfernen der **Produkt-Launcher**-Flags ist Slice V3b.
+
+**Bereit für V3b:** Da die immer-geladenen Klassen jetzt modullos ladbar sind und der modullose Start empirisch grün
+ist, kann V3b die `--add-modules`-Flags aus den Produkt-Launchern entfernen/optional machen (Compile/Test behalten sie,
+solange `VectorFloatMathOps` existiert).
+
+**Status V3a:** abgeschlossen — Vector-API isoliert, immer-geladene Klassen modullos ladbar, No-Modul-Smoke grün,
+mit-Modul-Suiten grün, Produkt-Launcher unverändert.

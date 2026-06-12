@@ -1,8 +1,7 @@
 package com.aresstack.windirectml.inference.decoderonly;
 
-import jdk.incubator.vector.FloatVector;
-import jdk.incubator.vector.VectorOperators;
-import jdk.incubator.vector.VectorSpecies;
+import com.aresstack.windirectml.inference.simd.FloatMathOps;
+import com.aresstack.windirectml.inference.simd.SimdMath;
 
 import java.util.stream.IntStream;
 
@@ -12,30 +11,20 @@ import java.util.stream.IntStream;
  * <p>This class intentionally lives in {@code decoderonly} instead of a concrete model package. Qwen, SmolLM2
  * and later decoder-only families can reuse the same SIMD/scalar reference implementation while native WARP
  * kernels are introduced behind the same projection boundary.</p>
+ *
+ * <p>It no longer imports {@code jdk.incubator.vector} directly: the dot product is delegated to the isolated
+ * {@link FloatMathOps} provider ({@link SimdMath}), so this class loads even without the incubator module (scalar
+ * fallback then). When the module is present the math is identical to before.</p>
  */
 public final class DecoderOnlyReferenceDenseOps {
 
-    private static final boolean ENABLED;
-    private static final VectorSpecies<Float> SPECIES;
-    private static final int LANES;
+    private static final FloatMathOps OPS = SimdMath.provider();
+
     private static final boolean PARALLEL_DENSE;
     private static final int PARALLEL_ROW_THRESHOLD;
     private static final int PARALLEL_COLUMN_THRESHOLD;
 
     static {
-        boolean enabled;
-        VectorSpecies<Float> species = null;
-        int lanes = 0;
-        try {
-            species = FloatVector.SPECIES_PREFERRED;
-            lanes = species.length();
-            enabled = lanes >= 4;
-        } catch (Throwable ignored) {
-            enabled = false;
-        }
-        ENABLED = enabled;
-        SPECIES = species;
-        LANES = lanes;
         PARALLEL_DENSE = Boolean.parseBoolean(System.getProperty(
                 "windirectml.decoderonly.reference.parallelDense",
                 System.getProperty("windirectml.smollm2.reference.parallelDense", "true")));
@@ -51,7 +40,7 @@ public final class DecoderOnlyReferenceDenseOps {
     }
 
     public static boolean enabled() {
-        return ENABLED;
+        return OPS.enabled();
     }
 
     public static boolean parallelEnabled() {
@@ -61,24 +50,7 @@ public final class DecoderOnlyReferenceDenseOps {
     public static float dot(float[] left, int leftOffset, float[] right, int rightOffset, int length) {
         requireRange(left, leftOffset, length, "left");
         requireRange(right, rightOffset, length, "right");
-        if (!ENABLED) {
-            return scalarDot(left, leftOffset, right, rightOffset, length);
-        }
-
-        FloatVector sumVector = FloatVector.zero(SPECIES);
-        int upperBound = SPECIES.loopBound(length);
-        int index = 0;
-        for (; index < upperBound; index += LANES) {
-            FloatVector leftVector = FloatVector.fromArray(SPECIES, left, leftOffset + index);
-            FloatVector rightVector = FloatVector.fromArray(SPECIES, right, rightOffset + index);
-            sumVector = leftVector.fma(rightVector, sumVector);
-        }
-
-        float sum = sumVector.reduceLanes(VectorOperators.ADD);
-        for (; index < length; index++) {
-            sum += left[leftOffset + index] * right[rightOffset + index];
-        }
-        return sum;
+        return OPS.dot(left, leftOffset, right, rightOffset, length);
     }
 
     public static float[] multiplyRows(float[] matrix, int rows, int cols, float[] input) {
@@ -125,14 +97,6 @@ public final class DecoderOnlyReferenceDenseOps {
                 && rows >= PARALLEL_ROW_THRESHOLD
                 && cols >= PARALLEL_COLUMN_THRESHOLD
                 && Runtime.getRuntime().availableProcessors() > 1;
-    }
-
-    private static float scalarDot(float[] left, int leftOffset, float[] right, int rightOffset, int length) {
-        float sum = 0.0f;
-        for (int index = 0; index < length; index++) {
-            sum += left[leftOffset + index] * right[rightOffset + index];
-        }
-        return sum;
     }
 
     private static void requireMatrix(float[] matrix, int rows, int cols) {
