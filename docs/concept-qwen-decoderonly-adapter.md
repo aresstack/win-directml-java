@@ -139,3 +139,19 @@ Gewichtsladen — reine Test-Infrastruktur, kein Adapter-Problem.
 **Fazit:** Der experimentelle Qwen-Session-Pfad ist **token-äquivalent** zur Produktion. Eine echte Migration /
 Default-Umschaltung ist damit *technisch* plausibel, bleibt aber bis zu einem kontrollierten Performance-Vergleich
 und einer ausdrücklichen Freigabe **offen**.
+
+## 7. Slice 8 — Result-Vertrag harmonisiert
+
+Der in §6 dokumentierte Unterschied (geteilte Loop nahm das Stop-Token in `generatedTokenIds` auf) ist beseitigt.
+Einheitlicher Vertrag jetzt überall (`DecoderOnlyGenerationLoop` **und** `SmolLM2ReferenceGenerationLoop`,
+deckungsgleich mit der produktiven `Qwen2Runtime`):
+
+- Ein terminierendes Stop-Token **beendet** die Generierung, wird aber **nicht** als generierter/gestreamter
+  Nutz-Token geführt.
+- `finishReason` bleibt `eos_token`.
+- Das konkrete Stop-Token wird separat als `DecoderOnlyGenerationResult.finishTokenId` gemeldet (`-1`, wenn keines;
+  d. h. bei `finishReason="length"`).
+
+Folge: Im Qwen-Session-E2E stimmen `generatedTokenIds`, gestreamte Tokens **und** Finish-Reason ohne Sonderbeziehung
+direkt mit der Produktion überein. SmolLM2 erhält denselben Vertrag (Stop-Token nicht mehr im Output) — reine
+Result-Bookkeeping-Angleichung, keine Numerik-/Laufzeitänderung.

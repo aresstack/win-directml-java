@@ -36,12 +36,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *     --info
  * }</pre>
  *
- * <h3>Known, documented loop-contract difference</h3>
- * <p>The production loop checks the stop policy <em>before</em> recording a token, so the terminating stop token is
- * NOT part of its generated ids. The shared {@link DecoderOnlyGenerationLoop} records the stop token and then stops,
- * so its {@code generatedTokenIds} include the trailing stop token. The accepted (streamed, non-stop) token sequences
- * are therefore the apples-to-apples comparison and must be identical; the shared path's generated ids equal the
- * production ids plus the trailing stop token when the finish reason is {@code eos_token}.</p>
+ * <h3>Result contract (harmonised in slice 8)</h3>
+ * <p>Both loops now use the same contract: a terminating stop token ends generation but is NOT recorded as a generated
+ * or streamed token. The shared {@link DecoderOnlyGenerationLoop} reports it via {@code finishTokenId} instead. So the
+ * generated token ids, the streamed token ids and the finish reason all match the production runtime directly, with no
+ * stop-token special case.</p>
  */
 @EnabledIf("harnessEnabled")
 class QwenDecoderOnlySessionE2eTest {
@@ -144,21 +143,18 @@ class QwenDecoderOnlySessionE2eTest {
                 experimentalStreamed.size(), result.tokensGenerated(), result.finishReason(),
                 expNanos / 1_000_000L, result.generatedTokenIds());
 
-        // ── Hard gates: accepted (non-stop) token sequence and finish reason must match ──
+        // ── Hard gates (harmonised contract — no stop-token special case): generated ids, streamed ids and
+        //    finish reason must match the production runtime exactly ──
+        assertEquals(productionTokens, result.generatedTokenIds(),
+                "Generated token ids must match the production runtime token-for-token");
         assertEquals(productionTokens, experimentalStreamed,
-                "Accepted token sequence must match the production runtime token-for-token");
+                "Streamed tokens must match the production runtime token-for-token");
         assertEquals(productionFinish, result.finishReason(), "Finish reason must match");
 
-        // ── Documented contract difference: shared loop keeps the trailing stop token ──
+        // The terminating stop token is reported separately, not as a generated token.
         if ("eos_token".equals(result.finishReason())) {
-            List<Integer> generated = result.generatedTokenIds();
-            assertEquals(productionTokens, generated.subList(0, generated.size() - 1),
-                    "Shared generated ids minus the trailing stop token must equal the production ids");
-            assertTrue(QwenStopTokenPolicy.shouldStop(generated.get(generated.size() - 1)),
-                    "The extra trailing shared-loop token must be a Qwen stop token");
-        } else {
-            assertEquals(productionTokens, result.generatedTokenIds(),
-                    "Without a stop token the shared generated ids equal the production ids");
+            assertTrue(QwenStopTokenPolicy.shouldStop(result.finishTokenId()),
+                    "finishTokenId must be the Qwen stop token that terminated generation");
         }
     }
 }

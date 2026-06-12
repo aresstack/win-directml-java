@@ -86,14 +86,10 @@ class SmolLM2NativeWarpExecutorTest {
             result = session.generateTokenIds(request, streamed::add);
         }
 
-        // The non-stop tokens (everything except a trailing stop token) must have been streamed in order as they
-        // were produced — the WARP path must not buffer the whole batch and skip the per-token callback.
-        List<Integer> expectedStreamed = result.generatedTokenIds();
-        if (!expectedStreamed.isEmpty() && "eos_token".equals(result.finishReason())) {
-            expectedStreamed = expectedStreamed.subList(0, expectedStreamed.size() - 1);
-        }
-        assertEquals(expectedStreamed, streamed,
-                "WARP generate(request, consumer) must invoke onToken for every accepted token");
+        // Harmonised contract: generatedTokenIds already excludes any terminating stop token, so the streamed tokens
+        // must equal it exactly — the WARP path must not buffer the whole batch and skip the per-token callback.
+        assertEquals(result.generatedTokenIds(), streamed,
+                "WARP generate(request, consumer) must stream exactly the generated (non-stop) tokens in order");
     }
 
     @Test

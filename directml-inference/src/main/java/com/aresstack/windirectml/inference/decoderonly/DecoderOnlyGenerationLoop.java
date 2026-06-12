@@ -67,6 +67,7 @@ public final class DecoderOnlyGenerationLoop {
         List<Integer> fullTokenIds = new ArrayList<>(inputTokenIds);
         DecoderOnlyGeneratedTokens generatedTokens = new DecoderOnlyGeneratedTokens(maxNewTokens);
         String finishReason = "length";
+        int finishTokenId = -1;
         int maxTokens = inputTokenIds.size() + maxNewTokens;
         List<String> stepTopK = new ArrayList<>();
         // The session owns its decode state / KV cache; the loop never creates or passes a cache. Step 0 prefills the
@@ -100,19 +101,23 @@ public final class DecoderOnlyGenerationLoop {
                     decodeProfile.tokenSelect += tokenSelectStep;
                 }
 
+                // Harmonised result contract: a terminating stop token ends generation but is NOT recorded as a
+                // generated/streamed user-output token (matches the production Qwen runtime). It is reported via
+                // finishTokenId instead.
+                if (selector.shouldStop(nextToken)) {
+                    finishReason = "eos_token";
+                    finishTokenId = nextToken;
+                    break;
+                }
                 generatedTokens.add(nextToken);
                 fullTokenIds.add(nextToken);
                 pendingToken = nextToken;
-                if (generatedTokenConsumer != null && !selector.shouldStop(nextToken)) {
+                if (generatedTokenConsumer != null) {
                     long streamStart = System.nanoTime();
                     generatedTokenConsumer.accept(nextToken);
                     if (profileDecode) {
                         decodeProfile.streamingCallback += System.nanoTime() - streamStart;
                     }
-                }
-                if (selector.shouldStop(nextToken)) {
-                    finishReason = "eos_token";
-                    break;
                 }
             }
         }
@@ -131,6 +136,7 @@ public final class DecoderOnlyGenerationLoop {
                 fullTokenIds,
                 generatedTokens.count(),
                 finishReason,
+                finishTokenId,
                 maxNewTokens,
                 System.nanoTime() - runtimeStart,
                 prefillNanos,

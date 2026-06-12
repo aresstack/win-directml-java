@@ -81,14 +81,16 @@ public final class SmolLM2ReferenceGenerationLoop {
             int nextToken = tokenSampler.selectNextToken(logits, generatedTokens);
             tokenSelectNanos += System.nanoTime() - tokenSelectStart;
 
-            generatedTokens.add(nextToken);
-            fullTokenIds.add(nextToken);
-            if (generatedTokenConsumer != null && !tokenSampler.shouldStop(nextToken)) {
-                generatedTokenConsumer.accept(nextToken);
-            }
+            // Harmonised result contract: the terminating stop token ends generation but is NOT recorded as a
+            // generated/streamed token (matches the production Qwen runtime and the shared DecoderOnlyGenerationLoop).
             if (tokenSampler.shouldStop(nextToken)) {
                 finishReason = "eos_token";
                 break;
+            }
+            generatedTokens.add(nextToken);
+            fullTokenIds.add(nextToken);
+            if (generatedTokenConsumer != null) {
+                generatedTokenConsumer.accept(nextToken);
             }
         }
         SmolLM2GenerationProfile profile = new SmolLM2GenerationProfile(

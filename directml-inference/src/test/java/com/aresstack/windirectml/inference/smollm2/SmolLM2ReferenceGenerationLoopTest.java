@@ -34,8 +34,9 @@ class SmolLM2ReferenceGenerationLoopTest {
         SmolLM2TokenRuntimeResult result = generationLoop.generate(
                 new SmolLM2TokenRuntimeRequest(List.of(0), 4, SmolLM2GenerationOptions.greedy()));
 
-        assertEquals(List.of(2), result.generatedTokenIds());
-        assertEquals(1, result.tokensGenerated());
+        // Harmonised contract: the eos token (id 2) terminates generation but is not itself a generated token.
+        assertEquals(List.of(), result.generatedTokenIds());
+        assertEquals(0, result.tokensGenerated());
         assertEquals("eos_token", result.finishReason());
     }
 

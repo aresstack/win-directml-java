@@ -28,13 +28,15 @@ class DecoderOnlyGenerationLoopTest {
         DecoderOnlyGenerationResult result = loop.generate(
                 List.of(3, 1), 10, new GreedyStopSelector(7), streamed::add);
 
-        assertEquals(List.of(2, 5, 7), result.generatedTokenIds());
-        assertEquals(List.of(3, 1, 2, 5, 7), result.fullTokenIds());
+        // Harmonised contract: the stop token (7) terminates generation but is NOT a generated/streamed token; it is
+        // reported via finishTokenId instead.
+        assertEquals(List.of(2, 5), result.generatedTokenIds());
+        assertEquals(List.of(3, 1, 2, 5), result.fullTokenIds());
         assertEquals(List.of(3, 1), result.inputTokenIds());
-        assertEquals(3, result.tokensGenerated());
+        assertEquals(2, result.tokensGenerated());
         assertEquals("eos_token", result.finishReason());
+        assertEquals(7, result.finishTokenId());
         assertEquals(10, result.maxNewTokens());
-        // The stop token (7) must NOT be streamed; the accepted tokens before it are streamed in order.
         assertEquals(List.of(2, 5), streamed);
     }
 
@@ -51,6 +53,7 @@ class DecoderOnlyGenerationLoopTest {
         assertEquals(List.of(1, 3), result.generatedTokenIds());
         assertEquals(2, result.tokensGenerated());
         assertEquals("length", result.finishReason());
+        assertEquals(-1, result.finishTokenId());
         assertEquals(List.of(1, 3), streamed);
     }
 
