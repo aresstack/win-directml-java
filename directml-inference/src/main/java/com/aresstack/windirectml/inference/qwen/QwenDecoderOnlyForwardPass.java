@@ -45,13 +45,13 @@ public final class QwenDecoderOnlyForwardPass implements DecoderOnlyForwardPass 
     }
 
     /**
-     * Whether the Qwen decoder-only session path may be constructed: either the experimental construction flag
-     * {@code -D{@value #EXPERIMENTAL_FLAG}=true} (used by the dev harnesses) or the runtime selector
-     * {@code -Dqwen.runtime=decoderonly-session} (the real opt-in) is set.
+     * Whether the Qwen decoder-only session path may be constructed. As of slice 11a the session path is the default
+     * runtime, so this is true unless the legacy path is explicitly selected via {@code -Dqwen.runtime=legacy} — or
+     * always true when the dev-harness construction flag {@code -D{@value #EXPERIMENTAL_FLAG}=true} is set.
      */
     public static boolean experimentalEnabled() {
         return Boolean.getBoolean(EXPERIMENTAL_FLAG)
-                || "decoderonly-session".equalsIgnoreCase(System.getProperty("qwen.runtime"));
+                || !"legacy".equalsIgnoreCase(System.getProperty("qwen.runtime", "decoderonly-session"));
     }
 
     @Override

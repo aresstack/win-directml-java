@@ -83,6 +83,10 @@ class QwenDecoderOnlySessionBenchmarkTest {
 
     @BeforeAll
     static void setUp() throws Exception {
+        // Production runs go through generateStreaming, which now defaults to the session path (slice 11a); force the
+        // legacy path so the production-vs-session comparison stays valid. runSession() drives the loop directly and
+        // is unaffected.
+        System.setProperty("qwen.runtime", "legacy");
         Path dir = resolveModelDir();
         assertNotNull(dir, "Model directory must resolve when the benchmark is enabled");
         engine = new QwenInferenceEngine(dir, MAX_TOKENS, BACKEND, MODEL_FILE);
@@ -98,6 +102,7 @@ class QwenDecoderOnlySessionBenchmarkTest {
         if (engine != null) {
             engine.shutdown();
         }
+        System.clearProperty("qwen.runtime");
     }
 
     @Test

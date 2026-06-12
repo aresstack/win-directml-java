@@ -227,3 +227,26 @@ Factory aktiviert.
 
 Für echte Läufe auf realen Maschinen (Workbench-Startbefehle inkl. Launcher-Stolperfalle, Erfassungstabelle,
 Bewertungskriterien) siehe **`docs/runbook-qwen-decoderonly-session.md`**.
+
+## 10. Slice 11a — decoder-only session ist jetzt Qwen-Default
+
+Nach erfolgreicher Real-Maschinen-Verifikation ist der **Default umgedreht**:
+
+```text
+(ohne Property)                     → decoder-only session   (neuer Default)
+-Dqwen.runtime=decoderonly-session  → decoder-only session   (explizit)
+-Dqwen.runtime=legacy               → bestehender Produktionspfad (opt-out, vollständig erhalten)
+```
+
+- `Qwen2Runtime.generateStreaming` läuft ohne Property über den gemeinsamen `DecoderOnlyGenerationLoop` +
+  `QwenDecoderOnlyDecodeSession`; der Legacy-Pfad ist nur noch via `-Dqwen.runtime=legacy` aktiv und bleibt
+  unverändert/erhalten (nicht entfernt).
+- Das Runtime-Path-Label geht jetzt auf **stdout** (`System.out.println("Runtime path: qwen …")`), damit es in der
+  normalen Workbench-Konsole sichtbar ist (der Launcher vererbt stdout via `inheritIO`).
+- Die Dev-Harnesses (Benchmark/E2E) setzen für ihren Produktions-/Legacy-Vergleichslauf explizit
+  `-Dqwen.runtime=legacy`, damit der Vergleich nach dem Default-Flip gültig bleibt.
+- Unverändert: identische gestreamte Token-IDs, identischer Volltext, identischer Finish-Reason; GPU-residenter
+  KV-Cache erhalten; keine Workbench-UI-/Prompt-/Kernel-/`.wdmlpack`-Änderung.
+
+Verifiziert auf Qwen2.5-Coder-0.5B INT4/WARP (`QwenSessionRoutingE2eTest`): legacy, explizit session **und** der
+Default-Lauf (ohne Property) liefern token-/text-/finish-identisch; der Default-Lauf entspricht dem Session-Lauf.

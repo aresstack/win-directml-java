@@ -86,6 +86,9 @@ class QwenDecoderOnlySessionE2eTest {
 
     @BeforeAll
     static void setUp() throws Exception {
+        // The production comparison call uses generateStreaming, which now defaults to the session path (slice 11a);
+        // force legacy so it stays the legacy gold standard. The session side drives the loop directly.
+        System.setProperty("qwen.runtime", "legacy");
         Path dir = resolveModelDir();
         assertNotNull(dir, "Model directory must resolve when the harness is enabled");
         engine = new QwenInferenceEngine(dir, MAX_TOKENS, BACKEND, MODEL_FILE);
@@ -103,6 +106,7 @@ class QwenDecoderOnlySessionE2eTest {
         if (engine != null) {
             engine.shutdown();
         }
+        System.clearProperty("qwen.runtime");
     }
 
     @Test

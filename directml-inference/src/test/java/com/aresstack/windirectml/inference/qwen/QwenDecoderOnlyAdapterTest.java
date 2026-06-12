@@ -37,13 +37,28 @@ class QwenDecoderOnlyAdapterTest {
     @AfterEach
     void clearFlag() {
         System.clearProperty(QwenDecoderOnlyForwardPass.EXPERIMENTAL_FLAG);
+        System.clearProperty("qwen.runtime");
     }
 
     @Test
-    void factoryRefusesConstructionWhenFlagDisabled() {
+    void defaultRuntimeEnablesTheSessionPath() {
+        // As of slice 11a the decoder-only session path is the default: no flags needed to enable construction.
         System.clearProperty(QwenDecoderOnlyForwardPass.EXPERIMENTAL_FLAG);
-        FakeSteps steps = new FakeSteps(logitsWithArgmax(1));
-        assertThrows(IllegalStateException.class, () -> new QwenDecoderOnlyForwardPass(config(), steps));
+        System.clearProperty("qwen.runtime");
+        assertTrue(QwenDecoderOnlyForwardPass.experimentalEnabled());
+    }
+
+    @Test
+    void factoryRefusesConstructionWhenLegacyExplicitlySelected() {
+        // Only an explicit -Dqwen.runtime=legacy (without the dev flag) disables the session forward pass.
+        System.clearProperty(QwenDecoderOnlyForwardPass.EXPERIMENTAL_FLAG);
+        System.setProperty("qwen.runtime", "legacy");
+        try {
+            FakeSteps steps = new FakeSteps(logitsWithArgmax(1));
+            assertThrows(IllegalStateException.class, () -> new QwenDecoderOnlyForwardPass(config(), steps));
+        } finally {
+            System.clearProperty("qwen.runtime");
+        }
     }
 
     @Test

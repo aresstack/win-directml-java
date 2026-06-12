@@ -87,21 +87,30 @@ class QwenSessionRoutingE2eTest {
     void sessionRuntimeRoutingMatchesLegacyTokenForToken() {
         Run legacy;
         Run session;
+        Run defaultRun;
         try {
-            System.clearProperty("qwen.runtime"); // default → legacy
+            System.setProperty("qwen.runtime", "legacy"); // explicit legacy (no longer the default as of slice 11a)
             legacy = runOnce();
             System.setProperty("qwen.runtime", "decoderonly-session");
             session = runOnce();
+            System.clearProperty("qwen.runtime"); // no property → must now default to the session path
+            defaultRun = runOnce();
         } finally {
             System.clearProperty("qwen.runtime");
         }
 
         log.info("[routing] legacy : {} tokens, finish={}, ids={}", legacy.tokens.size(), legacy.finish, legacy.tokens);
         log.info("[routing] session: {} tokens, finish={}, ids={}", session.tokens.size(), session.finish, session.tokens);
+        log.info("[routing] default: {} tokens, finish={}, ids={}",
+                defaultRun.tokens.size(), defaultRun.finish, defaultRun.tokens);
 
         assertEquals(legacy.tokens, session.tokens, "Session routing must stream the same token ids as legacy");
         assertEquals(legacy.text, session.text, "Session routing must produce the same decoded text as legacy");
         assertEquals(legacy.finish, session.finish, "Finish reason must match legacy");
+
+        // Slice 11a: without a property, generation must take the session path (== explicit session run).
+        assertEquals(session.tokens, defaultRun.tokens, "Default (no property) must route to the session path");
+        assertEquals(session.text, defaultRun.text, "Default (no property) must match the session path output");
     }
 
     private Run runOnce() {

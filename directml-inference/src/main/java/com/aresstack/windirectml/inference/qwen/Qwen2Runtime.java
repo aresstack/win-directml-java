@@ -299,10 +299,11 @@ public final class Qwen2Runtime implements QwenDecodeSteps {
     public String generateStreaming(String prompt, int maxTokens, TokenConsumer consumer) {
         int[] inputIds = tokenizer.encode(prompt);
 
-        // Optional shared decoder-only session runtime path (opt-in; legacy stays the default). Routing is keyed on
-        // -Dqwen.runtime (NOT the experimental construction gate) so the benchmark's production runs stay legacy.
+        // Shared decoder-only session runtime path. As of slice 11a this is the DEFAULT; legacy is opt-out via
+        // -Dqwen.runtime=legacy. Routing is keyed on -Dqwen.runtime only (NOT the experimental construction gate).
         boolean sessionPath = decoderOnlySessionRequested();
-        log.info("Runtime path: qwen {}", sessionPath ? "decoder-only session" : "legacy");
+        // Surface the active runtime path on the normal workbench console (stdout is inherited by the launcher).
+        System.out.println("Runtime path: qwen " + (sessionPath ? "decoder-only session" : "legacy"));
         if (sessionPath) {
             return generateViaDecoderOnlySession(inputIds, maxTokens, consumer);
         }
@@ -377,9 +378,12 @@ public final class Qwen2Runtime implements QwenDecodeSteps {
         return decodedText.fullText();
     }
 
-    /** Whether the optional shared decoder-only session runtime path is requested via {@code -Dqwen.runtime}. */
+    /**
+     * Whether the shared decoder-only session runtime path is active. As of slice 11a this is the DEFAULT: the legacy
+     * production path runs only when {@code -Dqwen.runtime=legacy} is set explicitly.
+     */
     private static boolean decoderOnlySessionRequested() {
-        return "decoderonly-session".equalsIgnoreCase(System.getProperty("qwen.runtime", "legacy"));
+        return !"legacy".equalsIgnoreCase(System.getProperty("qwen.runtime", "decoderonly-session"));
     }
 
     /**

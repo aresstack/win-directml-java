@@ -1,9 +1,9 @@
 # Runbook: Qwen legacy vs. decoder-only session — echte Läufe
 
-> **Zweck:** Vor jeder Default-Entscheidung (Slice 11) echte Qwen-Läufe auf realen Maschinen erfassen und legacy
-> gegen den decoder-only Session-Pfad vergleichen.
-> **Status:** Default ist und bleibt `legacy`. Dieser Runbook ändert **nichts** — nur Messen/Beobachten.
-> **Verwandt:** `docs/concept-qwen-decoderonly-adapter.md` §9 (Aktivierung), §8 (Benchmark), §6/§7 (Token-/Vertrag-Gleichheit).
+> **Zweck:** Qwen-Läufe auf realen Maschinen erfassen und legacy gegen den decoder-only Session-Pfad vergleichen.
+> **Status (ab Slice 11a):** **Default ist `decoder-only session`**; `legacy` ist opt-out via `-Dqwen.runtime=legacy`
+> und bleibt vollständig erhalten. Dieser Runbook ändert nichts — nur Messen/Beobachten.
+> **Verwandt:** `docs/concept-qwen-decoderonly-adapter.md` §10 (Default-Flip), §9 (Aktivierung), §8 (Benchmark).
 
 ## 0. Was verglichen wird
 
@@ -11,8 +11,9 @@ Derselbe Generierungseinstieg (`Qwen2Runtime.generateStreaming`), einmal über d
 einmal über den gemeinsamen `DecoderOnlyGenerationLoop` + `QwenDecoderOnlyDecodeSession`:
 
 ```text
--Dqwen.runtime=legacy               # Default — bestehender Produktionspfad
--Dqwen.runtime=decoderonly-session  # opt-in — gemeinsamer decoder-only Session-Pfad
+(ohne Property)                     # Default — decoder-only session
+-Dqwen.runtime=decoderonly-session  # explizit — decoder-only session
+-Dqwen.runtime=legacy               # opt-out — bestehender Produktionspfad
 ```
 
 Erwartung (bereits in CI/Harness verifiziert, hier auf echter Hardware bestätigen): **identische generated token IDs,
@@ -37,7 +38,8 @@ java --enable-preview --enable-native-access=ALL-UNNAMED --add-modules=jdk.incub
   -jar directml-workbench-all.jar
 ```
 
-(für legacy: `-Dqwen.runtime=legacy` oder die Property weglassen.)
+(Ohne Property läuft seit Slice 11a der **Session-Pfad** als Default; für den alten Pfad explizit
+`-Dqwen.runtime=legacy` setzen.)
 
 **B) Über den Launcher mit `JAVA_TOOL_OPTIONS` (wird an die Kind-JVM vererbt):**
 
