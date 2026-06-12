@@ -100,6 +100,11 @@ final class SmolLM2WarpForwardPass implements AutoCloseable {
         return delegate.decodeProfile();
     }
 
+    /** The shared generic forward pass this adapter wraps; used to drive the shared generation loop. */
+    DecoderOnlyWarpForwardPass delegate() {
+        return delegate;
+    }
+
     SmolLM2Config config() {
         return config;
     }

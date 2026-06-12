@@ -26,7 +26,7 @@ import java.util.Objects;
  * runs on WARP by default ({@code lmHead != null}); the CPU-SIMD reference projection is only used when a family opts
  * into the dev/diagnostic LM-head fallback, never to optimize the WARP path.</p>
  */
-public final class DecoderOnlyWarpForwardPass implements AutoCloseable {
+public final class DecoderOnlyWarpForwardPass implements AutoCloseable, DecoderOnlyForwardPass {
 
     private final DecoderOnlyConfig config;
     private final DecoderOnlyAttentionLayout attentionLayout;
@@ -177,6 +177,12 @@ public final class DecoderOnlyWarpForwardPass implements AutoCloseable {
         }
     }
 
+    @Override
+    public DecoderOnlyConfig config() {
+        return config;
+    }
+
+    @Override
     public DecoderOnlyWarpDecodeProfile decodeProfile() {
         return decodeProfile;
     }

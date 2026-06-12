@@ -1,5 +1,7 @@
 package com.aresstack.windirectml.inference.smollm2;
 
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyRuntimeMode;
+
 /**
  * Selects the SmolLM2 execution path without changing model package semantics.
  */
@@ -33,5 +35,17 @@ public enum SmolLM2RuntimeMode {
      */
     public String displayLabel() {
         return displayLabel;
+    }
+
+    /**
+     * Map onto the family-neutral {@link DecoderOnlyRuntimeMode}. SmolLM2 keeps its own, more specific
+     * {@link #displayLabel()}; this is the adapter point a shared decoder-only runtime selector consumes.
+     */
+    public DecoderOnlyRuntimeMode toDecoderOnlyRuntimeMode() {
+        return switch (this) {
+            case REFERENCE -> DecoderOnlyRuntimeMode.REFERENCE;
+            case WARP -> DecoderOnlyRuntimeMode.WARP;
+            case AUTO -> DecoderOnlyRuntimeMode.AUTO;
+        };
     }
 }

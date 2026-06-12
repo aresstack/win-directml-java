@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.smollm2;
 
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyTokenizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -26,7 +27,7 @@ import java.util.regex.Pattern;
  * {@code added_tokens}. It keeps chat-template rendering outside of the tokenizer so runtime tests can use raw text
  * prompts without pulling in UI or provider-specific prompt policy.</p>
  */
-public final class SmolLM2Tokenizer {
+public final class SmolLM2Tokenizer implements DecoderOnlyTokenizer {
 
     private static final char[] BYTE_TO_UNICODE = new char[256];
     private static final Map<Character, Byte> UNICODE_TO_BYTE = new HashMap<>(512);
