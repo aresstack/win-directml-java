@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.qwen;
 
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyTokenizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -52,7 +53,7 @@ import java.util.regex.Pattern;
  * <p><b>Runtime status:</b> Qwen model generation is <em>planned</em>.
  * This tokenizer supports offline prompt preparation and testing only.
  */
-public final class QwenTokenizer {
+public final class QwenTokenizer implements DecoderOnlyTokenizer {
 
     private static final Logger log = LoggerFactory.getLogger(QwenTokenizer.class);
 
@@ -413,6 +414,16 @@ public final class QwenTokenizer {
      */
     public boolean isEos(int tokenId) {
         return tokenId == ENDOFTEXT_ID || tokenId == IM_END_ID;
+    }
+
+    /**
+     * Whether {@code tokenId} maps to a special (non-surface) token such as {@code <|im_start|>}/{@code <|im_end|>}.
+     * Mirrors the {@code skipSpecialTokens} filtering in {@link #decode(int[], boolean)} so the shared
+     * {@link DecoderOnlyTokenizer} seam reports the same special-token set the decoder already skips.
+     */
+    @Override
+    public boolean isSpecialToken(int tokenId) {
+        return tokenId >= 0 && tokenId < idToToken.length && specialTokens.containsKey(idToToken[tokenId]);
     }
 
     /**
