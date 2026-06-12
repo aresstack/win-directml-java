@@ -12,7 +12,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Slice 6 — experimental Qwen {@code DecoderOnlyDecodeSession} adapter. Device-free: a fake {@link QwenDecodeSteps}
@@ -42,6 +44,21 @@ class QwenDecoderOnlyAdapterTest {
         System.clearProperty(QwenDecoderOnlyForwardPass.EXPERIMENTAL_FLAG);
         FakeSteps steps = new FakeSteps(logitsWithArgmax(1));
         assertThrows(IllegalStateException.class, () -> new QwenDecoderOnlyForwardPass(config(), steps));
+    }
+
+    @Test
+    void runtimePropertyAloneEnablesTheSessionPath() {
+        // The real opt-in -Dqwen.runtime=decoderonly-session enables the path without the experimental flag.
+        System.clearProperty(QwenDecoderOnlyForwardPass.EXPERIMENTAL_FLAG);
+        System.setProperty("qwen.runtime", "decoderonly-session");
+        try {
+            assertTrue(QwenDecoderOnlyForwardPass.experimentalEnabled());
+            DecoderOnlyForwardPass forwardPass =
+                    new QwenDecoderOnlyForwardPass(config(), new FakeSteps(logitsWithArgmax(1)));
+            assertNotNull(forwardPass.newDecodeSession(8));
+        } finally {
+            System.clearProperty("qwen.runtime");
+        }
     }
 
     @Test

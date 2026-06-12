@@ -197,3 +197,30 @@ der sich ab Run 1 stabilisiert. Token-Gleichheit + identischer Finish-Reason ble
 performance-neutral**. Eine echte Migration / Default-Umschaltung ist damit technisch tragfähig — die Entscheidung
 (nur vorbereitet / optional schaltbar / später Default) bleibt bewusst dem nächsten, separat freizugebenden Schritt
 überlassen.
+
+## 9. Slice 10 — Session-Pfad optional schaltbar (Default bleibt legacy)
+
+Der echte Generierungseinstieg `Qwen2Runtime.generateStreaming(...)` kann jetzt opt-in über den gemeinsamen
+`DecoderOnlyGenerationLoop` + `QwenDecoderOnlyDecodeSession` laufen. **Default ist und bleibt der Legacy-Pfad.**
+
+Aktivierung (nur per System-Property, keine Workbench-/Default-Änderung):
+
+```text
+-Dqwen.runtime=legacy               # Default: bestehender Produktionspfad
+-Dqwen.runtime=decoderonly-session  # opt-in: gemeinsamer decoder-only Session-Pfad
+```
+
+- Das Routing hängt ausschließlich an `qwen.runtime`. Das ältere `-Dqwen.decoderonly.experimental=true` bleibt der
+  Konstruktions-Gate für die Dev-Harnesses (E2E/Benchmark) und routet `generateStreaming` **nicht** um — so messen
+  diese weiterhin echt legacy vs. session.
+- Der Session-Pfad reicht Qwens reale Pipeline durch (`QwenDecodeSteps` → THIS runtime), GPU-residenter KV-Cache
+  bleibt erhalten; es wird kein CPU-Cache materialisiert. `Qwen2Runtime`/`QwenGpuPipeline` sind unverändert und
+  werden nicht entfernt.
+- Ehrliches Logging am Einstieg: `Runtime path: qwen legacy` bzw. `Runtime path: qwen decoder-only session`.
+- Gleiches beobachtbares Verhalten wie legacy: identische gestreamte Token-IDs, identische inkrementelle
+  Text-Dekodierung, identischer Volltext, identischer Finish-Reason (verifiziert in `QwenSessionRoutingE2eTest` auf
+  Qwen2.5-Coder-0.5B INT4/WARP).
+
+Verifikation: `QwenSessionRoutingE2eTest` (gated, fährt denselben Einstieg einmal legacy, einmal session und
+vergleicht Token-IDs/Text/Finish). Device-frei deckt `QwenDecoderOnlyAdapterTest` ab, dass `qwen.runtime` allein die
+Factory aktiviert.

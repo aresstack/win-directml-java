@@ -37,15 +37,21 @@ public final class QwenDecoderOnlyForwardPass implements DecoderOnlyForwardPass 
     public QwenDecoderOnlyForwardPass(Qwen2Config config, QwenDecodeSteps decodeSteps) {
         if (!experimentalEnabled()) {
             throw new IllegalStateException(
-                    "Qwen decoder-only session path is experimental; enable -D" + EXPERIMENTAL_FLAG + "=true");
+                    "Qwen decoder-only session path is opt-in; enable -D" + EXPERIMENTAL_FLAG
+                            + "=true or -Dqwen.runtime=decoderonly-session");
         }
         this.config = Objects.requireNonNull(config, "config");
         this.decodeSteps = Objects.requireNonNull(decodeSteps, "decodeSteps");
     }
 
-    /** Whether the experimental Qwen decoder-only session path is enabled via the system property. */
+    /**
+     * Whether the Qwen decoder-only session path may be constructed: either the experimental construction flag
+     * {@code -D{@value #EXPERIMENTAL_FLAG}=true} (used by the dev harnesses) or the runtime selector
+     * {@code -Dqwen.runtime=decoderonly-session} (the real opt-in) is set.
+     */
     public static boolean experimentalEnabled() {
-        return Boolean.getBoolean(EXPERIMENTAL_FLAG);
+        return Boolean.getBoolean(EXPERIMENTAL_FLAG)
+                || "decoderonly-session".equalsIgnoreCase(System.getProperty("qwen.runtime"));
     }
 
     @Override

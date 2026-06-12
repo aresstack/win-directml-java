@@ -4,7 +4,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyAttentionLayout;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyForwardPass;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyGeneratedTokens;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyGenerationLoop;
+import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyGenerationResult;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyGreedyTokenSelector;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyRotaryEmbedding;
@@ -13,8 +16,10 @@ import com.aresstack.windirectml.windows.GpuTimestampProfile;
 
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ForkJoinPool;
+import java.util.function.IntConsumer;
 import java.util.stream.IntStream;
 
 /**
@@ -294,6 +299,14 @@ public final class Qwen2Runtime implements QwenDecodeSteps {
     public String generateStreaming(String prompt, int maxTokens, TokenConsumer consumer) {
         int[] inputIds = tokenizer.encode(prompt);
 
+        // Optional shared decoder-only session runtime path (opt-in; legacy stays the default). Routing is keyed on
+        // -Dqwen.runtime (NOT the experimental construction gate) so the benchmark's production runs stay legacy.
+        boolean sessionPath = decoderOnlySessionRequested();
+        log.info("Runtime path: qwen {}", sessionPath ? "decoder-only session" : "legacy");
+        if (sessionPath) {
+            return generateViaDecoderOnlySession(inputIds, maxTokens, consumer);
+        }
+
         resetProfile();
         resetCache();
 
@@ -361,6 +374,54 @@ public final class Qwen2Runtime implements QwenDecodeSteps {
                 String.format("%.2f", profSteps / Math.max(1e-9, totalDecodeSec)),
                 lastProfile);
 
+        return decodedText.fullText();
+    }
+
+    /** Whether the optional shared decoder-only session runtime path is requested via {@code -Dqwen.runtime}. */
+    private static boolean decoderOnlySessionRequested() {
+        return "decoderonly-session".equalsIgnoreCase(System.getProperty("qwen.runtime", "legacy"));
+    }
+
+    /**
+     * Optional generation path that drives the shared {@link DecoderOnlyGenerationLoop} over a
+     * {@link QwenDecoderOnlyDecodeSession}. The session reuses THIS runtime's own prefill/single-token decode (via
+     * {@link QwenDecodeSteps}), so Qwen keeps its (optionally GPU-resident) KV cache; no CPU cache is materialised.
+     *
+     * <p>Produces the same observable output as the legacy path: the same accepted token ids are streamed with the
+     * same incremental text decoding, and the same full text is returned. The terminating stop token is not streamed
+     * (harmonised result contract).</p>
+     */
+    private String generateViaDecoderOnlySession(int[] inputIds, int maxTokens, TokenConsumer consumer) {
+        resetProfile();
+        List<Integer> inputTokenIds = new java.util.ArrayList<>(inputIds.length);
+        for (int id : inputIds) {
+            inputTokenIds.add(id);
+        }
+
+        DecoderOnlyForwardPass forwardPass = new QwenDecoderOnlyForwardPass(config, this);
+        DecoderOnlyGenerationLoop loop = new DecoderOnlyGenerationLoop(forwardPass, 0, 0);
+        DecoderOnlyTokenTextBuffer decodedText = new DecoderOnlyTokenTextBuffer(256);
+
+        // Mirror the legacy decode loop's per-token streaming: incremental text decode + TokenConsumer callback.
+        IntConsumer sink = tokenId -> {
+            DecoderOnlyTokenTextBuffer.DecoderOnlyTokenText tokenText =
+                    decodedText.appendDecodedTokenText(tokenizer.decode(new int[]{tokenId}, true));
+            if (consumer != null) {
+                consumer.onToken(tokenId, tokenText.fullText(), tokenText.delta());
+            }
+        };
+
+        long start = System.nanoTime();
+        DecoderOnlyGenerationResult result = loop.generate(
+                inputTokenIds, maxTokens, QwenTokenSelector.greedy(repetitionPenalty), sink);
+        long totalMs = (System.nanoTime() - start) / 1_000_000L;
+
+        lastProfile = String.format(
+                "Qwen decoder-only session: %d tokens in %d ms (prefill=%d ms, decode=%d ms), finish=%s",
+                result.tokensGenerated(), totalMs,
+                result.prefillNanos() / 1_000_000L, result.decoderStepNanos() / 1_000_000L,
+                result.finishReason());
+        log.info("Decode complete (decoder-only session): {}", lastProfile);
         return decodedText.fullText();
     }
 
