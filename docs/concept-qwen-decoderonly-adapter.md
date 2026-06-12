@@ -250,3 +250,6 @@ Nach erfolgreicher Real-Maschinen-Verifikation ist der **Default umgedreht**:
 
 Verifiziert auf Qwen2.5-Coder-0.5B INT4/WARP (`QwenSessionRoutingE2eTest`): legacy, explizit session **und** der
 Default-Lauf (ohne Property) liefern token-/text-/finish-identisch; der Default-Lauf entspricht dem Session-Lauf.
+
+> Konsolidierter Freeze-Stand des gesamten Blocks (Status, Architekturübersicht, offene TODOs) in
+> **`docs/decoderonly-homogenization.md`**.
