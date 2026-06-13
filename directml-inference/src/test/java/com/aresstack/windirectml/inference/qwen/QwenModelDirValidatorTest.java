@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -67,13 +68,35 @@ class QwenModelDirValidatorTest {
     }
 
     @Test
-    void missingSpecialTokensMapIsNamed(@TempDir Path tmp) throws Exception {
+    void specialTokensMapIsOptionalForQ4f16Dir(@TempDir Path tmp) throws Exception {
+        // Aligned with the q4f16 download contract: special_tokens_map.json may 404 and is optional.
         Files.writeString(tmp.resolve("config.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer.json"), "{}");
         Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
-        String msg = QwenModelDirValidator.describeMissingModelFile(tmp);
-        assertNotNull(msg);
-        assertTrue(msg.contains("special_tokens_map.json"), msg);
+        Files.writeString(tmp.resolve("model_q4f16.onnx"), "x"); // non-empty; q4f16 needs no external data
+        assertNull(QwenModelDirValidator.describeMissingRequiredFiles(tmp, "model_q4f16.onnx"),
+                "q4f16 dir without special_tokens_map.json must validate");
+    }
+
+    @Test
+    void q4f16DirStillRequiresModelFileAndMetadata(@TempDir Path tmp) throws Exception {
+        Files.writeString(tmp.resolve("config.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer.json"), "{}");
+        Files.writeString(tmp.resolve("tokenizer_config.json"), "{}");
+        // Missing model_q4f16.onnx -> still fails.
+        String missingModel = QwenModelDirValidator.describeMissingRequiredFiles(tmp, "model_q4f16.onnx");
+        assertNotNull(missingModel);
+        assertTrue(missingModel.contains("model_q4f16.onnx"), missingModel);
+
+        // Each required metadata file is still required.
+        for (String required : new String[]{"config.json", "tokenizer.json", "tokenizer_config.json"}) {
+            Files.writeString(tmp.resolve("model_q4f16.onnx"), "x");
+            Files.delete(tmp.resolve(required));
+            String msg = QwenModelDirValidator.describeMissingRequiredFiles(tmp, "model_q4f16.onnx");
+            assertNotNull(msg, "missing " + required + " must fail");
+            assertTrue(msg.contains(required), msg);
+            Files.writeString(tmp.resolve(required), "{}");
+        }
     }
 
     @Test

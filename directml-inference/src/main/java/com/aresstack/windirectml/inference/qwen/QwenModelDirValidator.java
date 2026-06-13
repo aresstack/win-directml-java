@@ -25,13 +25,15 @@ public final class QwenModelDirValidator {
     public static final String DATA_FILE_ALT = "model.onnx.data";
 
     /**
-     * Required metadata files in download/setup order.
+     * Required metadata files in download/setup order. Aligned with the Qwen q4f16 download contract:
+     * {@code special_tokens_map.json}, {@code added_tokens.json} and {@code generation_config.json} are
+     * optional (the onnx-community repo may not publish them), so they are intentionally not listed here
+     * and a missing optional file must not fail runtime init.
      */
     private static final String[] REQUIRED_METADATA_FILES = {
             "config.json",
             "tokenizer.json",
-            "tokenizer_config.json",
-            "special_tokens_map.json"
+            "tokenizer_config.json"
     };
 
     private QwenModelDirValidator() {
