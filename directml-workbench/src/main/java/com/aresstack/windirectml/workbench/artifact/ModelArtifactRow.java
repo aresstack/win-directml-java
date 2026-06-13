@@ -83,7 +83,10 @@ public final class ModelArtifactRow {
         StringBuilder sb = new StringBuilder(family.displayName())
                 .append(" — raw: ").append(pretty(s.rawState()))
                 .append(", package: ").append(pretty(s.packageState()));
-        if (s.ready()) {
+        if (s.packageState() == PackageState.PACKAGE_LEGACY_DIRECT) {
+            // Stay honest even when the model is runnable: there is no wdmlpack compiler here yet.
+            sb.append(" — direct SafeTensors legacy path (package compiler not implemented yet)");
+        } else if (s.ready()) {
             sb.append(" — READY");
         } else if (!s.reason().isBlank()) {
             sb.append(" — ").append(s.reason());

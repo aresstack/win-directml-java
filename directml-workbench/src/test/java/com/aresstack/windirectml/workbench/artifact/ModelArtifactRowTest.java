@@ -73,6 +73,10 @@ class ModelArtifactRowTest {
         ModelArtifactRow.RowView view = row.refresh();
         assertEquals("Legacy (direct)", view.convertLabel());
         assertFalse(view.convertEnabled());
+        assertTrue(view.statusText().contains("package compiler not implemented"),
+                "status must stay honest about the missing compiler: " + view.statusText());
+        assertTrue(view.convertTooltip().contains("Package compiler not implemented"),
+                "tooltip must explain the legacy state: " + view.convertTooltip());
         assertFalse(row.convert().ok());
         assertEquals(0, writes.get(), "legacy convert must not write");
     }

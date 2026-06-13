@@ -158,6 +158,15 @@ incomplete / corrupt / wrong variant), genutzt von E5/Reranker-Loadern + dem Dow
 E5/Reranker-Suiten waren in dieser Sitzung grün. **Offen/optional:** die Status-Stufen `loadable`/`executable` explizit
 in die Workbench-Anzeige ziehen (überlappt mit Item 8). Keine neuen Encoder-Architekturen (bewusst).
 
+**Folgearbeit (Artifact-Lifecycle-Block, Slice W5):** Encoder/Reranker (MiniLM/E5/Reranker) und Phi-3 haben **bewusst
+noch keinen `.wdmlpack`-Compiler**. Im einheitlichen Artifact-Lifecycle laufen sie als **`PACKAGE_LEGACY_DIRECT`**
+(`LegacyDirectLifecycle`): die Runtime lädt direkt aus den SafeTensors/ONNX-Quelldateien, das DownloadPanel zeigt einen
+deaktivierten „Legacy (direct)"-Button + den ehrlichen Status „direct SafeTensors legacy path (package compiler not
+implemented yet)" — **keine Fake-Konvertierung, kein implizites Package-Schreiben**. Der Release nutzt dort bewusst den
+direct-SafeTensors-Legacy-Pfad. **Eigener Folgepunkt (nicht in diesem Block umgesetzt):** ein
+Bert/MiniLM/E5-Encoder-`wdmlpack`-Compiler + ein CrossEncoder/Reranker-`wdmlpack`-Compiler + eine RuntimePackage-Facade,
+damit Encoder/Reranker denselben `download → convert → run-from-package`-Ablauf wie Qwen/SmolLM2/T5 bekommen.
+
 ## Item 11 — WARP-Profiling (teilweise)
 
 `DecoderOnlyWarpDecodeProfile` misst bereits Decode-/MLP-/SwiGLU-/LM-Head-Anteile; SmolLM2/Qwen nutzen es. Item 5
