@@ -2,7 +2,9 @@ package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.runtime.facade.*;
 import com.aresstack.windirectml.encoder.e5.E5Variant;
+import com.aresstack.windirectml.inference.artifact.ModelFamily;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
+import com.aresstack.windirectml.workbench.artifact.WorkbenchArtifactGate;
 
 import javax.swing.*;
 import java.awt.*;
@@ -63,9 +65,11 @@ public final class BatchEmbeddingsPanel extends JPanel {
                     var config = LocalMlRuntimeConfig.builder()
                             .backend(model.getBackend())
                             .build();
-                    var runtime = LocalMlRuntime.create(config);
                     var modelDir = model.getModelRoot().resolve(model.getEmbeddingModel());
+                    // Homogeneous lifecycle: runtime loads only from a wdmlpack. No direct SafeTensors.
+                    WorkbenchArtifactGate.requireExecutablePackage(ModelFamily.EMBEDDING, modelDir);
 
+                    var runtime = LocalMlRuntime.create(config);
                     var embedConfig = buildEmbeddingConfig(modelDir);
                     long startLoad = System.nanoTime();
                     try (var embeddings = runtime.loadEmbeddingModel(embedConfig)) {

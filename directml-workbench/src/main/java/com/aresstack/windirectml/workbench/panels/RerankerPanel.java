@@ -2,7 +2,9 @@ package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.runtime.facade.*;
 import com.aresstack.windirectml.encoder.reranker.RerankResult;
+import com.aresstack.windirectml.inference.artifact.ModelFamily;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
+import com.aresstack.windirectml.workbench.artifact.WorkbenchArtifactGate;
 
 import javax.swing.*;
 import java.awt.*;
@@ -84,8 +86,11 @@ public final class RerankerPanel extends JPanel {
                     var config = LocalMlRuntimeConfig.builder()
                             .backend(model.getBackend())
                             .build();
-                    var runtime = LocalMlRuntime.create(config);
                     var modelDir = model.getModelRoot().resolve(model.getRerankerModel());
+                    // Homogeneous lifecycle: runtime loads only from a wdmlpack. No direct SafeTensors.
+                    WorkbenchArtifactGate.requireExecutablePackage(ModelFamily.RERANKER, modelDir);
+
+                    var runtime = LocalMlRuntime.create(config);
                     var rerankConfig = new RerankerModelConfig(modelDir);
 
                     long startLoad = System.nanoTime();

@@ -18,7 +18,9 @@ import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationProfile;
 import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.prompt.PromptStrategies;
 import com.aresstack.windirectml.inference.prompt.PromptTask;
+import com.aresstack.windirectml.inference.artifact.ModelFamily;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
+import com.aresstack.windirectml.workbench.artifact.WorkbenchArtifactGate;
 import com.aresstack.windirectml.workbench.runtime.SmolLM2WorkbenchRuntimeRunner;
 import com.aresstack.windirectml.workbench.prompt.PromptTaskLabels;
 
@@ -222,6 +224,8 @@ public final class SummarizerPanel extends JPanel {
     }
 
     private void runPhi3Summarizer(Path modelDir, String text, int maxTokens) throws Exception {
+        // Homogeneous lifecycle: Phi-3 runs only from a wdmlpack. No direct ONNX execution.
+        WorkbenchArtifactGate.requireExecutablePackage(ModelFamily.PHI3, modelDir);
         validatePhi3ModelFiles(modelDir);
         String backend = model.getBackend().name().toLowerCase();
         long start = System.nanoTime();
