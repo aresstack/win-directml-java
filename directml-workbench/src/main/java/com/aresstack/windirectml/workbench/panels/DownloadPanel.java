@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.workbench.panels;
 
-import com.aresstack.windirectml.inference.artifact.LegacyDirectLifecycle;
+import com.aresstack.windirectml.inference.artifact.CompilerMissingLifecycle;
 import com.aresstack.windirectml.inference.artifact.ModelConversionResult;
 import com.aresstack.windirectml.inference.artifact.ModelFamily;
 import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
@@ -141,7 +141,7 @@ public final class DownloadPanel extends JPanel {
         addDownloadRow(rows,
                 downloadButton,
                 createConfigButton(folder),
-                legacyDirectRow(family, () -> model.getModelRoot().resolve(folder)),
+                compilerMissingRow(family, () -> model.getModelRoot().resolve(folder)),
                 createOpenFolderButton(() -> model.getModelRoot().resolve(folder)),
                 registerProgressBar(manifest));
     }
@@ -159,7 +159,7 @@ public final class DownloadPanel extends JPanel {
                 createConfigButton(modelId),
                 new ModelArtifactRow(ModelFamily.PHI3,
                         () -> model.getModelRoot().resolve(manifest.localDirName()),
-                        () -> new LegacyDirectLifecycle(ModelFamily.PHI3, java.util.List.of("config.json"),
+                        () -> new CompilerMissingLifecycle(ModelFamily.PHI3, java.util.List.of("config.json"),
                                 java.util.List.of(java.util.List.of("*.onnx", "model.safetensors")))),
                 createOpenFolderButton(() -> model.getModelRoot().resolve(manifest.localDirName())),
                 registerProgressBar(manifest));
@@ -242,14 +242,14 @@ public final class DownloadPanel extends JPanel {
             case SMOLLM2 -> SmolLM2PackageLifecycle::new;
             case T5 -> T5PackageLifecycle::new;
             case QWEN -> QwenPackageLifecycle::new; // default model.onnx -> model.wdmlpack
-            default -> () -> new LegacyDirectLifecycle(family,
+            default -> () -> new CompilerMissingLifecycle(family,
                     java.util.List.of("config.json", "tokenizer.json"),
                     java.util.List.of(java.util.List.of("*.safetensors", "pytorch_model.bin")));
         };
     }
 
-    private ModelArtifactRow legacyDirectRow(ModelFamily family, java.util.function.Supplier<Path> dir) {
-        return new ModelArtifactRow(family, dir, () -> new LegacyDirectLifecycle(family,
+    private ModelArtifactRow compilerMissingRow(ModelFamily family, java.util.function.Supplier<Path> dir) {
+        return new ModelArtifactRow(family, dir, () -> new CompilerMissingLifecycle(family,
                 java.util.List.of("config.json", "tokenizer.json"),
                 java.util.List.of(java.util.List.of("*.safetensors", "pytorch_model.bin"))));
     }

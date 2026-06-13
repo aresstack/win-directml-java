@@ -17,8 +17,9 @@ public enum PackageState {
     /** The package is present, loadable and executable. */
     PACKAGE_VALID,
     /**
-     * The family has no {@code .wdmlpack} compiler yet and runs directly from its raw source
-     * (encoder/reranker/Phi-3 today). This is an explicit, non-hidden legacy marker.
+     * The family has no {@code .wdmlpack} compiler yet, so it cannot be converted or executed. This is
+     * a homogeneous <b>not-executable</b> state (encoder/reranker/Phi-3 today) - never a legacy runtime
+     * path that silently loads raw weights.
      */
-    PACKAGE_LEGACY_DIRECT
+    PACKAGE_COMPILER_MISSING
 }

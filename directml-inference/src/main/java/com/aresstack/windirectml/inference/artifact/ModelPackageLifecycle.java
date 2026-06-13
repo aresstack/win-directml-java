@@ -74,7 +74,7 @@ public interface ModelPackageLifecycle {
             case PACKAGE_STALE -> ModelConversionAction.RECONVERT;
             case PACKAGE_CORRUPT, PACKAGE_NOT_LOADABLE, PACKAGE_NOT_EXECUTABLE -> ModelConversionAction.REPAIR;
             case PACKAGE_VALID -> ModelConversionAction.RECONVERT;
-            case PACKAGE_LEGACY_DIRECT -> ModelConversionAction.INSPECT;
+            case PACKAGE_COMPILER_MISSING -> ModelConversionAction.NOT_SUPPORTED;
         };
     }
 
@@ -90,14 +90,18 @@ public interface ModelPackageLifecycle {
         throw new IllegalStateException(actionableMessage(status));
     }
 
-    /** The standard "use the Download tab -> Convert" guidance for a not-ready status. */
+    /** Actionable, state-specific guidance for a not-ready status. Never implies a direct-from-source run. */
     default String actionableMessage(ModelArtifactStatus status) {
-        String base = "Missing or unusable " + family().displayName() + " runtime package ("
-                + status.packageState() + (status.reason().isBlank() ? "" : ": " + status.reason()) + ").";
-        if (!hasCompiler()) {
-            return base + " This family runs directly from its raw source; "
-                    + "download the model first from the Download tab.";
+        String family = family().displayName();
+        if (!hasCompiler() || status.packageState() == PackageState.PACKAGE_COMPILER_MISSING) {
+            return "Package compiler not implemented for " + family
+                    + ". This model is downloadable but not executable until a wdmlpack compiler exists.";
         }
-        return base + " Use the Download tab -> Convert to build it; inference never compiles a package.";
+        if (status.packageState() == PackageState.PACKAGE_MISSING) {
+            return "Missing " + family + " runtime package. Use Download tab -> Check, then Convert.";
+        }
+        String reason = status.reason().isBlank() ? status.packageState().name() : status.reason();
+        return "Invalid " + family + " runtime package (" + reason
+                + "). Use Download tab -> Check, then Repair/Reconvert.";
     }
 }

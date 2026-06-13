@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.workbench.artifact;
 
-import com.aresstack.windirectml.inference.artifact.LegacyDirectLifecycle;
+import com.aresstack.windirectml.inference.artifact.CompilerMissingLifecycle;
 import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
 import com.aresstack.windirectml.inference.artifact.ModelConversionResult;
 import com.aresstack.windirectml.inference.artifact.ModelFamily;
@@ -66,19 +66,20 @@ class ModelArtifactRowTest {
     }
 
     @Test
-    void legacyShowsNoFakeConvertAndConvertFails() {
+    void compilerMissingShowsNoFakeConvertAndConvertFails() {
         AtomicInteger writes = new AtomicInteger();
         ModelArtifactRow row = row(writes, false,
-                status(RawAssetState.RAW_VALID, PackageState.PACKAGE_LEGACY_DIRECT, false));
+                status(RawAssetState.RAW_VALID, PackageState.PACKAGE_COMPILER_MISSING, false));
         ModelArtifactRow.RowView view = row.refresh();
-        assertEquals("Legacy (direct)", view.convertLabel());
+        assertEquals("Compiler missing", view.convertLabel());
         assertFalse(view.convertEnabled());
+        assertFalse(view.ready());
         assertTrue(view.statusText().contains("package compiler not implemented"),
                 "status must stay honest about the missing compiler: " + view.statusText());
         assertTrue(view.convertTooltip().contains("Package compiler not implemented"),
-                "tooltip must explain the legacy state: " + view.convertTooltip());
+                "tooltip must explain the not-executable state: " + view.convertTooltip());
         assertFalse(row.convert().ok());
-        assertEquals(0, writes.get(), "legacy convert must not write");
+        assertEquals(0, writes.get(), "compiler-missing convert must not write");
     }
 
     @Test
@@ -95,16 +96,17 @@ class ModelArtifactRowTest {
     }
 
     @Test
-    void realLegacyLifecycleRowWritesNothingAndHasNoCompiler() throws IOException {
+    void realCompilerMissingLifecycleRowWritesNothingAndIsNotExecutable() throws IOException {
         ModelArtifactRow row = new ModelArtifactRow(ModelFamily.EMBEDDING, () -> tempDir,
-                () -> new LegacyDirectLifecycle(ModelFamily.EMBEDDING,
+                () -> new CompilerMissingLifecycle(ModelFamily.EMBEDDING,
                         List.of("config.json", "tokenizer.json"),
                         List.of(List.of("*.safetensors", "pytorch_model.bin"))));
 
         ModelArtifactRow.RowView view = row.refresh();
-        assertEquals("Legacy (direct)", view.convertLabel());
+        assertEquals("Compiler missing", view.convertLabel());
+        assertFalse(view.ready());
         assertFalse(row.convert().ok());
-        assertFalse(hasPackage(tempDir), "legacy row must never write a package");
+        assertFalse(hasPackage(tempDir), "compiler-missing row must never write a package");
     }
 
     private ModelArtifactRow row(AtomicInteger writes, boolean hasCompiler, ModelArtifactStatus status) {
@@ -114,7 +116,7 @@ class ModelArtifactRowTest {
 
     private ModelArtifactStatus status(RawAssetState raw, PackageState pkg, boolean executable) {
         return new ModelArtifactStatus(ModelFamily.SMOLLM2, tempDir, raw, pkg, executable,
-                pkg != PackageState.PACKAGE_LEGACY_DIRECT, "reason");
+                pkg != PackageState.PACKAGE_COMPILER_MISSING, "reason");
     }
 
     private static boolean hasPackage(Path dir) throws IOException {

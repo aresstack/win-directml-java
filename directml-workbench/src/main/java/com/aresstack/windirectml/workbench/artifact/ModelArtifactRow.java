@@ -59,7 +59,8 @@ public final class ModelArtifactRow {
         Path dir = modelDir.get();
         if (!lc.hasCompiler()) {
             return ModelConversionResult.failed("Package compiler not implemented for "
-                    + family.displayName() + " (direct SafeTensors legacy path).");
+                    + family.displayName() + ". This model is downloadable but not executable until a"
+                    + " wdmlpack compiler exists.");
         }
         ModelConversionPlan p = lc.planConversion(dir);
         boolean force = p.action() == ModelConversionAction.RECONVERT
@@ -83,9 +84,9 @@ public final class ModelArtifactRow {
         StringBuilder sb = new StringBuilder(family.displayName())
                 .append(" — raw: ").append(pretty(s.rawState()))
                 .append(", package: ").append(pretty(s.packageState()));
-        if (s.packageState() == PackageState.PACKAGE_LEGACY_DIRECT) {
-            // Stay honest even when the model is runnable: there is no wdmlpack compiler here yet.
-            sb.append(" — direct SafeTensors legacy path (package compiler not implemented yet)");
+        if (s.packageState() == PackageState.PACKAGE_COMPILER_MISSING) {
+            // Homogeneous not-executable state: downloadable, but no wdmlpack compiler/loader yet.
+            sb.append(" — package compiler not implemented (downloadable, not executable)");
         } else if (s.ready()) {
             sb.append(" — READY");
         } else if (!s.reason().isBlank()) {
@@ -99,7 +100,7 @@ public final class ModelArtifactRow {
             case CONVERT -> "Convert";
             case RECONVERT -> "Reconvert";
             case REPAIR -> "Repair package";
-            case NOT_SUPPORTED -> "Legacy (direct)";
+            case NOT_SUPPORTED -> "Compiler missing";
             case INSPECT -> rawUnavailable(s) ? "Download first" : "Inspect";
         };
     }
@@ -117,7 +118,7 @@ public final class ModelArtifactRow {
             case CONVERT -> "Build the runtime package from the downloaded source";
             case RECONVERT -> "Rebuild the runtime package (" + p.reason() + ")";
             case REPAIR -> "Rebuild the unusable package (" + p.reason() + ")";
-            case NOT_SUPPORTED -> "Package compiler not implemented for this family (direct SafeTensors legacy path)";
+            case NOT_SUPPORTED -> "Package compiler not implemented for this family — downloadable, not executable";
             case INSPECT -> rawUnavailable(s)
                     ? "Download the raw model files first, then Convert"
                     : "Re-check the current artifact status";

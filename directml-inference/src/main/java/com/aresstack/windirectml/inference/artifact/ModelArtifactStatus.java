@@ -28,14 +28,12 @@ public record ModelArtifactStatus(ModelFamily family,
     }
 
     /**
-     * Whether inference can run now. Compiler-backed families need a valid, executable package;
-     * the legacy direct-source families ({@link PackageState#PACKAGE_LEGACY_DIRECT}) only need
-     * valid raw source files.
+     * Whether inference can run now. Every visible model is treated homogeneously: inference requires a
+     * valid, executable runtime package. Families without a package compiler
+     * ({@link PackageState#PACKAGE_COMPILER_MISSING}) are never ready - they are visible but
+     * not-executable, never a silent direct-from-source path.
      */
     public boolean ready() {
-        if (packageState == PackageState.PACKAGE_LEGACY_DIRECT) {
-            return rawState == RawAssetState.RAW_VALID;
-        }
         return packageState == PackageState.PACKAGE_VALID && executable;
     }
 }

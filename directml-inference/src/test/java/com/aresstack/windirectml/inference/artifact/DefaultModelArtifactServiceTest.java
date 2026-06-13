@@ -66,7 +66,7 @@ class DefaultModelArtifactServiceTest {
     @Test
     void familyWithoutCompilerPlansNotSupported() {
         FakeLifecycle fake = new FakeLifecycle(false,
-                status(RawAssetState.RAW_VALID, PackageState.PACKAGE_LEGACY_DIRECT, false));
+                status(RawAssetState.RAW_VALID, PackageState.PACKAGE_COMPILER_MISSING, false));
         assertEquals(ModelConversionAction.NOT_SUPPORTED, fake.planConversion(tempDir).action());
     }
 
@@ -80,39 +80,36 @@ class DefaultModelArtifactServiceTest {
     }
 
     @Test
-    void legacyReadyDependsOnRawOnly() {
-        assertTrue(status(RawAssetState.RAW_VALID, PackageState.PACKAGE_LEGACY_DIRECT, false).ready());
-        assertFalse(status(RawAssetState.RAW_INCOMPLETE, PackageState.PACKAGE_LEGACY_DIRECT, false).ready());
+    void compilerMissingFamilyIsNeverReady() {
+        assertFalse(status(RawAssetState.RAW_VALID, PackageState.PACKAGE_COMPILER_MISSING, false).ready());
+        assertFalse(status(RawAssetState.RAW_INCOMPLETE, PackageState.PACKAGE_COMPILER_MISSING, false).ready());
     }
 
-    // --- legacy direct lifecycle + real raw inspection ---------------------------------------
+    // --- compiler-missing lifecycle + real raw inspection ------------------------------------
 
     @Test
-    void legacyLifecycleReportsRawStatesAndNeverWrites() throws IOException {
-        LegacyDirectLifecycle legacy = new LegacyDirectLifecycle(ModelFamily.EMBEDDING,
+    void compilerMissingLifecycleReportsRawStateButIsNotExecutableAndNeverWrites() throws IOException {
+        CompilerMissingLifecycle lifecycle = new CompilerMissingLifecycle(ModelFamily.EMBEDDING,
                 List.of("config.json", "tokenizer.json"),
                 List.of(List.of("*.safetensors", "pytorch_model.bin")));
 
         Path missingDir = tempDir.resolve("nope");
-        assertEquals(RawAssetState.RAW_MISSING, legacy.inspect(missingDir).rawState());
+        assertEquals(RawAssetState.RAW_MISSING, lifecycle.inspect(missingDir).rawState());
 
         Path dir = Files.createDirectories(tempDir.resolve("e5"));
-        assertEquals(RawAssetState.RAW_INCOMPLETE, legacy.inspect(dir).rawState());
+        assertEquals(RawAssetState.RAW_INCOMPLETE, lifecycle.inspect(dir).rawState());
 
         Files.writeString(dir.resolve("config.json"), "{}");
         Files.writeString(dir.resolve("tokenizer.json"), "{}");
         Files.writeString(dir.resolve("model.safetensors"), "x");
-        ModelArtifactStatus valid = legacy.inspect(dir);
+        ModelArtifactStatus valid = lifecycle.inspect(dir);
         assertEquals(RawAssetState.RAW_VALID, valid.rawState());
-        assertEquals(PackageState.PACKAGE_LEGACY_DIRECT, valid.packageState());
-        assertTrue(valid.ready());
-
-        Files.writeString(dir.resolve("config.json"), ""); // zero-byte -> corrupt
-        assertEquals(RawAssetState.RAW_CORRUPT, legacy.inspect(dir).rawState());
+        assertEquals(PackageState.PACKAGE_COMPILER_MISSING, valid.packageState());
+        assertFalse(valid.ready(), "no compiler -> not executable even with valid raw files");
 
         assertFalse(hasPackageFile(dir), "inspect must not write a package");
-        assertFalse(legacy.convert(dir, true).ok(), "legacy convert is unsupported");
-        assertFalse(hasPackageFile(dir), "legacy convert must not write a package");
+        assertFalse(lifecycle.convert(dir, true).ok(), "convert is unsupported when no compiler exists");
+        assertFalse(hasPackageFile(dir), "compiler-missing convert must not write a package");
     }
 
     @Test
@@ -172,7 +169,7 @@ class DefaultModelArtifactServiceTest {
     // --- helpers -----------------------------------------------------------------------------
 
     private ModelArtifactStatus status(RawAssetState raw, PackageState pkg, boolean executable) {
-        boolean hasCompiler = pkg != PackageState.PACKAGE_LEGACY_DIRECT;
+        boolean hasCompiler = pkg != PackageState.PACKAGE_COMPILER_MISSING;
         return new ModelArtifactStatus(ModelFamily.SMOLLM2, tempDir, raw, pkg, executable, hasCompiler, "test");
     }
 

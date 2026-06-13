@@ -29,13 +29,13 @@ public final class DefaultModelArtifactService implements ModelArtifactService {
         map.put(ModelFamily.QWEN, new QwenPackageLifecycle());
         map.put(ModelFamily.SMOLLM2, new SmolLM2PackageLifecycle());
         map.put(ModelFamily.T5, new T5PackageLifecycle());
-        map.put(ModelFamily.EMBEDDING, new LegacyDirectLifecycle(ModelFamily.EMBEDDING,
+        map.put(ModelFamily.EMBEDDING, new CompilerMissingLifecycle(ModelFamily.EMBEDDING,
                 List.of("config.json", "tokenizer.json"),
                 List.of(List.of("*.safetensors", "pytorch_model.bin"))));
-        map.put(ModelFamily.RERANKER, new LegacyDirectLifecycle(ModelFamily.RERANKER,
+        map.put(ModelFamily.RERANKER, new CompilerMissingLifecycle(ModelFamily.RERANKER,
                 List.of("config.json", "tokenizer.json"),
                 List.of(List.of("*.safetensors", "pytorch_model.bin"))));
-        map.put(ModelFamily.PHI3, new LegacyDirectLifecycle(ModelFamily.PHI3,
+        map.put(ModelFamily.PHI3, new CompilerMissingLifecycle(ModelFamily.PHI3,
                 List.of("config.json"),
                 List.of(List.of("*.onnx", "model.safetensors"))));
         return new DefaultModelArtifactService(map);
@@ -66,7 +66,7 @@ public final class DefaultModelArtifactService implements ModelArtifactService {
         if (!lifecycle.hasCompiler()) {
             return ModelConversionResult.failed(
                     "Package compiler not implemented for " + family.displayName()
-                            + " (direct SafeTensors legacy path).");
+                            + ". This model is downloadable but not executable until a wdmlpack compiler exists.");
         }
         try {
             return lifecycle.convert(modelDir, force);
