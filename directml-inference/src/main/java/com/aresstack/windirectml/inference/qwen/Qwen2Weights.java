@@ -440,6 +440,22 @@ public final class Qwen2Weights implements AutoCloseable {
      * @throws IOException if files are missing or corrupt
      */
     public static Qwen2Weights load(Path modelDir, Qwen2Config config, String modelFileName) throws IOException {
+        return load(modelDir, config, modelFileName, false);
+    }
+
+    /**
+     * Load Qwen weights, optionally in <b>strict</b> mode (W3 artifact lifecycle).
+     *
+     * <p>In strict mode the runtime must never compile or silently fall back: it requires an
+     * existing runtime package and throws an actionable error when it is missing, never falls back
+     * to ONNX on a package load failure, and never auto-creates a manifest/package. The
+     * Workbench/default inference path uses strict; the legacy path ({@code -Dqwen.runtime=legacy})
+     * uses non-strict to keep its historic ONNX/auto-create behavior for tests and compatibility.</p>
+     *
+     * @param strict require an existing package; no ONNX fallback; no auto-create
+     */
+    public static Qwen2Weights load(Path modelDir, Qwen2Config config, String modelFileName, boolean strict)
+            throws IOException {
         String safeModelFileName = QwenModelDirValidator.normalizeModelFileName(modelFileName);
         Path packagePath = QwenWdmlPackCompiler.resolveOutputPath(modelDir, safeModelFileName);
         boolean packageLoaded = false;
@@ -447,6 +463,9 @@ public final class Qwen2Weights implements AutoCloseable {
         if (QwenWdmlPackCompiler.shouldLoadPackage() && Files.isRegularFile(packagePath)) {
             modelSource = new QwenWdmlPackModelSource(modelDir, packagePath, safeModelFileName, config);
             packageLoaded = true;
+        } else if (strict) {
+            throw new IOException("Missing Qwen runtime package. Use Download tab -> Convert. (expected "
+                    + packagePath.getFileName() + " in " + modelDir + ")");
         } else {
             modelSource = new QwenOnnxModelSource(modelDir, safeModelFileName);
         }
@@ -457,7 +476,8 @@ public final class Qwen2Weights implements AutoCloseable {
         try {
             imported = modelSource.load();
         } catch (IOException | RuntimeException packageError) {
-            if (!packageLoaded) {
+            if (!packageLoaded || strict) {
+                // Strict mode never silently falls back to ONNX.
                 throw packageError;
             }
             Path onnxFallback = modelDir.resolve(safeModelFileName);
@@ -480,8 +500,11 @@ public final class Qwen2Weights implements AutoCloseable {
         Map<String, OnnxTensor> inlineTensors = imported.inlineTensors();
         log.info("Qwen tensor catalog: {}", imported.tensorCatalog().summary());
         if (!packageLoaded || "wdmlpack-manifest".equals(imported.sourceFormat())) {
-            QwenWdmlPackCompiler.writeManifestIfAutoCreateEnabled(imported, config, modelDir, safeModelFileName);
-            QwenWdmlPackCompiler.writeManifestIfRequested(imported, config, modelDir, safeModelFileName);
+            if (!strict) {
+                // Strict mode never auto-creates a manifest/package as a side effect of inference.
+                QwenWdmlPackCompiler.writeManifestIfAutoCreateEnabled(imported, config, modelDir, safeModelFileName);
+                QwenWdmlPackCompiler.writeManifestIfRequested(imported, config, modelDir, safeModelFileName);
+            }
             if (packageLoaded) {
                 log.info("Qwen wdmlpack manifest package accepted and upgraded for next start: {}", packagePath);
             }

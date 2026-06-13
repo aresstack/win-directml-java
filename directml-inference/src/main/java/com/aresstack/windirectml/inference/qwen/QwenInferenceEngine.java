@@ -6,6 +6,8 @@ import com.aresstack.windirectml.inference.InferenceEngine;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.InferenceRequest;
 import com.aresstack.windirectml.inference.InferenceResult;
+import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
+import com.aresstack.windirectml.inference.artifact.QwenPackageLifecycle;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,6 +85,7 @@ public class QwenInferenceEngine implements InferenceEngine {
     private final int defaultMaxTokens;
     private final String backend;   // "directml" | "cpu" | "auto" | "hybrid"
     private final String modelFileName;
+    private final ModelPackageLifecycle artifactLifecycle;
 
     private Qwen2Config config;
     private QwenTokenizer tokenizer;
@@ -130,6 +133,7 @@ public class QwenInferenceEngine implements InferenceEngine {
         this.defaultMaxTokens = defaultMaxTokens > 0 ? defaultMaxTokens : 256;
         this.backend = backend != null ? backend : "cpu";
         this.modelFileName = QwenModelDirValidator.normalizeModelFileName(modelFileName);
+        this.artifactLifecycle = new QwenPackageLifecycle(this.modelFileName);
     }
 
     @Override
@@ -158,8 +162,15 @@ public class QwenInferenceEngine implements InferenceEngine {
             tokenizer = QwenTokenizer.load(tokenizerPath);
             log.info("Tokenizer loaded: vocabSize={}", tokenizer.vocabSize());
 
-            // Load weights
-            weights = Qwen2Weights.load(modelDir, config, modelFileName);
+            // Load weights. W3: the Workbench/default path requires a prebuilt runtime package and
+            // must never compile or silently fall back to ONNX. The artifact lifecycle is the single
+            // validation authority; -Dqwen.runtime=legacy keeps the historic ONNX/auto-create path.
+            boolean legacyRuntime = "legacy".equalsIgnoreCase(
+                    System.getProperty("qwen.runtime", "decoderonly-session"));
+            if (!legacyRuntime) {
+                artifactLifecycle.validateOrThrowBeforeInference(modelDir);
+            }
+            weights = Qwen2Weights.load(modelDir, config, modelFileName, !legacyRuntime);
 
             // ── GPU acceleration ──────────────────────────────────────
             if (!"cpu".equalsIgnoreCase(backend) && WindowsBindings.isSupported()) {

@@ -121,6 +121,15 @@ public final class QwenWdmlPackCompileTool {
         return compileSafeTensorsDirectory(new CompileOptions(modelDir, output, true, false));
     }
 
+    /**
+     * Resolve the runtime-package path for a given source model file, mirroring the path the loader
+     * ({@link Qwen2Weights#load}) uses. Lets the artifact lifecycle check the same (possibly
+     * variant-specific) {@code .wdmlpack} the runtime would load.
+     */
+    public static Path resolvePackagePath(Path modelDir, String modelFileName) {
+        return QwenWdmlPackCompiler.resolveOutputPath(modelDir, modelFileName);
+    }
+
     public static CompileResult compileSafeTensorsDirectory(CompileOptions options) throws IOException {
         Objects.requireNonNull(options, "options");
         Path modelDir = options.modelDir().toAbsolutePath().normalize();

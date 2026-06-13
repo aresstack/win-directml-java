@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.inference.artifact;
 
 import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
+import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
 import com.aresstack.windirectml.inference.qwen.QwenWdmlPackCompileTool;
 
 import java.io.IOException;
@@ -10,13 +11,26 @@ import java.util.List;
 
 /**
  * Artifact lifecycle for Qwen2.5-Coder. Conversion compiles a Hugging Face SafeTensors directory
- * into {@code model.wdmlpack} via {@link QwenWdmlPackCompileTool}; package state is read from the
+ * into the runtime package via {@link QwenWdmlPackCompileTool}; package state is read from the
  * generic {@link RuntimeModelPackage} manifest. Qwen has no separate "executable" flag - a
  * payload-backed, runtime-loadable package is the runnable state.
+ *
+ * <p>The package file name is variant-specific (e.g. {@code model_q4f16.wdmlpack}); it is resolved
+ * the same way the loader resolves it ({@link QwenWdmlPackCompileTool#resolvePackagePath}) so the
+ * lifecycle checks exactly the package the runtime would load.</p>
  */
 public final class QwenPackageLifecycle implements ModelPackageLifecycle {
 
-    private static final String PACKAGE_FILE = "model.wdmlpack";
+    private final String modelFileName;
+
+    public QwenPackageLifecycle() {
+        this(QwenModelDirValidator.DEFAULT_MODEL_FILE);
+    }
+
+    public QwenPackageLifecycle(String modelFileName) {
+        this.modelFileName = modelFileName == null || modelFileName.isBlank()
+                ? QwenModelDirValidator.DEFAULT_MODEL_FILE : modelFileName;
+    }
 
     @Override
     public ModelFamily family() {
@@ -30,7 +44,7 @@ public final class QwenPackageLifecycle implements ModelPackageLifecycle {
 
     @Override
     public Path defaultPackagePath(Path modelDir) {
-        return modelDir.resolve(PACKAGE_FILE).toAbsolutePath().normalize();
+        return QwenWdmlPackCompileTool.resolvePackagePath(modelDir, modelFileName);
     }
 
     @Override
