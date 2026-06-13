@@ -1,10 +1,14 @@
 package com.aresstack.windirectml.workbench.panels;
 
-import com.aresstack.windirectml.inference.qwen.QwenWdmlPackCompileTool;
-import com.aresstack.windirectml.inference.t5.T5CompileOptions;
-import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
-import com.aresstack.windirectml.inference.t5.T5WdmlPackCompiler;
+import com.aresstack.windirectml.inference.artifact.LegacyDirectLifecycle;
+import com.aresstack.windirectml.inference.artifact.ModelConversionResult;
+import com.aresstack.windirectml.inference.artifact.ModelFamily;
+import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
+import com.aresstack.windirectml.inference.artifact.QwenPackageLifecycle;
+import com.aresstack.windirectml.inference.artifact.SmolLM2PackageLifecycle;
+import com.aresstack.windirectml.inference.artifact.T5PackageLifecycle;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
+import com.aresstack.windirectml.workbench.artifact.ModelArtifactRow;
 import com.aresstack.windirectml.workbench.download.DownloadFolderOpener;
 import com.aresstack.windirectml.workbench.download.DownloadOverrideStore;
 import com.aresstack.windirectml.workbench.download.DownloadUrlOpener;
@@ -63,6 +67,7 @@ public final class DownloadPanel extends JPanel {
     private final DownloadOverrideStore overrideStore;
     private final Map<String, ModelDownloadManifest> manifests = new HashMap<String, ModelDownloadManifest>();
     private final Map<String, JProgressBar> downloadProgressBars = new HashMap<String, JProgressBar>();
+    private final List<RowControls> rowControls = new ArrayList<RowControls>();
 
     private int downloadRowIndex;
     private boolean downloadAllQwenVariants;
@@ -78,40 +83,45 @@ public final class DownloadPanel extends JPanel {
         downloadRowIndex = 0;
 
         addEmbeddingRow(downloadRows, "Download MiniLM (all-MiniLM-L6-v2)",
-                "sentence-transformers/all-MiniLM-L6-v2", "all-MiniLM-L6-v2");
+                "sentence-transformers/all-MiniLM-L6-v2", "all-MiniLM-L6-v2", ModelFamily.EMBEDDING);
         addEmbeddingRow(downloadRows, "Download E5 small-v2",
-                "intfloat/e5-small-v2", "e5-small-v2");
+                "intfloat/e5-small-v2", "e5-small-v2", ModelFamily.EMBEDDING);
         addEmbeddingRow(downloadRows, "Download E5 base-v2",
-                "intfloat/e5-base-v2", "e5-base-v2");
+                "intfloat/e5-base-v2", "e5-base-v2", ModelFamily.EMBEDDING);
         addEmbeddingRow(downloadRows, "Download E5 large-v2",
-                "intfloat/e5-large-v2", "e5-large-v2");
+                "intfloat/e5-large-v2", "e5-large-v2", ModelFamily.EMBEDDING);
         addEmbeddingRow(downloadRows, "Download Reranker (ms-marco-MiniLM-L-6-v2)",
-                "cross-encoder/ms-marco-MiniLM-L-6-v2", "cross-encoder-ms-marco-MiniLM-L-6-v2");
+                "cross-encoder/ms-marco-MiniLM-L-6-v2", "cross-encoder-ms-marco-MiniLM-L-6-v2", ModelFamily.RERANKER);
         addEmbeddingRow(downloadRows, "Download Reranker (ms-marco-MiniLM-L-12-v2)",
-                "cross-encoder/ms-marco-MiniLM-L-12-v2", "cross-encoder-ms-marco-MiniLM-L-12-v2");
+                "cross-encoder/ms-marco-MiniLM-L-12-v2", "cross-encoder-ms-marco-MiniLM-L-12-v2", ModelFamily.RERANKER);
         addPhi3Row(downloadRows);
         addQwenRow(downloadRows);
         addManifestRow(downloadRows, "Download Qwen2.5-Coder 1.5B Instruct (SafeTensors, planned)",
-                ModelDownloadUrls.manifestForQwenCoder1_5BSafeTensors());
+                ModelDownloadUrls.manifestForQwenCoder1_5BSafeTensors(), ModelFamily.QWEN);
         addManifestRow(downloadRows, "Download Qwen2.5-Coder 3B Instruct (SafeTensors, planned)",
-                ModelDownloadUrls.manifestForQwenCoder3BSafeTensors());
+                ModelDownloadUrls.manifestForQwenCoder3BSafeTensors(), ModelFamily.QWEN);
         addManifestRow(downloadRows, "Download SmolLM2 135M Instruct (Summarizer planned)",
-                ModelDownloadUrls.manifestForSmolLm2_135M());
+                ModelDownloadUrls.manifestForSmolLm2_135M(), ModelFamily.SMOLLM2);
         addManifestRow(downloadRows, "Download SmolLM2 360M Instruct (Summarizer planned)",
-                ModelDownloadUrls.manifestForSmolLm2_360M());
+                ModelDownloadUrls.manifestForSmolLm2_360M(), ModelFamily.SMOLLM2);
         addT5Row(downloadRows, "Download google/flan-t5-small (SafeTensors)",
-                ModelDownloadUrls.manifestForGoogleFlanT5Small(),
-                "Compile FLAN-T5 small SafeTensors → wdmlpack");
+                ModelDownloadUrls.manifestForGoogleFlanT5Small());
         addT5Row(downloadRows, "Download google-t5/t5-small (SafeTensors smoke-test)",
-                ModelDownloadUrls.manifestForGoogleT5Small(),
-                "Compile T5-small SafeTensors → wdmlpack");
+                ModelDownloadUrls.manifestForGoogleT5Small());
         addCodeT5Row(downloadRows);
 
         forceCheckbox = new JCheckBox("Force re-download (overwrite existing)");
 
+        JButton refreshStatusButton = new JButton("Check packages / Refresh status");
+        refreshStatusButton.setToolTipText("Inspect raw + package status for every model. Never writes or compiles.");
+        refreshStatusButton.addActionListener(e -> refreshAllRows());
+        JPanel actionsRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        actionsRow.add(refreshStatusButton);
+        actionsRow.add(forceCheckbox);
+
         JPanel topPanel = new JPanel(new BorderLayout(8, 8));
         topPanel.add(downloadRows, BorderLayout.NORTH);
-        topPanel.add(forceCheckbox, BorderLayout.SOUTH);
+        topPanel.add(actionsRow, BorderLayout.SOUTH);
         add(topPanel, BorderLayout.NORTH);
 
         logArea = new JTextArea(18, 60);
@@ -120,7 +130,7 @@ public final class DownloadPanel extends JPanel {
         add(new JScrollPane(logArea), BorderLayout.CENTER);
     }
 
-    private void addEmbeddingRow(JPanel rows, String label, String repo, String folder) {
+    private void addEmbeddingRow(JPanel rows, String label, String repo, String folder, ModelFamily family) {
         ModelDownloadManifest manifest = overrideStore.applyOverrides(
                 ModelDownloadUrls.manifestForEmbedding(repo, folder));
         manifests.put(manifest.modelId(), manifest);
@@ -131,7 +141,7 @@ public final class DownloadPanel extends JPanel {
         addDownloadRow(rows,
                 downloadButton,
                 createConfigButton(folder),
-                createCompilePlaceholderButton(),
+                legacyDirectRow(family, () -> model.getModelRoot().resolve(folder)),
                 createOpenFolderButton(() -> model.getModelRoot().resolve(folder)),
                 registerProgressBar(manifest));
     }
@@ -147,7 +157,10 @@ public final class DownloadPanel extends JPanel {
         addDownloadRow(rows,
                 downloadButton,
                 createConfigButton(modelId),
-                createCompilePlaceholderButton(),
+                new ModelArtifactRow(ModelFamily.PHI3,
+                        () -> model.getModelRoot().resolve(manifest.localDirName()),
+                        () -> new LegacyDirectLifecycle(ModelFamily.PHI3, java.util.List.of("config.json"),
+                                java.util.List.of(java.util.List.of("*.onnx", "model.safetensors")))),
                 createOpenFolderButton(() -> model.getModelRoot().resolve(manifest.localDirName())),
                 registerProgressBar(manifest));
     }
@@ -167,15 +180,21 @@ public final class DownloadPanel extends JPanel {
         downloadProgressBars.put(onnxManifest.modelId(), qwenDownloadProgressBar);
         downloadProgressBars.put(safeTensorsManifest.modelId(), qwenDownloadProgressBar);
 
+        // Qwen converts SafeTensors -> variant-specific wdmlpack in the SafeTensors dir; the lifecycle
+        // resolves the same variant package the runtime loads (current selected ONNX variant).
+        ModelArtifactRow qwenRow = new ModelArtifactRow(ModelFamily.QWEN,
+                this::selectedQwenSafeTensorsTargetDir,
+                () -> new QwenPackageLifecycle(model.getQwenModelFile()));
+
         addDownloadRow(rows,
                 downloadButton,
                 createQwenConfigButton(),
-                createCompileButton("Compile Qwen SafeTensors → wdmlpack", () -> startQwenSafeTensorsCompile()),
+                qwenRow,
                 createOpenFolderButton(this::selectedQwenTargetDir),
                 qwenDownloadProgressBar);
     }
 
-    private void addManifestRow(JPanel rows, String label, ModelDownloadManifest manifest) {
+    private void addManifestRow(JPanel rows, String label, ModelDownloadManifest manifest, ModelFamily family) {
         ModelDownloadManifest effectiveManifest = overrideStore.applyOverrides(manifest);
         manifests.put(effectiveManifest.modelId(), effectiveManifest);
         String modelId = effectiveManifest.modelId();
@@ -186,22 +205,19 @@ public final class DownloadPanel extends JPanel {
         addDownloadRow(rows,
                 downloadButton,
                 createConfigButton(modelId),
-                createCompilePlaceholderButton(),
+                new ModelArtifactRow(family,
+                        () -> model.getModelRoot().resolve(effectiveManifest.localDirName()),
+                        lifecycleSupplier(family)),
                 createOpenFolderButton(() -> model.getModelRoot().resolve(effectiveManifest.localDirName())),
                 registerProgressBar(effectiveManifest));
     }
 
     private void addCodeT5Row(JPanel rows) {
-        ModelDownloadManifest smallManifest = ModelDownloadUrls.manifestForCodeT5Small();
-        addT5Row(rows, "Download CodeT5 small checkpoint", smallManifest,
-                "Compile CodeT5 small → wdmlpack");
-
-        ModelDownloadManifest multiSumManifest = ModelDownloadUrls.manifestForCodeT5BaseMultiSum();
-        addT5Row(rows, "Download CodeT5 base multi-sum checkpoint", multiSumManifest,
-                "Compile CodeT5 base multi-sum → wdmlpack");
+        addT5Row(rows, "Download CodeT5 small checkpoint", ModelDownloadUrls.manifestForCodeT5Small());
+        addT5Row(rows, "Download CodeT5 base multi-sum checkpoint", ModelDownloadUrls.manifestForCodeT5BaseMultiSum());
     }
 
-    private void addT5Row(JPanel rows, String downloadLabel, ModelDownloadManifest baseManifest, String compileLabel) {
+    private void addT5Row(JPanel rows, String downloadLabel, ModelDownloadManifest baseManifest) {
         ModelDownloadManifest manifest = overrideStore.applyOverrides(baseManifest);
         manifests.put(manifest.modelId(), manifest);
         String modelId = manifest.modelId();
@@ -213,23 +229,123 @@ public final class DownloadPanel extends JPanel {
         addDownloadRow(rows,
                 downloadButton,
                 createConfigButton(modelId),
-                createCompileButton(compileLabel, () -> startT5ModelPackageCompile(manifest.localDirName(), manifest.modelId())),
+                new ModelArtifactRow(ModelFamily.T5,
+                        () -> selectedT5TargetDir(manifest.localDirName()),
+                        T5PackageLifecycle::new),
                 createOpenFolderButton(() -> selectedT5TargetDir(manifest.localDirName())),
                 registerProgressBar(manifest));
+    }
+
+    /** Supplier of the central lifecycle for a family (variant-fixed; Qwen rows build their own). */
+    private static java.util.function.Supplier<ModelPackageLifecycle> lifecycleSupplier(ModelFamily family) {
+        return switch (family) {
+            case SMOLLM2 -> SmolLM2PackageLifecycle::new;
+            case T5 -> T5PackageLifecycle::new;
+            case QWEN -> QwenPackageLifecycle::new; // default model.onnx -> model.wdmlpack
+            default -> () -> new LegacyDirectLifecycle(family,
+                    java.util.List.of("config.json", "tokenizer.json"),
+                    java.util.List.of(java.util.List.of("*.safetensors", "pytorch_model.bin")));
+        };
+    }
+
+    private ModelArtifactRow legacyDirectRow(ModelFamily family, java.util.function.Supplier<Path> dir) {
+        return new ModelArtifactRow(family, dir, () -> new LegacyDirectLifecycle(family,
+                java.util.List.of("config.json", "tokenizer.json"),
+                java.util.List.of(java.util.List.of("*.safetensors", "pytorch_model.bin"))));
     }
 
     private void addDownloadRow(JPanel rows,
                                 JButton downloadButton,
                                 JButton configButton,
-                                JButton compileButton,
+                                ModelArtifactRow artifactRow,
                                 JButton openFolderButton,
                                 JProgressBar progressBar) {
         int row = downloadRowIndex++;
-        rows.add(downloadButton, rowConstraints(row, 0, 0.75d, GridBagConstraints.HORIZONTAL));
+        JButton checkButton = createIconButton("✓", "Check / validate artifact status (never writes)");
+        JButton convertButton = new JButton("Check first");
+        convertButton.setEnabled(false);
+        convertButton.setToolTipText("Press Check to inspect, then Convert if a package is needed");
+        JLabel statusLabel = new JLabel(artifactRow.family().displayName() + " — not checked");
+        statusLabel.setFont(statusLabel.getFont().deriveFont(Font.PLAIN, 11f));
+
+        RowControls controls = new RowControls(artifactRow, convertButton, statusLabel);
+        rowControls.add(controls);
+        checkButton.addActionListener(e -> refreshRow(controls));
+        convertButton.addActionListener(e -> startConvert(controls));
+
+        rows.add(downloadButton, rowConstraints(row, 0, 0.55d, GridBagConstraints.HORIZONTAL));
         rows.add(configButton, rowConstraints(row, 1, 0.0d, GridBagConstraints.NONE));
-        rows.add(compileButton, rowConstraints(row, 2, 0.0d, GridBagConstraints.NONE));
-        rows.add(openFolderButton, rowConstraints(row, 3, 0.0d, GridBagConstraints.NONE));
-        rows.add(progressBar, rowConstraints(row, 4, 1.0d, GridBagConstraints.HORIZONTAL));
+        rows.add(checkButton, rowConstraints(row, 2, 0.0d, GridBagConstraints.NONE));
+        rows.add(convertButton, rowConstraints(row, 3, 0.0d, GridBagConstraints.NONE));
+        rows.add(openFolderButton, rowConstraints(row, 4, 0.0d, GridBagConstraints.NONE));
+        rows.add(statusLabel, rowConstraints(row, 5, 0.45d, GridBagConstraints.HORIZONTAL));
+        rows.add(progressBar, rowConstraints(row, 6, 0.6d, GridBagConstraints.HORIZONTAL));
+    }
+
+    /** Re-inspect every row's artifact status (manual; never writes/compiles). */
+    private void refreshAllRows() {
+        for (RowControls controls : rowControls) {
+            refreshRow(controls);
+        }
+    }
+
+    /** Inspect one row off the EDT and update its status label + Convert button. Never writes. */
+    private void refreshRow(RowControls controls) {
+        controls.statusLabel.setText(controls.row.family().displayName() + " — checking…");
+        new SwingWorker<ModelArtifactRow.RowView, Void>() {
+            @Override
+            protected ModelArtifactRow.RowView doInBackground() {
+                return controls.row.refresh();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    applyRowView(controls, get());
+                } catch (Exception ex) {
+                    controls.statusLabel.setText(controls.row.family().displayName()
+                            + " — check failed: " + describe(ex));
+                    appendLog("Status check failed for " + controls.row.family().displayName()
+                            + ": " + describe(ex));
+                }
+            }
+        }.execute();
+    }
+
+    private void applyRowView(RowControls controls, ModelArtifactRow.RowView view) {
+        controls.statusLabel.setText(view.statusText());
+        controls.convertButton.setText(view.convertLabel());
+        controls.convertButton.setEnabled(view.convertEnabled());
+        controls.convertButton.setToolTipText(view.convertTooltip());
+    }
+
+    /** Convert one row (the only UI write path) off the EDT, then re-inspect. */
+    private void startConvert(RowControls controls) {
+        appendLog("Convert " + controls.row.family().displayName() + ": " + controls.row.modelDir());
+        controls.convertButton.setEnabled(false);
+        new SwingWorker<ModelConversionResult, Void>() {
+            @Override
+            protected ModelConversionResult doInBackground() {
+                return controls.row.convert();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    ModelConversionResult result = get();
+                    appendLog((result.ok() ? "  OK: " : "  FAILED: ") + result.message()
+                            + (result.output() != null ? " -> " + result.output() : ""));
+                } catch (Exception ex) {
+                    appendLog("  Convert error: " + describe(ex));
+                } finally {
+                    refreshRow(controls);
+                }
+            }
+        }.execute();
+    }
+
+    /** Per-row UI handles bound to a {@link ModelArtifactRow}. */
+    private record RowControls(ModelArtifactRow row, JButton convertButton, JLabel statusLabel) {
     }
 
     private GridBagConstraints rowConstraints(int row, int column, double weightX, int fill) {
@@ -269,20 +385,6 @@ public final class DownloadPanel extends JPanel {
         JButton button = createIconButton(SETTINGS_BUTTON_ICON, "Configure Qwen download source, variant and URLs");
         button.getAccessibleContext().setAccessibleName("Configure Qwen download settings");
         button.addActionListener(e -> openQwenConfigDialog());
-        return button;
-    }
-
-    private JButton createCompileButton(String tooltip, Runnable action) {
-        JButton button = createIconButton("\u21C4", tooltip);
-        button.getAccessibleContext().setAccessibleName(tooltip);
-        button.addActionListener(e -> action.run());
-        return button;
-    }
-
-    private JButton createCompilePlaceholderButton() {
-        JButton button = createIconButton(" ", "No compile step available");
-        button.setEnabled(false);
-        button.getAccessibleContext().setAccessibleName("No compile step available");
         return button;
     }
 
@@ -388,49 +490,6 @@ public final class DownloadPanel extends JPanel {
         return ModelDownloadUrls.manifestForQwen(QwenModelDownloadConfig.forVariant(variant));
     }
 
-    private void startQwenSafeTensorsCompile() {
-        Path targetDir = selectedQwenSafeTensorsTargetDir();
-        Path output = selectedQwenRuntimePackagePath();
-        appendLog("Compiling Qwen SafeTensors: " + targetDir + " -> " + output);
-
-        new SwingWorker<Boolean, String>() {
-            @Override
-            protected Boolean doInBackground() {
-                try {
-                    QwenWdmlPackCompileTool.CompileResult result =
-                            QwenWdmlPackCompileTool.compileSafeTensorsDirectory(
-                                    new QwenWdmlPackCompileTool.CompileOptions(
-                                            targetDir, output, true, false, false, true));
-                    publish("  runtimeLoadable=" + result.runtimeLoadable()
-                            + ", mode=" + result.runtimeLoadMode()
-                            + ", tensors=" + result.tensorCount());
-                    publish("  Wrote: " + result.output());
-                    return true;
-                } catch (Exception ex) {
-                    publish("ERROR: " + ex.getMessage());
-                    return false;
-                }
-            }
-
-            @Override
-            protected void process(java.util.List<String> chunks) {
-                for (String msg : chunks) {
-                    appendLog(msg);
-                }
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    appendLog(get() ? "Qwen SafeTensors compile finished."
-                            : "Qwen SafeTensors compile ended with errors.");
-                } catch (Exception ex) {
-                    appendLog("Qwen SafeTensors compile ended with errors: " + ex.getMessage());
-                }
-            }
-        }.execute();
-    }
-
     private QwenDownloadSource selectedQwenSource() {
         return model.getQwenDownloadSource();
     }
@@ -458,74 +517,8 @@ public final class DownloadPanel extends JPanel {
         return selectedQwenSafeTensorsTargetDir().resolve(base + ".wdmlpack");
     }
 
-    private void startT5ModelPackageCompile(String localDirName, String modelId) {
-        Path targetDir = selectedT5TargetDir(localDirName);
-        Path output = selectedT5RuntimePackagePath(localDirName);
-        appendLog("Compiling T5 model package (" + modelId + "): " + targetDir + " -> " + output);
-
-        new SwingWorker<Boolean, String>() {
-            @Override
-            protected Boolean doInBackground() {
-                try {
-                    if (!hasSupportedT5TensorSource(targetDir)) {
-                        publish("ERROR: No supported T5 tensor source found in " + targetDir);
-                        publish("  Expected *.safetensors, pytorch_model.bin restricted state_dict checkpoint, or a precompiled "
-                                + T5InferenceEngine.DEFAULT_PACKAGE_NAME + ".");
-                        return false;
-                    }
-                    T5WdmlPackCompiler.T5CompileResult result = T5WdmlPackCompiler.compile(
-                            new T5CompileOptions(targetDir, output, false, true));
-                    publish("  wrote=" + result.written()
-                            + ", output=" + result.output()
-                            + ", weightsLoadable=" + result.runtimePackage().weightsLoadable()
-                            + ", runtimeLoadable=" + result.runtimePackage().runtimeLoadable()
-                            + ", mode=" + result.runtimePackage().manifest().get("runtimeLoadMode"));
-                    return true;
-                } catch (Exception ex) {
-                    publish("ERROR: " + ex.getMessage());
-                    return false;
-                }
-            }
-
-            @Override
-            protected void process(java.util.List<String> chunks) {
-                for (String msg : chunks) {
-                    appendLog(msg);
-                }
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    appendLog(get() ? "T5 model package compile finished."
-                            : "T5 model package compile ended with errors.");
-                } catch (Exception ex) {
-                    appendLog("T5 model package compile ended with errors: " + ex.getMessage());
-                }
-            }
-        }.execute();
-    }
-
-    private static boolean hasSupportedT5TensorSource(Path directory) throws java.io.IOException {
-        if (!java.nio.file.Files.isDirectory(directory)) {
-            return false;
-        }
-        if (java.nio.file.Files.isRegularFile(directory.resolve("pytorch_model.bin"))) {
-            return true;
-        }
-        try (java.util.stream.Stream<Path> stream = java.nio.file.Files.list(directory)) {
-            return stream
-                    .filter(java.nio.file.Files::isRegularFile)
-                    .anyMatch(path -> path.getFileName().toString().endsWith(".safetensors"));
-        }
-    }
-
     private Path selectedT5TargetDir(String localDirName) {
         return model.getModelRoot().resolve(localDirName);
-    }
-
-    private Path selectedT5RuntimePackagePath(String localDirName) {
-        return selectedT5TargetDir(localDirName).resolve(T5InferenceEngine.DEFAULT_PACKAGE_NAME);
     }
 
     private void startDownload(ModelDownloadManifest manifest, String label) {
