@@ -16,6 +16,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -39,11 +40,11 @@ public final class SafetensorsReader implements AutoCloseable {
     private static final long MAX_HEADER_BYTES = 100L * 1024 * 1024;
 
     private final FileChannel channel;
-    private final MappedByteBuffer mapping;
+    private final ByteBuffer mapping;
     private final long dataSectionOffset;
     private final Map<String, SafetensorsEntry> entries;
 
-    private SafetensorsReader(FileChannel channel, MappedByteBuffer mapping,
+    private SafetensorsReader(FileChannel channel, ByteBuffer mapping,
                               long dataSectionOffset, Map<String, SafetensorsEntry> entries) {
         this.channel = channel;
         this.mapping = mapping;
@@ -96,6 +97,44 @@ public final class SafetensorsReader implements AutoCloseable {
                 } catch (IOException ignored) {
                 }
             }
+        }
+    }
+
+    /**
+     * Open a reader over an in-memory {@code .safetensors} file image (8-byte header length + JSON
+     * header + concatenated tensor data), e.g. a tensor blob stored verbatim inside a wdmlpack. No
+     * file handle is held; tensor data is sliced from the given buffer (no copy). Lets the runtime read
+     * weights from the package through the exact same code path as a real {@code .safetensors} file.
+     */
+    public static SafetensorsReader openFromBuffer(ByteBuffer fileImage) throws SafetensorsException {
+        try {
+            ByteBuffer image = Objects.requireNonNull(fileImage, "fileImage").duplicate().order(ByteOrder.LITTLE_ENDIAN);
+            int base = image.position();
+            long fileSize = image.remaining();
+            if (fileSize < 8) {
+                throw new SafetensorsException("buffer too small: " + fileSize);
+            }
+            long headerLen = image.getLong(base);
+            if (headerLen <= 0 || headerLen > MAX_HEADER_BYTES || 8 + headerLen > fileSize) {
+                throw new SafetensorsException("invalid header length: " + headerLen);
+            }
+            byte[] headerBytes = new byte[(int) headerLen];
+            ByteBuffer headerView = image.duplicate();
+            headerView.position(base + 8);
+            headerView.get(headerBytes);
+            JsonNode header = MAPPER.readTree(new String(headerBytes, StandardCharsets.UTF_8));
+
+            long dataSectionOffset = 8 + headerLen;
+            long dataSectionLen = fileSize - dataSectionOffset;
+            Map<String, SafetensorsEntry> entries = parseHeader(header, dataSectionLen);
+
+            ByteBuffer dataView = image.duplicate();
+            dataView.position((int) (base + dataSectionOffset));
+            dataView.limit((int) (base + dataSectionOffset + dataSectionLen));
+            ByteBuffer dataSlice = dataView.slice().order(ByteOrder.LITTLE_ENDIAN);
+            return new SafetensorsReader(null, dataSlice, dataSectionOffset, entries);
+        } catch (IOException e) {
+            throw new SafetensorsException("failed to parse safetensors buffer", e);
         }
     }
 
@@ -201,6 +240,9 @@ public final class SafetensorsReader implements AutoCloseable {
 
     @Override
     public void close() {
+        if (channel == null) {
+            return; // buffer-backed reader: nothing to close
+        }
         try {
             channel.close();
         } catch (IOException ignored) {

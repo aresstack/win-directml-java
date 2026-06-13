@@ -1,6 +1,9 @@
 dependencies {
     api project(':directml-config')
     api project(':directml-windows-bindings')
+    // Reuse the shared wdmlpack container + artifact lifecycle (no copy of the reader, no second
+    // SafeTensors parser). directml-inference does not depend on directml-encoder, so this is acyclic.
+    api project(':directml-inference')
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
 }
 
