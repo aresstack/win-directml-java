@@ -9,6 +9,7 @@ import com.aresstack.windirectml.inference.artifact.SmolLM2PackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.T5PackageLifecycle;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.artifact.ModelArtifactRow;
+import com.aresstack.windirectml.workbench.artifact.ModelRuntimeRegistry;
 import com.aresstack.windirectml.workbench.download.DownloadFolderOpener;
 import com.aresstack.windirectml.workbench.download.DownloadOverrideStore;
 import com.aresstack.windirectml.workbench.download.DownloadUrlOpener;
@@ -68,6 +69,7 @@ public final class DownloadPanel extends JPanel {
     private final Map<String, ModelDownloadManifest> manifests = new HashMap<String, ModelDownloadManifest>();
     private final Map<String, JProgressBar> downloadProgressBars = new HashMap<String, JProgressBar>();
     private final List<RowControls> rowControls = new ArrayList<RowControls>();
+    private final ModelRuntimeRegistry runtimeRegistry;
 
     private int downloadRowIndex;
     private boolean downloadAllQwenVariants;
@@ -75,6 +77,7 @@ public final class DownloadPanel extends JPanel {
 
     public DownloadPanel(WorkbenchModel model) {
         this.model = model;
+        this.runtimeRegistry = new ModelRuntimeRegistry(model);
         this.overrideStore = new DownloadOverrideStore(DownloadOverrideStore.defaultStorePath());
         setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
@@ -180,11 +183,9 @@ public final class DownloadPanel extends JPanel {
         downloadProgressBars.put(onnxManifest.modelId(), qwenDownloadProgressBar);
         downloadProgressBars.put(safeTensorsManifest.modelId(), qwenDownloadProgressBar);
 
-        // Qwen converts SafeTensors -> variant-specific wdmlpack in the SafeTensors dir; the lifecycle
-        // resolves the same variant package the runtime loads (current selected ONNX variant).
-        ModelArtifactRow qwenRow = new ModelArtifactRow(ModelFamily.QWEN,
-                this::selectedQwenSafeTensorsTargetDir,
-                () -> new QwenPackageLifecycle(model.getQwenModelFile()));
+        // Qwen 0.5B unified path: the row, convert and runtime all resolve the q4f16 package in the
+        // directml-int4 directory via the shared descriptor (model_q4f16.onnx -> model_q4f16.wdmlpack).
+        ModelArtifactRow qwenRow = runtimeRegistry.qwen05b().toRow();
 
         addDownloadRow(rows,
                 downloadButton,

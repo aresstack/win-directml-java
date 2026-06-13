@@ -50,9 +50,11 @@ public final class QwenPackageLifecycle implements ModelPackageLifecycle {
     @Override
     public ModelArtifactStatus inspect(Path modelDir) {
         Path dir = modelDir.toAbsolutePath().normalize();
-        RawAssetInspection.Result raw = RawAssetInspection.inspect(dir,
-                List.of("config.json"),
-                List.of(List.of("*.safetensors")));
+        // Raw = the convertible source. For the q4f16/ONNX runtime path (model_q4f16.onnx) require the
+        // ONNX file; for the SafeTensors path require any *.safetensors.
+        RawAssetInspection.Result raw = isOnnxSource()
+                ? RawAssetInspection.inspect(dir, List.of("config.json", modelFileName), List.of())
+                : RawAssetInspection.inspect(dir, List.of("config.json"), List.of(List.of("*.safetensors")));
         Path pkg = defaultPackagePath(dir);
         PackageState packageState;
         boolean executable = false;
@@ -88,11 +90,18 @@ public final class QwenPackageLifecycle implements ModelPackageLifecycle {
     public ModelConversionResult convert(Path modelDir, boolean force) throws IOException {
         Path dir = modelDir.toAbsolutePath().normalize();
         Path output = defaultPackagePath(dir);
-        QwenWdmlPackCompileTool.CompileResult result = QwenWdmlPackCompileTool.compileSafeTensorsDirectory(
-                new QwenWdmlPackCompileTool.CompileOptions(dir, output, true, false, false, force));
+        // Pick the convert path that matches the runtime source: q4f16/ONNX or SafeTensors.
+        QwenWdmlPackCompileTool.CompileResult result = isOnnxSource()
+                ? QwenWdmlPackCompileTool.compileOnnxDirectory(dir, modelFileName, output, force)
+                : QwenWdmlPackCompileTool.compileSafeTensorsDirectory(
+                        new QwenWdmlPackCompileTool.CompileOptions(dir, output, true, false, false, force));
         return new ModelConversionResult(result.runtimeLoadable(), result.output(),
-                "Qwen compile: runtimeLoadable=" + result.runtimeLoadable()
-                        + ", mode=" + result.runtimeLoadMode()
+                "Qwen compile (" + (isOnnxSource() ? "q4f16/onnx" : "safetensors") + "): runtimeLoadable="
+                        + result.runtimeLoadable() + ", mode=" + result.runtimeLoadMode()
                         + ", tensors=" + result.tensorCount());
+    }
+
+    private boolean isOnnxSource() {
+        return modelFileName.endsWith(".onnx");
     }
 }

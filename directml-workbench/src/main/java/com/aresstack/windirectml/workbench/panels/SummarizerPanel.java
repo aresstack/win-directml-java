@@ -20,6 +20,7 @@ import com.aresstack.windirectml.inference.prompt.PromptStrategies;
 import com.aresstack.windirectml.inference.prompt.PromptTask;
 import com.aresstack.windirectml.inference.artifact.ModelFamily;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
+import com.aresstack.windirectml.workbench.artifact.ModelRuntimeRegistry;
 import com.aresstack.windirectml.workbench.artifact.WorkbenchArtifactGate;
 import com.aresstack.windirectml.workbench.runtime.SmolLM2WorkbenchRuntimeRunner;
 import com.aresstack.windirectml.workbench.prompt.PromptTaskLabels;
@@ -48,6 +49,7 @@ public final class SummarizerPanel extends JPanel {
     private static final boolean DEBUG_PROMPT = Boolean.getBoolean("smollm2.debug.prompt");
 
     private final WorkbenchModel model;
+    private final ModelRuntimeRegistry runtimeRegistry;
     private final JTextArea inputArea;
     private final JTextArea resultArea;
     private final JComboBox<String> modelSelector;
@@ -56,6 +58,7 @@ public final class SummarizerPanel extends JPanel {
 
     public SummarizerPanel(WorkbenchModel model) {
         this.model = model;
+        this.runtimeRegistry = new ModelRuntimeRegistry(model);
         setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
@@ -205,7 +208,9 @@ public final class SummarizerPanel extends JPanel {
                 try {
                     Path modelDir = resolveSummarizerModelDir(selectedModel);
                     if (qwenTestModel) {
-                        runQwenGeneration(modelDir, promptTask, text, maxTokens, selectedModel);
+                        // Qwen 0.5B: use the shared descriptor's runtime dir so the panel status and the
+                        // actual load path agree (directml-int4 / model_q4f16.wdmlpack).
+                        runQwenGeneration(runtimeRegistry.qwen05bRuntimeDir(), promptTask, text, maxTokens, selectedModel);
                     } else if (smolLm2Model) {
                         runSmolLm2Generation(modelDir, promptTask, text, maxTokens);
                     } else if (isT5Model(selectedModel)) {

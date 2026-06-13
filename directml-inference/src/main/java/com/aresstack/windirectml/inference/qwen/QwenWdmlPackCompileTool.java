@@ -161,6 +161,35 @@ public final class QwenWdmlPackCompileTool {
         return toCompileResult(output, inspectPackage(output), false);
     }
 
+    /**
+     * Explicit, manual q4f16/ONNX -> wdmlpack convert path for Qwen (e.g.
+     * {@code model_q4f16.onnx -> model_q4f16.wdmlpack}). This is the supported Qwen 0.5B runtime
+     * conversion: it replaces the old silent auto-create. It loads the ONNX source through the import
+     * layer and writes a payload-backed package; the runtime then loads only that package.
+     */
+    public static CompileResult compileOnnxDirectory(Path modelDir, String modelFileName, Path output, boolean force)
+            throws IOException {
+        Path dir = Objects.requireNonNull(modelDir, "modelDir").toAbsolutePath().normalize();
+        if (!Files.isDirectory(dir)) {
+            throw new IOException("Qwen ONNX model directory not found: " + dir);
+        }
+        String safeModelFile = QwenModelDirValidator.normalizeModelFileName(modelFileName);
+        Path onnx = dir.resolve(safeModelFile);
+        if (!Files.isRegularFile(onnx)) {
+            throw new IOException("Missing Qwen ONNX source: " + onnx);
+        }
+        Qwen2Config config = Qwen2Config.load(dir.resolve("config.json"));
+        QwenModelImport imported = new QwenOnnxModelSource(dir, safeModelFile).load();
+        Path out = output == null
+                ? QwenWdmlPackCompiler.resolveOutputPath(dir, safeModelFile)
+                : output.toAbsolutePath().normalize();
+        if (Files.exists(out) && !force) {
+            throw new IOException("Output already exists: " + out + " (use force to overwrite)");
+        }
+        QwenWdmlPackCompiler.compileToPackage(imported, config, dir, safeModelFile, out, true);
+        return toCompileResult(out, inspectPackage(out), false);
+    }
+
     public static PackageInspection inspectPackage(Path packagePath) throws IOException {
         Path normalized = Objects.requireNonNull(packagePath, "packagePath").toAbsolutePath().normalize();
         RuntimeModelPackage modelPackage = RuntimeModelPackage.open(normalized);
