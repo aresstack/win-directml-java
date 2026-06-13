@@ -180,7 +180,7 @@ public final class DownloadPanel extends JPanel {
         manifests.put(safeTensorsManifest.modelId(), safeTensorsManifest);
 
         JButton downloadButton = new JButton("Download Qwen2.5-Coder 0.5B Instruct");
-        downloadButton.addActionListener(e -> startQwenDownload());
+        downloadButton.addActionListener(e -> startQwenRuntimeDownload());
 
         qwenDownloadProgressBar = createDownloadProgressBar();
         downloadProgressBars.put(onnxManifest.modelId(), qwenDownloadProgressBar);
@@ -194,7 +194,7 @@ public final class DownloadPanel extends JPanel {
                 downloadButton,
                 createQwenConfigButton(),
                 qwenRow,
-                createOpenFolderButton(this::selectedQwenTargetDir),
+                createOpenFolderButton(runtimeRegistry::qwen05bRuntimeDir),
                 qwenDownloadProgressBar);
     }
 
@@ -439,41 +439,22 @@ public final class DownloadPanel extends JPanel {
         startDownload(manifest, modelId);
     }
 
-    private void startQwenDownload() {
-        QwenDownloadSource source = selectedQwenSource();
-        QwenOnnxModelVariant variant = selectedQwenVariant();
-        boolean downloadAllVariants = source == QwenDownloadSource.ONNX && downloadAllQwenVariants;
-
-        ModelDownloadManifest manifest = overrideStore.applyOverrides(createQwenManifest(source, variant, downloadAllVariants));
+    /**
+     * Download the Qwen 0.5B runtime source: the selected q4f16/ONNX variant into the directml-int4
+     * directory - the same directory the Convert flow and the runtime ({@code ModelRuntimeRegistry
+     * .qwen05b()}) use. The BF16 SafeTensors path is never the default executable Qwen-0.5B download.
+     */
+    private void startQwenRuntimeDownload() {
+        QwenOnnxModelVariant variant = selectedQwenVariant(); // defaults to q4f16
+        QwenModelDownloadConfig config = QwenModelDownloadConfig.forVariant(variant);
+        ModelDownloadManifest manifest = overrideStore.applyOverrides(ModelDownloadUrls.manifestForQwen(config));
         manifests.put(manifest.modelId(), manifest);
         if (qwenDownloadProgressBar != null) {
             downloadProgressBars.put(manifest.modelId(), qwenDownloadProgressBar);
         }
-
-        String label = qwenDownloadLabel(source, variant, downloadAllVariants, manifest);
-        if (source == QwenDownloadSource.SAFETENSORS) {
-            appendLog("Selected Qwen SafeTensors URL: " + ModelDownloadUrls.selectedQwenSafeTensorsModelUrl());
-            appendLog("Runtime package target after compile: " + selectedQwenRuntimePackagePath());
-        } else if (downloadAllVariants) {
-            appendLog("Selected Qwen file for runtime remains: " + variant.modelFileName());
-        } else {
-            QwenModelDownloadConfig config = QwenModelDownloadConfig.forVariant(variant);
-            appendLog("Selected Qwen URL: " + ModelDownloadUrls.selectedQwenModelUrl(config));
-        }
-        startDownload(manifest, label);
-    }
-
-    private String qwenDownloadLabel(QwenDownloadSource source,
-                                     QwenOnnxModelVariant variant,
-                                     boolean downloadAllVariants,
-                                     ModelDownloadManifest manifest) {
-        if (source == QwenDownloadSource.SAFETENSORS) {
-            return manifest.modelId() + " (SafeTensors)";
-        }
-        if (downloadAllVariants) {
-            return manifest.modelId() + " (all ONNX variants)";
-        }
-        return manifest.modelId() + " (" + variant.modelFileName() + ")";
+        appendLog("Selected Qwen runtime source (q4f16/ONNX): " + ModelDownloadUrls.selectedQwenModelUrl(config));
+        appendLog("Runtime package target after Convert: " + runtimeRegistry.qwen05b().runtimePackagePath());
+        startDownload(manifest, manifest.modelId() + " (" + variant.modelFileName() + ")");
     }
 
     private ModelDownloadManifest createQwenManifest(QwenDownloadSource source,
@@ -494,25 +475,6 @@ public final class DownloadPanel extends JPanel {
 
     private QwenOnnxModelVariant selectedQwenVariant() {
         return QwenOnnxModelVariant.fromModelFileName(model.getQwenModelFile());
-    }
-
-    private Path selectedQwenTargetDir() {
-        if (selectedQwenSource() == QwenDownloadSource.SAFETENSORS) {
-            return selectedQwenSafeTensorsTargetDir();
-        }
-        return model.getModelRoot().resolve(QwenModelDownloadConfig.LOCAL_DIR_NAME);
-    }
-
-    private Path selectedQwenSafeTensorsTargetDir() {
-        return model.getModelRoot().resolve(ModelDownloadUrls.QWEN_SAFETENSORS_LOCAL_DIR);
-    }
-
-    private Path selectedQwenRuntimePackagePath() {
-        String modelFile = model.getQwenModelFile();
-        String base = modelFile.endsWith(".onnx")
-                ? modelFile.substring(0, modelFile.length() - ".onnx".length())
-                : modelFile;
-        return selectedQwenSafeTensorsTargetDir().resolve(base + ".wdmlpack");
     }
 
     private Path selectedT5TargetDir(String localDirName) {

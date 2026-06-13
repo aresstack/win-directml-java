@@ -56,8 +56,10 @@ public record QwenModelDownloadConfig(
                 variant.externalDataFileName(),
                 variant.modelFileName(),
                 variant.externalDataFileName(),
-                List.of("tokenizer.json", "config.json", "tokenizer_config.json", "special_tokens_map.json"),
-                List.of("added_tokens.json", "generation_config.json"),
+                // special_tokens_map.json is optional: the onnx-community Qwen repo may not publish it,
+                // and a 404 on an optional file must not abort the download.
+                List.of("tokenizer.json", "config.json", "tokenizer_config.json"),
+                List.of("special_tokens_map.json", "added_tokens.json", "generation_config.json"),
                 LOCAL_DIR_NAME
         );
     }

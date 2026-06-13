@@ -24,7 +24,8 @@ class ModelDownloaderQwenLayoutTest {
         assertTrue(files.contains("tokenizer.json"));
         assertTrue(files.contains("config.json"));
         assertTrue(files.contains("tokenizer_config.json"));
-        assertTrue(files.contains("special_tokens_map.json"));
+        // special_tokens_map.json is optional now (onnx-community repo may 404 it).
+        assertFalse(files.contains("special_tokens_map.json"));
     }
 
     @Test
@@ -53,7 +54,7 @@ class ModelDownloaderQwenLayoutTest {
         assertTrue(required.contains("tokenizer.json"));
         assertTrue(required.contains("config.json"));
         assertTrue(required.contains("tokenizer_config.json"));
-        assertTrue(required.contains("special_tokens_map.json"));
+        assertFalse(required.contains("special_tokens_map.json"));
         // added_tokens.json is optional, should not be in required
         assertFalse(required.contains("added_tokens.json"));
     }

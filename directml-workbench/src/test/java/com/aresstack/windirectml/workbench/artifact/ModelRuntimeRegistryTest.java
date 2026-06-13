@@ -36,7 +36,9 @@ class ModelRuntimeRegistryTest {
         Path engineResolved = QwenWdmlPackCompileTool.resolvePackagePath(runtimeDir, model.getQwenModelFile());
         assertEquals(engineResolved, qwen.runtimePackagePath(),
                 "panel descriptor package path must equal the runtime package path");
-        assertTrue(qwen.runtimePackagePath().getFileName().toString().endsWith(".wdmlpack"));
+        assertEquals("model_q4f16.wdmlpack", qwen.runtimePackagePath().getFileName().toString());
+        assertEquals(runtimeDir, qwen.runtimePackagePath().getParent(),
+                "the q4f16 package lives in the directml-int4 dir");
     }
 
     @Test
