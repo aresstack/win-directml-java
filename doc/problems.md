@@ -158,14 +158,20 @@ incomplete / corrupt / wrong variant), genutzt von E5/Reranker-Loadern + dem Dow
 E5/Reranker-Suiten waren in dieser Sitzung grün. **Offen/optional:** die Status-Stufen `loadable`/`executable` explizit
 in die Workbench-Anzeige ziehen (überlappt mit Item 8). Keine neuen Encoder-Architekturen (bewusst).
 
-**Folgearbeit (Artifact-Lifecycle-Block, Slice W5):** Encoder/Reranker (MiniLM/E5/Reranker) und Phi-3 haben **bewusst
-noch keinen `.wdmlpack`-Compiler**. Im einheitlichen Artifact-Lifecycle laufen sie als **`PACKAGE_LEGACY_DIRECT`**
-(`LegacyDirectLifecycle`): die Runtime lädt direkt aus den SafeTensors/ONNX-Quelldateien, das DownloadPanel zeigt einen
-deaktivierten „Legacy (direct)"-Button + den ehrlichen Status „direct SafeTensors legacy path (package compiler not
-implemented yet)" — **keine Fake-Konvertierung, kein implizites Package-Schreiben**. Der Release nutzt dort bewusst den
-direct-SafeTensors-Legacy-Pfad. **Eigener Folgepunkt (nicht in diesem Block umgesetzt):** ein
-Bert/MiniLM/E5-Encoder-`wdmlpack`-Compiler + ein CrossEncoder/Reranker-`wdmlpack`-Compiler + eine RuntimePackage-Facade,
-damit Encoder/Reranker denselben `download → convert → run-from-package`-Ablauf wie Qwen/SmolLM2/T5 bekommen.
+**Homogenitäts-Block (H-Slices, ersetzt die W5-Legacy-Direct-Entscheidung):** Es gibt **kein** Legacy-Direct mehr.
+`PACKAGE_LEGACY_DIRECT` → `PACKAGE_COMPILER_MISSING`; `LegacyDirectLifecycle` → `CompilerMissingLifecycle`. Modelle ohne
+`.wdmlpack`-Compiler (Encoder MiniLM/E5, Reranker, Phi-3) sind jetzt **homogen not-executable**: sichtbar + downloadbar,
+aber `ready()=false`, Convert-Button „Compiler missing" (disabled), und die Runtime-Tabs (Embeddings/Batch/Reranker via
+`WorkbenchArtifactGate`, Phi-3 in `SummarizerPanel`) **scheitern fail-fast** statt SafeTensors/ONNX direkt zu laden.
+Qwen 0.5B ist auf den q4f16-Pfad vereinheitlicht (`directml-int4/model_q4f16.onnx` → `model_q4f16.wdmlpack`, neuer
+`QwenWdmlPackCompileTool.compileOnnxDirectory`; Panel+Runtime über `ModelRuntimeRegistry.qwen05b()` denselben Pfad).
+**Offene Folgearbeit (nicht umgesetzt):** (a) Bert/MiniLM/E5-Encoder-`wdmlpack`-Compiler + Package-Loader,
+(b) CrossEncoder/Reranker-`wdmlpack`-Compiler + Loader, (c) Phi-3-`wdmlpack`-Compiler + Loader — erst dann sind diese
+Familien wieder ausführbar (statt `compiler_missing`); (d) `ModelRuntimeDescriptor`-Registry auf alle Familien (nicht nur
+Qwen 0.5B) ausweiten, sodass auch SmolLM2/T5/Encoder ihre Panel-/Runtime-Pfade strikt aus einer Quelle ziehen. Module:
+`directml-encoder`/`directml-runtime` hängen heute **nicht** von `directml-inference` (wo das wdmlpack-Format + die
+Artifact-API liegen) — der Encoder/Reranker-Compiler braucht zuerst diese Modul-Abhängigkeit (oder eine geteilte
+wdmlpack-Basis).
 
 ## Item 11 — WARP-Profiling (teilweise)
 
