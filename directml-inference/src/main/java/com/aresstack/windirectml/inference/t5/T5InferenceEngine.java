@@ -6,6 +6,9 @@ import com.aresstack.windirectml.inference.InferenceEngine;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.InferenceRequest;
 import com.aresstack.windirectml.inference.InferenceResult;
+import com.aresstack.windirectml.inference.artifact.ModelFamily;
+import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
+import com.aresstack.windirectml.inference.artifact.T5PackageLifecycle;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -33,6 +36,7 @@ public final class T5InferenceEngine implements InferenceEngine {
     private final int maxTokens;
     private final int maxInputTokens;
     private final String backend;
+    private final ModelPackageLifecycle lifecycle = new T5PackageLifecycle();
     private T5TextTokenizer tokenizer;
     private T5RuntimePackage runtimePackage;
     private T5Runtime runtime;
@@ -74,7 +78,11 @@ public final class T5InferenceEngine implements InferenceEngine {
         try {
             validateTokenizerFiles(modelDir);
             tokenizer = T5TokenizerLoader.load(modelDir);
-            Path packagePath = resolveRuntimePackage(modelDir);
+            // Runtime must never compile: require an already-built package via the central lifecycle.
+            lifecycle.validateOrThrowBeforeInference(modelDir);
+            Path packagePath = lifecycle.existingPackage(modelDir)
+                    .orElseThrow(() -> new IOException("Missing " + ModelFamily.T5.displayName()
+                            + " runtime package. Use Download tab -> Convert."));
             runtimePackage = T5RuntimePackage.open(packagePath);
             runtime = createRuntime(runtimePackage);
             ready = true;
@@ -200,21 +208,6 @@ public final class T5InferenceEngine implements InferenceEngine {
         return "Missing T5 runtime package (*.wdmlpack) and no supported import source is available for auto-compile. "
                 + "Place model.safetensors, pytorch_model.bin, or a precompiled " + DEFAULT_PACKAGE_NAME
                 + " in the T5 model directory.";
-    }
-
-    private static Path resolveRuntimePackage(Path modelDir) throws IOException {
-        Optional<Path> existing = findExistingWdmlPack(modelDir);
-        if (existing.isPresent()) {
-            return existing.get();
-        }
-        boolean hasSafeTensors = !T5ModelImport.discoverSafeTensors(modelDir).isEmpty();
-        boolean hasTorchCheckpoint = Files.isRegularFile(modelDir.resolve("pytorch_model.bin"));
-        if (!hasSafeTensors && !hasTorchCheckpoint) {
-            throw new IOException("No T5 .wdmlpack found and no supported import source is available in " + modelDir
-                    + " (expected *.safetensors or pytorch_model.bin)");
-        }
-        T5CompileOptions options = new T5CompileOptions(modelDir, modelDir.resolve(DEFAULT_PACKAGE_NAME), false, true);
-        return T5WdmlPackCompiler.compile(options).output();
     }
 
     private T5Runtime createRuntime(T5RuntimePackage packageToLoad) throws IOException {

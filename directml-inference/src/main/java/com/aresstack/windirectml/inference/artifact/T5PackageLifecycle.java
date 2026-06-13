@@ -37,11 +37,12 @@ public final class T5PackageLifecycle implements ModelPackageLifecycle {
     @Override
     public ModelArtifactStatus inspect(Path modelDir) {
         Path dir = modelDir.toAbsolutePath().normalize();
+        // Raw = the convertible model source (config + weights). The tokenizer is an inference-time
+        // asset validated separately by the engine, not part of the package source.
         RawAssetInspection.Result raw = RawAssetInspection.inspect(dir,
                 List.of("config.json"),
-                List.of(List.of("*.safetensors", "pytorch_model.bin"),
-                        List.of("spiece.model", "tokenizer.json")));
-        Optional<Path> existing = findExistingPackage(dir);
+                List.of(List.of("*.safetensors", "pytorch_model.bin")));
+        Optional<Path> existing = existingPackage(dir);
         PackageState packageState;
         boolean executable = false;
         String reason;
@@ -85,7 +86,8 @@ public final class T5PackageLifecycle implements ModelPackageLifecycle {
                         + ", runtimeLoadable=" + ok + ", executable=" + executable);
     }
 
-    private static Optional<Path> findExistingPackage(Path modelDir) {
+    @Override
+    public Optional<Path> existingPackage(Path modelDir) {
         Path preferred = modelDir.resolve(PACKAGE_FILE);
         if (Files.isRegularFile(preferred)) {
             return Optional.of(preferred.toAbsolutePath().normalize());

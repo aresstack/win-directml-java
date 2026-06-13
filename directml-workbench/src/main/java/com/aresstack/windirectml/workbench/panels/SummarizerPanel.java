@@ -192,9 +192,9 @@ public final class SummarizerPanel extends JPanel {
             appendResult("  NOTE: WARP runs SmolLM2's dense projections on the D3D12 software rasterizer (CPU); "
                     + "AUTO uses a hardware GPU when one exists and otherwise falls back to the Java reference "
                     + "runtime. Either way norms/RoPE/attention/KV-cache stay on CPU.");
-            appendResult("  NOTE: First use compiles SafeTensors to model.wdmlpack.");
+            appendResult("  NOTE: Requires a prebuilt model.wdmlpack. Use the Download tab -> Convert; inference never compiles.");
         } else if (isT5Model(selectedModel)) {
-            appendResult("  NOTE: T5-family models use the seq2seq runtime package path (.wdmlpack or SafeTensors auto-compile).");
+            appendResult("  NOTE: T5-family models run only from a prebuilt .wdmlpack. Use the Download tab -> Convert; inference never compiles.");
         }
 
         new SwingWorker<Void, Void>() {

@@ -1,7 +1,9 @@
 package com.aresstack.windirectml.inference.artifact;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 
 /**
  * Per-family adapter over the existing compilers and runtime-package facades. Implementations
@@ -24,6 +26,16 @@ public interface ModelPackageLifecycle {
 
     /** Where {@link #convert(Path, boolean)} would write the package, or {@code null} for legacy families. */
     Path defaultPackagePath(Path modelDir);
+
+    /**
+     * The existing runtime package to load for inference, if one is present on disk. Never compiles.
+     * Default resolves {@link #defaultPackagePath(Path)}; families that accept alternate file names
+     * (e.g. T5) override this to search the directory.
+     */
+    default Optional<Path> existingPackage(Path modelDir) {
+        Path candidate = defaultPackagePath(modelDir);
+        return candidate != null && Files.isRegularFile(candidate) ? Optional.of(candidate) : Optional.empty();
+    }
 
     /** Inspect raw + package state. Never writes, never compiles. */
     ModelArtifactStatus inspect(Path modelDir);

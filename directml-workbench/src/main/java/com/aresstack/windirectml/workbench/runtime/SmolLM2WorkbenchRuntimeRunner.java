@@ -1,7 +1,9 @@
 package com.aresstack.windirectml.workbench.runtime;
 
-import com.aresstack.windirectml.inference.smollm2.SmolLM2CompileOptions;
 import com.aresstack.windirectml.inference.GenerationTokenSink;
+import com.aresstack.windirectml.inference.artifact.ModelFamily;
+import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
+import com.aresstack.windirectml.inference.artifact.SmolLM2PackageLifecycle;
 import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationOptions;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationDiagnostics;
@@ -15,8 +17,6 @@ import com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2WarpRuntime;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2ModelDirectory;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2Tokenizer;
-import com.aresstack.windirectml.inference.smollm2.SmolLM2WdmlPackCompiler;
-import com.aresstack.windirectml.inference.smollm2.SmolLM2WdmlPackManifest;
 import com.aresstack.windirectml.runtime.facade.Backend;
 
 import java.io.IOException;
@@ -25,8 +25,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.logging.Logger;
-import java.util.stream.Stream;
 
 /**
  * Workbench adapter for the SmolLM2 reference runtime.
@@ -38,22 +36,19 @@ import java.util.stream.Stream;
  */
 public final class SmolLM2WorkbenchRuntimeRunner {
 
-    private static final Logger LOG = Logger.getLogger(SmolLM2WorkbenchRuntimeRunner.class.getName());
-
-    private static final String DEFAULT_PACKAGE_FILE = "model.wdmlpack";
     private static final String TOKENIZER_FILE = "tokenizer.json";
     private static final String TOKENIZER_CONFIG_FILE = "tokenizer_config.json";
 
     private final Path modelDir;
-    private final SmolLM2WdmlPackCompiler compiler;
+    private final ModelPackageLifecycle lifecycle;
 
     public SmolLM2WorkbenchRuntimeRunner(Path modelDir) {
-        this(modelDir, new SmolLM2WdmlPackCompiler());
+        this(modelDir, new SmolLM2PackageLifecycle());
     }
 
-    SmolLM2WorkbenchRuntimeRunner(Path modelDir, SmolLM2WdmlPackCompiler compiler) {
+    SmolLM2WorkbenchRuntimeRunner(Path modelDir, ModelPackageLifecycle lifecycle) {
         this.modelDir = Objects.requireNonNull(modelDir, "modelDir").toAbsolutePath().normalize();
-        this.compiler = Objects.requireNonNull(compiler, "compiler");
+        this.lifecycle = Objects.requireNonNull(lifecycle, "lifecycle");
     }
 
     public Result generate(PromptInput promptInput, int maxTokens) throws IOException {
@@ -69,7 +64,7 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         PromptInput safeInput = promptInput == null ? PromptInput.raw("") : promptInput;
         Backend safeBackend = requestedBackend == null ? Backend.CPU : requestedBackend;
 
-        Path packagePath = ensureExecutablePackage();
+        Path packagePath = requireExecutablePackage();
         Path tokenizerPath = requireTokenizer();
         Path tokenizerConfigPath = optionalTokenizerConfig();
 
@@ -186,92 +181,16 @@ public final class SmolLM2WorkbenchRuntimeRunner {
         return warpStatus.map(SmolLM2WarpExecutionStatus::warnings).orElseGet(List::of);
     }
 
-    private Path ensureExecutablePackage() throws IOException {
-        Path packagePath = modelDir.resolve(DEFAULT_PACKAGE_FILE);
-        boolean hasSource = hasCompileSource();
-        Optional<String> existingReject = inspectExistingPackage(packagePath, hasSource);
-        if (existingReject.isEmpty()) {
-            return packagePath;
-        }
-        if (Files.isRegularFile(packagePath)) {
-            LOG.info(() -> "Rebuilding SmolLM2 package " + packagePath + ": " + existingReject.get());
-        }
-        if (!hasSource) {
-            if (Files.isRegularFile(packagePath)) {
-                throw new IllegalStateException("Existing SmolLM2 package cannot be used (" + existingReject.get()
-                        + "): " + packagePath
-                        + ". Put dense SafeTensors files into the model folder and retry so the package can be rebuilt.");
-            }
-            throw new IllegalStateException("Missing SmolLM2 runtime package and no SafeTensors source is available. "
-                    + "Download the SmolLM2 model first from the Download tab.");
-        }
-        compiler.compile(new SmolLM2CompileOptions(modelDir, packagePath, false, true));
-        Optional<String> rebuiltReject = inspectExistingPackage(packagePath, true);
-        if (rebuiltReject.isPresent()) {
-            throw new IllegalStateException("Compiled SmolLM2 package is not usable (" + rebuiltReject.get()
-                    + "): " + packagePath);
-        }
-        return packagePath;
-    }
-
     /**
-     * Returns an empty optional when the existing package on disk is current and reusable.
-     * Otherwise the optional carries a human-readable reason it must be rebuilt (missing file,
-     * not executable, stale compiler/schema version, or changed source weights).
+     * Resolve the runtime package to load, validating it through the central artifact lifecycle.
+     * The runtime never compiles: if the package is missing/stale/corrupt/not-loadable/not-executable
+     * this fails fast with an actionable error pointing at the manual Convert flow.
      */
-    private Optional<String> inspectExistingPackage(Path packagePath, boolean hasSource) {
-        if (!Files.isRegularFile(packagePath)) {
-            return Optional.of("package file is missing");
-        }
-        try {
-            SmolLM2RuntimePackage runtimePackage = SmolLM2RuntimePackage.open(packagePath);
-            if (!runtimePackage.executable()) {
-                return Optional.of("package is not runtime-loadable: " + runtimePackage.runtimeLoadableReason());
-            }
-            if (runtimePackage.compilerVersion() != SmolLM2WdmlPackManifest.COMPILER_VERSION) {
-                return Optional.of("stale compilerVersion " + runtimePackage.compilerVersion()
-                        + " (expected " + SmolLM2WdmlPackManifest.COMPILER_VERSION + ")");
-            }
-            if (runtimePackage.schemaVersion() != SmolLM2WdmlPackManifest.SCHEMA_VERSION) {
-                return Optional.of("stale schemaVersion " + runtimePackage.schemaVersion()
-                        + " (expected " + SmolLM2WdmlPackManifest.SCHEMA_VERSION + ")");
-            }
-            if (hasSource) {
-                Optional<String> sourceMismatch = detectSourceMismatch(runtimePackage);
-                if (sourceMismatch.isPresent()) {
-                    return sourceMismatch;
-                }
-            }
-            return Optional.empty();
-        } catch (Exception e) {
-            return Optional.of("package could not be opened: " + e.getMessage());
-        }
-    }
-
-    private Optional<String> detectSourceMismatch(SmolLM2RuntimePackage runtimePackage) throws IOException {
-        Optional<String> stored = runtimePackage.sourceFingerprint();
-        if (stored.isEmpty()) {
-            return Optional.of("package predates source fingerprinting");
-        }
-        String current = new SmolLM2ModelDirectory(modelDir).sourceAggregate().fingerprint();
-        if (!stored.get().equals(current)) {
-            return Optional.of("source SafeTensors changed since the package was built");
-        }
-        return Optional.empty();
-    }
-
-    private boolean hasCompileSource() throws IOException {
-        if (!Files.isRegularFile(modelDir.resolve("config.json"))) {
-            return false;
-        }
-        if (!Files.isDirectory(modelDir)) {
-            return false;
-        }
-        try (Stream<Path> stream = Files.list(modelDir)) {
-            return stream
-                    .filter(Files::isRegularFile)
-                    .anyMatch(path -> path.getFileName().toString().endsWith(".safetensors"));
-        }
+    private Path requireExecutablePackage() {
+        lifecycle.validateOrThrowBeforeInference(modelDir);
+        return lifecycle.existingPackage(modelDir)
+                .orElseThrow(() -> new IllegalStateException("Missing " + ModelFamily.SMOLLM2.displayName()
+                        + " runtime package. Use Download tab -> Convert."));
     }
 
     private Path requireTokenizer() {

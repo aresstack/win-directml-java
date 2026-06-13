@@ -50,8 +50,10 @@ public final class SmolLM2PackageLifecycle implements ModelPackageLifecycle {
     @Override
     public ModelArtifactStatus inspect(Path modelDir) {
         Path dir = modelDir.toAbsolutePath().normalize();
+        // Raw = the convertible model source (config + weights). The tokenizer is an inference-time
+        // asset validated separately by the runner, not part of the package source fingerprint.
         RawAssetInspection.Result raw = RawAssetInspection.inspect(dir,
-                List.of("config.json", "tokenizer.json"),
+                List.of("config.json"),
                 List.of(List.of("*.safetensors")));
         Path pkg = defaultPackagePath(dir);
         PackageState packageState;
