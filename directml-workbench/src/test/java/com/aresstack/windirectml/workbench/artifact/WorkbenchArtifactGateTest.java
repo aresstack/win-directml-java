@@ -23,20 +23,25 @@ class WorkbenchArtifactGateTest {
     Path tempDir;
 
     @Test
-    void compilerMissingFamiliesFailFastWithActionableMessageAndWriteNothing() throws IOException {
-        // Even with raw model files present, these families are not executable until a compiler exists.
+    void embeddingAndRerankerFailFastWithMissingPackageAndWriteNothing() throws IOException {
+        // Raw files present, but no wdmlpack yet: must fail fast with the Convert hint, never load raw.
         Files.writeString(tempDir.resolve("config.json"), "{}");
         Files.writeString(tempDir.resolve("tokenizer.json"), "{}");
         Files.writeString(tempDir.resolve("model.safetensors"), "x");
 
-        for (ModelFamily family : new ModelFamily[]{ModelFamily.EMBEDDING, ModelFamily.RERANKER, ModelFamily.PHI3}) {
+        for (ModelFamily family : new ModelFamily[]{ModelFamily.EMBEDDING, ModelFamily.RERANKER}) {
             IllegalStateException error = assertThrows(IllegalStateException.class,
                     () -> WorkbenchArtifactGate.requireExecutablePackage(family, tempDir),
                     family + " must fail fast");
-            assertTrue(error.getMessage().contains("Package compiler not implemented"),
+            assertTrue(error.getMessage().contains("Use Download tab -> Check, then Convert"),
                     family + " message: " + error.getMessage());
             assertFalse(WorkbenchArtifactGate.inspect(family, tempDir).ready(), family + " must not be ready");
         }
+
+        // Phi-3 still has no compiler -> homogeneous not-executable.
+        IllegalStateException phi3 = assertThrows(IllegalStateException.class,
+                () -> WorkbenchArtifactGate.requireExecutablePackage(ModelFamily.PHI3, tempDir));
+        assertTrue(phi3.getMessage().contains("Package compiler not implemented"), phi3.getMessage());
 
         try (var stream = Files.list(tempDir)) {
             assertFalse(stream.anyMatch(p -> p.getFileName().toString().endsWith(".wdmlpack")),

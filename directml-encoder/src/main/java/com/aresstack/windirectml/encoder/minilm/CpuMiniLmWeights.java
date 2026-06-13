@@ -113,11 +113,13 @@ public final class CpuMiniLmWeights implements EncoderWeights {
     }
 
     public static CpuMiniLmWeights load(Path modelDir, MiniLmArchitecture arch) throws EmbeddingException {
-        Path safetensors = modelDir.resolve("model.safetensors");
-        try (SafetensorsReader reader = SafetensorsReader.open(safetensors)) {
+        Path pkg = modelDir.resolve(com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.ENCODER_PACKAGE_FILE);
+        try (SafetensorsReader reader =
+                     com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.openWeightsReader(pkg)) {
             return loadFromReader(reader, arch);
-        } catch (SafetensorsException e) {
-            throw new EmbeddingException("Failed to load MiniLM weights from " + safetensors, e);
+        } catch (SafetensorsException | java.io.IOException e) {
+            throw new EmbeddingException("Missing or unusable embedding runtime package: " + pkg
+                    + ". Use Download tab -> Check, then Convert. (" + e.getMessage() + ")", e);
         }
     }
 

@@ -89,8 +89,9 @@ public final class RerankerCpuWeights {
      */
     public static RerankerCpuWeights load(Path modelDir, BertEncoderConfig cfg)
             throws EmbeddingException {
-        Path safetensors = modelDir.resolve("model.safetensors");
-        try (SafetensorsReader reader = SafetensorsReader.open(safetensors)) {
+        Path pkg = modelDir.resolve(com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.RERANKER_PACKAGE_FILE);
+        try (SafetensorsReader reader =
+                     com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.openWeightsReader(pkg)) {
             BertCpuEncoderWeights bert = BertCpuEncoderWeights.loadFromReader(reader, cfg);
             String classifierName = findClassifierTensor(reader);
             String classifierPrefix = classifierName.substring(
@@ -105,8 +106,9 @@ public final class RerankerCpuWeights {
                         + ") is not a multiple of H=" + H);
             }
             return new RerankerCpuWeights(bert, w, b, numLabels);
-        } catch (SafetensorsException e) {
-            throw new EmbeddingException("Failed to load reranker weights from " + safetensors, e);
+        } catch (SafetensorsException | java.io.IOException e) {
+            throw new EmbeddingException("Missing or unusable reranker runtime package: " + pkg
+                    + ". Use Download tab -> Check, then Convert. (" + e.getMessage() + ")", e);
         }
     }
 

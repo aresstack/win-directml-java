@@ -3,6 +3,7 @@ package com.aresstack.windirectml.encoder.bert;
 import com.aresstack.windirectml.encoder.EmbeddingException;
 import com.aresstack.windirectml.encoder.safetensors.SafetensorsEntry;
 import com.aresstack.windirectml.encoder.safetensors.SafetensorsException;
+import com.aresstack.windirectml.encoder.pack.EncoderWdmlPack;
 import com.aresstack.windirectml.encoder.safetensors.SafetensorsReader;
 import com.aresstack.windirectml.runtime.TensorDataType;
 
@@ -80,15 +81,17 @@ public final class BertCpuEncoderWeights {
     }
 
     /**
-     * Load BERT-style weights from {@code modelDir/model.safetensors}.
+     * Load BERT-style weights from the encoder runtime package ({@code modelDir/encoder.wdmlpack}).
+     * The runtime loads only from the package, never directly from {@code model.safetensors}.
      */
     public static BertCpuEncoderWeights load(Path modelDir, BertEncoderConfig cfg)
             throws EmbeddingException {
-        Path safetensors = modelDir.resolve("model.safetensors");
-        try (SafetensorsReader reader = SafetensorsReader.open(safetensors)) {
+        Path pkg = modelDir.resolve(EncoderWdmlPack.ENCODER_PACKAGE_FILE);
+        try (SafetensorsReader reader = EncoderWdmlPack.openWeightsReader(pkg)) {
             return loadFromReader(reader, cfg);
-        } catch (SafetensorsException e) {
-            throw new EmbeddingException("Failed to load BERT weights from " + safetensors, e);
+        } catch (SafetensorsException | java.io.IOException e) {
+            throw new EmbeddingException("Missing or unusable embedding runtime package: " + pkg
+                    + ". Use Download tab -> Check, then Convert. (" + e.getMessage() + ")", e);
         }
     }
 

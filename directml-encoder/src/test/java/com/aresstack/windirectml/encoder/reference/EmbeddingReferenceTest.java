@@ -66,7 +66,14 @@ class EmbeddingReferenceTest {
 
     @BeforeAll
     static void load() throws Exception {
-        model = CpuMiniLmEncoder.load(resolveModelDir());
+        Path dir = resolveModelDir();
+        if (dir != null) {
+            // Runtime loads only from the package now: convert the reference model first.
+            com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.compile(dir,
+                    dir.resolve(com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.ENCODER_PACKAGE_FILE),
+                    com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.FAMILY_ENCODER);
+        }
+        model = CpuMiniLmEncoder.load(dir);
     }
 
     @Test

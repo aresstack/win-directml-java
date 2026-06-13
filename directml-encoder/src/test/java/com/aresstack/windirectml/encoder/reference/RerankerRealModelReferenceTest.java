@@ -127,7 +127,10 @@ class RerankerRealModelReferenceTest {
         modelDir = resolveModelDir();
         assumeTrue(modelDir != null, "No real reranker model found on disk – skipping.");
 
-        // Step 1: CPU loader always succeeds on a well-formed dir.
+        // Step 1: CPU loader always succeeds on a well-formed dir — from the package (convert first).
+        com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.compile(modelDir,
+                modelDir.resolve(com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.RERANKER_PACKAGE_FILE),
+                com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.FAMILY_RERANKER);
         cpuModel = BertCrossEncoderRerankers.loadCpu(modelDir);
         assertTrue(cpuModel.isReady(), "CPU reranker must report ready after load");
         assertNotNull(cpuModel.modelName(), "CPU reranker must expose modelName()");

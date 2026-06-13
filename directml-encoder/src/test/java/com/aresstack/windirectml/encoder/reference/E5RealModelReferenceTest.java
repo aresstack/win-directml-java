@@ -157,7 +157,10 @@ class E5RealModelReferenceTest {
         assertEquals(variant.config().numLayers(), resolvedConfig.numLayers(),
                 "resolveConfig must agree with declared variant on numLayers");
 
-        // Step 2: CPU encoder always loads.
+        // Step 2: CPU encoder always loads — from the package (convert the reference model first).
+        com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.compile(modelDir,
+                modelDir.resolve(com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.ENCODER_PACKAGE_FILE),
+                com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.FAMILY_ENCODER);
         cpuModel = E5Encoders.loadCpu(modelDir, variant);
         assertTrue(cpuModel.isReady(), "CPU E5 encoder must report ready after load");
 

@@ -80,6 +80,11 @@ class DirectMlMiniLmEmbeddingReferenceTest {
     static void load() throws Exception {
         assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12");
         Path dir = resolveModelDir();
+        if (dir != null) {
+            com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.compile(dir,
+                    dir.resolve(com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.ENCODER_PACKAGE_FILE),
+                    com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.FAMILY_ENCODER);
+        }
         cpuModel = CpuMiniLmEncoder.load(dir);
         try {
             dmlModel = DirectMlMiniLmEncoder.load(dir);

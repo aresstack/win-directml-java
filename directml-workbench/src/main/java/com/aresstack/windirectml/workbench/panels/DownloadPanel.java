@@ -144,7 +144,10 @@ public final class DownloadPanel extends JPanel {
         addDownloadRow(rows,
                 downloadButton,
                 createConfigButton(folder),
-                compilerMissingRow(family, () -> model.getModelRoot().resolve(folder)),
+                new ModelArtifactRow(family, () -> model.getModelRoot().resolve(folder),
+                        () -> family == ModelFamily.RERANKER
+                                ? com.aresstack.windirectml.encoder.pack.EncoderPackageLifecycle.reranker()
+                                : com.aresstack.windirectml.encoder.pack.EncoderPackageLifecycle.embedding()),
                 createOpenFolderButton(() -> model.getModelRoot().resolve(folder)),
                 registerProgressBar(manifest));
     }
@@ -247,12 +250,6 @@ public final class DownloadPanel extends JPanel {
                     java.util.List.of("config.json", "tokenizer.json"),
                     java.util.List.of(java.util.List.of("*.safetensors", "pytorch_model.bin")));
         };
-    }
-
-    private ModelArtifactRow compilerMissingRow(ModelFamily family, java.util.function.Supplier<Path> dir) {
-        return new ModelArtifactRow(family, dir, () -> new CompilerMissingLifecycle(family,
-                java.util.List.of("config.json", "tokenizer.json"),
-                java.util.List.of(java.util.List.of("*.safetensors", "pytorch_model.bin"))));
     }
 
     private void addDownloadRow(JPanel rows,
