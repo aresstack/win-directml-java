@@ -61,8 +61,8 @@ class T5InferenceEngineTest {
         T5InferenceEngine engine = new T5InferenceEngine(tempDir, 2, 8);
         try {
             InferenceException error = assertThrows(InferenceException.class, engine::initialize);
-            assertTrue(error.getMessage().contains("Download tab -> Convert"),
-                    "actionable error must point at the Convert flow: " + error.getMessage());
+            assertTrue(error.getMessage().contains("Download tab -> Check, then Convert"),
+                    "actionable error must point at the Check/Convert flow: " + error.getMessage());
             assertFalse(engine.isReady());
             assertFalse(Files.isRegularFile(tempDir.resolve(T5InferenceEngine.DEFAULT_PACKAGE_NAME)),
                     "init must not implicitly compile a wdmlpack");
