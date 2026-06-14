@@ -57,6 +57,62 @@ class DownloadManifestTest {
                 f.localFilename().equals("added_tokens.json") && !f.required()));
     }
 
+
+    @Test
+    void manifestForGemma3InstructContainsGatedModelFiles() {
+        var manifest = ModelDownloadUrls.manifestForGemma3_270MInstruct();
+        assertEquals("google/gemma-3-270m-it", manifest.modelId());
+        assertEquals("gemma-3-270m-it", manifest.localDirName());
+        assertTrue(manifest.files().stream().anyMatch(f ->
+                f.localFilename().equals("model.safetensors") && f.required()));
+        assertTrue(manifest.files().stream().anyMatch(f ->
+                f.localFilename().equals("tokenizer.model") && f.required()));
+        assertTrue(manifest.files().stream().anyMatch(f ->
+                f.localFilename().equals("chat_template.jinja") && !f.required()));
+    }
+
+    @Test
+    void overrideStorePreservesTokenWhenUrlsAreUpdated(@TempDir Path tempDir) throws IOException {
+        Path storeFile = tempDir.resolve("download-overrides.json");
+        var store = new DownloadOverrideStore(storeFile);
+        var manifest = ModelDownloadUrls.manifestForGemma3_270MInstruct();
+
+        store.storeAccessSettings(manifest.modelId(), new DownloadAccessSettings("hf_secret_token"));
+        store.storeOverrides(manifest.withFileUrl(0, "https://example.invalid/model.safetensors"));
+
+        var reloadedStore = new DownloadOverrideStore(storeFile);
+        reloadedStore.load();
+        var reloadedManifest = reloadedStore.applyOverrides(manifest);
+        assertEquals("https://example.invalid/model.safetensors", reloadedManifest.files().get(0).currentUrl());
+        assertEquals("hf_secret_token", reloadedStore.accessSettings(manifest.modelId()).huggingFaceToken());
+    }
+
+    @Test
+    void overrideStoreReadsVersionedDownloadSettings(@TempDir Path tempDir) throws IOException {
+        Path storeFile = tempDir.resolve("download-overrides.json");
+        String json = """
+                {
+                  "urlOverrides": {
+                    "google/gemma-3-270m-it": {
+                      "model.safetensors": "https://example.com/gemma.safetensors"
+                    }
+                  },
+                  "huggingFaceTokens": {
+                    "google/gemma-3-270m-it": "hf_secret_token"
+                  }
+                }
+                """;
+        Files.writeString(storeFile, json);
+
+        var store = new DownloadOverrideStore(storeFile);
+        store.load();
+        var manifest = ModelDownloadUrls.manifestForGemma3_270MInstruct();
+        var result = store.applyOverrides(manifest);
+
+        assertEquals("https://example.com/gemma.safetensors", result.files().get(0).currentUrl());
+        assertEquals("hf_secret_token", store.accessSettings(manifest.modelId()).huggingFaceToken());
+    }
+
     @Test
     void fileDescriptorWithCurrentUrlCreatesNewInstance() {
         var desc = new ModelFileDescriptor("test.json", true,

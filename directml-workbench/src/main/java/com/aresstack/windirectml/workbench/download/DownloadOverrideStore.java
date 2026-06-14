@@ -5,32 +5,47 @@ import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Persists user-edited download URL overrides to a JSON file under %APPDATA%/.directml.
+ * Persists user-edited download URL overrides and gated-model access settings.
  *
- * <p>The JSON structure is:
+ * <p>The default file is {@code %APPDATA%/.directml/download-overrides.json}.
+ * New files are written with an explicit schema:</p>
+ *
  * <pre>{
- *   "modelId": {
- *     "localFilename": "overriddenUrl",
- *     ...
+ *   "urlOverrides": {
+ *     "modelId": {
+ *       "localFilename": "overriddenUrl"
+ *     }
  *   },
- *   ...
+ *   "huggingFaceTokens": {
+ *     "modelId": "hf_..."
+ *   }
  * }</pre>
  *
- * <p>Thread-safety: all public methods are synchronized on this instance.
+ * <p>Legacy files using {@code { "modelId": { "localFilename": "url" } }}
+ * are still accepted and are migrated on the next save.</p>
+ *
+ * <p>Thread-safety: all public methods are synchronized on this instance.</p>
  */
 public final class DownloadOverrideStore {
 
     private static final Logger LOG = Logger.getLogger(DownloadOverrideStore.class.getName());
 
+    private static final String URL_OVERRIDES_SECTION = "urlOverrides";
+    private static final String HUGGING_FACE_TOKENS_SECTION = "huggingFaceTokens";
+
     private final Path storeFile;
 
-    // modelId -> (localFilename -> url)
-    private final Map<String, Map<String, String>> overrides = new LinkedHashMap<>();
+    private final Map<String, Map<String, String>> urlOverrides = new LinkedHashMap<String, Map<String, String>>();
+    private final Map<String, String> huggingFaceTokens = new LinkedHashMap<String, String>();
     private boolean loaded = false;
 
     public DownloadOverrideStore(Path storeFile) {
@@ -60,7 +75,7 @@ public final class DownloadOverrideStore {
     }
 
     /**
-     * Loads overrides from disk. Tolerates missing or corrupt files.
+     * Loads settings from disk. Tolerates missing or corrupt files.
      */
     public synchronized void load() {
         loaded = true;
@@ -69,43 +84,48 @@ public final class DownloadOverrideStore {
             return;
         }
         try (Reader reader = Files.newBufferedReader(storeFile)) {
-            overrides.clear();
-            parseJson(reader);
-            LOG.info(() -> "Loaded download URL overrides from " + storeFile);
+            urlOverrides.clear();
+            huggingFaceTokens.clear();
+            readSettings(JsonObjectParser.parse(readAll(reader)));
+            LOG.info(() -> "Loaded download settings from " + storeFile);
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not load download overrides from " + storeFile
+            LOG.log(Level.WARNING, "Could not load download settings from " + storeFile
                     + "; using defaults: " + e.getMessage(), e);
-            overrides.clear();
+            urlOverrides.clear();
+            huggingFaceTokens.clear();
         }
     }
 
     /**
-     * Saves current overrides to disk.
+     * Saves current settings to disk.
      */
     public synchronized void save() {
         try {
-            Files.createDirectories(storeFile.getParent());
+            Path parent = storeFile.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
             try (Writer writer = Files.newBufferedWriter(storeFile)) {
                 writeJson(writer);
             }
-            LOG.info(() -> "Saved download URL overrides to " + storeFile);
+            LOG.info(() -> "Saved download settings to " + storeFile);
         } catch (IOException e) {
-            LOG.log(Level.WARNING, "Could not save download overrides to " + storeFile
+            LOG.log(Level.WARNING, "Could not save download settings to " + storeFile
                     + ": " + e.getMessage(), e);
         }
     }
 
     /**
-     * Applies stored overrides to a manifest and returns the updated manifest.
+     * Applies stored URL overrides to a manifest and returns the updated manifest.
      */
     public synchronized ModelDownloadManifest applyOverrides(ModelDownloadManifest manifest) {
         ensureLoaded();
-        var modelOverrides = overrides.get(manifest.modelId());
+        Map<String, String> modelOverrides = urlOverrides.get(manifest.modelId());
         if (modelOverrides == null || modelOverrides.isEmpty()) {
             return manifest;
         }
-        var newFiles = new ArrayList<ModelFileDescriptor>();
-        for (var desc : manifest.files()) {
+        ArrayList<ModelFileDescriptor> newFiles = new ArrayList<ModelFileDescriptor>();
+        for (ModelFileDescriptor desc : manifest.files()) {
             String override = modelOverrides.get(desc.localFilename());
             if (override != null && !override.isBlank()) {
                 newFiles.add(desc.withCurrentUrl(override));
@@ -113,26 +133,48 @@ public final class DownloadOverrideStore {
                 newFiles.add(desc);
             }
         }
-        return new ModelDownloadManifest(manifest.modelId(), manifest.localDirName(),
-                List.copyOf(newFiles));
+        return new ModelDownloadManifest(manifest.modelId(), manifest.localDirName(), List.copyOf(newFiles));
     }
 
     /**
-     * Stores the URL overrides from a manifest (only entries that differ from default).
+     * Stores the URL overrides from a manifest without changing authentication settings.
      */
     public synchronized void storeOverrides(ModelDownloadManifest manifest) {
         ensureLoaded();
-        var modelOverrides = new LinkedHashMap<String, String>();
-        for (var desc : manifest.files()) {
+        Map<String, String> modelOverrides = new LinkedHashMap<String, String>();
+        for (ModelFileDescriptor desc : manifest.files()) {
             String currentUrl = desc.currentUrl().trim();
             if (!currentUrl.isBlank() && !currentUrl.equals(desc.defaultUrl())) {
                 modelOverrides.put(desc.localFilename(), currentUrl);
             }
         }
         if (modelOverrides.isEmpty()) {
-            overrides.remove(manifest.modelId());
+            urlOverrides.remove(manifest.modelId());
         } else {
-            overrides.put(manifest.modelId(), modelOverrides);
+            urlOverrides.put(manifest.modelId(), modelOverrides);
+        }
+        save();
+    }
+
+    /**
+     * Reads access settings for a model.
+     */
+    public synchronized DownloadAccessSettings accessSettings(String modelId) {
+        ensureLoaded();
+        return new DownloadAccessSettings(huggingFaceTokens.get(modelId));
+    }
+
+    /**
+     * Stores or clears access settings for a model without changing URL overrides.
+     */
+    public synchronized void storeAccessSettings(String modelId, DownloadAccessSettings accessSettings) {
+        ensureLoaded();
+        DownloadAccessSettings effectiveSettings = accessSettings == null
+                ? DownloadAccessSettings.empty() : accessSettings;
+        if (effectiveSettings.hasHuggingFaceToken()) {
+            huggingFaceTokens.put(modelId, effectiveSettings.huggingFaceToken());
+        } else {
+            huggingFaceTokens.remove(modelId);
         }
         save();
     }
@@ -143,89 +185,122 @@ public final class DownloadOverrideStore {
         }
     }
 
-    // ---- Minimal JSON parser/writer (avoids external dependency) ----
-
-    private void parseJson(Reader reader) throws IOException {
-        String content = readAll(reader);
-        content = content.trim();
-        if (!content.startsWith("{") || !content.endsWith("}")) {
-            throw new IOException("Invalid JSON: expected object");
+    private void readSettings(Map<String, Object> root) throws IOException {
+        Object explicitUrlOverrides = root.get(URL_OVERRIDES_SECTION);
+        if (explicitUrlOverrides instanceof Map<?, ?> explicitUrlMap) {
+            readUrlOverrides(explicitUrlMap);
+        } else {
+            readUrlOverrides(root);
         }
-        // Simple state-machine parser for nested { "key": { "key": "value" } }
-        content = content.substring(1, content.length() - 1).trim();
-        if (content.isEmpty()) return;
 
-        int i = 0;
-        while (i < content.length()) {
-            i = skipWhitespace(content, i);
-            if (i >= content.length()) break;
-            if (content.charAt(i) == ',') {
-                i++;
+        Object tokenSection = root.get(HUGGING_FACE_TOKENS_SECTION);
+        if (tokenSection instanceof Map<?, ?> tokenMap) {
+            readHuggingFaceTokens(tokenMap);
+        }
+    }
+
+    private void readUrlOverrides(Map<?, ?> section) throws IOException {
+        for (Map.Entry<?, ?> entry : section.entrySet()) {
+            String modelId = asStringKey(entry.getKey());
+            if (URL_OVERRIDES_SECTION.equals(modelId) || HUGGING_FACE_TOKENS_SECTION.equals(modelId)) {
                 continue;
             }
-
-            String modelId = parseString(content, i);
-            i = advancePastString(content, i);
-            i = skipWhitespace(content, i);
-            if (i < content.length() && content.charAt(i) == ':') i++;
-            i = skipWhitespace(content, i);
-
-            if (i >= content.length() || content.charAt(i) != '{') {
-                throw new IOException("Expected '{' for model overrides at pos " + i);
+            if (!(entry.getValue() instanceof Map<?, ?> fileMap)) {
+                continue;
             }
-            int braceEnd = findMatchingBrace(content, i);
-            String inner = content.substring(i + 1, braceEnd).trim();
-            i = braceEnd + 1;
-
-            var fileOverrides = new LinkedHashMap<String, String>();
-            int j = 0;
-            while (j < inner.length()) {
-                j = skipWhitespace(inner, j);
-                if (j >= inner.length()) break;
-                if (inner.charAt(j) == ',') {
-                    j++;
-                    continue;
+            Map<String, String> fileOverrides = new LinkedHashMap<String, String>();
+            for (Map.Entry<?, ?> fileEntry : fileMap.entrySet()) {
+                String filename = asStringKey(fileEntry.getKey());
+                if (!(fileEntry.getValue() instanceof String url)) {
+                    throw new IOException("Expected string URL for " + modelId + "/" + filename);
                 }
-
-                String filename = parseString(inner, j);
-                j = advancePastString(inner, j);
-                j = skipWhitespace(inner, j);
-                if (j < inner.length() && inner.charAt(j) == ':') j++;
-                j = skipWhitespace(inner, j);
-                String url = parseString(inner, j);
-                j = advancePastString(inner, j);
-
-                fileOverrides.put(filename, url);
+                if (!url.isBlank()) {
+                    fileOverrides.put(filename, url);
+                }
             }
             if (!fileOverrides.isEmpty()) {
-                overrides.put(modelId, fileOverrides);
+                urlOverrides.put(modelId, fileOverrides);
             }
         }
     }
 
+    private void readHuggingFaceTokens(Map<?, ?> tokenMap) throws IOException {
+        for (Map.Entry<?, ?> entry : tokenMap.entrySet()) {
+            String modelId = asStringKey(entry.getKey());
+            if (!(entry.getValue() instanceof String token)) {
+                throw new IOException("Expected string token for " + modelId);
+            }
+            DownloadAccessSettings settings = new DownloadAccessSettings(token);
+            if (settings.hasHuggingFaceToken()) {
+                huggingFaceTokens.put(modelId, settings.huggingFaceToken());
+            }
+        }
+    }
+
+    private static String asStringKey(Object key) throws IOException {
+        if (key instanceof String value) {
+            return value;
+        }
+        throw new IOException("Expected string key but got " + key);
+    }
+
     private void writeJson(Writer writer) throws IOException {
         writer.write("{\n");
-        var modelIt = overrides.entrySet().iterator();
-        while (modelIt.hasNext()) {
-            var modelEntry = modelIt.next();
-            writer.write("  " + escapeJson(modelEntry.getKey()) + ": {\n");
-            var fileIt = modelEntry.getValue().entrySet().iterator();
-            while (fileIt.hasNext()) {
-                var fileEntry = fileIt.next();
-                writer.write("    " + escapeJson(fileEntry.getKey()) + ": "
-                        + escapeJson(fileEntry.getValue()));
-                if (fileIt.hasNext()) writer.write(",");
-                writer.write("\n");
-            }
+        boolean wroteSection = false;
+        if (!urlOverrides.isEmpty()) {
+            writer.write("  " + escapeJson(URL_OVERRIDES_SECTION) + ": {\n");
+            writeNestedStringMap(writer, urlOverrides, 4);
             writer.write("  }");
-            if (modelIt.hasNext()) writer.write(",");
+            wroteSection = true;
+        }
+        if (!huggingFaceTokens.isEmpty()) {
+            if (wroteSection) {
+                writer.write(",\n");
+            }
+            writer.write("  " + escapeJson(HUGGING_FACE_TOKENS_SECTION) + ": {\n");
+            writeStringMap(writer, huggingFaceTokens, 4);
+            writer.write("  }");
+            wroteSection = true;
+        }
+        if (wroteSection) {
             writer.write("\n");
         }
         writer.write("}\n");
     }
 
+    private static void writeNestedStringMap(Writer writer, Map<String, Map<String, String>> map, int indent)
+            throws IOException {
+        java.util.Iterator<Map.Entry<String, Map<String, String>>> modelIt = map.entrySet().iterator();
+        while (modelIt.hasNext()) {
+            Map.Entry<String, Map<String, String>> modelEntry = modelIt.next();
+            writer.write(spaces(indent) + escapeJson(modelEntry.getKey()) + ": {\n");
+            writeStringMap(writer, modelEntry.getValue(), indent + 2);
+            writer.write(spaces(indent) + "}");
+            if (modelIt.hasNext()) {
+                writer.write(",");
+            }
+            writer.write("\n");
+        }
+    }
+
+    private static void writeStringMap(Writer writer, Map<String, String> map, int indent) throws IOException {
+        java.util.Iterator<Map.Entry<String, String>> it = map.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, String> entry = it.next();
+            writer.write(spaces(indent) + escapeJson(entry.getKey()) + ": " + escapeJson(entry.getValue()));
+            if (it.hasNext()) {
+                writer.write(",");
+            }
+            writer.write("\n");
+        }
+    }
+
+    private static String spaces(int count) {
+        return " ".repeat(Math.max(0, count));
+    }
+
     private static String escapeJson(String s) {
-        var out = new StringBuilder(s.length() + 8);
+        StringBuilder out = new StringBuilder(s.length() + 8);
         out.append('"');
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
@@ -251,7 +326,7 @@ public final class DownloadOverrideStore {
     }
 
     private static String readAll(Reader reader) throws IOException {
-        var sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder();
         char[] buf = new char[8192];
         int n;
         while ((n = reader.read(buf)) != -1) {
@@ -260,103 +335,134 @@ public final class DownloadOverrideStore {
         return sb.toString();
     }
 
-    private static int skipWhitespace(String s, int i) {
-        while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
-        return i;
-    }
+    private static final class JsonObjectParser {
+        private final String source;
+        private int index;
 
-    private static String parseString(String s, int i) throws IOException {
-        if (i >= s.length() || s.charAt(i) != '"') {
-            throw new IOException("Expected '\"' at pos " + i + " in: " + s.substring(Math.max(0, i - 10), Math.min(s.length(), i + 20)));
+        private JsonObjectParser(String source) {
+            this.source = source == null ? "" : source;
         }
-        int end = i + 1;
-        while (end < s.length()) {
-            char c = s.charAt(end);
-            if (c == '\\') {
-                end = Math.min(end + 2, s.length());
-                continue;
-            }
-            if (c == '"') break;
-            end++;
-        }
-        if (end >= s.length() || s.charAt(end) != '"') {
-            throw new IOException("Unterminated string starting at pos " + i);
-        }
-        return unescapeJsonString(s.substring(i + 1, end));
-    }
 
-    private static int advancePastString(String s, int i) {
-        // skip opening quote
-        i++;
-        while (i < s.length()) {
-            char c = s.charAt(i);
-            if (c == '\\') {
-                i = Math.min(i + 2, s.length());
-                continue;
+        static Map<String, Object> parse(String source) throws IOException {
+            JsonObjectParser parser = new JsonObjectParser(source);
+            Map<String, Object> object = parser.parseObject();
+            parser.skipWhitespace();
+            if (!parser.isEnd()) {
+                throw parser.error("Unexpected trailing content");
             }
-            if (c == '"') return i + 1;
-            i++;
+            return object;
         }
-        return i;
-    }
 
-    private static int findMatchingBrace(String s, int openPos) throws IOException {
-        int depth = 0;
-        boolean inString = false;
-        for (int i = openPos; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '\\' && inString) {
-                if (i + 1 < s.length()) i++;
-                continue;
+        private Map<String, Object> parseObject() throws IOException {
+            skipWhitespace();
+            expect('{');
+            Map<String, Object> object = new LinkedHashMap<String, Object>();
+            skipWhitespace();
+            if (consume('}')) {
+                return object;
             }
-            if (c == '"') {
-                inString = !inString;
-                continue;
-            }
-            if (inString) continue;
-            if (c == '{') depth++;
-            if (c == '}') {
-                depth--;
-                if (depth == 0) return i;
-            }
-        }
-        throw new IOException("Unmatched brace at pos " + openPos);
-    }
-
-    private static String unescapeJsonString(String s) throws IOException {
-        var out = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c != '\\') {
-                out.append(c);
-                continue;
-            }
-            if (i + 1 >= s.length()) {
-                throw new IOException("Invalid JSON escape at end of string");
-            }
-            char esc = s.charAt(++i);
-            switch (esc) {
-                case '"', '\\', '/' -> out.append(esc);
-                case 'b' -> out.append('\b');
-                case 'f' -> out.append('\f');
-                case 'n' -> out.append('\n');
-                case 'r' -> out.append('\r');
-                case 't' -> out.append('\t');
-                case 'u' -> {
-                    if (i + 4 >= s.length()) {
-                        throw new IOException("Invalid unicode escape in JSON string");
-                    }
-                    String hex = s.substring(i + 1, i + 5);
-                    try {
-                        out.append((char) Integer.parseInt(hex, 16));
-                    } catch (NumberFormatException e) {
-                        throw new IOException("Invalid unicode escape in JSON string: \\u" + hex, e);
-                    }
-                    i += 4;
+            while (true) {
+                skipWhitespace();
+                String key = parseString();
+                skipWhitespace();
+                expect(':');
+                Object value = parseValue();
+                object.put(key, value);
+                skipWhitespace();
+                if (consume('}')) {
+                    return object;
                 }
-                default -> throw new IOException("Unsupported JSON escape: \\" + esc);
+                expect(',');
             }
         }
-        return out.toString();
+
+        private Object parseValue() throws IOException {
+            skipWhitespace();
+            if (isEnd()) {
+                throw error("Expected JSON value");
+            }
+            char current = source.charAt(index);
+            if (current == '{') {
+                return parseObject();
+            }
+            if (current == '"') {
+                return parseString();
+            }
+            throw error("Unsupported JSON value");
+        }
+
+        private String parseString() throws IOException {
+            expect('"');
+            StringBuilder out = new StringBuilder();
+            while (!isEnd()) {
+                char c = source.charAt(index++);
+                if (c == '"') {
+                    return out.toString();
+                }
+                if (c != '\\') {
+                    out.append(c);
+                    continue;
+                }
+                if (isEnd()) {
+                    throw error("Invalid JSON escape at end of string");
+                }
+                char escaped = source.charAt(index++);
+                switch (escaped) {
+                    case '"', '\\', '/' -> out.append(escaped);
+                    case 'b' -> out.append('\b');
+                    case 'f' -> out.append('\f');
+                    case 'n' -> out.append('\n');
+                    case 'r' -> out.append('\r');
+                    case 't' -> out.append('\t');
+                    case 'u' -> out.append(parseUnicodeEscape());
+                    default -> throw error("Unsupported JSON escape: \\" + escaped);
+                }
+            }
+            throw error("Unterminated JSON string");
+        }
+
+        private char parseUnicodeEscape() throws IOException {
+            if (index + 4 > source.length()) {
+                throw error("Invalid unicode escape in JSON string");
+            }
+            String hex = source.substring(index, index + 4);
+            try {
+                index += 4;
+                return (char) Integer.parseInt(hex, 16);
+            } catch (NumberFormatException e) {
+                throw new IOException("Invalid unicode escape in JSON string: \\u" + hex, e);
+            }
+        }
+
+        private void skipWhitespace() {
+            while (!isEnd() && Character.isWhitespace(source.charAt(index))) {
+                index++;
+            }
+        }
+
+        private void expect(char expected) throws IOException {
+            skipWhitespace();
+            if (isEnd() || source.charAt(index) != expected) {
+                throw error("Expected '" + expected + "'");
+            }
+            index++;
+        }
+
+        private boolean consume(char expected) {
+            skipWhitespace();
+            if (!isEnd() && source.charAt(index) == expected) {
+                index++;
+                return true;
+            }
+            return false;
+        }
+
+        private boolean isEnd() {
+            return index >= source.length();
+        }
+
+        private IOException error(String message) {
+            return new IOException(message + " at pos " + index);
+        }
     }
 }

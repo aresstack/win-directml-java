@@ -13,6 +13,7 @@ public enum ModelFamily {
 
     QWEN("Qwen2.5-Coder"),
     SMOLLM2("SmolLM2"),
+    GEMMA3("Gemma 3"),
     T5("T5/CodeT5"),
     EMBEDDING("Embedding"),
     RERANKER("Reranker"),

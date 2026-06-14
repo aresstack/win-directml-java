@@ -31,6 +31,10 @@ public final class ModelDownloadUrls {
     public static final String GOOGLE_T5_SMALL_LOCAL_DIR = "t5-small";
     public static final String GOOGLE_FLAN_T5_SMALL_REPO = "google/flan-t5-small";
     public static final String GOOGLE_FLAN_T5_SMALL_LOCAL_DIR = "flan-t5-small";
+    public static final String GEMMA3_270M_REPO = "google/gemma-3-270m";
+    public static final String GEMMA3_270M_LOCAL_DIR = "gemma-3-270m";
+    public static final String GEMMA3_270M_IT_REPO = "google/gemma-3-270m-it";
+    public static final String GEMMA3_270M_IT_LOCAL_DIR = "gemma-3-270m-it";
 
     private ModelDownloadUrls() {
     }
@@ -131,6 +135,20 @@ public final class ModelDownloadUrls {
      */
     public static ModelDownloadManifest manifestForSmolLm2_360M() {
         return manifestForLlamaStyleSafeTensors(SMOLLM2_360M_REPO, SMOLLM2_360M_LOCAL_DIR);
+    }
+
+    /**
+     * Creates a complete download manifest for Gemma 3 270M.
+     */
+    public static ModelDownloadManifest manifestForGemma3_270M() {
+        return manifestForGemma3SafeTensors(GEMMA3_270M_REPO, GEMMA3_270M_LOCAL_DIR, false);
+    }
+
+    /**
+     * Creates a complete download manifest for Gemma 3 270M Instruct.
+     */
+    public static ModelDownloadManifest manifestForGemma3_270MInstruct() {
+        return manifestForGemma3SafeTensors(GEMMA3_270M_IT_REPO, GEMMA3_270M_IT_LOCAL_DIR, true);
     }
 
     /**
@@ -304,6 +322,24 @@ public final class ModelDownloadUrls {
     }
 
     /**
+     * Returns download URLs for Gemma 3 270M.
+     */
+    public static List<String> forGemma3_270M() {
+        return manifestForGemma3_270M().files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+    /**
+     * Returns download URLs for Gemma 3 270M Instruct.
+     */
+    public static List<String> forGemma3_270MInstruct() {
+        return manifestForGemma3_270MInstruct().files().stream()
+                .map(ModelFileDescriptor::defaultUrl)
+                .toList();
+    }
+
+    /**
      * Returns download URLs for CodeT5-small.
      */
     public static List<String> forCodeT5Small() {
@@ -352,6 +388,23 @@ public final class ModelDownloadUrls {
      */
     public static String selectedQwenSafeTensorsModelUrl() {
         return buildUrl(QWEN_SAFETENSORS_REPO, "model.safetensors");
+    }
+
+    private static ModelDownloadManifest manifestForGemma3SafeTensors(String repo, String localDirName,
+                                                                   boolean instructionTuned) {
+        ArrayList<ModelFileDescriptor> descriptors = new ArrayList<ModelFileDescriptor>();
+        addRootDescriptor(descriptors, repo, "model.safetensors", true);
+        addRootDescriptor(descriptors, repo, "config.json", true);
+        addRootDescriptor(descriptors, repo, "tokenizer.json", true);
+        addRootDescriptor(descriptors, repo, "tokenizer.model", true);
+        addRootDescriptor(descriptors, repo, "tokenizer_config.json", true);
+        addRootDescriptor(descriptors, repo, "special_tokens_map.json", true);
+        addRootDescriptor(descriptors, repo, "added_tokens.json", false);
+        addRootDescriptor(descriptors, repo, "generation_config.json", false);
+        if (instructionTuned) {
+            addRootDescriptor(descriptors, repo, "chat_template.jinja", false);
+        }
+        return new ModelDownloadManifest(repo, localDirName, List.copyOf(descriptors));
     }
 
     private static ModelDownloadManifest manifestForQwenCoderSafeTensors(String repo, String localDirName,

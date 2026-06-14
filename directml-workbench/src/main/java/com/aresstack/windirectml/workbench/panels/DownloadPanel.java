@@ -10,6 +10,7 @@ import com.aresstack.windirectml.inference.artifact.T5PackageLifecycle;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.artifact.ModelArtifactRow;
 import com.aresstack.windirectml.workbench.artifact.ModelRuntimeRegistry;
+import com.aresstack.windirectml.workbench.download.DownloadAccessSettings;
 import com.aresstack.windirectml.workbench.download.DownloadFolderOpener;
 import com.aresstack.windirectml.workbench.download.DownloadOverrideStore;
 import com.aresstack.windirectml.workbench.download.DownloadUrlOpener;
@@ -107,6 +108,10 @@ public final class DownloadPanel extends JPanel {
                 ModelDownloadUrls.manifestForSmolLm2_135M(), ModelFamily.SMOLLM2);
         addManifestRow(downloadRows, "Download SmolLM2 360M Instruct (Summarizer planned)",
                 ModelDownloadUrls.manifestForSmolLm2_360M(), ModelFamily.SMOLLM2);
+        addGemmaRow(downloadRows, "Download Gemma 3 270M (gated, planned)",
+                ModelDownloadUrls.manifestForGemma3_270M());
+        addGemmaRow(downloadRows, "Download Gemma 3 270M Instruct (gated, planned)",
+                ModelDownloadUrls.manifestForGemma3_270MInstruct());
         addT5Row(downloadRows, "Download google/flan-t5-small (SafeTensors)",
                 ModelDownloadUrls.manifestForGoogleFlanT5Small());
         addT5Row(downloadRows, "Download google-t5/t5-small (SafeTensors smoke-test)",
@@ -221,6 +226,27 @@ public final class DownloadPanel extends JPanel {
         addT5Row(rows, "Download CodeT5 base multi-sum checkpoint", ModelDownloadUrls.manifestForCodeT5BaseMultiSum());
     }
 
+    private void addGemmaRow(JPanel rows, String downloadLabel, ModelDownloadManifest baseManifest) {
+        ModelDownloadManifest manifest = overrideStore.applyOverrides(baseManifest);
+        manifests.put(manifest.modelId(), manifest);
+        String modelId = manifest.modelId();
+
+        JButton downloadButton = new JButton(downloadLabel);
+        downloadButton.setToolTipText("Downloads Gemma files from a gated Hugging Face repository. Configure a token before downloading.");
+        downloadButton.addActionListener(e -> startManifestDownload(modelId));
+
+        addDownloadRow(rows,
+                downloadButton,
+                createAccessConfigButton(modelId),
+                new ModelArtifactRow(ModelFamily.GEMMA3,
+                        () -> model.getModelRoot().resolve(manifest.localDirName()),
+                        () -> new CompilerMissingLifecycle(ModelFamily.GEMMA3,
+                                java.util.List.of("model.safetensors", "config.json", "tokenizer.json"),
+                                java.util.List.of(java.util.List.of("*.safetensors")))),
+                createOpenFolderButton(() -> model.getModelRoot().resolve(manifest.localDirName())),
+                registerProgressBar(manifest));
+    }
+
     private void addT5Row(JPanel rows, String downloadLabel, ModelDownloadManifest baseManifest) {
         ModelDownloadManifest manifest = overrideStore.applyOverrides(baseManifest);
         manifests.put(manifest.modelId(), manifest);
@@ -244,6 +270,9 @@ public final class DownloadPanel extends JPanel {
     private static java.util.function.Supplier<ModelPackageLifecycle> lifecycleSupplier(ModelFamily family) {
         return switch (family) {
             case SMOLLM2 -> SmolLM2PackageLifecycle::new;
+            case GEMMA3 -> () -> new CompilerMissingLifecycle(ModelFamily.GEMMA3,
+                    java.util.List.of("model.safetensors", "config.json", "tokenizer.json"),
+                    java.util.List.of(java.util.List.of("*.safetensors")));
             case T5 -> T5PackageLifecycle::new;
             case QWEN -> QwenPackageLifecycle::new; // default model.onnx -> model.wdmlpack
             default -> () -> new CompilerMissingLifecycle(family,
@@ -386,6 +415,13 @@ public final class DownloadPanel extends JPanel {
         return button;
     }
 
+    private JButton createAccessConfigButton(String modelId) {
+        JButton button = createIconButton(SETTINGS_BUTTON_ICON, "Configure gated download URLs and HF token");
+        button.getAccessibleContext().setAccessibleName("Configure gated download settings");
+        button.addActionListener(e -> openAccessConfigDialog(modelId));
+        return button;
+    }
+
     private JButton createOpenFolderButton(Supplier<Path> folderSupplier) {
         JButton button = createIconButton("\uD83D\uDCC2", "Open target folder");
         button.getAccessibleContext().setAccessibleName("Open target folder");
@@ -429,6 +465,27 @@ public final class DownloadPanel extends JPanel {
     private void openQwenConfigDialog() {
         QwenDownloadSettingsDialog dialog = new QwenDownloadSettingsDialog(SwingUtilities.getWindowAncestor(this));
         dialog.setVisible(true);
+    }
+
+    private void openAccessConfigDialog(String modelId) {
+        ModelDownloadManifest manifest = manifests.get(modelId);
+        if (manifest == null) {
+            return;
+        }
+
+        DownloadAccessConfigDialog dialog = new DownloadAccessConfigDialog(
+                SwingUtilities.getWindowAncestor(this), manifest, overrideStore.accessSettings(modelId));
+        dialog.setVisible(true);
+
+        if (dialog.isAccepted()) {
+            ModelDownloadManifest updated = manifest.withAllUrls(dialog.getEditedUrls());
+            DownloadAccessSettings accessSettings = dialog.getAccessSettings();
+            manifests.put(modelId, updated);
+            overrideStore.storeOverrides(updated);
+            overrideStore.storeAccessSettings(modelId, accessSettings);
+            appendLog("Updated gated download settings for: " + modelId
+                    + (accessSettings.hasHuggingFaceToken() ? " (HF token configured)" : " (HF token cleared)"));
+        }
     }
 
     private void startManifestDownload(String modelId) {
@@ -497,7 +554,8 @@ public final class DownloadPanel extends JPanel {
                     ModelDownloader.downloadFromManifest(manifest, targetDir, force,
                             message -> publish(DownloadUiEvent.message(message)),
                             event -> publish(progressTracker.update(event)),
-                            model.getProxyConfiguration());
+                            model.getProxyConfiguration(),
+                            accessSettingsFor(manifest));
                     List<String> missing = ModelDownloader.missingRequiredFiles(manifest, targetDir);
                     if (missing.isEmpty()) {
                         publish(DownloadUiEvent.message("  Verified: all required files present in " + targetDir));
@@ -539,6 +597,14 @@ public final class DownloadPanel extends JPanel {
                 }
             }
         }.execute();
+    }
+
+    private DownloadAccessSettings accessSettingsFor(ModelDownloadManifest manifest) {
+        DownloadAccessSettings storedSettings = overrideStore.accessSettings(manifest.modelId());
+        if (storedSettings.hasHuggingFaceToken()) {
+            return storedSettings;
+        }
+        return new DownloadAccessSettings(System.getenv("HF_TOKEN"));
     }
 
     private JProgressBar progressBarFor(ModelDownloadManifest manifest) {

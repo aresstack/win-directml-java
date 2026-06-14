@@ -160,14 +160,14 @@ public final class ModelDownloader {
         for (String file : requiredFiles) {
             String url = HF_BASE_URL + "/" + repo + "/resolve/main/" + pathPrefix + file;
             downloadFileFromUrl(client, url, file, targetDir, force, logger, true,
-                    index++, totalFiles, NO_PROGRESS);
+                    index++, totalFiles, NO_PROGRESS, DownloadAccessSettings.empty());
         }
 
         if (optionalFiles != null) {
             for (String file : optionalFiles) {
                 String url = HF_BASE_URL + "/" + repo + "/resolve/main/" + pathPrefix + file;
                 downloadFileFromUrl(client, url, file, targetDir, force, logger, false,
-                        index++, totalFiles, NO_PROGRESS);
+                        index++, totalFiles, NO_PROGRESS, DownloadAccessSettings.empty());
             }
         }
     }
@@ -254,16 +254,40 @@ public final class ModelDownloader {
                                             ProgressListener progressListener,
                                             ProxyConfiguration proxyConfiguration)
             throws IOException, InterruptedException {
+        downloadFromManifest(manifest, targetDir, force, logger, progressListener,
+                proxyConfiguration, DownloadAccessSettings.empty());
+    }
+
+    /**
+     * Download model files using a manifest, proxy configuration and access settings.
+     *
+     * @param manifest           the model download manifest
+     * @param targetDir          local directory to save files into
+     * @param force              if true, overwrite existing files
+     * @param logger             callback for progress messages
+     * @param progressListener   byte-level progress callback for each manifest file
+     * @param proxyConfiguration Windows proxy configuration for outbound HTTP requests
+     * @param accessSettings     optional gated-model credentials
+     */
+    public static void downloadFromManifest(ModelDownloadManifest manifest, Path targetDir,
+                                            boolean force, Consumer<String> logger,
+                                            ProgressListener progressListener,
+                                            ProxyConfiguration proxyConfiguration,
+                                            DownloadAccessSettings accessSettings)
+            throws IOException, InterruptedException {
         Files.createDirectories(targetDir);
 
         HttpClient client = createHttpClient(proxyConfiguration);
+        DownloadAccessSettings effectiveAccessSettings = accessSettings == null
+                ? DownloadAccessSettings.empty() : accessSettings;
 
         ProgressListener listener = progressListener == null ? NO_PROGRESS : progressListener;
         int totalFiles = manifest.files().size();
         for (int i = 0; i < totalFiles; i++) {
             ModelFileDescriptor desc = manifest.files().get(i);
             downloadFileFromUrl(client, desc.currentUrl(), desc.localFilename(),
-                    targetDir, force, logger, desc.required(), i, totalFiles, listener);
+                    targetDir, force, logger, desc.required(), i, totalFiles, listener,
+                    effectiveAccessSettings);
         }
     }
 
@@ -346,7 +370,8 @@ public final class ModelDownloader {
                                             String localFilename, Path targetDir,
                                             boolean force, Consumer<String> logger,
                                             boolean required, int fileIndex,
-                                            int totalFiles, ProgressListener progressListener)
+                                            int totalFiles, ProgressListener progressListener,
+                                            DownloadAccessSettings accessSettings)
             throws IOException, InterruptedException {
 
         Path target = targetDir.resolve(localFilename);
@@ -367,11 +392,15 @@ public final class ModelDownloader {
 
         logger.accept("  Downloading: " + localFilename + " ...");
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(parseUriOrThrow(sanitizedUrl, localFilename, required))
+        URI requestUri = parseUriOrThrow(sanitizedUrl, localFilename, required);
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                .uri(requestUri)
                 .timeout(Duration.ofMinutes(30))
-                .GET()
-                .build();
+                .GET();
+        if (shouldSendHuggingFaceToken(requestUri, accessSettings)) {
+            requestBuilder.header("Authorization", accessSettings.authorizationHeaderValue());
+        }
+        HttpRequest request = requestBuilder.build();
 
         HttpResponse<InputStream> response = client.send(request,
                 HttpResponse.BodyHandlers.ofInputStream());
@@ -390,7 +419,7 @@ public final class ModelDownloader {
                     0L, 0L, true, true));
         } else {
             String msg = "HTTP " + response.statusCode() + " for " + localFilename
-                    + " (url: " + sanitizedUrl + ")";
+                    + " (url: " + sanitizedUrl + ")" + gatedAccessHint(response.statusCode(), sanitizedUrl);
             if (required) {
                 throw new IOException(msg);
             } else {
@@ -458,5 +487,23 @@ public final class ModelDownloader {
             throw new IOException("Invalid " + (required ? "required" : "optional")
                     + " download URL for " + localFilename + ": " + url, ex);
         }
+    }
+
+    private static boolean shouldSendHuggingFaceToken(URI uri, DownloadAccessSettings accessSettings) {
+        if (accessSettings == null || !accessSettings.hasHuggingFaceToken() || uri == null) {
+            return false;
+        }
+        String host = uri.getHost();
+        return host != null && (host.equalsIgnoreCase("huggingface.co")
+                || host.endsWith(".huggingface.co"));
+    }
+
+    private static String gatedAccessHint(int statusCode, String url) {
+        if ((statusCode != 401 && statusCode != 403) || url == null
+                || !url.contains("huggingface.co/")) {
+            return "";
+        }
+        return ". Hugging Face denied access. For gated models, accept the model terms in the browser "
+                + "and configure a read token in the download settings.";
     }
 }
