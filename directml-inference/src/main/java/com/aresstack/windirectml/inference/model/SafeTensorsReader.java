@@ -93,35 +93,54 @@ public final class SafeTensorsReader {
             }
             MappedByteBuffer mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
             mapped.order(ByteOrder.LITTLE_ENDIAN);
-            long headerLength = mapped.getLong(0);
-            validateHeaderLength(file, fileSize, headerLength);
-
-            ByteBuffer headerBuffer = mapped.asReadOnlyBuffer();
-            headerBuffer.position(HEADER_LENGTH_BYTES);
-            headerBuffer.limit(Math.toIntExact(HEADER_LENGTH_BYTES + headerLength));
-            byte[] headerBytes = new byte[Math.toIntExact(headerLength)];
-            headerBuffer.get(headerBytes);
-
-            JsonNode root = MAPPER.readTree(new String(headerBytes, StandardCharsets.UTF_8));
-            long dataBaseOffset = HEADER_LENGTH_BYTES + headerLength;
-            Map<String, String> metadata = parseMetadata(root.get("__metadata__"));
-            Map<String, SafeTensorEntry> tensors = new LinkedHashMap<>();
-
-            var fields = root.fields();
-            while (fields.hasNext()) {
-                Map.Entry<String, JsonNode> field = fields.next();
-                String name = field.getKey();
-                if ("__metadata__".equals(name)) {
-                    continue;
-                }
-                tensors.put(name, parseTensor(file, mapped, fileSize, dataBaseOffset, name, field.getValue()));
-            }
-            return new SafeTensorsFile(file.toAbsolutePath().normalize(), tensors, metadata, dataBaseOffset, fileSize);
+            return parseContainer(file.toAbsolutePath().normalize(), mapped, fileSize);
         }
     }
 
+    /**
+     * Parse a SafeTensors file image already held in memory (e.g. a payload blob extracted from a
+     * {@code .wdmlpack}). The buffer must contain the full file image (8-byte header length + JSON
+     * header + concatenated tensor data) starting at its current position.
+     */
+    public static SafeTensorsFile readFromBuffer(Path label, ByteBuffer image) throws IOException {
+        ByteBuffer buf = Objects.requireNonNull(image, "image").duplicate().order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer base = buf.slice().order(ByteOrder.LITTLE_ENDIAN);
+        long fileSize = base.remaining();
+        if (fileSize < HEADER_LENGTH_BYTES) {
+            throw new IOException("Invalid SafeTensors buffer: too small: " + fileSize);
+        }
+        return parseContainer(label == null ? Path.of("buffer.safetensors") : label, base, fileSize);
+    }
+
+    private static SafeTensorsFile parseContainer(Path label, ByteBuffer mapped, long fileSize) throws IOException {
+        long headerLength = mapped.getLong(0);
+        validateHeaderLength(label, fileSize, headerLength);
+
+        ByteBuffer headerBuffer = mapped.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
+        headerBuffer.position(HEADER_LENGTH_BYTES);
+        headerBuffer.limit(Math.toIntExact(HEADER_LENGTH_BYTES + headerLength));
+        byte[] headerBytes = new byte[Math.toIntExact(headerLength)];
+        headerBuffer.get(headerBytes);
+
+        JsonNode root = MAPPER.readTree(new String(headerBytes, StandardCharsets.UTF_8));
+        long dataBaseOffset = HEADER_LENGTH_BYTES + headerLength;
+        Map<String, String> metadata = parseMetadata(root.get("__metadata__"));
+        Map<String, SafeTensorEntry> tensors = new LinkedHashMap<>();
+
+        var fields = root.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            String name = field.getKey();
+            if ("__metadata__".equals(name)) {
+                continue;
+            }
+            tensors.put(name, parseTensor(label, mapped, fileSize, dataBaseOffset, name, field.getValue()));
+        }
+        return new SafeTensorsFile(label, tensors, metadata, dataBaseOffset, fileSize);
+    }
+
     private static SafeTensorEntry parseTensor(Path file,
-                                               MappedByteBuffer mapped,
+                                               ByteBuffer mapped,
                                                long fileSize,
                                                long dataBaseOffset,
                                                String name,
