@@ -1,93 +1,99 @@
-# Gemma 3 270M-it — Evaluations-Ergebnis (MODEL-GEMMA-3)
+# Gemma 3 270M-it — Evaluations-Ergebnis (MODEL-GEMMA-4)
 
-> Tatsächliche Ausführung der externen Probe aus
+> Echte Ausführung der externen Probe aus
 > [`model-candidate-gemma3-270m-external-probe.md`](model-candidate-gemma3-270m-external-probe.md)
-> via `scripts/probe-gemma3-270m-it.py`. **Keine Runtime-/Produktcode-Änderung** in
-> `win-directml-java`. **Keine erfundenen Zahlen** — Gemma konnte nicht gesampelt werden (siehe unten),
-> daher keine Gemma-Scores.
+> via `scripts/probe-gemma3-270m-it.py`. **Keine Runtime-/Produktcode-Änderung**, nur Probe + Doku.
+> **Keine erfundenen Zahlen** — alle Werte aus dem realen Lauf (gemessen, HF-Login-Token vorhanden).
+>
+> Vorgeschichte: MODEL-GEMMA-3 lief mit HTTP 401 (gated, ohne Token). Mit akzeptierter Lizenz +
+> gespeichertem HF-Login lud `google/gemma-3-270m-it` jetzt erfolgreich und generierte.
 
 ## Umgebung (gemessen)
 
 | Feld | Wert |
 |------|------|
-| Datum / Tester | 2026-06-14 / automated probe run |
-| OS | Windows 11 Pro N (10.0.22631) |
-| Python | 3.12.10 |
+| Datum | 2026-06-14 |
+| OS / Python | Windows 11 Pro N · Python 3.12.10 |
 | transformers / torch | 5.11.0 / 2.12.0+cpu (CPU) |
-| HF erreichbar | ja |
-| HF-Token gesetzt + Gemma-Lizenz akzeptiert | **nein** (kein `HF_TOKEN`, Lizenz nicht akzeptiert) |
-| `--max-new-tokens` | 64 |
-| Vergleichsmodelle geladen | SmolLM2-360M-Instruct ✓ (heruntergeladen) · Qwen2.5-Coder-0.5B ✗ (nicht ausgeführt, siehe unten) |
+| HF-Zugang | Login-Token aus HF-Cache (Gemma-Lizenz akzeptiert) — Gemma lädt |
+| Lauf | `--limit 28 --max-new-tokens 160`, Vergleich `--compare smollm2` |
+| Prompts | **28** (Gruppe 1:7 · 2:5 · 3:6 · 4:5 · 5:5) |
 
-## Hauptergebnis: Gemma ist gated → nicht sampelbar
+## Prompt-Anzahl geklärt (15 vs 28)
 
-`google/gemma-3-270m-it` ließ sich in dieser Umgebung **nicht** laden:
+Im früheren Lauf waren nur ~15 Prompts sichtbar, weil das **Skript** out-of-the-box nur **15**
+eingebettete Prompts hatte (kein Parser der `.md`; `--limit` war korrekt, aber durch
+`len(PROMPTS)=15` gedeckelt). Die `.md` enthält real **28** Prompts. Das Skript wurde auf die vollen
+**28 maschinenlesbaren** Prompts erweitert (1:1 aus der `.md`, Snippets inline) — **nicht künstlich
+aufgefüllt**, es sind dieselben 28. Dieser Lauf hat alle 28 ausgeführt.
 
-```
-SKIPPED: could not load google/gemma-3-270m-it: You are trying to access a gated repo.
-401 Client Error. Cannot access gated repo for url
-https://huggingface.co/google/gemma-3-270m-it/resolve/main/config.json
-Access to model google/gemma-3-270m-it is restricted. ... Please log in.
-```
+Außerdem behoben: `--out` legt das Zielverzeichnis jetzt an (`Path(out).parent.mkdir(...)`), der
+frühere `FileNotFoundError: build/gemma-probe/...jsonl` tritt nicht mehr auf; `.jsonl` schreibt JSONL.
 
-**Ursache (sauber dokumentiert, wie gefordert):**
-- Gemma-**Lizenz** auf der HF-Modellseite **nicht akzeptiert**.
-- **`HF_TOKEN` fehlt** (unauthenticated request).
-- HF antwortet daher mit **401** (gated).
+## Latenz (gemessen, CPU)
 
-→ Es gibt **keine** Gemma-Antworten zum Bewerten. Es wurde **nicht** am Produkt-Downloader gearbeitet
-(wie vorgegeben). Der Skript-Pfad funktioniert korrekt (sauberes Skip + Hinweis statt Crash).
+| Modell | Prompts | ø tok/s |
+|--------|--------:|--------:|
+| gemma-3-270m-it | 28 | **22.0** |
+| SmolLM2-360M-Instruct | 28 | 14.2 |
 
-**Entsperren (manuell, außerhalb dieses Repos):** Lizenz auf
-<https://huggingface.co/google/gemma-3-270m-it> akzeptieren, `HF_TOKEN` setzen, dann
-`python scripts/probe-gemma3-270m-it.py --compare smollm2 qwen --out result.md` erneut laufen lassen und
-die SmolLM2-Spalte unten um die Gemma-Spalte ergänzen.
+Gemma ist auf dieser CPU **schneller** als SmolLM2-360M (~22 vs ~14 tok/s; deckt sich mit der
+Beobachtung ~20–26 tok/s) und liefert meist kurze Antworten.
 
-## Baseline (real gemessen): SmolLM2-360M-Instruct
+## Qualität pro Gruppe (gemma-3-270m-it, real)
 
-Der Probe-Harness wurde so an einem **echten** Modell validiert; gleichzeitig ist das die Messlatte,
-die Gemma „spürbar" überbieten müsste. Latenz: **~9–16 tok/s** auf dieser CPU. Qualität gemischt:
+| Gruppe | Urteil | Beobachtung |
+|--------|:------:|------|
+| 1 Code erklären | **0** | EN/DE-Erklärungen flüssig & kurz, aber Natural/ADABAS nur **oberflächlich** (z. B. „reads from a local file", DISPLAY-Felder ungenau) |
+| 2 Pseudocode/Java-Skizze | **-** | P2.1 **echo't** den Input statt Pseudocode; Java-Skizze ist ein **Platzhalter** mit „replace this"-Kommentaren (halluziniert); SQL `WHERE NAME = 'EMPLOYEES'` **fachlich falsch** |
+| 3 JSON-Extraktion | **0/-** | JSON ist **syntaktisch immer valide**, aber die **Werte sind Platzhalter** (`"view":"..."`, `"fields":["..."]`) statt extrahiert — strukturtreu, aber inhaltsleer |
+| 4 Tech-Zusammenfassung | **+** | **deutsche** Zusammenfassung sauber & korrekt; 2-Bullet ok |
+| 5 DE/EN-Umformulierung | **+** | einfache Übersetzungen DE↔EN brauchbar (kleine Holprigkeiten) |
 
-| Gruppe | folgt Instruktion | fachlich grob richtig | halluziniert | JSON valide | kurz | Deutsch brauchbar | Code-/Natural-Semantik | Beobachtung (SmolLM2-360M) |
-|--------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|------|
-| 1 Code erklären | + | + | nein | n/a | + | **-** | + | EN-Erklärung von Natural **und** Java korrekt & knapp; **deutscher** Prompt echo'te das Snippet statt zu antworten |
-| 2 Pseudocode/Skizze | 0 | 0 | teils | n/a | 0 | n/a | 0 | Java-Skelett brauchbar (echte Methode + SQL); Natural→Pseudocode echo'te Input; SQL-Rewrite lieferte `CREATE TABLE` statt `SELECT ... ORDER BY` |
-| 3 JSON-Extraktion | 0 | 0 | teils | **teils** | + | n/a | + | `{view,accessType,fields}` **valide & korrekt**; „calls" lieferte falschen Inhalt + Markdown-Fence; query/documents lieferte gar kein JSON |
-| 4 Tech-Zusammenfassung | **-** | + | nein | n/a | **-** | **-** | n/a | EN-„Summary" gab den Satz unverändert zurück (nicht gekürzt); DE echo'te Prompt; 2-Bullet teils ok |
-| 5 DE/EN-Umformulierung | 0 | 0 | nein | n/a | + | 0 | n/a | gemischt (kurze Umformulierungen teils ok, deutsche Prompts schwächer) |
+**JSON valide?** Syntaktisch **ja** (alle 6 Group-3-Antworten parsen), inhaltlich **nein** (Platzhalter).
 
-Stärkste Disziplin von SmolLM2-360M out-of-the-box: **knappe englische Erklärung** + **eine** saubere
-JSON-Extraktion. Schwächen: **deutsche** Instruktionen und „nur-X"-Transformationen (Pseudocode/SQL,
-JSON-only) werden oft mit Echo des Inputs beantwortet.
+## Vergleich zur SmolLM2-360M-Baseline
 
-## Qwen2.5-Coder-0.5B-Instruct
+| Aspekt | gemma-3-270m-it | SmolLM2-360M |
+|--------|------------------|--------------|
+| Latenz (CPU) | **~22 tok/s** | ~14 tok/s |
+| EN-Erklärung | flüssig, oberflächlich | flüssig, oberflächlich |
+| Deutsch (Summary/Translate) | **brauchbar** | schwächer (echo't dt. Prompts öfter) |
+| JSON-Struktur | **immer valide**, aber Platzhalter | mal echte Werte (P3.1 korrekt extrahiert!), mal halluziniert/Markdown-Fence |
+| Pseudocode/SQL/Java-Skizze | echo/halluziniert/falsch | ebenfalls schwach |
+| Antwortlänge | meist kurz | meist kurz |
 
-**Nicht ausgeführt.** Optionaler Vergleich; ein ~1 GB-Download, der ohne Gemma-Baseline die
-Gemma-Entscheidung nicht beeinflusst. Bei Bedarf:
-`python scripts/probe-gemma3-270m-it.py --compare qwen`.
-
-## Bewertung der Leitfragen
-
-- **Folgt Gemma der Instruktion?** unbekannt (nicht sampelbar — gated).
-- **Bleibt die Antwort kurz?** unbekannt.
-- **Versteht es Natural/ADABAS grob?** unbekannt.
-- **Liefert es gültiges JSON?** unbekannt.
-- **Besser als Smol360?** unbekannt — die Smol360-Messlatte ist dokumentiert (knappe EN-Erklärung +
-  1× saubere JSON-Extraktion; schwach bei DE + reinen Transformationen).
-- **Viel schlechter als Qwen?** unbekannt (Qwen nicht ausgeführt).
-- **CPU-Latenz realistisch?** für die Klasse plausibel (Smol360 ~9–16 tok/s CPU gemessen); Gemmas
-  256k-FP32-LM-Head bleibt laut Feasibility-Doc der dominante Posten — nicht hier verifiziert.
+Kurz: Gemma ist **schneller** und bei **Deutsch + valider JSON-Struktur** disziplinierter; SmolLM2
+trifft bei **JSON-Werte-Extraktion** vereinzelt besser (P3.1), ist dafür inkonsistenter. Beide sind
+out-of-the-box **schwach** bei Code-Transformation (Pseudocode/SQL/Java-Skizze) und
+Natural/ADABAS-Tiefe.
 
 ## Entscheidung
 
-**Verdikt: ☑ WAIT (access-blocked).**
+**Verdikt: WAIT — aber positiv (Fine-Tuning plausibel).**
 
-**Begründung:** Die externe Probe wurde real ausgeführt und der Harness an SmolLM2-360M validiert, aber
-`gemma-3-270m-it` konnte mangels akzeptierter Lizenz + `HF_TOKEN` **nicht geladen** werden (401 gated).
-Ohne echte Gemma-Antworten ist **kein GO/NO-GO** seriös begründbar (keine erfundenen Zahlen). Die
-Empfehlung aus MODEL-GEMMA-1 (WAIT, erst billige externe Probe) bleibt bestehen; sie ist jetzt **nur
-noch durch HF-Zugang blockiert**, nicht durch fehlende Vorbereitung.
+**Begründung:** `gemma-3-270m-it` ist auf CPU **schnell genug** (~22 tok/s) und zeigt out-of-the-box
+brauchbare **deutsche Zusammenfassung/Übersetzung** und eine **konsequent valide JSON-Struktur** —
+genau die Eigenschaften, die Google als „Fine-Tune-Basis / task-specific" bewirbt. Es ist aber
+**kein** brauchbarer Spezialassistent von der Stange: Pseudocode-Aufgaben echoen den Input,
+Java-Skizzen halluzinieren, SQL ist fachlich falsch, JSON-Extraktion liefert Platzhalter statt Werte,
+Natural/ADABAS wird nur oberflächlich verstanden. Gegenüber SmolLM2-360M ist es **nicht klar besser
+in der Aufgaben-Qualität**, aber **schneller** und **strukturierter** — was es als **Fine-Tuning-Basis
+für strukturierte Extraktion / kurze Erklärungen** interessant macht.
 
-**Nächster Schritt (außerhalb dieses Repos, kein Produkt-Downloader-Umbau):** HF-Lizenz akzeptieren +
-`HF_TOKEN` setzen, Probe erneut mit `--compare smollm2 qwen` laufen lassen, diese Datei um die
-Gemma-Spalte ergänzen und dann GO/WAIT/NO-GO final setzen.
+**Folge:** Noch **kein** GO für eine eigene `gemma/`-Runtime-Familie auf Basis der Out-of-the-box-
+Qualität. Wenn Gemma weiterverfolgt wird, dann als **Fine-Tuning-Kandidat** (LoRA/SFT auf unsere
+engen Aufgaben: Code-Erklärung, Natural/ADABAS, JSON-Extraktion), gefolgt von einer erneuten Probe.
+Der Runtime-Aufwand (eigene `GemmaWarpForwardPass`, siehe `model-candidate-gemma3-270m.md` §2) bleibt
+unverändert groß und sollte erst nach einer überzeugenden (ggf. fine-getunten) Qualitätsprobe
+investiert werden.
+
+## Reproduzieren
+
+```bash
+# Gemma-Lizenz akzeptieren + HF-Login (huggingface-cli login oder HF_TOKEN), dann:
+python scripts/probe-gemma3-270m-it.py --compare smollm2 \
+    --out build/gemma-probe/compare.jsonl --limit 28 --max-new-tokens 160
+```
+
+(JSONL-Rohausgaben liegen unter `build/` und sind nicht versioniert.)
