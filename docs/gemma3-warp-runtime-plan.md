@@ -37,10 +37,23 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-4 CPU reference math | **done** (bd8fbb4) |
 | GEMMA-WARP-8/9 reference weights + full forward | **done** (4b028fe) |
 | GEMMA-WARP-9 real-model parity vs transformers | **done — PASS** (next token 9079 " Paris") |
-| GEMMA-WARP-5..8 WARP kernels / single layer | pending (GPU-gated) |
-| GEMMA-WARP-10 decode session + KV cache | pending |
-| GEMMA-WARP-11 workbench native flag | pending |
-| GEMMA-WARP-12 perf/heap comparison | pending |
+| GEMMA-WARP-3 wdmlpack compiler + package | **done** (137f0f5) |
+| GEMMA-WARP-7 attention layout + window mask (device-free) | **done** (0d83fbd) |
+| GEMMA-WARP-10 reference greedy generation | **done** (036493b) |
+| GEMMA-WARP-2 tokenizer + chat template | **open — blocker** (see below) |
+| GEMMA-WARP-5/6/8/9 WARP kernels / single-layer / prefill | **open — GPU-blocked** (see below) |
+| GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
+| GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
+| GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
+
+## What works now (verified, device-free, no Python)
+
+A complete **native CPU Gemma 3 runtime** in Java, numerically correct vs HF transformers:
+`config.json` + `model.safetensors` → `Gemma3WdmlPackCompiler` → `.wdmlpack` →
+`Gemma3RuntimePackage.loadReferenceWeights()` → `Gemma3ReferenceForwardPass` /
+`Gemma3ReferenceGenerator` (greedy). Real-model parity PASSES (next token 9079 " Paris"). 24 gemma
+tests green (1 gated parity ran locally). This CPU path is the **WARP parity oracle**, not the product
+path.
 
 **Milestone:** the device-free CPU reference is numerically correct against HF transformers
 (`Gemma3RealModelParityTest`, gated): for "The capital of France is" (ids [2,818,5279,529,7001,563])
@@ -56,4 +69,31 @@ head) is therefore the trustworthy WARP parity oracle.
   (mirrors `SmolLM2NativeWarpExecutorTest`, which is `@EnabledIf(WindowsBindings.isSupported())`).
   Strategy: build a **CPU reference** that is verifiable against HF/transformers, then mirror it on
   WARP and gate the GPU tests.
-- (further blockers appended as encountered)
+- **GEMMA-WARP-2 Tokenizer (open, blocks end-to-end text):** Gemma uses a SentencePiece-style BPE
+  (256k) via `tokenizer.json` with metaspace (`▁`), byte-fallback and a Gemma normalizer. The existing
+  Java BPE path (SmolLM2/Qwen, GPT-2 byte-level) almost certainly will **not** tokenize Gemma
+  correctly, so it was not reused blindly. Until a Gemma `tokenizer.json` loader (or a thin Gemma
+  tokenizer) exists, the native runtime is exercised with **pre-tokenized ids** (the parity test feeds
+  transformers ids). This is the gating item for a text→text workbench native path. Decision needed:
+  build a Gemma tokenizer.json loader in Java vs. a smaller dedicated Gemma BPE.
+
+- **WARP kernels (GEMMA-WARP-5/6/8/9/10, GPU-blocked here):** no DirectML/D3D12 device in this build
+  sandbox, so on-GPU numerical validation cannot run (mirrors `SmolLM2NativeWarpExecutorTest`, gated on
+  `WindowsBindings.isSupported()`). The CPU reference + `Gemma3AttentionLayout` give a ready parity
+  oracle. Implementation plan when run on a Windows+GPU host: reuse `WarpDenseProjection`/
+  `MatMulNBitsKernel` + the D3D12 ByteBuffer upload for q/k/v/o/gate/up/down and the LM head; add
+  **new** Gemma kernels for zero-centered RMSNorm, QK-norm, GELU-tanh/GeGLU; drive attention from
+  `Gemma3AttentionLayout` (local/global + sliding window + GQA + dual RoPE). Validate each kernel and
+  the single-layer/prefill output against the CPU reference (tolerance documented), then add the WARP
+  decode session + KV cache (local layers only need a windowed cache).
+
+- **Heap (product path):** the reference materializes `embed_tokens` as FP32 (~671 MB for 270M) — fine
+  for parity, not for the product path. The WARP runtime must be heap-light: ByteBuffer/mmap upload,
+  and the tied `embed_tokens`/LM-head must not be uploaded twice. The 256k FP32 LM head dominates
+  per-token cost (per the feasibility doc) — candidate for a later optimization slice.
+
+- **Workbench native flag (GEMMA-WARP-11):** wire `-Dgemma.runtime=native-warp` to the native package
+  path once tokenizer + WARP exist; keep `external-python-transformers` the default until WARP is
+  proven on GPU. The external probe path stays intact (untouched this block).
+
+- **GEMMA-WARP-12 perf:** pending a runnable WARP path; no fabricated numbers.
