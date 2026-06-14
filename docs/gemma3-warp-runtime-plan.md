@@ -41,7 +41,8 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-7 attention layout + window mask (device-free) | **done** (0d83fbd) |
 | GEMMA-WARP-10 reference greedy generation | **done** (036493b) |
 | GEMMA-WARP-2 tokenizer + chat template | **done — exact transformers match** |
-| GEMMA-WARP-5/6/8/9 WARP kernels / single-layer / prefill | **open — GPU-blocked** (see below) |
+| GEMMA-WARP-5a WARP zero-centered RMSNorm + QK-Norm kernels | **done — GPU-validated vs reference** |
+| GEMMA-WARP-5b/6/8/9 WARP MLP / attention / single-layer / prefill | open — next |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -63,12 +64,24 @@ head) is therefore the trustworthy WARP parity oracle.
 
 ## Open points / blockers (resolve at the end)
 
-- **GPU/WARP execution not verifiable in this environment:** no DirectML/D3D12 device in the build
-  sandbox. WARP-kernel slices (5–10) can be written + given device-free tests (masks, layouts,
-  reference parity), but actual on-GPU numerical validation must run on a Windows host with a GPU
-  (mirrors `SmolLM2NativeWarpExecutorTest`, which is `@EnabledIf(WindowsBindings.isSupported())`).
-  Strategy: build a **CPU reference** that is verifiable against HF/transformers, then mirror it on
-  WARP and gate the GPU tests.
+- **GPU/WARP execution IS available on this host (`WHERETHEHEARTIS`).** The earlier "no device in the
+  sandbox" assumption no longer holds for this machine: the existing `SmolLM2NativeWarpExecutorTest`
+  runs (5 tests, 0 skipped, `backend=warp`), and the new `Gemma3WarpNormKernelTest` runs all 7 GPU
+  cases. WARP-kernel slices are therefore validated on the real device, gated on
+  `WindowsBindings.isSupported()` so they skip (not fail) on a CI box without an adapter. Strategy
+  unchanged: the CPU reference (numerically correct vs HF/transformers) is the parity oracle; each
+  WARP kernel is mirrored against it.
+
+- **GEMMA-WARP-5a norm kernels — done, GPU-validated.** `Gemma3WarpNorms` (HLSL), `Gemma3WarpRmsNormKernel`
+  (zero-centered RMSNorm over a whole vector) and `Gemma3WarpQkNormKernel` (per-head RMSNorm over
+  `head_dim`, all heads in one dispatch). Both are the GPU mirror of `Gemma3ReferenceMath.rmsNormZeroCentered`
+  and **scale by `(1 + weight)`** — kept strictly separate from the Phi-3/Qwen `RMSNORM_HLSL` (which
+  scales by `weight`); those shaders are untouched. Validated on the real device against the verified
+  CPU reference for small shapes, the real hidden=640 and head_dim=256 (incl. numHeads=1 GQA k-head),
+  multiple eps, and the zero-weight identity-scale case. Tolerance **abs 1e-4 + rel 1e-4** (GPU float
+  vs reference double sum-of-squares). `head_dim` is supplied by the caller, never derived as
+  `hidden/heads`. Still validation building blocks (per-call upload/readback), not yet the fused
+  product path.
 - **GEMMA-WARP-2 Tokenizer — RESOLVED (done).** Native `Gemma3Tokenizer` reads `tokenizer.json` only
   (no `tokenizer.model`, no SentencePiece DLL, no Python): normalizer space→`▁`, BPE over the whole
   normalized string (the `Split(" ")` pre-tokenizer is a no-op post-normalization), byte_fallback to
