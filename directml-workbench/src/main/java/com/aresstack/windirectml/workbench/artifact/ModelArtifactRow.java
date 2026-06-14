@@ -81,13 +81,13 @@ public final class ModelArtifactRow {
     }
 
     private String statusText(ModelArtifactStatus s) {
+        if (s.packageState() == PackageState.PACKAGE_COMPILER_MISSING) {
+            return compilerMissingStatusText(s);
+        }
         StringBuilder sb = new StringBuilder(family.displayName())
                 .append(" — raw: ").append(pretty(s.rawState()))
                 .append(", package: ").append(pretty(s.packageState()));
-        if (s.packageState() == PackageState.PACKAGE_COMPILER_MISSING) {
-            // Homogeneous not-executable state: downloadable, but no wdmlpack compiler/loader yet.
-            sb.append(" — package compiler not implemented (downloadable, not executable)");
-        } else if (s.ready()) {
+        if (s.ready()) {
             sb.append(" — READY");
         } else if (!s.reason().isBlank()) {
             sb.append(" — ").append(s.reason());
@@ -95,12 +95,22 @@ public final class ModelArtifactRow {
         return sb.toString();
     }
 
+    private String compilerMissingStatusText(ModelArtifactStatus s) {
+        String reason = family == ModelFamily.GEMMA3 && !s.reason().isBlank()
+                ? s.reason()
+                : "package compiler not implemented (downloadable, not executable)";
+        return new StringBuilder(family.displayName())
+                .append(" — raw: ").append(pretty(s.rawState()))
+                .append(" — ").append(reason)
+                .toString();
+    }
+
     private static String convertLabel(ModelArtifactStatus s, ModelConversionPlan p) {
         return switch (p.action()) {
             case CONVERT -> "Convert";
             case RECONVERT -> "Reconvert";
             case REPAIR -> "Repair package";
-            case NOT_SUPPORTED -> "Compiler missing";
+            case NOT_SUPPORTED -> downloadOnlyCandidate(p) ? "Download only" : "Compiler missing";
             case INSPECT -> rawUnavailable(s) ? "Download first" : "Inspect";
         };
     }
@@ -118,11 +128,18 @@ public final class ModelArtifactRow {
             case CONVERT -> "Build the runtime package from the downloaded source";
             case RECONVERT -> "Rebuild the runtime package (" + p.reason() + ")";
             case REPAIR -> "Rebuild the unusable package (" + p.reason() + ")";
-            case NOT_SUPPORTED -> "Package compiler not implemented for this family — downloadable, not executable";
+            case NOT_SUPPORTED -> downloadOnlyCandidate(p)
+                    ? p.reason()
+                    : "Package compiler not implemented for this family — downloadable, not executable";
             case INSPECT -> rawUnavailable(s)
                     ? "Download the raw model files first, then Convert"
                     : "Re-check the current artifact status";
         };
+    }
+
+    private static boolean downloadOnlyCandidate(ModelConversionPlan p) {
+        String reason = p.reason().toLowerCase(java.util.Locale.ROOT);
+        return reason.contains("download/probe") || reason.contains("download-only");
     }
 
     private static boolean rawUnavailable(ModelArtifactStatus s) {

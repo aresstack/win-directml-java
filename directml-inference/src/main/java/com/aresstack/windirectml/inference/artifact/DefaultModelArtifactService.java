@@ -29,6 +29,7 @@ public final class DefaultModelArtifactService implements ModelArtifactService {
         map.put(ModelFamily.QWEN, new QwenPackageLifecycle());
         map.put(ModelFamily.SMOLLM2, new SmolLM2PackageLifecycle());
         map.put(ModelFamily.T5, new T5PackageLifecycle());
+        map.put(ModelFamily.GEMMA3, new Gemma3DownloadLifecycle());
         map.put(ModelFamily.EMBEDDING, new CompilerMissingLifecycle(ModelFamily.EMBEDDING,
                 List.of("config.json", "tokenizer.json"),
                 List.of(List.of("*.safetensors", "pytorch_model.bin"))));

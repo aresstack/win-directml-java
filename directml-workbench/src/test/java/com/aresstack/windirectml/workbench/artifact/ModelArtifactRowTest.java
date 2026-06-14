@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.workbench.artifact;
 
 import com.aresstack.windirectml.inference.artifact.CompilerMissingLifecycle;
+import com.aresstack.windirectml.inference.artifact.Gemma3DownloadLifecycle;
 import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
 import com.aresstack.windirectml.inference.artifact.ModelConversionResult;
 import com.aresstack.windirectml.inference.artifact.ModelFamily;
@@ -80,6 +81,24 @@ class ModelArtifactRowTest {
                 "tooltip must explain the not-executable state: " + view.convertTooltip());
         assertFalse(row.convert().ok());
         assertEquals(0, writes.get(), "compiler-missing convert must not write");
+    }
+
+
+    @Test
+    void gemmaDownloadOnlyRowDoesNotReportCompilerImplementationError() throws IOException {
+        Files.writeString(tempDir.resolve("model.safetensors"), "weights");
+        Files.writeString(tempDir.resolve("config.json"), "{}");
+        Files.writeString(tempDir.resolve("tokenizer.json"), "{}");
+
+        ModelArtifactRow row = new ModelArtifactRow(ModelFamily.GEMMA3, () -> tempDir, Gemma3DownloadLifecycle::new);
+
+        ModelArtifactRow.RowView view = row.refresh();
+        assertEquals("Download only", view.convertLabel());
+        assertFalse(view.convertEnabled());
+        assertFalse(view.ready());
+        assertTrue(view.statusText().contains("Gemma 3 files are present"));
+        assertFalse(view.statusText().contains("package compiler not implemented"));
+        assertTrue(view.convertTooltip().contains("download/probe only"));
     }
 
     @Test
