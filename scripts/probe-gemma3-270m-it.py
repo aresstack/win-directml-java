@@ -96,13 +96,21 @@ def load(model_id: str):
 
 def generate(tok, model, prompt: str, max_new_tokens: int):
     messages = [{"role": "user", "content": prompt}]
-    inputs = tok.apply_chat_template(
+    enc = tok.apply_chat_template(
         messages, add_generation_prompt=True, return_tensors="pt", tokenize=True
     )
+    # transformers <5 returns a tensor; >=5 returns a BatchEncoding (dict with input_ids).
+    if hasattr(enc, "shape"):
+        input_ids = enc
+        gen_kwargs = {}
+    else:
+        input_ids = enc["input_ids"]
+        gen_kwargs = {k: v for k, v in enc.items()}
     start = time.time()
-    out = model.generate(inputs, max_new_tokens=max_new_tokens, do_sample=False)
+    out = model.generate(input_ids, max_new_tokens=max_new_tokens, do_sample=False,
+                         **{k: v for k, v in gen_kwargs.items() if k != "input_ids"})
     elapsed = time.time() - start
-    gen = out[0][inputs.shape[-1]:]
+    gen = out[0][input_ids.shape[-1]:]
     text = tok.decode(gen, skip_special_tokens=True).strip()
     tok_per_s = (len(gen) / elapsed) if elapsed > 0 else 0.0
     return text, len(gen), elapsed, tok_per_s
