@@ -69,4 +69,21 @@ class Gemma3RealModelParityTest {
         assertEquals(EXPECTED_NEXT, next,
                 "Java reference greedy next token must match transformers (\" Paris\")");
     }
+
+    @Test
+    void nativeTextToTextProducesParis() throws Exception {
+        Path dir = resolveModelDir();
+        Gemma3Config config = new Gemma3ConfigReader().read(dir.resolve("config.json"));
+        Gemma3Tokenizer tokenizer = Gemma3Tokenizer.load(dir.resolve("tokenizer.json"));
+        SafeTensorsReader.SafeTensorsFile file = SafeTensorsReader.read(dir.resolve("model.safetensors"));
+        Gemma3ReferenceForwardPass fp = new Gemma3ReferenceForwardPass(
+                Gemma3ReferenceWeights.load(file, config));
+
+        // Full native chain: text -> Java tokenizer -> Java forward -> Java decode. No Python, no hardcoded ids.
+        int[] ids = tokenizer.encode("The capital of France is");
+        int next = com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath.argmax(fp.logitsForLastToken(ids));
+        String decoded = tokenizer.decode(new int[]{next}).strip();
+        System.out.println("[GEMMA-NATIVE] '" + decoded + "' (id " + next + ")");
+        assertTrue(decoded.equals("Paris"), "native text->token->forward->text must yield 'Paris', got '" + decoded + "'");
+    }
 }

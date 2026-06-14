@@ -40,7 +40,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-3 wdmlpack compiler + package | **done** (137f0f5) |
 | GEMMA-WARP-7 attention layout + window mask (device-free) | **done** (0d83fbd) |
 | GEMMA-WARP-10 reference greedy generation | **done** (036493b) |
-| GEMMA-WARP-2 tokenizer + chat template | **open — blocker** (see below) |
+| GEMMA-WARP-2 tokenizer + chat template | **done — exact transformers match** |
 | GEMMA-WARP-5/6/8/9 WARP kernels / single-layer / prefill | **open — GPU-blocked** (see below) |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
@@ -69,13 +69,16 @@ head) is therefore the trustworthy WARP parity oracle.
   (mirrors `SmolLM2NativeWarpExecutorTest`, which is `@EnabledIf(WindowsBindings.isSupported())`).
   Strategy: build a **CPU reference** that is verifiable against HF/transformers, then mirror it on
   WARP and gate the GPU tests.
-- **GEMMA-WARP-2 Tokenizer (open, blocks end-to-end text):** Gemma uses a SentencePiece-style BPE
-  (256k) via `tokenizer.json` with metaspace (`▁`), byte-fallback and a Gemma normalizer. The existing
-  Java BPE path (SmolLM2/Qwen, GPT-2 byte-level) almost certainly will **not** tokenize Gemma
-  correctly, so it was not reused blindly. Until a Gemma `tokenizer.json` loader (or a thin Gemma
-  tokenizer) exists, the native runtime is exercised with **pre-tokenized ids** (the parity test feeds
-  transformers ids). This is the gating item for a text→text workbench native path. Decision needed:
-  build a Gemma tokenizer.json loader in Java vs. a smaller dedicated Gemma BPE.
+- **GEMMA-WARP-2 Tokenizer — RESOLVED (done).** Native `Gemma3Tokenizer` reads `tokenizer.json` only
+  (no `tokenizer.model`, no SentencePiece DLL, no Python): normalizer space→`▁`, BPE over the whole
+  normalized string (the `Split(" ")` pre-tokenizer is a no-op post-normalization), byte_fallback to
+  `<0xNN>`, added/special tokens carved out before BPE, `<bos>` prepended. Java ids match HF
+  transformers **exactly** for all fixtures (English, German umlauts, Natural/ADABAS, Java, empty,
+  unicode/byte-fallback) and the chat template; decode round-trips. Findings: **`tokenizer.json` alone
+  suffices** (no `tokenizer.model` needed); byte-fallback **is** required (and implemented); metaspace
+  normalizer correct; no leading-`▁` prepend at start. The full native chain
+  **text → Java tokens → Java forward → Java decode = "Paris"** is verified (`nativeTextToTextProducesParis`).
+  → A text→text workbench native path is now possible (pending the WARP runtime for speed).
 
 - **WARP kernels (GEMMA-WARP-5/6/8/9/10, GPU-blocked here):** no DirectML/D3D12 device in this build
   sandbox, so on-GPU numerical validation cannot run (mirrors `SmolLM2NativeWarpExecutorTest`, gated on
