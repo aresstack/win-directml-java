@@ -31,15 +31,22 @@ stopping. Open points are resolved with the user at the end.
 
 | Slice | Status |
 |-------|--------|
-| GEMMA-WARP-1 family shell + config/inspect | in progress |
+| GEMMA-WARP-1 family shell + config/inspect | **done** (7b1dd3c) |
 | GEMMA-WARP-2 tokenizer + chat template | pending |
 | GEMMA-WARP-3 wdmlpack compiler shell | pending |
-| GEMMA-WARP-4 CPU reference math | pending |
+| GEMMA-WARP-4 CPU reference math | **done** (bd8fbb4) |
+| GEMMA-WARP-8/9 reference weights + full forward | **done** (4b028fe) |
+| GEMMA-WARP-9 real-model parity vs transformers | **done — PASS** (next token 9079 " Paris") |
 | GEMMA-WARP-5..8 WARP kernels / single layer | pending (GPU-gated) |
-| GEMMA-WARP-9 full prefill forward | pending |
 | GEMMA-WARP-10 decode session + KV cache | pending |
 | GEMMA-WARP-11 workbench native flag | pending |
 | GEMMA-WARP-12 perf/heap comparison | pending |
+
+**Milestone:** the device-free CPU reference is numerically correct against HF transformers
+(`Gemma3RealModelParityTest`, gated): for "The capital of France is" (ids [2,818,5279,529,7001,563])
+the Java reference greedy next token == transformers argmax == 9079 (" Paris"). The Gemma math
+(zero-centered RMSNorm, QK-norm, dual-theta RoPE, GQA, sliding window, GeGLU, sandwich norms, tied LM
+head) is therefore the trustworthy WARP parity oracle.
 
 ## Open points / blockers (resolve at the end)
 
