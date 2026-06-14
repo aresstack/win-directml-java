@@ -60,6 +60,29 @@ class GenerationModelRegistryTest {
         }
     }
 
+
+    @Test
+    void registryContainsGemma3InstructionModelAsExternalExperimental() {
+        GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId("google/gemma-3-270m-it");
+
+        assertNotNull(entry, "Gemma 3 IT must be selectable in the generation registry");
+        assertEquals(GenerationModelRegistry.Architecture.CAUSAL_LM, entry.architecture());
+        assertEquals(GenerationModelRegistry.Status.EXPERIMENTAL, entry.status());
+        assertEquals(ChatTemplate.GEMMA3, entry.chatTemplate());
+        assertTrue(entry.isCausalLM());
+        assertTrue(entry.isRunnable(), "Gemma 3 IT should be visible as an external-probe runtime");
+    }
+
+    @Test
+    void registryContainsGemma3BaseAsPlanned() {
+        GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId("google/gemma-3-270m");
+
+        assertNotNull(entry, "Gemma 3 base should be known for downloads and inspection");
+        assertEquals(GenerationModelRegistry.Status.PLANNED, entry.status());
+        assertEquals(ChatTemplate.RAW, entry.chatTemplate());
+        assertFalse(entry.isRunnable(), "Base Gemma should not be offered as an instruction runtime");
+    }
+
     @Test
     void registryContainsT5FamilyAsExperimentalSeq2Seq() {
         String[] ids = {

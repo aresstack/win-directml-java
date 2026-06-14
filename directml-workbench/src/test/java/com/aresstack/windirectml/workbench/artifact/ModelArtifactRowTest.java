@@ -96,9 +96,9 @@ class ModelArtifactRowTest {
         assertEquals("Download only", view.convertLabel());
         assertFalse(view.convertEnabled());
         assertFalse(view.ready());
-        assertTrue(view.statusText().contains("Gemma 3 files are present"));
+        assertEquals("Gemma 3 — download: ready (raw files complete)", view.statusText());
         assertFalse(view.statusText().contains("package compiler not implemented"));
-        assertTrue(view.convertTooltip().contains("download/probe only"));
+        assertTrue(view.convertTooltip().contains("Download-only model candidate"));
     }
 
     @Test

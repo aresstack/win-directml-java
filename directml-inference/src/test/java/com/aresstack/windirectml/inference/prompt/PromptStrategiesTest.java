@@ -63,6 +63,29 @@ class PromptStrategiesTest {
         assertEquals(rendered, prompt);
     }
 
+
+    // ---- Gemma 3 ----------------------------------------------------------
+
+    @Test
+    void gemma3InstructionModelRendersGemmaTurnTemplate() {
+        String prompt = PromptStrategies.forModel("google/gemma-3-270m-it")
+                .renderPrompt(PromptInput.of(PromptTask.SUMMARIZE, "Long text"));
+
+        assertTrue(prompt.startsWith("<start_of_turn>user\nLong text\n\nSummarize"));
+        assertTrue(prompt.contains("<end_of_turn>\n<start_of_turn>model\n"));
+        assertFalse(prompt.contains("<|im_start|>"));
+    }
+
+    @Test
+    void gemma3SupportsInteractiveWorkbenchTasks() {
+        List<PromptTask> tasks = PromptStrategies.supportedTasks("google/gemma-3-270m-it");
+
+        assertTrue(tasks.contains(PromptTask.NONE));
+        assertTrue(tasks.contains(PromptTask.SUMMARIZE));
+        assertTrue(tasks.contains(PromptTask.TRANSLATE_TO_GERMAN));
+        assertTrue(tasks.contains(PromptTask.EXPLAIN_CODE));
+    }
+
     // ---- T5 family --------------------------------------------------------
 
     @Test

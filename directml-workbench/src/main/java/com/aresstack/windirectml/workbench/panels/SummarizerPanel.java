@@ -22,6 +22,7 @@ import com.aresstack.windirectml.inference.artifact.ModelFamily;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.artifact.ModelRuntimeRegistry;
 import com.aresstack.windirectml.workbench.artifact.WorkbenchArtifactGate;
+import com.aresstack.windirectml.workbench.runtime.Gemma3ExternalRuntimeRunner;
 import com.aresstack.windirectml.workbench.runtime.SmolLM2WorkbenchRuntimeRunner;
 import com.aresstack.windirectml.workbench.prompt.PromptTaskLabels;
 
@@ -42,6 +43,7 @@ import java.util.List;
 public final class SummarizerPanel extends JPanel {
 
     private static final String QWEN05_MODEL_ID = "Qwen/Qwen2.5-Coder-0.5B-Instruct";
+    private static final String GEMMA3_MODEL_ID_PREFIX = "google/gemma-3-";
     private static final String SMOLLM2_MODEL_ID_PREFIX = "HuggingFaceTB/SmolLM2-";
 
     /** Diagnostic toggle ({@code -Dsmollm2.debug.prompt=true}): show the rendered prompt and
@@ -173,6 +175,7 @@ public final class SummarizerPanel extends JPanel {
         }
 
         boolean qwenTestModel = isQwenTestModel(selectedModel);
+        boolean gemma3Model = isGemma3Model(selectedModel);
         boolean smolLm2Model = isSmolLm2Model(selectedModel);
         Entry entry = GenerationModelRegistry.findByModelId(selectedModel);
         if (entry != null) {
@@ -180,7 +183,7 @@ public final class SummarizerPanel extends JPanel {
                 appendResult("ERROR: Model '" + selectedModel + "' is unsupported in this runtime.");
                 return;
             }
-            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !qwenTestModel && !smolLm2Model) {
+            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !qwenTestModel && !gemma3Model && !smolLm2Model) {
                 appendResult("ERROR: Model '" + selectedModel + "' is selectable but not executable yet.");
                 appendResult("  Status: planned. Runtime support is in progress for family "
                         + entry.architecture().token() + ".");
@@ -193,6 +196,9 @@ public final class SummarizerPanel extends JPanel {
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
         if (qwenTestModel) {
             appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
+        } else if (gemma3Model) {
+            appendResult("  NOTE: Gemma 3 uses the external local Python/Transformers probe path in this build.");
+            appendResult("  NOTE: This is not the native Java/WARP runtime yet; it loads the downloaded HF files from AppData.");
         } else if (smolLm2Model) {
             appendResult("  NOTE: WARP runs SmolLM2's dense projections on the D3D12 software rasterizer (CPU); "
                     + "AUTO uses a hardware GPU when one exists and otherwise falls back to the Java reference "
@@ -211,6 +217,8 @@ public final class SummarizerPanel extends JPanel {
                         // Qwen 0.5B: use the shared descriptor's runtime dir so the panel status and the
                         // actual load path agree (directml-int4 / model_q4f16.wdmlpack).
                         runQwenGeneration(runtimeRegistry.qwen05bRuntimeDir(), promptTask, text, maxTokens, selectedModel);
+                    } else if (gemma3Model) {
+                        runGemma3Generation(modelDir, promptTask, text, maxTokens, selectedModel);
                     } else if (smolLm2Model) {
                         runSmolLm2Generation(modelDir, promptTask, text, maxTokens);
                     } else if (isT5Model(selectedModel)) {
@@ -249,6 +257,34 @@ public final class SummarizerPanel extends JPanel {
             appendResult("SUMMARY:");
             appendResult(summary.text());
         }
+    }
+
+    private void runGemma3Generation(Path modelDir, PromptTask task, String text, int maxTokens, String selectedModel)
+            throws Exception {
+        long start = System.nanoTime();
+        Gemma3ExternalRuntimeRunner runner = new Gemma3ExternalRuntimeRunner(modelDir);
+        appendResult("Initializing Gemma 3 external probe from " + modelDir + "...");
+        appendResult("Python command: " + System.getProperty("gemma3.python",
+                System.getenv("GEMMA3_PYTHON") == null ? "python" : System.getenv("GEMMA3_PYTHON")));
+        appendResult("");
+        appendResult("OUTPUT:");
+        Gemma3ExternalRuntimeRunner.Result result = runner.generate(PromptInput.of(task, text), maxTokens);
+        if (result.text().isBlank()) {
+            appendResult("  NOTE: generated text is empty after detokenization.");
+        } else {
+            appendResult(result.text());
+        }
+        appendResult("");
+        appendResult("Model loaded and generated in " + elapsedMs(start) + " ms");
+        appendResult("Runtime mode: external-python-transformers");
+        appendResult("Model id: " + selectedModel);
+        appendResult("Model directory: " + result.modelDir());
+        appendResult("Python command: " + result.pythonCommand());
+        appendResult("Generation completed in " + result.metrics().generateMillis() + " ms");
+        appendResult("  Model load: " + result.metrics().modelLoadMillis() + " ms");
+        appendResult("  Prompt tokens: " + result.metrics().promptTokens());
+        appendResult("  Output tokens: " + result.metrics().outputTokens());
+        appendResult("  Finish reason: external_process_completed");
     }
 
     private void runSmolLm2Generation(Path modelDir, PromptTask task, String text, int maxTokens) throws Exception {
@@ -496,6 +532,10 @@ public final class SummarizerPanel extends JPanel {
 
     private static boolean isQwenTestModel(String modelId) {
         return QWEN05_MODEL_ID.equals(modelId);
+    }
+
+    private static boolean isGemma3Model(String modelId) {
+        return modelId != null && modelId.startsWith(GEMMA3_MODEL_ID_PREFIX);
     }
 
     private static boolean isSmolLm2Model(String modelId) {

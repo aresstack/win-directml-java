@@ -23,6 +23,11 @@ public enum ChatTemplate {
     CHATML,
 
     /**
+     * Gemma 3 turn template ({@code <start_of_turn>user\n...<end_of_turn>}).
+     */
+    GEMMA3,
+
+    /**
      * Raw prompt with no template wrapping.
      */
     RAW,

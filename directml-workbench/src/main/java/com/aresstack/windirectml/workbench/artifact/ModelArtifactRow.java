@@ -96,13 +96,25 @@ public final class ModelArtifactRow {
     }
 
     private String compilerMissingStatusText(ModelArtifactStatus s) {
-        String reason = family == ModelFamily.GEMMA3 && !s.reason().isBlank()
-                ? s.reason()
-                : "package compiler not implemented (downloadable, not executable)";
+        if (family == ModelFamily.GEMMA3) {
+            return gemmaDownloadOnlyStatusText(s);
+        }
         return new StringBuilder(family.displayName())
                 .append(" — raw: ").append(pretty(s.rawState()))
-                .append(" — ").append(reason)
+                .append(" — package compiler not implemented (downloadable, not executable)")
                 .toString();
+    }
+
+    private String gemmaDownloadOnlyStatusText(ModelArtifactStatus s) {
+        StringBuilder sb = new StringBuilder(family.displayName()).append(" — download: ");
+        if (s.rawState() == RawAssetState.RAW_VALID) {
+            return sb.append("ready (raw files complete)").toString();
+        }
+        sb.append("incomplete");
+        if (!s.reason().isBlank()) {
+            sb.append(" — ").append(s.reason());
+        }
+        return sb.toString();
     }
 
     private static String convertLabel(ModelArtifactStatus s, ModelConversionPlan p) {

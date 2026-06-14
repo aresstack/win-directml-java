@@ -269,6 +269,34 @@ public final class GenerationModelRegistry {
                 "Small decoder-only candidate and likely best sub-0.5B fallback. "
                         + "Runs through the SmolLM2 reference runtime from a compiled wdmlpack package."));
 
+        // --- Gemma 3: gated compact decoder-only candidate for external Workbench probing ---
+        entries.add(new Entry(
+                "google/gemma-3-270m-it",
+                Architecture.CAUSAL_LM,
+                "Google",
+                "270M",
+                ChatTemplate.GEMMA3,
+                Status.EXPERIMENTAL,
+                Arrays.asList(
+                        "model/gemma-3-270m-it",
+                        "model/google/gemma-3-270m-it"),
+                "Instruction-tuned compact Gemma 3 candidate. Runs in the Workbench through the explicit "
+                        + "external Python/Transformers probe path until a native Java/WARP Gemma runtime exists."));
+
+        entries.add(new Entry(
+                "google/gemma-3-270m",
+                Architecture.CAUSAL_LM,
+                "Google",
+                "270M",
+                ChatTemplate.RAW,
+                Status.PLANNED,
+                Arrays.asList(
+                        "model/gemma-3-270m",
+                        "model/google/gemma-3-270m"),
+                "Pretrained/base Gemma 3 checkpoint. Downloadable for architecture inspection; not a default "
+                        + "interactive instruction model."));
+
+
         // --- T5/CodeT5: encoder-decoder family for code explanation and short summaries ---
         entries.add(new Entry(
                 "Salesforce/codet5-small",

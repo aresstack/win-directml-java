@@ -46,9 +46,9 @@ public final class Gemma3DownloadLifecycle implements ModelPackageLifecycle {
 
     @Override
     public ModelConversionPlan planConversion(Path modelDir) {
-        ModelArtifactStatus status = inspect(modelDir);
         return new ModelConversionPlan(ModelConversionAction.NOT_SUPPORTED, null,
-                sourceDescription(modelDir), status.reason());
+                sourceDescription(modelDir),
+                "Download-only model candidate. Runtime execution is not available in this build.");
     }
 
     @Override
@@ -64,7 +64,7 @@ public final class Gemma3DownloadLifecycle implements ModelPackageLifecycle {
 
     private static String statusReason(RawAssetInspection.Result raw) {
         if (raw.state() == RawAssetState.RAW_VALID) {
-            return "Gemma 3 files are present. Runtime integration is planned; download/probe only.";
+            return "Gemma 3 raw files are complete.";
         }
         return "Gemma 3 download is not complete yet: " + raw.detail();
     }

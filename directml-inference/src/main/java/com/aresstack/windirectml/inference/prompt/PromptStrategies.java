@@ -26,6 +26,14 @@ public final class PromptStrategies {
     public static PromptStrategy forModel(String modelId) {
         String id = Objects.toString(modelId, "").toLowerCase(Locale.ROOT);
 
+        if (id.contains("gemma-3") || id.contains("gemma3")) {
+            return new Gemma3PromptStrategy(ChatTaskInstructions.standard(), EnumSet.of(
+                    PromptTask.NONE,
+                    PromptTask.SUMMARIZE,
+                    PromptTask.TRANSLATE_TO_GERMAN,
+                    PromptTask.TRANSLATE_TO_ENGLISH,
+                    PromptTask.EXPLAIN_CODE));
+        }
         if (id.contains("smollm2")) {
             return chatMl(EnumSet.of(
                     PromptTask.NONE,
