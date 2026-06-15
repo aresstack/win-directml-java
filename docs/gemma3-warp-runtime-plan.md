@@ -58,6 +58,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-13b-2 GPU-resident buffer/execution-context seam | **done — resident kernels, attn-chain 4→1 readbacks, parity** |
 | GEMMA-WARP-13b-3a resident decodeStep wiring | **done — real readbacks/token 344→37, still " Paris"** |
 | GEMMA-WARP-13b-3b submit/fence-coalescing | **done — real fenceWaits/token 834→93, submits 834→454, still " Paris"** |
+| GEMMA-WORKBENCH-PROFILING-1 profile output + runtime UI | **done — Gemma runtime UI-selectable (no JVM flag), detailed phase/WARP-counter profile, 'Show runtime profile' toggle** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -433,3 +434,28 @@ head) is therefore the trustworthy WARP parity oracle.
     the growing key/value uploads, and one drain per layer. Further submit reduction would mean recording a
     whole layer's dispatches into a single command list (and/or deferring the key/value uploads with batch-
     retained upload buffers) — a larger, riskier change deferred to a later slice.
+
+- **GEMMA-WORKBENCH-PROFILING-1 profile output + runtime UI — done.** Two Workbench usability changes, no
+  runtime-path change (the native generator still uses the synchronous `float[]` `decodeStep` path via
+  `Gemma3WarpGenerator`, so the profile reflects that path; switching it to the 13b-3b resident path to
+  surface those gains in the Workbench is a separate future perf slice).
+  - **Runtime mode in the UI (Ziel 3).** `SummarizerPanel` gains a "Gemma runtime:" selector (External
+    Python / Transformers · Native Java/WARP (experimental)), enabled only for Gemma. The choice lives in
+    `WorkbenchModel.gemmaRuntimeMode` and is authoritative; `runGemma3Generation` branches on it instead of
+    `-Dgemma.runtime`. The legacy `-Dgemma.runtime=native-warp` flag remains only as a seed for the initial
+    selection (compat alias), so no JVM flag is needed for normal use. External stays the default.
+  - **Profiling (Ziele 1/5).** `Gemma3NativeWarpRuntime` measures the load phases (package open, tokenizer
+    load, weight load, WARP/session init) and generation phases (tokenize, prefill = time to first token,
+    decode total + avg/token, detokenize) and captures the `WarpSubmissionStats` deltas over the generate
+    region (submits / fence waits / readbacks, + per-token), returned as a `Gemma3NativeWarpProfile` on the
+    `Result`. `Gemma3NativeWarpProfileReport` (Swing-free, unit-tested) formats the detailed block (incl.
+    runtime mode / backend / output mode / package / tokenizer / prompt template / effective prompt chars /
+    token counts) or a short summary.
+  - **Toggle (Ziel 2).** A "Show runtime profile" checkbox (initial value from
+    `-Ddirectml.generation.profile`, checkbox authoritative; default off) selects detailed vs summary.
+  - **Messages (Ziel 4).** Missing package → the existing actionable "compiled model_gemma3.wdmlpack …
+    Download tab → Convert"; runtime mode lines use `Gemma3RuntimeMode.displayLabel()`
+    (`external-python-transformers` / `native-warp-experimental`). Streaming stays the default; buffered
+    stays available. No native-warp default; external-python kept; no fused pipeline / batched prefill /
+    windowed-eviction / downloader / .wdmlpack-format change; Qwen/T5/SmolLM2 untouched. Full
+    `:directml-inference` + `:directml-encoder` + `:directml-workbench` regression green.

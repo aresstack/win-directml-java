@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.workbench;
 
+import com.aresstack.windirectml.inference.gemma.Gemma3RuntimeMode;
 import com.aresstack.windirectml.runtime.facade.Backend;
 import com.aresstack.windirectml.workbench.download.DownloadOverrideStore;
 import com.aresstack.windirectml.workbench.download.QwenDownloadSource;
@@ -21,6 +22,9 @@ public final class WorkbenchModel {
     private volatile String qwenModelFile = QwenOnnxModelVariant.Q4F16.modelFileName();
     private volatile QwenDownloadSource qwenDownloadSource = QwenDownloadSource.ONNX;
     private volatile ProxyConfiguration proxyConfiguration = defaultProxyConfiguration();
+    // Gemma runtime is now UI-selectable (GEMMA-WORKBENCH-PROFILING-1). The legacy -Dgemma.runtime flag
+    // only seeds the initial value; the Workbench selection is authoritative thereafter.
+    private volatile Gemma3RuntimeMode gemmaRuntimeMode = Gemma3RuntimeMode.fromSystemProperty();
 
     public Backend getBackend() {
         return backend;
@@ -76,6 +80,14 @@ public final class WorkbenchModel {
 
     public void setQwenDownloadSource(QwenDownloadSource qwenDownloadSource) {
         this.qwenDownloadSource = qwenDownloadSource == null ? QwenDownloadSource.ONNX : qwenDownloadSource;
+    }
+
+    public Gemma3RuntimeMode getGemmaRuntimeMode() {
+        return gemmaRuntimeMode;
+    }
+
+    public void setGemmaRuntimeMode(Gemma3RuntimeMode gemmaRuntimeMode) {
+        this.gemmaRuntimeMode = gemmaRuntimeMode == null ? Gemma3RuntimeMode.EXTERNAL : gemmaRuntimeMode;
     }
 
     public ProxyConfiguration getProxyConfiguration() {

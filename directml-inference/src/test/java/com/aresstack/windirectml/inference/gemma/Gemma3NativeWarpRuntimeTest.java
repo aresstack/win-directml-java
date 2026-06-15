@@ -72,6 +72,16 @@ class Gemma3NativeWarpRuntimeTest {
             assertTrue(r.outputTokens() >= 1, "expected at least one generated token");
             assertEquals("WARP", r.backend(), "backend");
             assertTrue(r.text().contains("Paris"), "native WARP output should contain \"Paris\": '" + r.text() + "'");
+            // GEMMA-WORKBENCH-PROFILING-1: the profile is populated and consistent with the result.
+            Gemma3NativeWarpProfile profile = r.profile();
+            assertNotNull(profile, "profile must be populated");
+            assertEquals(r.promptTokens(), profile.promptTokens(), "profile prompt tokens");
+            assertEquals(r.outputTokens(), profile.outputTokens(), "profile output tokens");
+            assertTrue(profile.weightLoadMs() >= 0 && profile.sessionInitMs() >= 0, "load phases measured");
+            assertTrue(profile.submits() > 0, "WARP submits counted for the generate region");
+            System.out.println("[GEMMA-PROFILE] " + Gemma3NativeWarpProfileReport.detailed(
+                    profile, "native-warp-experimental", r.backend(), "streaming",
+                    "model_gemma3.wdmlpack", "tokenizer.json", "NONE", 24, 0, profile.runtimeTotalMs()));
             // one delta per visible token (stop token not streamed); deltas concatenate to the final text.
             assertEquals(r.outputTokens(), deltas.size(), "one streamed delta per visible token");
             assertEquals(r.text(), streamed.toString(), "concatenated deltas == final result text");

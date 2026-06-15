@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.gemma;
 
+import com.aresstack.windirectml.windows.WarpSubmissionStats;
 import com.aresstack.windirectml.windows.WindowsBindings;
 
 import java.io.IOException;
@@ -34,9 +35,10 @@ public final class Gemma3NativeWarpRuntime {
         this.tokenizerJson = Objects.requireNonNull(tokenizerJson, "tokenizerJson");
     }
 
-    /** Result of a native WARP generation. */
+    /** Result of a native WARP generation, including a phase/WARP-counter {@link Gemma3NativeWarpProfile}. */
     public record Result(String text, int promptTokens, int outputTokens,
-                         Gemma3GenerationResult.FinishReason finishReason, Path packagePath, String backend) {
+                         Gemma3GenerationResult.FinishReason finishReason, Path packagePath, String backend,
+                         Gemma3NativeWarpProfile profile) {
     }
 
     /**
@@ -105,22 +107,31 @@ public final class Gemma3NativeWarpRuntime {
             throw new IllegalStateException("Gemma native WARP requires tokenizer.json: " + tokenizerJson);
         }
 
+        long runtimeStart = System.nanoTime();
+        long mark = runtimeStart;
         Gemma3RuntimePackage pkg = Gemma3RuntimePackage.open(packagePath);
+        long packageOpenMs = sinceMs(mark);
         Gemma3Config config = pkg.config();
         // Heap-light: projections + tied embedding/LM head load as direct FP32 ByteBuffers (off-heap),
         // not the ~1 GB float[] reference path. The reference path stays for parity/tests only.
+        mark = System.nanoTime();
         Gemma3WarpWeights weights = pkg.loadWarpWeightsHeapLight();
+        long weightLoadMs = sinceMs(mark);
 
+        mark = System.nanoTime();
         Gemma3Tokenizer tokenizer = Gemma3Tokenizer.load(tokenizerJson);
+        long tokenizerLoadMs = sinceMs(mark);
         String rendered = applyChatTemplate ? Gemma3ChatTemplate.renderUserTurn(promptText) : promptText;
+        mark = System.nanoTime();
         int[] promptIds = tokenizer.encode(rendered, true);
+        long tokenizeMs = sinceMs(mark);
 
         Gemma3StopTokenPolicy stop = stopPolicy(config, tokenizer);
         // Incremental decode for streaming: decode the growing visible-id prefix and emit only the new tail,
         // so the streamed concatenation matches the final tokenizer.decode of all ids exactly.
         java.util.List<Integer> visibleIds = new java.util.ArrayList<>();
         String[] prevText = {""};
-        IntConsumer callback = (onTokenId == null && onTextDelta == null) ? null : id -> {
+        IntConsumer userCallback = (onTokenId == null && onTextDelta == null) ? null : id -> {
             if (onTokenId != null) {
                 onTokenId.accept(id);
             }
@@ -133,17 +144,49 @@ public final class Gemma3NativeWarpRuntime {
                 onTextDelta.accept(full.substring(common));
             }
         };
+        // Profiling wrapper: the first visible token marks the prefill/decode boundary (prefill = time to
+        // first token), then delegate to the user callback. Always installed, even in buffered mode.
+        long[] firstTokenNanos = {-1L};
+        IntConsumer callback = id -> {
+            if (firstTokenNanos[0] < 0) {
+                firstTokenNanos[0] = System.nanoTime();
+            }
+            if (userCallback != null) {
+                userCallback.accept(id);
+            }
+        };
 
         try {
             WindowsBindings wb = new WindowsBindings();
+            long sessionStart = System.nanoTime();
             wb.init("directml");
             try (Gemma3WarpDecodeSession session = new Gemma3WarpDecodeSession(wb, weights)) {
+                long sessionInitMs = sinceMs(sessionStart);
                 Gemma3WarpGenerator generator = new Gemma3WarpGenerator(session, stop);
+                // WARP counters for the generate region only (weight upload happened during session init,
+                // before this snapshot, so the deltas isolate prefill + decode).
+                WarpSubmissionStats.Snapshot warpBefore = WarpSubmissionStats.snapshot();
+                long genStart = System.nanoTime();
                 Gemma3GenerationResult result = generator.generate(
                         new Gemma3GenerationRequest(promptIds, maxNewTokens), callback);
+                long genEnd = System.nanoTime();
+                WarpSubmissionStats.Snapshot warpDelta = WarpSubmissionStats.snapshot().minus(warpBefore);
+
+                long prefillMs = firstTokenNanos[0] > 0
+                        ? nanosToMs(firstTokenNanos[0] - genStart) : nanosToMs(genEnd - genStart);
+                long decodeTotalMs = firstTokenNanos[0] > 0 ? nanosToMs(genEnd - firstTokenNanos[0]) : 0L;
+
+                long detokenizeStart = System.nanoTime();
                 String text = tokenizer.decode(result.generatedTokenIds());
+                long detokenizeMs = sinceMs(detokenizeStart);
+
+                Gemma3NativeWarpProfile profile = new Gemma3NativeWarpProfile(
+                        packageOpenMs, tokenizerLoadMs, weightLoadMs, sessionInitMs,
+                        tokenizeMs, prefillMs, decodeTotalMs, detokenizeMs, sinceMs(runtimeStart),
+                        result.promptTokenCount(), result.outputTokenCount(),
+                        warpDelta.submits(), warpDelta.fenceWaits(), warpDelta.readbacks());
                 return new Result(text, result.promptTokenCount(), result.outputTokenCount(),
-                        result.finishReason(), packagePath, "WARP");
+                        result.finishReason(), packagePath, "WARP", profile);
             } finally {
                 wb.close();
             }
@@ -152,6 +195,14 @@ public final class Gemma3NativeWarpRuntime {
         } catch (Exception e) {
             throw new IOException("Gemma native WARP generation failed", e);
         }
+    }
+
+    private static long sinceMs(long startNanos) {
+        return nanosToMs(System.nanoTime() - startNanos);
+    }
+
+    private static long nanosToMs(long nanos) {
+        return nanos / 1_000_000L;
     }
 
     private static int commonPrefixLength(String a, String b) {
