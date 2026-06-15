@@ -43,7 +43,9 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-2 tokenizer + chat template | **done — exact transformers match** |
 | GEMMA-WARP-5a WARP zero-centered RMSNorm + QK-Norm kernels | **done — GPU-validated vs reference** |
 | GEMMA-WARP-6 WARP GeGLU + GELU-tanh MLP | **done — GPU-validated vs reference** |
-| GEMMA-WARP-7/8/9 WARP attention / single-layer / prefill | open — next |
+| GEMMA-WARP-7a attention layout + RoPE reference (device-free) | **done** (layout 0d83fbd, RoPE this slice) |
+| GEMMA-WARP-7b WARP RoPE + attention-scores primitives | **done — GPU-validated vs reference** |
+| GEMMA-WARP-8/9 WARP single-layer / prefill | open — next |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -99,6 +101,22 @@ head) is therefore the trustworthy WARP parity oracle.
   magnitudes (the regime a pre-feedforward-normed input actually produces). ByteBuffer norm-weight
   upload intentionally skipped (norm/activation vectors are tiny; heap-light matters for the big
   projections + tied embedding/LM-head).
+
+- **GEMMA-WARP-7 RoPE + local/global attention layout — done.** Split into 7a (device-free) and 7b
+  (WARP). **7a:** the local/global layout (`Gemma3AttentionLayout`) was already shipped in 0d83fbd
+  (GQA mapping, full layers 5/11/17, dual theta, sliding-window + causal visibility); this slice adds
+  the device-free `Gemma3RoPE` (rotate-half across heads, the parity oracle) plus `Gemma3RoPETest`
+  rounding out the checklist (all-18-layer full/local classification, **explicit head_dim=256** — never
+  `hidden/heads`, GQA with >1 kv head, window+causal). **7b:** `Gemma3WarpAttention` (HLSL) +
+  `Gemma3WarpRoPEKernel` (rotate-half RoPE over packed heads) and `Gemma3WarpAttentionScoresKernel`
+  (scaled masked `QK^T` for one query position; GQA `kvHead=head/groupsPerKv`; the visible range
+  `[firstValid, queryPos]` comes from `Gemma3AttentionLayout`, so local/global + causal are applied
+  without imitating any other family; masked keys get the `SCORE_SENTINEL = -1e30` a softmax drops).
+  Validated on the real GPU vs the verified reference: RoPE on a small shape and the real head_dim=256
+  at **both** thetas (1e4/1e6) and several positions (pos=0 identity); scores on a full layer
+  (firstValid=0), a local layer with a biting sliding window, and a 4-heads/2-kv GQA case. Tolerance
+  **abs 1e-4 + rel 1e-4**. Still primitives (per-call upload/readback), not yet the fused single-layer
+  step — that is GEMMA-WARP-8 (softmax + AV + o_proj wiring).
 - **GEMMA-WARP-2 Tokenizer — RESOLVED (done).** Native `Gemma3Tokenizer` reads `tokenizer.json` only
   (no `tokenizer.model`, no SentencePiece DLL, no Python): normalizer space→`▁`, BPE over the whole
   normalized string (the `Split(" ")` pre-tokenizer is a no-op post-normalization), byte_fallback to
