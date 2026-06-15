@@ -55,6 +55,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WORKBENCH-CONVERT-1 UI Convert → model_gemma3.wdmlpack | **done — Convert enabled + produces the package the runtime finds** |
 | GENERATION-STREAMING-1 global streaming switch + Gemma native-warp streaming | **done — default streaming, Gemma streams " Paris." live** |
 | GEMMA-WARP-13b-1 submit/fence/readback instrumentation | **done — measured: ~1140 submits + 344 readbacks per decode token** |
+| GEMMA-WARP-13b-2 GPU-resident buffer/execution-context seam | **done — resident kernels, attn-chain 4→1 readbacks, parity** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -349,3 +350,26 @@ head) is therefore the trustworthy WARP parity oracle.
   - **Next (not in this slice):** 13b-2 batch/execution-context seam for a Gemma layer; 13b-3 Gemma
     decodeStep keeps norm/rope/scores/softmax/value/geglu GPU-resident across one command list with a
     single readback per token. No math/output change intended — output stays " Paris.".
+
+- **GEMMA-WARP-13b-2 GPU-resident buffer/execution-context seam — done (infra, Gemma-first).**
+  `WarpGpuBuffer` (directml-windows-bindings) — a resident FP32 D3D12 buffer (`allocate`/`upload`,
+  `gpuAddress()`, `readback()`, `close()`); `WarpExecutionContext` — resident buffer factories +
+  `dispatch(kernel, uavs, constants, elementCount)` that records+submits one compute dispatch with **no
+  readback** (output stays GPU-resident; one submit+fence, counted by `WarpSubmissionStats`). All seven
+  Gemma compute kernels gained an **additive** resident overload
+  (`WarpGpuBuffer fn(WarpExecutionContext, WarpGpuBuffer…)`): RmsNorm, QkNorm, RoPE, AttentionScores,
+  Softmax, AttentionValue, GeGLU. The existing `float[]` APIs are unchanged (separate code paths;
+  reused by all current tests + the still-synchronous decodeStep).
+  - Validated (`Gemma3WarpResidentPipelineTest`, synthetic, default suite): resident output == float[]
+    output (tol 1e-4) for `RMSNorm→GeGLU` and the `RoPE→Scores→Softmax→Value` chain; **readbacks drop**
+    rms→geglu 2→1, attn-chain 4→1 (intermediates stay resident, only the final result is read back).
+  - Counting: resident `dispatch` and `WarpGpuBuffer.readback()` go through the same `executeAndWait`/
+    `readbackFloatsInternal` chokepoints, so `WarpSubmissionStats` measures them correctly; no
+    double-count (the resident path uses `GpuComputeKernel`, not `MatMulNBitsKernel.matvec`).
+  - **Still per-call:** each resident `dispatch` is its own submit+fence (this slice removes intermediate
+    uploads/readbacks, not the per-dispatch fence). **For 13b-3:** rewire `Gemma3WarpLayer.decodeStep`
+    (and the q/k/v/o + gate/up/down projections) onto resident buffers end-to-end with one readback per
+    token, and optionally coalesce the per-dispatch fences via `DirectMlGpuBatch` (deferred fence) so a
+    decode step approaches a single drain — then compare 13b-1 counters before/after on the real model.
+    Output must stay " Paris.". No native-warp default switch / external removal / Qwen-Smol-T5 change /
+    batched-prefill / windowed-eviction in this slice.

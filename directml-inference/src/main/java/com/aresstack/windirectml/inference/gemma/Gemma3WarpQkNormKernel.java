@@ -3,6 +3,8 @@ package com.aresstack.windirectml.inference.gemma;
 import com.aresstack.windirectml.windows.D3D12Bindings;
 import com.aresstack.windirectml.windows.DxgiBindings;
 import com.aresstack.windirectml.windows.GpuComputeKernel;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -99,6 +101,27 @@ public final class Gemma3WarpQkNormKernel implements AutoCloseable {
                 DxgiBindings.release(outBuf);
             }
         }
+    }
+
+    /** GPU-resident per-head QK-norm (GEMMA-WARP-13b-2). Same math as {@link #normalizeHeads}. */
+    public WarpGpuBuffer normalizeHeads(WarpExecutionContext ctx, WarpGpuBuffer heads, int numHeads,
+                                        int headDim, WarpGpuBuffer weight, float eps) throws WindowsNativeException {
+        ensureOpen();
+        if (numHeads < 1 || headDim < 1) {
+            throw new IllegalArgumentException("numHeads and headDim must be positive");
+        }
+        if (heads.elementCount() != numHeads * headDim) {
+            throw new IllegalArgumentException("heads length must equal numHeads*headDim");
+        }
+        if (weight.elementCount() != headDim) {
+            throw new IllegalArgumentException("weight length must equal headDim");
+        }
+        WarpGpuBuffer out = ctx.allocate(numHeads * headDim);
+        ctx.dispatch(kernel,
+                new long[]{heads.gpuAddress(), weight.gpuAddress(), out.gpuAddress()},
+                new int[]{numHeads, headDim, Float.floatToRawIntBits(eps)},
+                numHeads * Gemma3WarpNorms.GROUP_SIZE);
+        return out;
     }
 
     private void ensureOpen() {

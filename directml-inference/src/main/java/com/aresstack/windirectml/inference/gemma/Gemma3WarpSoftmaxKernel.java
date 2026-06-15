@@ -3,6 +3,8 @@ package com.aresstack.windirectml.inference.gemma;
 import com.aresstack.windirectml.windows.D3D12Bindings;
 import com.aresstack.windirectml.windows.DxgiBindings;
 import com.aresstack.windirectml.windows.GpuComputeKernel;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -81,6 +83,24 @@ public final class Gemma3WarpSoftmaxKernel implements AutoCloseable {
                 DxgiBindings.release(outBuf);
             }
         }
+    }
+
+    /** GPU-resident row-wise softmax (GEMMA-WARP-13b-2). Same math as {@link #softmaxRows(float[], int, int)}. */
+    public WarpGpuBuffer softmaxRows(WarpExecutionContext ctx, WarpGpuBuffer scores, int numRows, int cols)
+            throws WindowsNativeException {
+        ensureOpen();
+        if (numRows < 1 || cols < 1) {
+            throw new IllegalArgumentException("numRows and cols must be positive");
+        }
+        if (scores.elementCount() != numRows * cols) {
+            throw new IllegalArgumentException("scores length must equal numRows*cols");
+        }
+        WarpGpuBuffer out = ctx.allocate(numRows * cols);
+        ctx.dispatch(kernel,
+                new long[]{scores.gpuAddress(), out.gpuAddress()},
+                new int[]{numRows, cols},
+                numRows * Gemma3WarpAttention.GROUP_SIZE);
+        return out;
     }
 
     private void ensureOpen() {

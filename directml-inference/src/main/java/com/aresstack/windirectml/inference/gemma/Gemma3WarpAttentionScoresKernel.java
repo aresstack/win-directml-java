@@ -3,6 +3,8 @@ package com.aresstack.windirectml.inference.gemma;
 import com.aresstack.windirectml.windows.D3D12Bindings;
 import com.aresstack.windirectml.windows.DxgiBindings;
 import com.aresstack.windirectml.windows.GpuComputeKernel;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -115,6 +117,29 @@ public final class Gemma3WarpAttentionScoresKernel implements AutoCloseable {
                 DxgiBindings.release(sBuf);
             }
         }
+    }
+
+    /** GPU-resident scaled masked QK^T (GEMMA-WARP-13b-2). Same math as {@link #scores}. */
+    public WarpGpuBuffer scores(WarpExecutionContext ctx, WarpGpuBuffer q, WarpGpuBuffer keys,
+                                int numHeads, int numKvHeads, int headDim, int seqLen, int queryPos,
+                                int firstValid, float scale) throws WindowsNativeException {
+        ensureOpen();
+        if (numHeads % numKvHeads != 0) {
+            throw new IllegalArgumentException("numHeads must be a multiple of numKvHeads");
+        }
+        int kvDim = numKvHeads * headDim;
+        if (q.elementCount() != numHeads * headDim || keys.elementCount() != seqLen * kvDim) {
+            throw new IllegalArgumentException("q/keys length mismatch");
+        }
+        int groupsPerKv = numHeads / numKvHeads;
+        int total = numHeads * seqLen;
+        WarpGpuBuffer out = ctx.allocate(total);
+        ctx.dispatch(kernel,
+                new long[]{q.gpuAddress(), keys.gpuAddress(), out.gpuAddress()},
+                new int[]{numHeads, groupsPerKv, headDim, kvDim, seqLen, queryPos, firstValid,
+                        Float.floatToRawIntBits(scale)},
+                total);
+        return out;
     }
 
     private void ensureOpen() {

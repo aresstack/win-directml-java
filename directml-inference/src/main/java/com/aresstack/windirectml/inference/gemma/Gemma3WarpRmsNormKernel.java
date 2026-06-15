@@ -3,6 +3,8 @@ package com.aresstack.windirectml.inference.gemma;
 import com.aresstack.windirectml.windows.D3D12Bindings;
 import com.aresstack.windirectml.windows.DxgiBindings;
 import com.aresstack.windirectml.windows.GpuComputeKernel;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -91,6 +93,27 @@ public final class Gemma3WarpRmsNormKernel implements AutoCloseable {
                 DxgiBindings.release(outBuf);
             }
         }
+    }
+
+    /**
+     * GPU-resident zero-centered RMSNorm (GEMMA-WARP-13b-2): reads {@code x}/{@code weight} from resident
+     * buffers and writes the result to a new resident buffer — no upload/readback. Same math as
+     * {@link #normalize(float[], float[], float)}.
+     */
+    public WarpGpuBuffer normalize(WarpExecutionContext ctx, WarpGpuBuffer x, WarpGpuBuffer weight, float eps)
+            throws WindowsNativeException {
+        ensureOpen();
+        int dim = x.elementCount();
+        if (weight.elementCount() != dim) {
+            throw new IllegalArgumentException("x and weight must have equal length: x=" + dim
+                    + ", weight=" + weight.elementCount());
+        }
+        WarpGpuBuffer out = ctx.allocate(dim);
+        ctx.dispatch(kernel,
+                new long[]{x.gpuAddress(), weight.gpuAddress(), out.gpuAddress()},
+                new int[]{dim, Float.floatToRawIntBits(eps)},
+                Gemma3WarpNorms.GROUP_SIZE);
+        return out;
     }
 
     private void ensureOpen() {

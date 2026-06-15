@@ -3,6 +3,8 @@ package com.aresstack.windirectml.inference.gemma;
 import com.aresstack.windirectml.windows.D3D12Bindings;
 import com.aresstack.windirectml.windows.DxgiBindings;
 import com.aresstack.windirectml.windows.GpuComputeKernel;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -87,6 +89,24 @@ public final class Gemma3WarpRoPEKernel implements AutoCloseable {
                 DxgiBindings.release(outBuf);
             }
         }
+    }
+
+    /** GPU-resident rotate-half RoPE (GEMMA-WARP-13b-2). Same math as {@link #applyToHeads(float[], int, int, int, float)}. */
+    public WarpGpuBuffer applyToHeads(WarpExecutionContext ctx, WarpGpuBuffer packed, int numHeads,
+                                      int headDim, int pos, float theta) throws WindowsNativeException {
+        ensureOpen();
+        if (numHeads < 1 || headDim < 1 || (headDim & 1) != 0) {
+            throw new IllegalArgumentException("numHeads/headDim must be positive and headDim even");
+        }
+        if (packed.elementCount() != numHeads * headDim) {
+            throw new IllegalArgumentException("packed length must equal numHeads*headDim");
+        }
+        WarpGpuBuffer out = ctx.allocate(numHeads * headDim);
+        ctx.dispatch(kernel,
+                new long[]{packed.gpuAddress(), out.gpuAddress()},
+                new int[]{numHeads, headDim, pos, Float.floatToRawIntBits(theta)},
+                numHeads * (headDim / 2));
+        return out;
     }
 
     private void ensureOpen() {

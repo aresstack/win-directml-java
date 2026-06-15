@@ -3,6 +3,8 @@ package com.aresstack.windirectml.inference.gemma;
 import com.aresstack.windirectml.windows.D3D12Bindings;
 import com.aresstack.windirectml.windows.DxgiBindings;
 import com.aresstack.windirectml.windows.GpuComputeKernel;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -80,6 +82,29 @@ public final class Gemma3WarpGeGluKernel implements AutoCloseable {
                 DxgiBindings.release(outBuf);
             }
         }
+    }
+
+    /**
+     * GPU-resident fused GeGLU (GEMMA-WARP-13b-2): reads a {@code [2*intermediate]} resident
+     * {@code [gate|up]} buffer and writes {@code [intermediate]} to a new resident buffer — no
+     * upload/readback. Same math as {@link #apply(float[], int)}.
+     */
+    public WarpGpuBuffer apply(WarpExecutionContext ctx, WarpGpuBuffer gateUp, int intermediate)
+            throws WindowsNativeException {
+        ensureOpen();
+        if (intermediate < 1) {
+            throw new IllegalArgumentException("intermediate must be positive: " + intermediate);
+        }
+        if (gateUp.elementCount() != 2 * intermediate) {
+            throw new IllegalArgumentException("gateUp length must equal 2*intermediate: gateUp="
+                    + gateUp.elementCount() + ", expected=" + (2 * intermediate));
+        }
+        WarpGpuBuffer out = ctx.allocate(intermediate);
+        ctx.dispatch(kernel,
+                new long[]{gateUp.gpuAddress(), out.gpuAddress()},
+                new int[]{intermediate},
+                intermediate);
+        return out;
     }
 
     private void ensureOpen() {

@@ -3,6 +3,8 @@ package com.aresstack.windirectml.inference.gemma;
 import com.aresstack.windirectml.windows.D3D12Bindings;
 import com.aresstack.windirectml.windows.DxgiBindings;
 import com.aresstack.windirectml.windows.GpuComputeKernel;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -103,6 +105,27 @@ public final class Gemma3WarpAttentionValueKernel implements AutoCloseable {
                 DxgiBindings.release(cBuf);
             }
         }
+    }
+
+    /** GPU-resident value aggregation context = prob·V (GEMMA-WARP-13b-2). Same math as {@link #aggregate}. */
+    public WarpGpuBuffer aggregate(WarpExecutionContext ctx, WarpGpuBuffer prob, WarpGpuBuffer values,
+                                   int numHeads, int numKvHeads, int headDim, int cols) throws WindowsNativeException {
+        ensureOpen();
+        if (numHeads % numKvHeads != 0) {
+            throw new IllegalArgumentException("numHeads must be a multiple of numKvHeads");
+        }
+        int kvDim = numKvHeads * headDim;
+        if (prob.elementCount() != numHeads * cols || values.elementCount() != cols * kvDim) {
+            throw new IllegalArgumentException("prob/values length mismatch");
+        }
+        int groupsPerKv = numHeads / numKvHeads;
+        int total = numHeads * headDim;
+        WarpGpuBuffer out = ctx.allocate(total);
+        ctx.dispatch(kernel,
+                new long[]{prob.gpuAddress(), values.gpuAddress(), out.gpuAddress()},
+                new int[]{numHeads, groupsPerKv, headDim, kvDim, cols},
+                total);
+        return out;
     }
 
     private void ensureOpen() {
