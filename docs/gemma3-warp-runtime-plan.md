@@ -52,6 +52,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-11 workbench native flag (-Dgemma.runtime=native-warp) | **done — native path " Paris." in the runner** |
 | GEMMA-WARP-12 perf/heap measurement (native-warp vs external) | **done — measured; verdict WAIT** (see `gemma3-warp-runtime-performance.md`) |
 | GEMMA-WARP-13a heap-light product weight load | **done — on-heap delta 0 MB at load, still " Paris"** |
+| GEMMA-WORKBENCH-CONVERT-1 UI Convert → model_gemma3.wdmlpack | **done — Convert enabled + produces the package the runtime finds** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -276,3 +277,19 @@ head) is therefore the trustworthy WARP parity oracle.
   The heavy perf probe is now opt-in (`-Dgemma.perf.probe=true`) so the default suite doesn't OOM the WARP
   device with the added heap-light real-model test. Reference path stays for parity/tests; perf
   (fused/batched pipeline) is the remaining WAIT item before native-warp could become default.
+
+- **GEMMA-WORKBENCH-CONVERT-1 UI Convert — done.** Gemma's artifact lifecycle was `Gemma3DownloadLifecycle`
+  (download/probe-only: `hasCompiler=false`, `convert` returns failed) → the Workbench Convert button
+  stayed disabled, so `-Dgemma.runtime=native-warp` couldn't get its package from the UI. New
+  `Gemma3PackageLifecycle` (mirrors `T5PackageLifecycle`): `hasCompiler=true`, targets exactly
+  `model_gemma3.wdmlpack` (`Gemma3WdmlPackCompiler.DEFAULT_OUTPUT_NAME` — the file
+  `Gemma3NativeWarpRuntime` loads), `inspect` reports raw (config + safetensors) + package state via
+  `Gemma3RuntimePackage`, `convert` calls `Gemma3WdmlPackCompiler.compile(dir, model_gemma3.wdmlpack, force)`.
+  Wired into both product sites (`DownloadPanel` rows + `lifecycleSupplier`, and
+  `DefaultModelArtifactService.createDefault`). The runtime's missing-package message now matches the UI
+  ("Open the Download tab, select google/gemma-3-270m-it, then run Convert."). `Gemma3DownloadLifecycle`
+  is retained only for its existing unit test. Validated: device-free lifecycle tests (raw-complete →
+  Convert, empty → Inspect, corrupt package → Repair, exact-name `existingPackage`) and a CPU
+  real-convert test (hard-links the model into a temp dir, converts, asserts the package is
+  runtime-loadable and the runtime finds it, lifecycle then READY). No native-runtime path change beyond
+  the message; no format change; T5/SmolLM2/Qwen lifecycles untouched.

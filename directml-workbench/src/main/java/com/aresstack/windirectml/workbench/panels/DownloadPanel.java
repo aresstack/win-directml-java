@@ -1,7 +1,7 @@
 package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.inference.artifact.CompilerMissingLifecycle;
-import com.aresstack.windirectml.inference.artifact.Gemma3DownloadLifecycle;
+import com.aresstack.windirectml.inference.artifact.Gemma3PackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.ModelConversionResult;
 import com.aresstack.windirectml.inference.artifact.ModelFamily;
 import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
@@ -241,7 +241,7 @@ public final class DownloadPanel extends JPanel {
                 createAccessConfigButton(modelId),
                 new ModelArtifactRow(ModelFamily.GEMMA3,
                         () -> model.getModelRoot().resolve(manifest.localDirName()),
-                        Gemma3DownloadLifecycle::new),
+                        Gemma3PackageLifecycle::new),
                 createOpenFolderButton(() -> model.getModelRoot().resolve(manifest.localDirName())),
                 registerProgressBar(manifest));
     }
@@ -269,7 +269,7 @@ public final class DownloadPanel extends JPanel {
     private static java.util.function.Supplier<ModelPackageLifecycle> lifecycleSupplier(ModelFamily family) {
         return switch (family) {
             case SMOLLM2 -> SmolLM2PackageLifecycle::new;
-            case GEMMA3 -> Gemma3DownloadLifecycle::new;
+            case GEMMA3 -> Gemma3PackageLifecycle::new;
             case T5 -> T5PackageLifecycle::new;
             case QWEN -> QwenPackageLifecycle::new; // default model.onnx -> model.wdmlpack
             default -> () -> new CompilerMissingLifecycle(family,

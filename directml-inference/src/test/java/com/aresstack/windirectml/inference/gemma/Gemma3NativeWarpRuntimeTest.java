@@ -27,9 +27,9 @@ class Gemma3NativeWarpRuntimeTest {
         Path absent = Path.of("does", "not", "exist", "model_gemma3.wdmlpack");
         String msg = Gemma3NativeWarpRuntime.describeMissingPackage(absent);
         assertNotNull(msg, "missing package must produce a message");
-        assertTrue(msg.contains("compiled .wdmlpack"), "message should mention the compiled package: " + msg);
-        assertTrue(msg.contains("Download/Convert") || msg.contains("compiler"),
-                "message should point to Download/Convert or the compiler: " + msg);
+        assertTrue(msg.contains("model_gemma3.wdmlpack"), "message should name the package file: " + msg);
+        assertTrue(msg.contains("Download tab") && msg.contains("Convert"),
+                "message should point to the Download tab + Convert: " + msg);
 
         Path present = Files.createTempFile("gemma-pkg-present", ".wdmlpack");
         try {

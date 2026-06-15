@@ -53,8 +53,9 @@ public final class Gemma3NativeWarpRuntime {
      */
     public static String describeMissingPackage(Path packagePath) {
         if (packagePath == null || !Files.isRegularFile(packagePath)) {
-            return "Gemma native WARP requires a compiled .wdmlpack package (" + packagePath + "). "
-                    + "Use Download/Convert first or run the Gemma compiler.";
+            return "Gemma native WARP requires a compiled " + Gemma3WdmlPackCompiler.DEFAULT_OUTPUT_NAME
+                    + " package. Open the Download tab, select google/gemma-3-270m-it, then run Convert. "
+                    + "(expected at " + packagePath + ")";
         }
         return null;
     }
