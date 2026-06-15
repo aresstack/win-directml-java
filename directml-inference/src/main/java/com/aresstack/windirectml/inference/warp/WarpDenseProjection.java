@@ -1,7 +1,10 @@
 package com.aresstack.windirectml.inference.warp;
 
 import com.aresstack.windirectml.windows.MatMulNBitsKernel;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
+import com.aresstack.windirectml.windows.WindowsNativeException;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -131,6 +134,24 @@ public final class WarpDenseProjection implements AutoCloseable {
      */
     public MatMulNBitsKernel kernel() {
         return kernel;
+    }
+
+    /**
+     * GPU-resident projection (GEMMA-WARP-13b-3a): {@code y = W * x} reading {@code input} from a resident
+     * buffer and returning a new resident {@link WarpGpuBuffer} — no CPU upload/readback. Numerically
+     * identical to {@link #project(float[])}.
+     */
+    public WarpGpuBuffer forwardResident(WarpExecutionContext ctx, WarpGpuBuffer input)
+            throws WindowsNativeException {
+        ensureOpen();
+        Objects.requireNonNull(ctx, "ctx");
+        if (input.elementCount() != inputSize) {
+            throw new IllegalArgumentException("WARP dense projection resident input length mismatch for "
+                    + name + ": input=" + input.elementCount() + ", expected=" + inputSize);
+        }
+        WarpGpuBuffer output = ctx.allocate(outputSize);
+        kernel.matvecResident(input, output);
+        return output;
     }
 
     /** Project one vector, allocating the output. */

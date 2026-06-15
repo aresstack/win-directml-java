@@ -27,6 +27,7 @@ public final class Gemma3WarpGeGluKernel implements AutoCloseable {
     private final MemorySegment queue;
     private final Arena arena;
     private final GpuComputeKernel kernel;
+    private final GpuComputeKernel kernel2; // two-input (separate gate/up buffers) — resident MLP
     private boolean closed;
 
     public Gemma3WarpGeGluKernel(WindowsBindings windowsBindings) throws WindowsNativeException {
@@ -41,6 +42,28 @@ public final class Gemma3WarpGeGluKernel implements AutoCloseable {
         this.kernel = new GpuComputeKernel(windowsBindings, cmdListForMh,
                 Gemma3WarpActivations.GEGLU_HLSL, "gemma3_geglu",
                 2, 1, Gemma3WarpActivations.GROUP_SIZE);
+        this.kernel2 = new GpuComputeKernel(windowsBindings, cmdListForMh,
+                Gemma3WarpActivations.GEGLU2_HLSL, "gemma3_geglu2",
+                3, 1, Gemma3WarpActivations.GROUP_SIZE);
+    }
+
+    /**
+     * GPU-resident two-buffer GeGLU (GEMMA-WARP-13b-3a): {@code out = gelu_tanh(gate) * up} reading
+     * separate resident {@code gate}/{@code up} buffers (each {@code intermediate}) — the resident MLP
+     * keeps the two projection outputs apart, no host concat. Same math as {@link #apply(float[], int)}.
+     */
+    public WarpGpuBuffer apply(WarpExecutionContext ctx, WarpGpuBuffer gate, WarpGpuBuffer up, int intermediate)
+            throws WindowsNativeException {
+        ensureOpen();
+        if (gate.elementCount() != intermediate || up.elementCount() != intermediate) {
+            throw new IllegalArgumentException("gate/up length must equal intermediate=" + intermediate);
+        }
+        WarpGpuBuffer out = ctx.allocate(intermediate);
+        ctx.dispatch(kernel2,
+                new long[]{gate.gpuAddress(), up.gpuAddress(), out.gpuAddress()},
+                new int[]{intermediate},
+                intermediate);
+        return out;
     }
 
     /**
@@ -118,6 +141,7 @@ public final class Gemma3WarpGeGluKernel implements AutoCloseable {
         if (!closed) {
             closed = true;
             kernel.close();
+            kernel2.close();
             arena.close();
         }
     }

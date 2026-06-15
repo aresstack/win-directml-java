@@ -50,6 +50,49 @@ public final class Gemma3WarpActivations {
             """.replace("%C%", C);
 
     // ═══════════════════════════════════════════════════════════════════
+    // Element-wise add (residual): out[i] = a[i] + b[i]
+    //   Root params: u0=A, u1=B, u2=Out, b0={count}. (GEMMA-WARP-13b-3a resident residual.)
+    // ═══════════════════════════════════════════════════════════════════
+    public static final String ELEMENT_ADD_HLSL = """
+            RWByteAddressBuffer A   : register(u0);
+            RWByteAddressBuffer B   : register(u1);
+            RWByteAddressBuffer Out : register(u2);
+            cbuffer CB : register(b0) { uint count; };
+
+            [numthreads(256, 1, 1)]
+            void CSMain(uint3 dtid : SV_DispatchThreadID) {
+                uint i = dtid.x;
+                if (i < count) {
+                    Out.Store(i * 4, asuint(asfloat(A.Load(i * 4)) + asfloat(B.Load(i * 4))));
+                }
+            }
+            """;
+
+    // ═══════════════════════════════════════════════════════════════════
+    // GeGLU from two separate buffers: out[i] = gelu_tanh(gate[i]) * up[i]
+    //   Root params: u0=Gate, u1=Up, u2=Out, b0={intermediate}. (Resident MLP: gate/up are separate
+    //   resident projection outputs, so no host concat into a single [gate|up] buffer is needed.)
+    // ═══════════════════════════════════════════════════════════════════
+    public static final String GEGLU2_HLSL = """
+            RWByteAddressBuffer Gate : register(u0);
+            RWByteAddressBuffer Up   : register(u1);
+            RWByteAddressBuffer Out  : register(u2);
+            cbuffer CB : register(b0) { uint intermediate; };
+
+            [numthreads(256, 1, 1)]
+            void CSMain(uint3 dtid : SV_DispatchThreadID) {
+                uint i = dtid.x;
+                if (i < intermediate) {
+                    float gate = asfloat(Gate.Load(i * 4));
+                    float up   = asfloat(Up.Load(i * 4));
+                    float inner = clamp(%C% * (gate + 0.044715f * gate * gate * gate), -20.0f, 20.0f);
+                    float gelu = 0.5f * gate * (1.0f + tanh(inner));
+                    Out.Store(i * 4, asuint(gelu * up));
+                }
+            }
+            """.replace("%C%", C);
+
+    // ═══════════════════════════════════════════════════════════════════
     // GeGLU (fused): out[i] = gelu_tanh(gate[i]) * up[i]
     //   Input layout: GateUp = [gate_0..gate_{N-1} | up_0..up_{N-1}]
     //   Root params: u0=GateUp, u1=Output, b0={intermediate}

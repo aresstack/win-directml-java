@@ -1,6 +1,8 @@
 package com.aresstack.windirectml.inference.gemma;
 
 import com.aresstack.windirectml.inference.warp.WarpDenseProjection;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -29,6 +31,7 @@ public final class Gemma3WarpLayer implements AutoCloseable {
     private final int numKvHeads;
     private final int headDim;
     private final int kvDim;
+    private final int intermediate;
     private final float eps;
     private final float theta;
     private final float scale;
@@ -48,6 +51,13 @@ public final class Gemma3WarpLayer implements AutoCloseable {
     private final WarpDenseProjection vProj;
     private final WarpDenseProjection oProj;
     private final Gemma3WarpMlp mlp;
+    // Lazily-uploaded resident norm weights (GEMMA-WARP-13b-3a), built on first decodeStepResident call.
+    private WarpGpuBuffer inputLayerNormBuf;
+    private WarpGpuBuffer qNormBuf;
+    private WarpGpuBuffer kNormBuf;
+    private WarpGpuBuffer postAttentionLayerNormBuf;
+    private WarpGpuBuffer preFeedforwardLayerNormBuf;
+    private WarpGpuBuffer postFeedforwardLayerNormBuf;
     private boolean closed;
 
     /** Self-contained layer that builds and owns its compute kernels (standalone use / tests). */
@@ -90,6 +100,7 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         this.ownsKernels = ownsKernels;
         int attnDim = config.attentionDim();
         int inter = config.intermediateSize();
+        this.intermediate = inter;
         this.qProj = WarpDenseProjection.fromWeightSource(wb, w.qSource(attnDim, hidden));
         this.kProj = WarpDenseProjection.fromWeightSource(wb, w.kSource(kvDim, hidden));
         this.vProj = WarpDenseProjection.fromWeightSource(wb, w.vSource(kvDim, hidden));
@@ -196,6 +207,80 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         return out;
     }
 
+    /**
+     * GPU-resident single-token decode step (GEMMA-WARP-13b-3a): same math as {@link #decodeStep} but the
+     * whole layer runs on GPU-resident buffers — the only CPU readback is the new token's k/v into the
+     * host KV cache (2 per layer) instead of one readback per kernel. Returns the layer output as a
+     * resident buffer (the caller closes the input buffer it passed in).
+     */
+    public WarpGpuBuffer decodeStepResident(WarpExecutionContext ctx, WarpGpuBuffer hiddenIn, int pos,
+                                            Gemma3WarpKvCache cache) throws WindowsNativeException {
+        ensureOpen();
+        Objects.requireNonNull(ctx, "ctx");
+        Objects.requireNonNull(hiddenIn, "hiddenIn");
+        Objects.requireNonNull(cache, "cache");
+        ensureResidentNormWeights(ctx);
+
+        WarpGpuBuffer normed = k.rmsNorm().normalize(ctx, hiddenIn, inputLayerNormBuf, eps);
+        WarpGpuBuffer q = qProj.forwardResident(ctx, normed);
+        WarpGpuBuffer k0 = kProj.forwardResident(ctx, normed);
+        WarpGpuBuffer v = vProj.forwardResident(ctx, normed);
+        normed.close();
+        WarpGpuBuffer qn = k.qkNorm().normalizeHeads(ctx, q, numHeads, headDim, qNormBuf, eps);
+        q.close();
+        WarpGpuBuffer kn = k.qkNorm().normalizeHeads(ctx, k0, numKvHeads, headDim, kNormBuf, eps);
+        k0.close();
+        WarpGpuBuffer qr = k.rope().applyToHeads(ctx, qn, numHeads, headDim, pos, theta);
+        qn.close();
+        WarpGpuBuffer kr = k.rope().applyToHeads(ctx, kn, numKvHeads, headDim, pos, theta);
+        kn.close();
+
+        // Only readback: the new token's k (normed+roped) and v (raw) into the host KV cache.
+        cache.put(layer, pos, kr.readback(), v.readback());
+        kr.close();
+        v.close();
+        int seqLen = pos + 1;
+        int firstValid = layout.firstValidKey(layer, pos);
+        WarpGpuBuffer keys = ctx.upload(cache.kFlat(layer, seqLen));
+        WarpGpuBuffer values = ctx.upload(cache.vFlat(layer, seqLen));
+
+        WarpGpuBuffer scores = k.scores().scores(ctx, qr, keys, numHeads, numKvHeads, headDim, seqLen, pos, firstValid, scale);
+        qr.close();
+        keys.close();
+        WarpGpuBuffer prob = k.softmax().softmaxRows(ctx, scores, numHeads, seqLen);
+        scores.close();
+        WarpGpuBuffer context = k.value().aggregate(ctx, prob, values, numHeads, numKvHeads, headDim, seqLen);
+        prob.close();
+        values.close();
+        WarpGpuBuffer attnProj = oProj.forwardResident(ctx, context);
+        context.close();
+        WarpGpuBuffer attnProjNorm = k.rmsNorm().normalize(ctx, attnProj, postAttentionLayerNormBuf, eps);
+        attnProj.close();
+        WarpGpuBuffer hidden1 = k.elementAdd().add(ctx, hiddenIn, attnProjNorm);
+        attnProjNorm.close();
+
+        WarpGpuBuffer ff = k.rmsNorm().normalize(ctx, hidden1, preFeedforwardLayerNormBuf, eps);
+        WarpGpuBuffer down = mlp.mlp(ctx, ff);
+        ff.close();
+        WarpGpuBuffer downNorm = k.rmsNorm().normalize(ctx, down, postFeedforwardLayerNormBuf, eps);
+        down.close();
+        WarpGpuBuffer out = k.elementAdd().add(ctx, hidden1, downNorm);
+        hidden1.close();
+        downNorm.close();
+        return out;
+    }
+
+    private void ensureResidentNormWeights(WarpExecutionContext ctx) throws WindowsNativeException {
+        if (inputLayerNormBuf == null) {
+            inputLayerNormBuf = ctx.upload(inputLayerNorm);
+            qNormBuf = ctx.upload(qNorm);
+            kNormBuf = ctx.upload(kNorm);
+            postAttentionLayerNormBuf = ctx.upload(postAttentionLayerNorm);
+            preFeedforwardLayerNormBuf = ctx.upload(preFeedforwardLayerNorm);
+            postFeedforwardLayerNormBuf = ctx.upload(postFeedforwardLayerNorm);
+        }
+    }
+
     private void ensureOpen() {
         if (closed) {
             throw new IllegalStateException("Gemma3WarpLayer is closed");
@@ -211,9 +296,21 @@ public final class Gemma3WarpLayer implements AutoCloseable {
             vProj.close();
             oProj.close();
             mlp.close();
+            closeBuffer(inputLayerNormBuf);
+            closeBuffer(qNormBuf);
+            closeBuffer(kNormBuf);
+            closeBuffer(postAttentionLayerNormBuf);
+            closeBuffer(preFeedforwardLayerNormBuf);
+            closeBuffer(postFeedforwardLayerNormBuf);
             if (ownsKernels) {
                 k.close();
             }
+        }
+    }
+
+    private static void closeBuffer(WarpGpuBuffer b) {
+        if (b != null) {
+            b.close();
         }
     }
 }

@@ -1677,6 +1677,70 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     }
 
     /**
+     * GPU-resident matvec (GEMMA-WARP-13b-3a): {@code out = in @ W^T} reading the input from a resident
+     * {@link WarpGpuBuffer} and writing the result into a resident {@link WarpGpuBuffer}, with <b>no CPU
+     * upload or readback</b> — the in/out copies are GPU→GPU (D3D12 buffers implicit-promote to
+     * copy-source/dest). Same single combined submit + fence as {@link #matvec(float[], float[])}, same
+     * math. The output stays on the GPU for the next kernel.
+     */
+    public void matvecResident(WarpGpuBuffer in, WarpGpuBuffer out) {
+        if (!prepared) {
+            throw new IllegalStateException("Kernel not prepared");
+        }
+        if (in.elementCount() != K) {
+            throw new IllegalArgumentException("input length " + in.elementCount() + " != K=" + K);
+        }
+        if (out.elementCount() != N) {
+            throw new IllegalArgumentException("output length " + out.elementCount() + " != N=" + N);
+        }
+        long inputBytes = (long) K * Float.BYTES;
+        long outputBytes = (long) N * Float.BYTES;
+        try {
+            int hr = (int) mhResetAllocator.invokeExact(execAllocator);
+            HResult.check(hr, "CommandAllocator::Reset");
+            hr = (int) mhResetCmdList.invokeExact(execCmdList, execAllocator, MemorySegment.NULL);
+            HResult.check(hr, "CommandList::Reset");
+
+            // GPU->GPU copy resident input into the kernel's input buffer (instead of upload-heap copy).
+            mhCopyBufferRegion.invokeExact(execCmdList, inputBuf, 0L, in.d3d12Buffer(), 0L, inputBytes);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierInputToUAV);
+            if (useInt4Gpu) {
+                int4Shader.recordDispatch(execCmdList, int4UavAddrs, int4Constants, matvecDispatchElementCount());
+            } else if (useWarpParallelFp32Matvec) {
+                fp32Shader.recordDispatch(execCmdList, fp32UavAddrs, fp32Constants, N);
+            } else {
+                mhSetDescriptorHeaps.invokeExact(execCmdList, 1, heapArrayPtr);
+                mhRecordDispatch.invokeExact(cmdRecorder, execCmdList, compiledGemm, execBindingTable);
+            }
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierOutputToCS);
+            // GPU->GPU copy result into the resident output buffer (instead of readback-heap copy).
+            mhCopyBufferRegion.invokeExact(execCmdList, out.d3d12Buffer(), 0L, outputBuf, 0L, outputBytes);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierInputToCommon);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierOutputToCommon);
+
+            hr = (int) mhCloseCmdList.invokeExact(execCmdList);
+            HResult.check(hr, "CommandList::Close");
+            mhExecuteCmdLists.invokeExact(wb.getCommandQueue(), 1, cmdListArrayPtr);
+            fenceValue++;
+            hr = (int) mhQueueSignal.invokeExact(wb.getCommandQueue(), execFence, fenceValue);
+            HResult.check(hr, "Queue::Signal");
+            long deadline = System.currentTimeMillis() + 120_000;
+            while ((long) mhFenceGetCompleted.invokeExact(execFence) < fenceValue) {
+                if (System.currentTimeMillis() > deadline) {
+                    throw new WindowsNativeException("GPU fence timeout after 120000 ms – the GPU may be hung");
+                }
+                Thread.onSpinWait();
+            }
+            // GEMMA-WARP-13b-3a: one combined submit + fence wait, NO readback (output stays resident).
+            WarpSubmissionStats.recordSubmitAndFenceWait();
+        } catch (WindowsNativeException e) {
+            throw new RuntimeException("MatMulNBitsKernel.matvecResident failed", e);
+        } catch (Throwable t) {
+            throw new RuntimeException("MatMulNBitsKernel.matvecResident failed", t);
+        }
+    }
+
+    /**
      * Compute y = x @ W^T on GPU, writing result into a caller-provided buffer.
      * <p>
      * <b>V1.2 zero-alloc hot path</b>: upload, dispatch, and readback are combined

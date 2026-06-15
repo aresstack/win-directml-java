@@ -69,6 +69,12 @@ public final class WarpGpuBuffer implements AutoCloseable {
         return D3D12Bindings.getGpuVirtualAddress(buffer);
     }
 
+    /** The underlying D3D12 buffer resource (package-internal: for GPU→GPU copies, e.g. resident matvec). */
+    MemorySegment d3d12Buffer() {
+        ensureOpen();
+        return buffer;
+    }
+
     /** Copy the buffer contents back to a host {@code float[]} (one readback). */
     public float[] readback() throws WindowsNativeException {
         ensureOpen();

@@ -1,7 +1,10 @@
 package com.aresstack.windirectml.inference.gemma;
 
 import com.aresstack.windirectml.inference.warp.WarpDenseProjection;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
+import com.aresstack.windirectml.windows.WindowsNativeException;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
@@ -58,6 +61,25 @@ public final class Gemma3WarpLmHead implements AutoCloseable {
             throw new IllegalArgumentException("hidden length mismatch: " + hiddenState.length + " != " + hidden);
         }
         return projection.project(hiddenState);
+    }
+
+    /**
+     * Vocab-sized logits for a resident (already final-normed) hidden buffer (GEMMA-WARP-13b-3a): one
+     * resident matvec + the single necessary readback (logits are needed on the CPU for token selection).
+     */
+    public float[] logits(WarpExecutionContext ctx, WarpGpuBuffer hiddenState) throws WindowsNativeException {
+        if (closed) {
+            throw new IllegalStateException("Gemma3WarpLmHead is closed");
+        }
+        if (hiddenState.elementCount() != hidden) {
+            throw new IllegalArgumentException("hidden length mismatch: " + hiddenState.elementCount() + " != " + hidden);
+        }
+        WarpGpuBuffer out = projection.forwardResident(ctx, hiddenState);
+        try {
+            return out.readback();
+        } finally {
+            out.close();
+        }
     }
 
     @Override

@@ -1,6 +1,8 @@
 package com.aresstack.windirectml.inference.gemma;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -32,6 +34,8 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
     private final Gemma3WarpKvCache cache;
     private final WindowsBindings wb;
     private Gemma3WarpLmHead lmHead; // lazily built on first logits
+    private WarpExecutionContext residentCtx; // lazily built for the resident path (13b-3a)
+    private WarpGpuBuffer finalNormBuf;       // resident final-norm weight (13b-3a)
     private boolean closed;
 
     public Gemma3WarpDecodeSession(WindowsBindings wb, Gemma3WarpWeights weights) throws WindowsNativeException {
@@ -97,6 +101,83 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
         return DecoderOnlyMath.argmax(decodeNext(tokenId));
     }
 
+    // ── Resident path (GEMMA-WARP-13b-3a): same math, intermediates stay GPU-resident ──────────────
+
+    /** Resident prefill — same result as {@link #prefill}, far fewer readbacks (only k/v cache + logits). */
+    public float[] prefillResident(int[] promptIds) throws WindowsNativeException {
+        ensureOpen();
+        if (promptIds == null || promptIds.length == 0) {
+            throw new IllegalArgumentException("promptIds must not be empty");
+        }
+        cache.reset();
+        WarpGpuBuffer last = null;
+        for (int t = 0; t < promptIds.length; t++) {
+            if (last != null) {
+                last.close();
+            }
+            last = stepTokenResident(promptIds[t], t);
+            cache.commitLength(t + 1);
+        }
+        return residentLogits(last);
+    }
+
+    public int prefillNextTokenResident(int[] promptIds) throws WindowsNativeException {
+        return DecoderOnlyMath.argmax(prefillResident(promptIds));
+    }
+
+    /** Resident single-token decode — same result as {@link #decodeNext}. */
+    public float[] decodeNextResident(int tokenId) throws WindowsNativeException {
+        ensureOpen();
+        if (cache.length() == 0) {
+            throw new IllegalStateException("decodeNextResident requires a prior prefill");
+        }
+        int pos = cache.length();
+        WarpGpuBuffer hidden = stepTokenResident(tokenId, pos);
+        cache.commitLength(pos + 1);
+        return residentLogits(hidden);
+    }
+
+    public int decodeNextTokenResident(int tokenId) throws WindowsNativeException {
+        return DecoderOnlyMath.argmax(decodeNextResident(tokenId));
+    }
+
+    private WarpExecutionContext ctx() {
+        if (residentCtx == null) {
+            residentCtx = new WarpExecutionContext(wb);
+        }
+        return residentCtx;
+    }
+
+    private WarpGpuBuffer stepTokenResident(int tokenId, int pos) throws WindowsNativeException {
+        if (tokenId < 0 || tokenId >= config.vocabSize()) {
+            throw new IllegalArgumentException("token id out of range: " + tokenId);
+        }
+        int[] one = {tokenId};
+        float[] embedRow = weights.hasByteBufferEmbedding()
+                ? Gemma3WarpEmbedding.lookupScaled(weights.embeddingFp32Le(), one, hidden, embeddingScale)[0]
+                : Gemma3WarpEmbedding.lookupScaled(weights.embeddingFloat(), one, hidden, embeddingScale)[0];
+        WarpGpuBuffer hiddenB = ctx().upload(embedRow);
+        for (Gemma3WarpLayer layer : layers) {
+            WarpGpuBuffer next = layer.decodeStepResident(ctx(), hiddenB, pos, cache);
+            hiddenB.close();
+            hiddenB = next;
+        }
+        return hiddenB;
+    }
+
+    private float[] residentLogits(WarpGpuBuffer finalHidden) throws WindowsNativeException {
+        if (finalNormBuf == null) {
+            finalNormBuf = ctx().upload(weights.finalNorm());
+        }
+        WarpGpuBuffer normed = kernels.rmsNorm().normalize(ctx(), finalHidden, finalNormBuf, eps);
+        finalHidden.close();
+        try {
+            return lmHead().logits(ctx(), normed);
+        } finally {
+            normed.close();
+        }
+    }
+
     private float[] stepToken(int tokenId, int pos) throws WindowsNativeException {
         if (tokenId < 0 || tokenId >= config.vocabSize()) {
             throw new IllegalArgumentException("token id out of range: " + tokenId);
@@ -141,6 +222,9 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
             kernels.close();
             if (lmHead != null) {
                 lmHead.close();
+            }
+            if (finalNormBuf != null) {
+                finalNormBuf.close();
             }
         }
     }

@@ -18,6 +18,7 @@ public final class Gemma3WarpKernels implements AutoCloseable {
     private final Gemma3WarpSoftmaxKernel softmax;
     private final Gemma3WarpAttentionValueKernel value;
     private final Gemma3WarpGeGluKernel geGlu;
+    private final Gemma3WarpElementAddKernel elementAdd;
     private boolean closed;
 
     public Gemma3WarpKernels(WindowsBindings wb) throws WindowsNativeException {
@@ -28,6 +29,7 @@ public final class Gemma3WarpKernels implements AutoCloseable {
         this.softmax = new Gemma3WarpSoftmaxKernel(wb);
         this.value = new Gemma3WarpAttentionValueKernel(wb);
         this.geGlu = new Gemma3WarpGeGluKernel(wb);
+        this.elementAdd = new Gemma3WarpElementAddKernel(wb);
     }
 
     public Gemma3WarpRmsNormKernel rmsNorm() {
@@ -58,6 +60,10 @@ public final class Gemma3WarpKernels implements AutoCloseable {
         return geGlu;
     }
 
+    public Gemma3WarpElementAddKernel elementAdd() {
+        return elementAdd;
+    }
+
     @Override
     public void close() {
         if (!closed) {
@@ -69,6 +75,7 @@ public final class Gemma3WarpKernels implements AutoCloseable {
             softmax.close();
             value.close();
             geGlu.close();
+            elementAdd.close();
         }
     }
 }

@@ -2,6 +2,8 @@ package com.aresstack.windirectml.inference.gemma;
 
 import com.aresstack.windirectml.inference.warp.WarpDenseProjection;
 import com.aresstack.windirectml.inference.warp.WarpWeightSource;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -123,6 +125,27 @@ public final class Gemma3WarpMlp implements AutoCloseable {
         System.arraycopy(up, 0, gateUp, intermediate, intermediate);
         float[] activated = geGlu.apply(gateUp, intermediate);
         return downProj.project(activated);
+    }
+
+    /**
+     * GPU-resident MLP (GEMMA-WARP-13b-3a): {@code down_proj( gelu_tanh(gate_proj·x) * up_proj·x )} fully
+     * on the GPU — gate/up come from resident projections and feed the two-buffer GeGLU, no host concat
+     * or intermediate readback. {@code x} is the pre-feedforward-normed resident hidden; returns the
+     * resident {@code down} output (pre post-norm). Same math as {@link #mlp(float[])}.
+     */
+    public WarpGpuBuffer mlp(WarpExecutionContext ctx, WarpGpuBuffer x) throws WindowsNativeException {
+        ensureOpen();
+        if (x.elementCount() != hidden) {
+            throw new IllegalArgumentException("x length must equal hidden: x=" + x.elementCount() + ", hidden=" + hidden);
+        }
+        WarpGpuBuffer gate = gateProj.forwardResident(ctx, x);
+        WarpGpuBuffer up = upProj.forwardResident(ctx, x);
+        WarpGpuBuffer activated = geGlu.apply(ctx, gate, up, intermediate);
+        gate.close();
+        up.close();
+        WarpGpuBuffer down = downProj.forwardResident(ctx, activated);
+        activated.close();
+        return down;
     }
 
     public int hidden() {
