@@ -19,9 +19,10 @@ import java.util.function.IntConsumer;
  * message — it never falls back to Python. Requires a DirectML/D3D12 device
  * ({@link WindowsBindings#isSupported()}).</p>
  *
- * <p>This is the wiring slice: weights load through the package's {@code float[]} reference path (heap),
- * which is correct but not heap-light; the ByteBuffer/heap-light product weight load and perf work are
- * separate later slices.</p>
+ * <p>Weights load heap-light (GEMMA-WARP-13a): {@link Gemma3RuntimePackage#loadWarpWeightsHeapLight}
+ * decodes the layer projections and the tied embedding/LM head into direct FP32 ByteBuffers (off-heap),
+ * so the JVM heap no longer carries the ~1 GB {@code float[]} reference weights. Perf work (fused
+ * pipeline, batched prefill) remains separate later slices.</p>
  */
 public final class Gemma3NativeWarpRuntime {
 
@@ -82,8 +83,9 @@ public final class Gemma3NativeWarpRuntime {
 
         Gemma3RuntimePackage pkg = Gemma3RuntimePackage.open(packagePath);
         Gemma3Config config = pkg.config();
-        Gemma3ReferenceWeights refWeights = pkg.loadReferenceWeights();
-        Gemma3WarpWeights weights = Gemma3WarpWeights.from(refWeights);
+        // Heap-light: projections + tied embedding/LM head load as direct FP32 ByteBuffers (off-heap),
+        // not the ~1 GB float[] reference path. The reference path stays for parity/tests only.
+        Gemma3WarpWeights weights = pkg.loadWarpWeightsHeapLight();
 
         Gemma3Tokenizer tokenizer = Gemma3Tokenizer.load(tokenizerJson);
         String rendered = applyChatTemplate ? Gemma3ChatTemplate.renderUserTurn(promptText) : promptText;

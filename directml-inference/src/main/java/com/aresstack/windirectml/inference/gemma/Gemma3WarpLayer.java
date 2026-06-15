@@ -89,12 +89,13 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         this.k = kernels;
         this.ownsKernels = ownsKernels;
         int attnDim = config.attentionDim();
-        this.qProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.q_proj", attnDim, hidden, w.qProj());
-        this.kProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.k_proj", kvDim, hidden, w.kProj());
-        this.vProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.v_proj", kvDim, hidden, w.vProj());
-        this.oProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.o_proj", hidden, attnDim, w.oProj());
-        this.mlp = new Gemma3WarpMlp(wb, hidden, config.intermediateSize(),
-                w.gateProj(), w.upProj(), w.downProj(), kernels.geGlu());
+        int inter = config.intermediateSize();
+        this.qProj = WarpDenseProjection.fromWeightSource(wb, w.qSource(attnDim, hidden));
+        this.kProj = WarpDenseProjection.fromWeightSource(wb, w.kSource(kvDim, hidden));
+        this.vProj = WarpDenseProjection.fromWeightSource(wb, w.vSource(kvDim, hidden));
+        this.oProj = WarpDenseProjection.fromWeightSource(wb, w.oSource(hidden, attnDim));
+        this.mlp = new Gemma3WarpMlp(wb, hidden, inter,
+                w.gateSource(inter, hidden), w.upSource(inter, hidden), w.downSource(hidden, inter), kernels.geGlu());
     }
 
     /**

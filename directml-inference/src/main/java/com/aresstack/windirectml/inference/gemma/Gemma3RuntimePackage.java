@@ -6,6 +6,7 @@ import com.aresstack.windirectml.inference.model.WdmlPackWriter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -74,5 +75,65 @@ public final class Gemma3RuntimePackage {
         SafeTensorsReader.SafeTensorsFile file = SafeTensorsReader.readFromBuffer(
                 Objects.requireNonNull(packagePath), ByteBuffer.wrap(image));
         return Gemma3ReferenceWeights.load(file, config);
+    }
+
+    /**
+     * Heap-light WARP weights for the product runtime (GEMMA-WARP-13a): mmaps the SafeTensors payload and
+     * decodes each layer projection and the tied embedding/LM head into direct FP32 {@link ByteBuffer}s
+     * (off-heap), so the JVM heap no longer carries the ~1 GB of weights that
+     * {@link #loadReferenceWeights()} materialises as {@code float[]}. Norm vectors stay {@code float[]}
+     * (small). No format change — same payload, different decode target.
+     */
+    public Gemma3WarpWeights loadWarpWeightsHeapLight() throws IOException {
+        WdmlPackWriter.Header header = modelPackage.header();
+        if (!header.payloadIncluded()) {
+            throw new IOException("Gemma wdmlpack has no weight payload: " + packagePath);
+        }
+        try (FileChannel channel = FileChannel.open(packagePath, StandardOpenOption.READ)) {
+            MappedByteBuffer payload = channel.map(
+                    FileChannel.MapMode.READ_ONLY, header.payloadOffset(), header.payloadLength());
+            SafeTensorsReader.SafeTensorsFile file = SafeTensorsReader.readFromBuffer(packagePath, payload);
+
+            ByteBuffer embedding = Gemma3WeightBufferView.decodeFp32LittleEndian(
+                    entry(file, Gemma3TensorNameMapper.EMBED_TOKENS));
+            float[] finalNorm = Gemma3ReferenceWeights.decodeFloats(entry(file, Gemma3TensorNameMapper.FINAL_NORM));
+
+            int n = config.numHiddenLayers();
+            Gemma3WarpLayerWeights[] layers = new Gemma3WarpLayerWeights[n];
+            for (int i = 0; i < n; i++) {
+                layers[i] = Gemma3WarpLayerWeights.ofByteBufferProjections(
+                        floats(file, Gemma3TensorNameMapper.inputLayerNorm(i)),
+                        buffer(file, Gemma3TensorNameMapper.qProj(i)),
+                        buffer(file, Gemma3TensorNameMapper.kProj(i)),
+                        buffer(file, Gemma3TensorNameMapper.vProj(i)),
+                        buffer(file, Gemma3TensorNameMapper.oProj(i)),
+                        floats(file, Gemma3TensorNameMapper.qNorm(i)),
+                        floats(file, Gemma3TensorNameMapper.kNorm(i)),
+                        floats(file, Gemma3TensorNameMapper.postAttentionLayerNorm(i)),
+                        floats(file, Gemma3TensorNameMapper.preFeedforwardLayerNorm(i)),
+                        buffer(file, Gemma3TensorNameMapper.gateProj(i)),
+                        buffer(file, Gemma3TensorNameMapper.upProj(i)),
+                        buffer(file, Gemma3TensorNameMapper.downProj(i)),
+                        floats(file, Gemma3TensorNameMapper.postFeedforwardLayerNorm(i)));
+            }
+            return Gemma3WarpWeights.ofByteBufferEmbedding(config, embedding, finalNorm, layers);
+        }
+    }
+
+    private static SafeTensorsReader.SafeTensorEntry entry(
+            SafeTensorsReader.SafeTensorsFile file, String name) throws IOException {
+        SafeTensorsReader.SafeTensorEntry e = file.tensors().get(name);
+        if (e == null) {
+            throw new IOException("Gemma wdmlpack payload is missing tensor: " + name);
+        }
+        return e;
+    }
+
+    private static ByteBuffer buffer(SafeTensorsReader.SafeTensorsFile file, String name) throws IOException {
+        return Gemma3WeightBufferView.decodeFp32LittleEndian(entry(file, name));
+    }
+
+    private static float[] floats(SafeTensorsReader.SafeTensorsFile file, String name) throws IOException {
+        return Gemma3ReferenceWeights.decodeFloats(entry(file, name));
     }
 }

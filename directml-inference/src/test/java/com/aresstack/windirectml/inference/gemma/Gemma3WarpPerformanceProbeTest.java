@@ -3,6 +3,7 @@ package com.aresstack.windirectml.inference.gemma;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 
@@ -21,8 +22,13 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * external-python-transformers numbers for the same prompts. Gated on a DirectML device + the local
  * model; the external half additionally needs a Python with torch + transformers. The printed lines are
  * transcribed into {@code docs/gemma3-warp-runtime-performance.md}.
+ *
+ * <p><b>Opt-in</b> ({@code -Dgemma.perf.probe=true}): this probe spawns several full-model Python loads
+ * alongside the JVM's WARP weight buffers, so it must not run in the default suite (the combined system
+ * RAM spike can OOM the WARP device for neighbouring tests). Run it on demand to refresh the perf doc.</p>
  */
 @EnabledOnOs(OS.WINDOWS)
+@EnabledIfSystemProperty(named = "gemma.perf.probe", matches = "true")
 class Gemma3WarpPerformanceProbeTest {
 
     private static final int MAX_NEW = 8;

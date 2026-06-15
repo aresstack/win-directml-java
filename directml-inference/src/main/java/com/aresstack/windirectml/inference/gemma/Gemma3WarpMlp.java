@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.inference.gemma;
 
 import com.aresstack.windirectml.inference.warp.WarpDenseProjection;
+import com.aresstack.windirectml.inference.warp.WarpWeightSource;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.windows.WindowsNativeException;
 
@@ -55,12 +56,36 @@ public final class Gemma3WarpMlp implements AutoCloseable {
     public Gemma3WarpMlp(WindowsBindings wb, int hidden, int intermediate,
                          float[] gateProj, float[] upProj, float[] downProj,
                          Gemma3WarpGeGluKernel sharedGeGlu) throws WindowsNativeException {
+        this(wb, hidden, intermediate,
+                arraySource("gemma3.gate_proj", intermediate, hidden, gateProj),
+                arraySource("gemma3.up_proj", intermediate, hidden, upProj),
+                arraySource("gemma3.down_proj", hidden, intermediate, downProj),
+                Objects.requireNonNull(sharedGeGlu, "sharedGeGlu"), false);
+    }
+
+    /**
+     * MLP from {@link WarpWeightSource}s (heap-light when they wrap direct FP32 ByteBuffers) using a
+     * <b>shared</b> GeGLU kernel.
+     */
+    public Gemma3WarpMlp(WindowsBindings wb, int hidden, int intermediate,
+                         WarpWeightSource gateProj, WarpWeightSource upProj, WarpWeightSource downProj,
+                         Gemma3WarpGeGluKernel sharedGeGlu) throws WindowsNativeException {
         this(wb, hidden, intermediate, gateProj, upProj, downProj,
                 Objects.requireNonNull(sharedGeGlu, "sharedGeGlu"), false);
     }
 
     private Gemma3WarpMlp(WindowsBindings wb, int hidden, int intermediate,
                           float[] gateProj, float[] upProj, float[] downProj,
+                          Gemma3WarpGeGluKernel geGlu, boolean ownsGeGlu) throws WindowsNativeException {
+        this(wb, hidden, intermediate,
+                arraySource("gemma3.gate_proj", intermediate, hidden, gateProj),
+                arraySource("gemma3.up_proj", intermediate, hidden, upProj),
+                arraySource("gemma3.down_proj", hidden, intermediate, downProj),
+                geGlu, ownsGeGlu);
+    }
+
+    private Gemma3WarpMlp(WindowsBindings wb, int hidden, int intermediate,
+                          WarpWeightSource gateProj, WarpWeightSource upProj, WarpWeightSource downProj,
                           Gemma3WarpGeGluKernel geGlu, boolean ownsGeGlu) throws WindowsNativeException {
         Objects.requireNonNull(wb, "wb");
         if (hidden < 1 || intermediate < 1) {
@@ -69,11 +94,16 @@ public final class Gemma3WarpMlp implements AutoCloseable {
         }
         this.hidden = hidden;
         this.intermediate = intermediate;
-        this.gateProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.gate_proj", intermediate, hidden, gateProj);
-        this.upProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.up_proj", intermediate, hidden, upProj);
-        this.downProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.down_proj", hidden, intermediate, downProj);
+        this.gateProj = WarpDenseProjection.fromWeightSource(wb, gateProj);
+        this.upProj = WarpDenseProjection.fromWeightSource(wb, upProj);
+        this.downProj = WarpDenseProjection.fromWeightSource(wb, downProj);
         this.geGlu = geGlu;
         this.ownsGeGlu = ownsGeGlu;
+    }
+
+    private static WarpWeightSource arraySource(String name, int outputRows, int inputColumns, float[] arr) {
+        Objects.requireNonNull(arr, name);
+        return WarpWeightSource.of(name, outputRows, inputColumns, null, () -> arr);
     }
 
     /**

@@ -51,6 +51,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-10b WARP greedy generate + stop + streaming | **done — real " Paris." multi-step on GPU** |
 | GEMMA-WARP-11 workbench native flag (-Dgemma.runtime=native-warp) | **done — native path " Paris." in the runner** |
 | GEMMA-WARP-12 perf/heap measurement (native-warp vs external) | **done — measured; verdict WAIT** (see `gemma3-warp-runtime-performance.md`) |
+| GEMMA-WARP-13a heap-light product weight load | **done — on-heap delta 0 MB at load, still " Paris"** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -259,3 +260,19 @@ head) is therefore the trustworthy WARP parity oracle.
   (`float[]` reference weights). Correct (`" Paris."`) but **verdict WAIT** — usable experimentally behind
   the flag, not the sensible default until the fused/batched pipeline + heap-light weight load land.
   Bottlenecks + optimization order are in the perf doc.
+
+- **GEMMA-WARP-13a heap-light product weight load — done.** The native product path no longer uses the
+  `float[]` reference weights. `Gemma3RuntimePackage.loadWarpWeightsHeapLight()` mmaps the SafeTensors
+  payload and decodes each layer projection (q/k/v/o, gate/up/down) and the tied embedding/LM head into
+  **direct FP32 ByteBuffers** (off-heap) via `Gemma3WeightBufferView`; norm vectors stay `float[]`
+  (small). `Gemma3WarpLayerWeights` now carries the seven projections as `WarpWeightSource`s
+  (ByteBuffer-or-float[], decision in `WarpDenseProjection.fromWeightSource`); `Gemma3WarpMlp`/`Gemma3WarpLayer`
+  build from sources — the `float[]` test/reference path is numerically unchanged. `Gemma3NativeWarpRuntime`
+  uses the heap-light loader (so the tied embedding/LM head go through `Gemma3WarpLmHead.fromFp32ByteBuffer`,
+  not duplicated host-side). **Heap before/after load delta = 0 MB** on the real model (vs ~1199 MB for the
+  `float[]` reference path in WARP-12); the ~1 GB of weights now lives off-heap. Validated: synthetic
+  ByteBuffer-projection logits == float[] logits (bit-for-bit); real heap-light load yields
+  ByteBuffer-backed weights and still prefills top-1 9079 (" Paris"); existing WARP suites unchanged.
+  The heavy perf probe is now opt-in (`-Dgemma.perf.probe=true`) so the default suite doesn't OOM the WARP
+  device with the added heap-light real-model test. Reference path stays for parity/tests; perf
+  (fused/batched pipeline) is the remaining WAIT item before native-warp could become default.

@@ -2,7 +2,9 @@
 
 Measurement only — **no optimization was introduced in this slice.** Real numbers from a single run of
 `Gemma3WarpPerformanceProbeTest` (gated on a DirectML device + the local model; the external half needs a
-Python with torch + transformers). Re-run it to refresh these figures.
+Python with torch + transformers). The probe is **opt-in** — run it with `-Dgemma.perf.probe=true` to
+refresh these figures (it spawns several full-model Python loads next to the JVM's WARP buffers, so it is
+kept out of the default test suite to avoid a system-RAM spike OOM-ing the WARP device for other tests).
 
 ## Test environment
 
