@@ -899,6 +899,7 @@ public final class D3D12Bindings {
                 Thread.onSpinWait();
             }
             com.aresstack.windirectml.runtime.DirectMlGpuBatch.recordStandaloneFenceWait();
+            WarpSubmissionStats.recordSubmitAndFenceWait();
         } finally {
             DxgiBindings.release(fence);
         }
@@ -1169,6 +1170,7 @@ public final class D3D12Bindings {
             float[] result = new float[numFloats];
             MemorySegment.copy(mapped, ValueLayout.JAVA_FLOAT, 0, result, 0, numFloats);
             unmapResource(readbackBuf);
+            WarpSubmissionStats.recordReadback(); // the submit was already counted by executeAndWait above
             return result;
         } finally {
             if (cmdList != null) DxgiBindings.release(cmdList);

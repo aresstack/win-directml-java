@@ -10,4 +10,13 @@ tasks.withType(Test).configureEach {
     // the CPU reference parity test (~1.1 GB float[]). A smaller JVM heap also leaves more system RAM for
     // the WARP (software) device's buffers.
     maxHeapSize = '2g'
+    // Forward the opt-in gemma test toggles from the Gradle CLI to the test JVM (Gradle does not pass
+    // -D through by default). Unset -> gated real-model/perf tests stay disabled and the suite is green.
+    ['gemma.warp.realModel', 'gemma.perf.probe', 'gemma.testModelDir', 'gemma.runtime',
+     'directml.generation.output', 'directml.generation.streaming'].each { key ->
+        def value = System.getProperty(key)
+        if (value != null) {
+            systemProperty(key, value)
+        }
+    }
 }

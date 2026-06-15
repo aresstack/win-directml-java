@@ -54,6 +54,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-13a heap-light product weight load | **done — on-heap delta 0 MB at load, still " Paris"** |
 | GEMMA-WORKBENCH-CONVERT-1 UI Convert → model_gemma3.wdmlpack | **done — Convert enabled + produces the package the runtime finds** |
 | GENERATION-STREAMING-1 global streaming switch + Gemma native-warp streaming | **done — default streaming, Gemma streams " Paris." live** |
+| GEMMA-WARP-13b-1 submit/fence/readback instrumentation | **done — measured: ~1140 submits + 344 readbacks per decode token** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -322,3 +323,29 @@ head) is therefore the trustworthy WARP parity oracle.
     largest non-gated heap user is the CPU reference at ~1.1 GB), which also leaves more system RAM for the
     WARP device. Synthetic + device-free GPU tests (incl. the streaming contract) stay in the default
     suite. No native-warp default switch; external-python untouched; no perf/fused/batched work.
+
+- **GEMMA-WARP-13b-1 submit/fence/readback instrumentation — done (measure first).** `WarpSubmissionStats`
+  (directml-windows-bindings) — process-wide counters incremented at the three blocking chokepoints:
+  `D3D12Bindings.executeAndWait` (every Gemma compute-kernel upload/dispatch/readback-copy goes through it
+  → submit + fence wait), `D3D12Bindings.readbackFloatsInternal` (readback), and the `MatMulNBitsKernel`
+  matvec single-submit path (one submit + fence + readback). Snapshot/diff measures a region. Pure
+  counting, no behaviour change. Device-free `WarpSubmissionStatsTest` (default suite) covers the
+  counting; the gated `Gemma3WarpSubmissionStatsTest` (`-Dgemma.warp.realModel=true`) measures the real
+  model and asserts top-1 9079 (" Paris") still.
+  - **Baseline (real Gemma 3 270M, this host):** per **decode** token **~1140 submits / ~1140 fence
+    waits / ~344 readbacks**, ~920 ms → **~1.09 tok/s**; **prefill** ~1135 submits + ~342 readbacks
+    *per prompt token* (token-by-token). ~1140 submits/token ≈ 18 layers × ~63, because each Gemma
+    compute kernel (RMSNorm/QK-norm/RoPE/scores/softmax/value/GeGLU) uploads its 2–3 buffers as
+    *separate* `executeAndWait` submits + a dispatch + a readback (4–6 submits each), whereas the
+    projections (`MatMulNBitsKernel`) are already a single combined submit. **This is the batching target.**
+  - **Already efficient (single combined submit):** q/k/v/o + gate/up/down projections (`MatMulNBitsKernel`).
+    **Still per-call / synchronous:** the seven Gemma compute kernels (each does separate buffer uploads +
+    dispatch + readback via `D3D12Bindings`). An existing `DirectMlGpuBatch` seam (fire-and-forget submit +
+    deferred fence) is available to reduce these in 13b-2/13b-3.
+  - **Forwarding:** the inference test task now passes through the opt-in `-D` toggles
+    (`gemma.warp.realModel`, `gemma.perf.probe`, `gemma.testModelDir`, `gemma.runtime`,
+    `directml.generation.*`) to the test JVM so the gated tests are runnable on demand; unset → gated
+    tests stay disabled and the default suite is green.
+  - **Next (not in this slice):** 13b-2 batch/execution-context seam for a Gemma layer; 13b-3 Gemma
+    decodeStep keeps norm/rope/scores/softmax/value/geglu GPU-resident across one command list with a
+    single readback per token. No math/output change intended — output stays " Paris.".

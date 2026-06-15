@@ -1,0 +1,62 @@
+package com.aresstack.windirectml.windows;
+
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * Process-wide counters for WARP/DirectML GPU submissions, fence waits and readbacks (GEMMA-WARP-13b-1).
+ *
+ * <p>Pure instrumentation — counting only, no behaviour change. Every blocking command-list execution
+ * ({@link D3D12Bindings#executeAndWait} and the {@code MatMulNBitsKernel} matvec single-submit path)
+ * records one submit + one fence wait; every CPU readback records one readback. A caller measures a
+ * region (e.g. one decode token) by taking a {@link #snapshot()} before and after and diffing — see
+ * {@link Snapshot#minus}.</p>
+ *
+ * <p>Counters are global (all families); callers that only care about one model snapshot around that
+ * model's calls. {@link #reset()} zeroes them.</p>
+ */
+public final class WarpSubmissionStats {
+
+    private static final AtomicLong SUBMITS = new AtomicLong();
+    private static final AtomicLong FENCE_WAITS = new AtomicLong();
+    private static final AtomicLong READBACKS = new AtomicLong();
+
+    private WarpSubmissionStats() {
+    }
+
+    /** Record one command-list submission immediately followed by a blocking fence wait. */
+    public static void recordSubmitAndFenceWait() {
+        SUBMITS.incrementAndGet();
+        FENCE_WAITS.incrementAndGet();
+    }
+
+    /** Record one CPU readback of GPU results. */
+    public static void recordReadback() {
+        READBACKS.incrementAndGet();
+    }
+
+    public static void reset() {
+        SUBMITS.set(0);
+        FENCE_WAITS.set(0);
+        READBACKS.set(0);
+    }
+
+    /** Immutable snapshot of the current counters. */
+    public static Snapshot snapshot() {
+        return new Snapshot(SUBMITS.get(), FENCE_WAITS.get(), READBACKS.get());
+    }
+
+    /** A point-in-time view of the counters; subtract two snapshots to measure a region. */
+    public record Snapshot(long submits, long fenceWaits, long readbacks) {
+
+        /** This snapshot minus an earlier {@code before} snapshot (the deltas over the measured region). */
+        public Snapshot minus(Snapshot before) {
+            return new Snapshot(submits - before.submits, fenceWaits - before.fenceWaits,
+                    readbacks - before.readbacks);
+        }
+
+        @Override
+        public String toString() {
+            return "submits=" + submits + " fenceWaits=" + fenceWaits + " readbacks=" + readbacks;
+        }
+    }
+}

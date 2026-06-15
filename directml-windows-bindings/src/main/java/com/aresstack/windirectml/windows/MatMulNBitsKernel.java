@@ -1747,6 +1747,9 @@ public final class MatMulNBitsKernel implements AutoCloseable {
 
             // 6. Read result from persistently-mapped readback buffer
             MemorySegment.copy(mappedReadback, ValueLayout.JAVA_FLOAT, 0, out, 0, N);
+            // GEMMA-WARP-13b-1 instrumentation: this matvec is one combined submit + fence wait + readback.
+            WarpSubmissionStats.recordSubmitAndFenceWait();
+            WarpSubmissionStats.recordReadback();
 
         } catch (WindowsNativeException e) {
             throw new RuntimeException("MatMulNBitsKernel.matvec failed", e);
