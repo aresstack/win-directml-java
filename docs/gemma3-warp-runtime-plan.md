@@ -49,7 +49,8 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-9 WARP full prefill (all layers + embedding + tied LM head) | **done — real model top-1 " Paris" on GPU** |
 | GEMMA-WARP-10a WARP KV cache + single-token decodeNext | **done — real decode == full recompute on GPU** |
 | GEMMA-WARP-10b WARP greedy generate + stop + streaming | **done — real " Paris." multi-step on GPU** |
-| GEMMA-WARP-11 workbench native flag | open — next |
+| GEMMA-WARP-11 workbench native flag (-Dgemma.runtime=native-warp) | **done — native path " Paris." in the runner** |
+| GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -202,6 +203,25 @@ head) is therefore the trustworthy WARP parity oracle.
     workbench's model/runtime descriptor + a `-Dgemma.runtime=native-warp` flag (external-python stays
     default until proven); plus the heap-light product weight load (ByteBuffer projections, wdmlpack
     payload) and the perf items above. No runtime default switch / downloader / .wdmlpack change here.
+
+- **GEMMA-WARP-11 workbench native flag — done.** `Gemma3RuntimeMode` (`-Dgemma.runtime`: `external`
+  default / `native-warp`), `Gemma3NativeWarpRuntime` (tokenizer.json → `Gemma3Tokenizer`/optional
+  `Gemma3ChatTemplate` → weights from the compiled `model_gemma3.wdmlpack` via `Gemma3RuntimePackage` →
+  `Gemma3WarpGenerator` → detokenized text). `SummarizerPanel.runGemma3Generation` branches on the mode:
+  default keeps the **unchanged** external Python path; `native-warp` runs the native runner and logs
+  `Runtime mode: native-warp-experimental`, model id/dir, `Backend: WARP`, `Package: model_gemma3.wdmlpack`,
+  prompt/output tokens, finish reason. **Missing package with an explicit native flag fails clearly**
+  (`"Gemma native WARP requires a compiled .wdmlpack package (...). Use Download/Convert first or run the
+  Gemma compiler."`) and does **not** fall back to Python; likewise a missing device fails clearly.
+  Validated: runtime-mode parsing (default external, native-warp on flag), the missing-package message is
+  actionable, and a real GPU smoke that compiles a `.wdmlpack` and generates **"The capital of France is"
+  → " Paris."** through the native runner (`Gemma3NativeWarpRuntimeTest`). external default unchanged,
+  not switched. Weights still load through the package's `float[]` reference path (heap) — correct, not
+  yet heap-light; the ByteBuffer/heap-light product load + perf remain GEMMA-WARP-12.
+  - **Perf note (rough, no optimization claim):** the per-call upload/readback building-block path makes
+    the native runner clearly slower than a fused pipeline would be; the gated tests run in the tens of
+    seconds (model load + prefill + a few decode steps on the WARP software rasterizer). Real numbers and
+    any speedup are GEMMA-WARP-12.
 - **GEMMA-WARP-2 Tokenizer — RESOLVED (done).** Native `Gemma3Tokenizer` reads `tokenizer.json` only
   (no `tokenizer.model`, no SentencePiece DLL, no Python): normalizer space→`▁`, BPE over the whole
   normalized string (the `Split(" ")` pre-tokenizer is a no-op post-normalization), byte_fallback to

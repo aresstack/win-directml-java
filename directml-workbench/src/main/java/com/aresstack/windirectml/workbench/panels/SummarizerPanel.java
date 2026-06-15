@@ -14,6 +14,8 @@ import com.aresstack.windirectml.inference.SummaryRequest;
 import com.aresstack.windirectml.inference.qwen.QwenInferenceEngine;
 import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
 import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
+import com.aresstack.windirectml.inference.gemma.Gemma3NativeWarpRuntime;
+import com.aresstack.windirectml.inference.gemma.Gemma3RuntimeMode;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationProfile;
 import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.prompt.PromptStrategies;
@@ -197,8 +199,13 @@ public final class SummarizerPanel extends JPanel {
         if (qwenTestModel) {
             appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
         } else if (gemma3Model) {
-            appendResult("  NOTE: Gemma 3 uses the external local Python/Transformers probe path in this build.");
-            appendResult("  NOTE: This is not the native Java/WARP runtime yet; it loads the downloaded HF files from AppData.");
+            if (Gemma3RuntimeMode.fromSystemProperty() == Gemma3RuntimeMode.NATIVE_WARP) {
+                appendResult("  NOTE: Gemma 3 runs the experimental native Java/WARP runtime (-Dgemma.runtime=native-warp).");
+                appendResult("  NOTE: Weights load from the compiled model_gemma3.wdmlpack; no Python is used.");
+            } else {
+                appendResult("  NOTE: Gemma 3 uses the external local Python/Transformers probe path in this build (default).");
+                appendResult("  NOTE: This is not the native Java/WARP runtime; set -Dgemma.runtime=native-warp to try it.");
+            }
         } else if (smolLm2Model) {
             appendResult("  NOTE: WARP runs SmolLM2's dense projections on the D3D12 software rasterizer (CPU); "
                     + "AUTO uses a hardware GPU when one exists and otherwise falls back to the Java reference "
@@ -261,6 +268,10 @@ public final class SummarizerPanel extends JPanel {
 
     private void runGemma3Generation(Path modelDir, PromptTask task, String text, int maxTokens, String selectedModel)
             throws Exception {
+        if (Gemma3RuntimeMode.fromSystemProperty() == Gemma3RuntimeMode.NATIVE_WARP) {
+            runGemma3NativeWarp(modelDir, task, text, maxTokens, selectedModel);
+            return;
+        }
         long start = System.nanoTime();
         Gemma3ExternalRuntimeRunner runner = new Gemma3ExternalRuntimeRunner(modelDir);
         appendResult("Initializing Gemma 3 external probe from " + modelDir + "...");
@@ -285,6 +296,45 @@ public final class SummarizerPanel extends JPanel {
         appendResult("  Prompt tokens: " + result.metrics().promptTokens());
         appendResult("  Output tokens: " + result.metrics().outputTokens());
         appendResult("  Finish reason: external_process_completed");
+    }
+
+    /**
+     * Experimental native Java/WARP Gemma 3 path (-Dgemma.runtime=native-warp). Loads weights from the
+     * compiled {@code model_gemma3.wdmlpack}; on a missing package it fails clearly rather than falling
+     * back to Python.
+     */
+    private void runGemma3NativeWarp(Path modelDir, PromptTask task, String text, int maxTokens,
+                                     String selectedModel) {
+        long start = System.nanoTime();
+        Path pkg = Gemma3NativeWarpRuntime.defaultPackagePath(modelDir);
+        appendResult("Runtime mode: native-warp-experimental");
+        appendResult("Model id: " + selectedModel);
+        appendResult("Model directory: " + modelDir);
+        appendResult("Backend: WARP");
+        appendResult("Package: " + pkg.getFileName());
+        String missing = Gemma3NativeWarpRuntime.describeMissingPackage(pkg);
+        if (missing != null) {
+            appendResult("ERROR: " + missing);
+            return;
+        }
+        Path tokenizerJson = modelDir.resolve("tokenizer.json");
+        String prompt = PromptStrategies.forModel("google/gemma-3-270m-it").renderPrompt(PromptInput.of(task, text));
+        appendResult("");
+        appendResult("OUTPUT:");
+        try {
+            Gemma3NativeWarpRuntime runtime = new Gemma3NativeWarpRuntime(pkg, tokenizerJson);
+            // The prompt is already rendered by the model's strategy; do not chat-template again.
+            Gemma3NativeWarpRuntime.Result result = runtime.generate(prompt, false, maxTokens, null);
+            appendResult(result.text().isBlank()
+                    ? "  NOTE: generated text is empty after detokenization." : result.text());
+            appendResult("");
+            appendResult("Model loaded and generated in " + elapsedMs(start) + " ms");
+            appendResult("Prompt tokens: " + result.promptTokens());
+            appendResult("Output tokens: " + result.outputTokens());
+            appendResult("Finish reason: " + result.finishReason());
+        } catch (Exception e) {
+            appendResult("ERROR: " + e.getMessage());
+        }
     }
 
     private void runSmolLm2Generation(Path modelDir, PromptTask task, String text, int maxTokens) throws Exception {
