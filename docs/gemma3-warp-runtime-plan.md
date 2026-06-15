@@ -45,7 +45,8 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-6 WARP GeGLU + GELU-tanh MLP | **done — GPU-validated vs reference** |
 | GEMMA-WARP-7a attention layout + RoPE reference (device-free) | **done** (layout 0d83fbd, RoPE this slice) |
 | GEMMA-WARP-7b WARP RoPE + attention-scores primitives | **done — GPU-validated vs reference** |
-| GEMMA-WARP-8/9 WARP single-layer / prefill | open — next |
+| GEMMA-WARP-8 WARP single-layer (softmax + value + full attention) | **done — GPU-validated vs reference** |
+| GEMMA-WARP-9 WARP full prefill (all layers + embedding + LM head) | open — next |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -117,6 +118,24 @@ head) is therefore the trustworthy WARP parity oracle.
   (firstValid=0), a local layer with a biting sliding window, and a 4-heads/2-kv GQA case. Tolerance
   **abs 1e-4 + rel 1e-4**. Still primitives (per-call upload/readback), not yet the fused single-layer
   step — that is GEMMA-WARP-8 (softmax + AV + o_proj wiring).
+
+- **GEMMA-WARP-8 single-layer — done, GPU-validated.** `Gemma3WarpSoftmaxKernel` (numerically-stable
+  row-wise softmax; masked sentinels exp to 0) + `Gemma3WarpAttentionValueKernel`
+  (`context = prob·V`, GQA `kvHead=head/groupsPerKv`) complete the attention chain; `Gemma3WarpLayer`
+  composes the full Gemma layer from the validated blocks —
+  `input RMSNorm → q/k/v proj → QK-norm → dual-theta RoPE → GQA attention (local/global sliding-window
+  + causal via Gemma3AttentionLayout) → o_proj → post-attention RMSNorm → +residual → pre-ff RMSNorm →
+  GeGLU MLP → post-ff RMSNorm → +residual`. `Gemma3WarpLayerWeights` is the WARP-side per-layer holder
+  (`from(Gemma3ReferenceWeights.Layer)`); a new `Gemma3ReferenceForwardPass.runLayer(state, layer)`
+  exposes the single-layer oracle. Validated on the real GPU vs the reference for a tiny local layer
+  (biting window), a tiny full layer, a 4-heads/2-kv GQA layer, and the **real head_dim=256 geometry**
+  (hidden=640, inter=2048) both full and local. Tolerance **abs 2e-3 + rel 2e-3** — looser than the
+  element-wise kernels because a layer chains many float kernels against a reference that accumulates
+  RMSNorm/RoPE/softmax in double; small realistic weight magnitudes (the normed-input regime). Still a
+  building-block composition (CPU readback between kernels), not the fused single-submission pipeline.
+  **For GEMMA-WARP-9 (full prefill) still missing:** embedding lookup ×sqrt(hidden), the 18-layer loop
+  driving `Gemma3WarpLayer` per layer (correct per-layer theta/mask already comes from config), final
+  RMSNorm, and the tied 256k LM head (the heap/perf-critical piece — see the heap open point).
 - **GEMMA-WARP-2 Tokenizer — RESOLVED (done).** Native `Gemma3Tokenizer` reads `tokenizer.json` only
   (no `tokenizer.model`, no SentencePiece DLL, no Python): normalizer space→`▁`, BPE over the whole
   normalized string (the `Split(" ")` pre-tokenizer is a no-op post-normalization), byte_fallback to

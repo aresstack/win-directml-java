@@ -66,6 +66,15 @@ public final class Gemma3ReferenceForwardPass {
         return DecoderOnlyMath.argmax(logitsForLastToken(tokenIds));
     }
 
+    /**
+     * Run a single transformer layer in place over {@code state} ({@code [seqLen][hidden]}) — the
+     * device-free parity oracle for {@link Gemma3WarpLayer} (GEMMA-WARP-8). Uses the configured
+     * {@code rms_norm_eps}.
+     */
+    public void runLayer(float[][] state, int layer) {
+        applyLayer(state, layer, (float) config.rmsNormEps());
+    }
+
     private void applyLayer(float[][] hidden, int layer, float eps) {
         Gemma3ReferenceWeights.Layer w = weights.layers[layer];
         int s = hidden.length;
