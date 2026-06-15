@@ -50,7 +50,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-10a WARP KV cache + single-token decodeNext | **done — real decode == full recompute on GPU** |
 | GEMMA-WARP-10b WARP greedy generate + stop + streaming | **done — real " Paris." multi-step on GPU** |
 | GEMMA-WARP-11 workbench native flag (-Dgemma.runtime=native-warp) | **done — native path " Paris." in the runner** |
-| GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
+| GEMMA-WARP-12 perf/heap measurement (native-warp vs external) | **done — measured; verdict WAIT** (see `gemma3-warp-runtime-performance.md`) |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -252,4 +252,10 @@ head) is therefore the trustworthy WARP parity oracle.
   path once tokenizer + WARP exist; keep `external-python-transformers` the default until WARP is
   proven on GPU. The external probe path stays intact (untouched this block).
 
-- **GEMMA-WARP-12 perf:** pending a runnable WARP path; no fabricated numbers.
+- **GEMMA-WARP-12 perf — done (measured, no optimization).** Real numbers in
+  `docs/gemma3-warp-runtime-performance.md` (`Gemma3WarpPerformanceProbeTest`, gated). On this WARP/CPU
+  host: native-warp decode ≈ **0.9–1.15 tok/s** vs external ≈ **8.8–10.7 tok/s** (~10× slower); native
+  prefill is token-by-token and scales badly (~25 s for a 20-token prompt); native heap ≈ **1.2 GB**
+  (`float[]` reference weights). Correct (`" Paris."`) but **verdict WAIT** — usable experimentally behind
+  the flag, not the sensible default until the fused/batched pipeline + heap-light weight load land.
+  Bottlenecks + optimization order are in the perf doc.
