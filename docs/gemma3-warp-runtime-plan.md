@@ -56,6 +56,7 @@ stopping. Open points are resolved with the user at the end.
 | GENERATION-STREAMING-1 global streaming switch + Gemma native-warp streaming | **done — default streaming, Gemma streams " Paris." live** |
 | GEMMA-WARP-13b-1 submit/fence/readback instrumentation | **done — measured: ~1140 submits + 344 readbacks per decode token** |
 | GEMMA-WARP-13b-2 GPU-resident buffer/execution-context seam | **done — resident kernels, attn-chain 4→1 readbacks, parity** |
+| GEMMA-WARP-13b-3a resident decodeStep wiring | **done — real readbacks/token 344→37, still " Paris"** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -373,3 +374,26 @@ head) is therefore the trustworthy WARP parity oracle.
     decode step approaches a single drain — then compare 13b-1 counters before/after on the real model.
     Output must stay " Paris.". No native-warp default switch / external removal / Qwen-Smol-T5 change /
     batched-prefill / windowed-eviction in this slice.
+
+- **GEMMA-WARP-13b-3a resident decodeStep — done (readbacks down ~9×).** Split per the spec: this is 3a
+  (resident decode / fewer readbacks); fence/submit coalescing is the separate 3b. New resident plumbing:
+  `MatMulNBitsKernel.matvecResident(WarpGpuBuffer in, WarpGpuBuffer out)` (GPU→GPU copy I/O, one combined
+  submit, **no readback**; D3D12 buffers implicit-promote) + `WarpDenseProjection.forwardResident`;
+  `Gemma3WarpElementAddKernel` (resident residual add) + a two-buffer resident GeGLU
+  (`Gemma3WarpGeGluKernel.apply(ctx, gate, up, inter)`, new `GEGLU2_HLSL`) so the MLP needs no host
+  concat; `Gemma3WarpMlp.mlp(ctx, x)`; `Gemma3WarpLmHead.logits(ctx, hidden)`; `Gemma3WarpLayer.decodeStepResident`
+  (lazily uploads the 6 norm weights as resident buffers; the whole layer runs resident, the only readback
+  is the new token's k/v into the host KV cache); `Gemma3WarpDecodeSession.prefillResident/decodeNextResident`
+  (resident embed → layers → final norm → tied LM head, one logits readback). The old `float[]` path is
+  unchanged (oracle/fallback).
+  - **Measured.** Synthetic: prefill readbacks **382 → 41** (5 prompt tokens), resident logits == float[]
+    logits (top-1 identical); resident decodeNext == float[] decodeNext. Real Gemma 3 270M: **readbacks/token
+    344 → 37** (~2/layer×18 cache k/v + 1 logits), submits/token **1140 → 834** (intermediate uploads
+    removed too), **top-1 9079 (" Paris"), next 236761** — identical output.
+  - **Acceptance:** readbacks/token deutlich gesunken (344→37); output identical. Submits/fences still high
+    (834/token) — each resident dispatch is its own submit+fence; **that is the next slice (13b-3b):**
+    coalesce the per-dispatch fences via `DirectMlGpuBatch`/`executeOrDefer` (deferred fence) and/or record
+    a layer's dispatches into one command list, so a decode step approaches a single drain. Streaming stays
+    live and buffered stays identical (the session's float[] path, used by the workbench runner, is
+    unchanged; the resident path is additive and validated equal). No native-warp default switch; external
+    untouched; no Qwen/Smol/T5 change; no batched-prefill / windowed-eviction / .wdmlpack-format change.
