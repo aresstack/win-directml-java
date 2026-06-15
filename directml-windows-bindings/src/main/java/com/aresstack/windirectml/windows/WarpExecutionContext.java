@@ -29,9 +29,14 @@ public final class WarpExecutionContext {
         return wb;
     }
 
-    /** A zero-initialised resident buffer of {@code elementCount} floats. */
+    /**
+     * A resident output buffer of {@code elementCount} floats (GEMMA-WARP-13b-3b: <b>uninitialised</b> —
+     * no zero-init upload). Resident kernels fully overwrite their output before it is read, so skipping
+     * the per-allocation upload removes one submit + one fence wait per kernel output. See
+     * {@link WarpGpuBuffer#allocateUninitialized}.
+     */
     public WarpGpuBuffer allocate(int elementCount) throws WindowsNativeException {
-        return WarpGpuBuffer.allocate(wb, elementCount);
+        return WarpGpuBuffer.allocateUninitialized(wb, elementCount);
     }
 
     /** A resident buffer initialised from {@code data}. */
@@ -42,6 +47,13 @@ public final class WarpExecutionContext {
     /**
      * Record + submit one compute-kernel dispatch over GPU-resident buffers (no readback). The
      * {@code uavAddresses} are {@link WarpGpuBuffer#gpuAddress()} values in the kernel's UAV order.
+     *
+     * <p>When a {@link com.aresstack.windirectml.runtime.DirectMlGpuBatch} is active on the calling
+     * thread (GEMMA-WARP-13b-3b) the dispatch is submitted fire-and-forget via
+     * {@link D3D12Bindings#executeOrDefer} — its fence is coalesced into the batch drain instead of a
+     * per-dispatch CPU wait. Without a batch this behaves exactly as before (one submit + one fence
+     * wait). Either way the command list and allocator are released here (the batch holds its own
+     * {@code AddRef} until the drain), so this no longer leaks one command list/allocator per dispatch.</p>
      */
     public void dispatch(GpuComputeKernel kernel, long[] uavAddresses, int[] constants, int elementCount)
             throws WindowsNativeException {
@@ -54,7 +66,9 @@ public final class WarpExecutionContext {
             MemorySegment cmdList = D3D12Bindings.createCommandList(
                     dev, D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, a);
             kernel.recordDispatch(cmdList, uavAddresses, constants, elementCount);
-            D3D12Bindings.executeAndWait(dev, queue, cmdList, a);
+            D3D12Bindings.executeOrDefer(dev, queue, cmdList, allocator, a);
+            DxgiBindings.release(cmdList);
+            DxgiBindings.release(allocator);
         }
     }
 }

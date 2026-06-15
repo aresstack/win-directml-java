@@ -134,18 +134,36 @@ public final class Gemma3WarpMlp implements AutoCloseable {
      * resident {@code down} output (pre post-norm). Same math as {@link #mlp(float[])}.
      */
     public WarpGpuBuffer mlp(WarpExecutionContext ctx, WarpGpuBuffer x) throws WindowsNativeException {
+        // Standalone (no active batch): synchronous projections, so the gate/up/activated scratch can be
+        // freed immediately. Inside a DirectMlGpuBatch use {@link #mlp(WarpExecutionContext, WarpGpuBuffer,
+        // java.util.List)} so the deferred dispatches' inputs survive until the batch drains.
+        java.util.List<WarpGpuBuffer> scratch = new java.util.ArrayList<>();
+        WarpGpuBuffer down = mlp(ctx, x, scratch);
+        for (WarpGpuBuffer b : scratch) {
+            b.close();
+        }
+        return down;
+    }
+
+    /**
+     * Resident MLP that registers its {@code gate}/{@code up}/{@code activated} intermediates in
+     * {@code scratch} instead of closing them (GEMMA-WARP-13b-3b): under a {@code DirectMlGpuBatch} the
+     * projections/GeGLU are deferred, so these buffers must outlive this call until the batch drains.
+     * The caller closes {@code scratch} after the drain. Returns the resident {@code down} output.
+     */
+    public WarpGpuBuffer mlp(WarpExecutionContext ctx, WarpGpuBuffer x, java.util.List<WarpGpuBuffer> scratch)
+            throws WindowsNativeException {
         ensureOpen();
         if (x.elementCount() != hidden) {
             throw new IllegalArgumentException("x length must equal hidden: x=" + x.elementCount() + ", hidden=" + hidden);
         }
         WarpGpuBuffer gate = gateProj.forwardResident(ctx, x);
+        scratch.add(gate);
         WarpGpuBuffer up = upProj.forwardResident(ctx, x);
+        scratch.add(up);
         WarpGpuBuffer activated = geGlu.apply(ctx, gate, up, intermediate);
-        gate.close();
-        up.close();
-        WarpGpuBuffer down = downProj.forwardResident(ctx, activated);
-        activated.close();
-        return down;
+        scratch.add(activated);
+        return downProj.forwardResident(ctx, activated);
     }
 
     public int hidden() {

@@ -2,6 +2,7 @@ package com.aresstack.windirectml.windows;
 
 import com.aresstack.windirectml.windows.D3D12Bindings;
 import com.aresstack.windirectml.windows.DxgiBindings;
+import com.aresstack.windirectml.runtime.DirectMlGpuBatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1696,27 +1697,20 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         long inputBytes = (long) K * Float.BYTES;
         long outputBytes = (long) N * Float.BYTES;
         try {
+            if (DirectMlGpuBatch.isActive()) {
+                // GEMMA-WARP-13b-3b: a submission batch is open on this thread — record into a fresh
+                // command list and submit fire-and-forget; the batch coalesces the fence into one drain.
+                matvecResidentDeferred(in, out, inputBytes, outputBytes);
+                return;
+            }
+            // Synchronous fallback (no batch active): reuse the persistent command list, one combined
+            // submit + one fence wait, no readback (output stays resident). Always-correct path.
             int hr = (int) mhResetAllocator.invokeExact(execAllocator);
             HResult.check(hr, "CommandAllocator::Reset");
             hr = (int) mhResetCmdList.invokeExact(execCmdList, execAllocator, MemorySegment.NULL);
             HResult.check(hr, "CommandList::Reset");
 
-            // GPU->GPU copy resident input into the kernel's input buffer (instead of upload-heap copy).
-            mhCopyBufferRegion.invokeExact(execCmdList, inputBuf, 0L, in.d3d12Buffer(), 0L, inputBytes);
-            mhResourceBarrier.invokeExact(execCmdList, 1, barrierInputToUAV);
-            if (useInt4Gpu) {
-                int4Shader.recordDispatch(execCmdList, int4UavAddrs, int4Constants, matvecDispatchElementCount());
-            } else if (useWarpParallelFp32Matvec) {
-                fp32Shader.recordDispatch(execCmdList, fp32UavAddrs, fp32Constants, N);
-            } else {
-                mhSetDescriptorHeaps.invokeExact(execCmdList, 1, heapArrayPtr);
-                mhRecordDispatch.invokeExact(cmdRecorder, execCmdList, compiledGemm, execBindingTable);
-            }
-            mhResourceBarrier.invokeExact(execCmdList, 1, barrierOutputToCS);
-            // GPU->GPU copy result into the resident output buffer (instead of readback-heap copy).
-            mhCopyBufferRegion.invokeExact(execCmdList, out.d3d12Buffer(), 0L, outputBuf, 0L, outputBytes);
-            mhResourceBarrier.invokeExact(execCmdList, 1, barrierInputToCommon);
-            mhResourceBarrier.invokeExact(execCmdList, 1, barrierOutputToCommon);
+            recordMatvecResident(execCmdList, in, out, inputBytes, outputBytes);
 
             hr = (int) mhCloseCmdList.invokeExact(execCmdList);
             HResult.check(hr, "CommandList::Close");
@@ -1737,6 +1731,56 @@ public final class MatMulNBitsKernel implements AutoCloseable {
             throw new RuntimeException("MatMulNBitsKernel.matvecResident failed", e);
         } catch (Throwable t) {
             throw new RuntimeException("MatMulNBitsKernel.matvecResident failed", t);
+        }
+    }
+
+    /**
+     * Record the resident matvec sequence into {@code cl}: GPU→GPU copy of {@code in}, the dispatch
+     * (INT4 / WARP-FP32 / DML GEMM), and a GPU→GPU copy of the result into {@code out}, framed by the
+     * state-transition barriers. Shared by the synchronous {@link #matvecResident} path (persistent
+     * command list) and the deferred {@link #matvecResidentDeferred} path (fresh command list).
+     */
+    private void recordMatvecResident(MemorySegment cl, WarpGpuBuffer in, WarpGpuBuffer out,
+                                      long inputBytes, long outputBytes) throws Throwable {
+        mhCopyBufferRegion.invokeExact(cl, inputBuf, 0L, in.d3d12Buffer(), 0L, inputBytes);
+        mhResourceBarrier.invokeExact(cl, 1, barrierInputToUAV);
+        if (useInt4Gpu) {
+            int4Shader.recordDispatch(cl, int4UavAddrs, int4Constants, matvecDispatchElementCount());
+        } else if (useWarpParallelFp32Matvec) {
+            fp32Shader.recordDispatch(cl, fp32UavAddrs, fp32Constants, N);
+        } else {
+            mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
+            mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+        }
+        mhResourceBarrier.invokeExact(cl, 1, barrierOutputToCS);
+        mhCopyBufferRegion.invokeExact(cl, out.d3d12Buffer(), 0L, outputBuf, 0L, outputBytes);
+        mhResourceBarrier.invokeExact(cl, 1, barrierInputToCommon);
+        mhResourceBarrier.invokeExact(cl, 1, barrierOutputToCommon);
+    }
+
+    /**
+     * Deferred resident matvec (GEMMA-WARP-13b-3b): record the same sequence as {@link #matvecResident}
+     * into a <b>fresh</b> command list and submit it via {@link D3D12Bindings#executeOrDefer}, so the
+     * active {@link DirectMlGpuBatch} coalesces the fence into its single drain instead of a per-call
+     * CPU wait. A fresh list (rather than the reused {@code execCmdList}) is required because the batch
+     * must {@code AddRef} and retain each submission until the drain. {@code recordSubmit()} is bumped by
+     * {@code executeOrDefer}; no readback (output stays resident). Each projection kernel is invoked at
+     * most once per batch, so its persistent {@code inputBuf}/{@code outputBuf} are never reused while a
+     * deferred submission is still in flight.
+     */
+    private void matvecResidentDeferred(WarpGpuBuffer in, WarpGpuBuffer out,
+                                        long inputBytes, long outputBytes) throws Throwable {
+        MemorySegment dev = wb.getD3d12Device();
+        MemorySegment queue = wb.getCommandQueue();
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment allocator = D3D12Bindings.createCommandAllocator(
+                    dev, D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, a);
+            MemorySegment cl = D3D12Bindings.createCommandList(
+                    dev, D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, a);
+            recordMatvecResident(cl, in, out, inputBytes, outputBytes);
+            D3D12Bindings.executeOrDefer(dev, queue, cl, allocator, a);
+            DxgiBindings.release(cl);
+            DxgiBindings.release(allocator);
         }
     }
 

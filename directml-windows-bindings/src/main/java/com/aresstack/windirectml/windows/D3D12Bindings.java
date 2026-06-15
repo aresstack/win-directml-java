@@ -931,6 +931,8 @@ public final class D3D12Bindings {
         closeCommandList(cmdList);
         executeCommandLists(queue, cmdList, arena);
         batch.retain(cmdList, cmdAllocator);
+        // GEMMA-WARP-13b-3b: one submit, no fence — the fence is coalesced into the batch drain.
+        WarpSubmissionStats.recordSubmit();
     }
 
     /**

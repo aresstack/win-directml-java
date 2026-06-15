@@ -4,6 +4,10 @@ import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
 import com.aresstack.windirectml.inference.model.SafeTensorsReader;
 import com.aresstack.windirectml.inference.model.SafeTensorsReader.SafeTensorEntry;
 import com.aresstack.windirectml.inference.model.SafeTensorsReader.SafeTensorsFile;
+import com.aresstack.windirectml.inference.warp.WarpDenseProjection;
+import com.aresstack.windirectml.runtime.DirectMlGpuBatch;
+import com.aresstack.windirectml.windows.WarpExecutionContext;
+import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WarpSubmissionStats;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import org.junit.jupiter.api.AfterAll;
@@ -29,6 +33,11 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * GEMMA-WARP-13b-3a: the resident decode path matches the synchronous float[] path numerically and does
  * far fewer readbacks per token (intermediates stay GPU-resident; only the new k/v and the final logits
  * are read back).
+ *
+ * <p>GEMMA-WARP-13b-3b: the resident path additionally coalesces fences — each layer's pure compute
+ * dispatches (incl. the resident projections) are submitted fire-and-forget under a {@code DirectMlGpuBatch}
+ * and fenced once per layer drain, so {@code fenceWaits} fall far below {@code submits} while the output
+ * stays identical. The deferred matvec is asserted bit-for-bit equal to the synchronous matvec.</p>
  */
 @EnabledOnOs(OS.WINDOWS)
 class Gemma3WarpResidentDecodeStepTest {
@@ -108,6 +117,73 @@ class Gemma3WarpResidentDecodeStepTest {
         }
     }
 
+    @Test
+    void batchedResidentMatvecEqualsSyncMatvec() throws Exception {
+        // 13b-3b: the deferred (batched) matvec must produce the exact same output as the synchronous one.
+        int outN = 48;
+        int inK = 64;
+        Random rng = new Random(515);
+        float[] w = rand(rng, outN * inK, 0.05f); // [N, K] row-major
+        float[] x = rand(rng, inK, 0.5f);
+        WarpExecutionContext ctx = new WarpExecutionContext(wb);
+        try (WarpDenseProjection proj = WarpDenseProjection.fromDequantizedWeights(wb, "test.matvec", outN, inK, w)) {
+            float[] sync;
+            try (WarpGpuBuffer xb = ctx.upload(x); WarpGpuBuffer ob = proj.forwardResident(ctx, xb)) {
+                sync = ob.readback(); // no batch active -> synchronous matvec path
+            }
+            float[] batched;
+            try (WarpGpuBuffer xb = ctx.upload(x)) {
+                try (DirectMlGpuBatch batch = DirectMlGpuBatch.begin(wb)) {
+                    try (WarpGpuBuffer ob = proj.forwardResident(ctx, xb)) { // deferred matvec
+                        batched = ob.readback();
+                    }
+                }
+            }
+            assertEquals(sync.length, batched.length, "matvec length");
+            for (int i = 0; i < sync.length; i++) {
+                assertEquals(sync[i], batched[i], 0f, "deferred matvec must equal sync matvec at [" + i + "]");
+            }
+        }
+    }
+
+    @Test
+    void syntheticResidentPrefillCoalescesFences() throws Exception {
+        // 13b-3b: resident prefill stays numerically identical to the float[] path, but its fence waits
+        // are coalesced — far fewer fenceWaits than submits, and far fewer fenceWaits than the float path.
+        Gemma3Config config = smallConfig();
+        Gemma3ReferenceWeights ref = syntheticWeights(config, new Random(343));
+        int[] ids = {4, 11, 27, 2, 18};
+
+        try (Gemma3WarpDecodeSession sess = new Gemma3WarpDecodeSession(wb, Gemma3WarpWeights.from(ref))) {
+            WarpSubmissionStats.reset();
+            WarpSubmissionStats.Snapshot f0 = WarpSubmissionStats.snapshot();
+            float[] floatLogits = sess.prefill(ids);
+            WarpSubmissionStats.Snapshot floatStats = WarpSubmissionStats.snapshot().minus(f0);
+
+            WarpSubmissionStats.Snapshot r0 = WarpSubmissionStats.snapshot();
+            float[] residentLogits = sess.prefillResident(ids);
+            WarpSubmissionStats.Snapshot resStats = WarpSubmissionStats.snapshot().minus(r0);
+
+            for (int o = 0; o < floatLogits.length; o++) {
+                assertClose("prefill logits[" + o + "]", floatLogits[o], residentLogits[o]);
+            }
+            assertEquals(DecoderOnlyMath.argmax(floatLogits), DecoderOnlyMath.argmax(residentLogits), "top-1");
+            System.out.println("[13b-3b] synthetic prefill float=" + floatStats + " resident=" + resStats);
+            // Coalescing: resident dispatches are deferred and fenced once per layer drain, so fenceWaits
+            // drop strictly below submits (in 13b-3a they were equal — every submit fenced). On this tiny
+            // synthetic config the unavoidable upload/readback syncs dominate; the real-model gated test
+            // asserts the much larger ratio where the big projections/compute dominate.
+            assertTrue(resStats.fenceWaits() < resStats.submits(),
+                    "resident fenceWaits must be coalesced below its submits: " + resStats);
+            assertTrue(resStats.submits() - resStats.fenceWaits() >= config.numHiddenLayers(),
+                    "at least one dispatch per layer must be coalesced: " + resStats);
+            // And the resident path fences far less than the all-synchronous float path.
+            assertTrue(resStats.fenceWaits() < floatStats.fenceWaits(),
+                    "resident fenceWaits must be below float-path fenceWaits: resident="
+                            + resStats.fenceWaits() + " float=" + floatStats.fenceWaits());
+        }
+    }
+
     @EnabledIfSystemProperty(named = "gemma.warp.realModel", matches = "true")
     @Test
     void realModelResidentParisAndReadbacksWellBelowBaseline() throws Exception {
@@ -128,11 +204,18 @@ class Gemma3WarpResidentDecodeStepTest {
             int next = sess.decodeNextTokenResident(top1);
             WarpSubmissionStats.Snapshot dd = WarpSubmissionStats.snapshot().minus(d0);
             System.out.println("[13b-3] resident decode/token " + dd
-                    + " (13b-1 baseline ~344 readbacks/token); top1=" + top1 + " next=" + next);
+                    + " (13b-1 baseline ~344 readbacks/token, ~834 fenceWaits/token after 13b-3a);"
+                    + " top1=" + top1 + " next=" + next);
 
             assertEquals(EXPECTED_NEXT, top1, "resident prefill top-1 must be \" Paris\"");
             assertTrue(dd.readbacks() < 100,
                     "resident decode readbacks/token must be well below the ~344 baseline: " + dd.readbacks());
+            // 13b-3b: fences coalesced — fenceWaits per token fall far below submits and far below the
+            // ~834/token of 13b-3a (each layer drains once instead of fencing every dispatch).
+            assertTrue(dd.fenceWaits() * 2 < dd.submits(),
+                    "resident decode fenceWaits must be coalesced below half its submits: " + dd);
+            assertTrue(dd.fenceWaits() < 300,
+                    "resident decode fenceWaits/token must be well below the ~834 13b-3a baseline: " + dd.fenceWaits());
         }
     }
 

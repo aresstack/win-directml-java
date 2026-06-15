@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.inference.gemma;
 
 import com.aresstack.windirectml.inference.warp.WarpDenseProjection;
+import com.aresstack.windirectml.runtime.DirectMlGpuBatch;
 import com.aresstack.windirectml.windows.WarpExecutionContext;
 import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
@@ -221,53 +222,65 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         Objects.requireNonNull(cache, "cache");
         ensureResidentNormWeights(ctx);
 
-        WarpGpuBuffer normed = k.rmsNorm().normalize(ctx, hiddenIn, inputLayerNormBuf, eps);
-        WarpGpuBuffer q = qProj.forwardResident(ctx, normed);
-        WarpGpuBuffer k0 = kProj.forwardResident(ctx, normed);
-        WarpGpuBuffer v = vProj.forwardResident(ctx, normed);
-        normed.close();
-        WarpGpuBuffer qn = k.qkNorm().normalizeHeads(ctx, q, numHeads, headDim, qNormBuf, eps);
-        q.close();
-        WarpGpuBuffer kn = k.qkNorm().normalizeHeads(ctx, k0, numKvHeads, headDim, kNormBuf, eps);
-        k0.close();
-        WarpGpuBuffer qr = k.rope().applyToHeads(ctx, qn, numHeads, headDim, pos, theta);
-        qn.close();
-        WarpGpuBuffer kr = k.rope().applyToHeads(ctx, kn, numKvHeads, headDim, pos, theta);
-        kn.close();
+        // GEMMA-WARP-13b-3b: open a per-layer submission batch so the layer's pure compute dispatches
+        // (norms, QK-norm, RoPE, attention, GeGLU, element-adds and the resident projections) are
+        // submitted fire-and-forget and their fences coalesced into one drain at batch close, instead
+        // of a CPU wait per kernel. Per-layer (not per-token) bounds the retained command lists —
+        // important on the memory-sensitive WARP device. Without a batch every dispatch falls back to
+        // its own submit + fence wait.
+        //
+        // Because dispatches are deferred, an intermediate buffer must stay alive until the GPU has
+        // actually consumed it (the batch drain), so all scratch buffers are closed only AFTER the batch
+        // closes — eagerly closing them mid-layer would free GPU memory still referenced by a not-yet-
+        // executed command list. Only the returned {@code out} (and the caller-owned {@code hiddenIn})
+        // outlive this method.
+        java.util.List<WarpGpuBuffer> scratch = new java.util.ArrayList<>();
+        WarpGpuBuffer out;
+        try (DirectMlGpuBatch batch = DirectMlGpuBatch.begin(ctx.bindings())) {
+            WarpGpuBuffer normed = track(scratch, k.rmsNorm().normalize(ctx, hiddenIn, inputLayerNormBuf, eps));
+            WarpGpuBuffer q = track(scratch, qProj.forwardResident(ctx, normed));
+            WarpGpuBuffer k0 = track(scratch, kProj.forwardResident(ctx, normed));
+            WarpGpuBuffer v = track(scratch, vProj.forwardResident(ctx, normed));
+            WarpGpuBuffer qn = track(scratch, k.qkNorm().normalizeHeads(ctx, q, numHeads, headDim, qNormBuf, eps));
+            WarpGpuBuffer kn = track(scratch, k.qkNorm().normalizeHeads(ctx, k0, numKvHeads, headDim, kNormBuf, eps));
+            WarpGpuBuffer qr = track(scratch, k.rope().applyToHeads(ctx, qn, numHeads, headDim, pos, theta));
+            WarpGpuBuffer kr = track(scratch, k.rope().applyToHeads(ctx, kn, numKvHeads, headDim, pos, theta));
 
-        // Only readback: the new token's k (normed+roped) and v (raw) into the host KV cache.
-        cache.put(layer, pos, kr.readback(), v.readback());
-        kr.close();
-        v.close();
-        int seqLen = pos + 1;
-        int firstValid = layout.firstValidKey(layer, pos);
-        WarpGpuBuffer keys = ctx.upload(cache.kFlat(layer, seqLen));
-        WarpGpuBuffer values = ctx.upload(cache.vFlat(layer, seqLen));
+            // Only readback: the new token's k (normed+roped) and v (raw) into the host KV cache. The
+            // readback waits the GPU, which also drains the deferred dispatches recorded above.
+            cache.put(layer, pos, kr.readback(), v.readback());
+            int seqLen = pos + 1;
+            int firstValid = layout.firstValidKey(layer, pos);
+            WarpGpuBuffer keys = track(scratch, ctx.upload(cache.kFlat(layer, seqLen)));
+            WarpGpuBuffer values = track(scratch, ctx.upload(cache.vFlat(layer, seqLen)));
 
-        WarpGpuBuffer scores = k.scores().scores(ctx, qr, keys, numHeads, numKvHeads, headDim, seqLen, pos, firstValid, scale);
-        qr.close();
-        keys.close();
-        WarpGpuBuffer prob = k.softmax().softmaxRows(ctx, scores, numHeads, seqLen);
-        scores.close();
-        WarpGpuBuffer context = k.value().aggregate(ctx, prob, values, numHeads, numKvHeads, headDim, seqLen);
-        prob.close();
-        values.close();
-        WarpGpuBuffer attnProj = oProj.forwardResident(ctx, context);
-        context.close();
-        WarpGpuBuffer attnProjNorm = k.rmsNorm().normalize(ctx, attnProj, postAttentionLayerNormBuf, eps);
-        attnProj.close();
-        WarpGpuBuffer hidden1 = k.elementAdd().add(ctx, hiddenIn, attnProjNorm);
-        attnProjNorm.close();
+            WarpGpuBuffer scores = track(scratch,
+                    k.scores().scores(ctx, qr, keys, numHeads, numKvHeads, headDim, seqLen, pos, firstValid, scale));
+            WarpGpuBuffer prob = track(scratch, k.softmax().softmaxRows(ctx, scores, numHeads, seqLen));
+            WarpGpuBuffer context = track(scratch,
+                    k.value().aggregate(ctx, prob, values, numHeads, numKvHeads, headDim, seqLen));
+            WarpGpuBuffer attnProj = track(scratch, oProj.forwardResident(ctx, context));
+            WarpGpuBuffer attnProjNorm = track(scratch,
+                    k.rmsNorm().normalize(ctx, attnProj, postAttentionLayerNormBuf, eps));
+            WarpGpuBuffer hidden1 = track(scratch, k.elementAdd().add(ctx, hiddenIn, attnProjNorm));
 
-        WarpGpuBuffer ff = k.rmsNorm().normalize(ctx, hidden1, preFeedforwardLayerNormBuf, eps);
-        WarpGpuBuffer down = mlp.mlp(ctx, ff);
-        ff.close();
-        WarpGpuBuffer downNorm = k.rmsNorm().normalize(ctx, down, postFeedforwardLayerNormBuf, eps);
-        down.close();
-        WarpGpuBuffer out = k.elementAdd().add(ctx, hidden1, downNorm);
-        hidden1.close();
-        downNorm.close();
+            WarpGpuBuffer ff = track(scratch, k.rmsNorm().normalize(ctx, hidden1, preFeedforwardLayerNormBuf, eps));
+            WarpGpuBuffer down = track(scratch, mlp.mlp(ctx, ff, scratch));
+            WarpGpuBuffer downNorm = track(scratch, k.rmsNorm().normalize(ctx, down, postFeedforwardLayerNormBuf, eps));
+            out = k.elementAdd().add(ctx, hidden1, downNorm);
+            // batch.close() (try-with-resources) drains the layer's deferred submissions in one fence
+            // wait, so every scratch buffer has now been consumed by the GPU and `out` is valid.
+        }
+        for (WarpGpuBuffer b : scratch) {
+            b.close();
+        }
         return out;
+    }
+
+    /** Register a freshly produced resident buffer for end-of-layer cleanup (after the batch drains). */
+    private static WarpGpuBuffer track(java.util.List<WarpGpuBuffer> scratch, WarpGpuBuffer b) {
+        scratch.add(b);
+        return b;
     }
 
     private void ensureResidentNormWeights(WarpExecutionContext ctx) throws WindowsNativeException {

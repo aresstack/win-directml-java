@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.inference.gemma;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
+import com.aresstack.windirectml.runtime.DirectMlGpuBatch;
 import com.aresstack.windirectml.windows.WarpExecutionContext;
 import com.aresstack.windirectml.windows.WarpGpuBuffer;
 import com.aresstack.windirectml.windows.WindowsBindings;
@@ -169,12 +170,18 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
         if (finalNormBuf == null) {
             finalNormBuf = ctx().upload(weights.finalNorm());
         }
-        WarpGpuBuffer normed = kernels.rmsNorm().normalize(ctx(), finalHidden, finalNormBuf, eps);
-        finalHidden.close();
-        try {
-            return lmHead().logits(ctx(), normed);
-        } finally {
-            normed.close();
+        // GEMMA-WARP-13b-3b: coalesce the final-norm dispatch + tied LM-head matvec under one batch; the
+        // logits readback drains it (logits must reach the CPU for token selection — the one readback).
+        // finalHidden feeds the deferred final-norm dispatch, so it must stay alive until that work has
+        // been consumed (the readback drain) — close it only after logits() returns.
+        try (DirectMlGpuBatch batch = DirectMlGpuBatch.begin(wb)) {
+            WarpGpuBuffer normed = kernels.rmsNorm().normalize(ctx(), finalHidden, finalNormBuf, eps);
+            try {
+                return lmHead().logits(ctx(), normed);
+            } finally {
+                normed.close();
+                finalHidden.close();
+            }
         }
     }
 

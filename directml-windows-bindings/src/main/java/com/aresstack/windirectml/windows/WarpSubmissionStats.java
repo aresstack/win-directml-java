@@ -29,6 +29,24 @@ public final class WarpSubmissionStats {
         FENCE_WAITS.incrementAndGet();
     }
 
+    /**
+     * Record one command-list submission with <b>no</b> fence wait (GEMMA-WARP-13b-3b): a deferred,
+     * fire-and-forget submission whose fence is coalesced into a later {@code DirectMlGpuBatch} drain.
+     * The matching drain records exactly one {@link #recordFenceWait()}.
+     */
+    public static void recordSubmit() {
+        SUBMITS.incrementAndGet();
+    }
+
+    /**
+     * Record one blocking fence wait with <b>no</b> submission (GEMMA-WARP-13b-3b): a
+     * {@code DirectMlGpuBatch} drain that fences every deferred submission since the last drain in one
+     * wait.
+     */
+    public static void recordFenceWait() {
+        FENCE_WAITS.incrementAndGet();
+    }
+
     /** Record one CPU readback of GPU results. */
     public static void recordReadback() {
         READBACKS.incrementAndGet();

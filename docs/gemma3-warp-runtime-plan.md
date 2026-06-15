@@ -57,6 +57,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-13b-1 submit/fence/readback instrumentation | **done — measured: ~1140 submits + 344 readbacks per decode token** |
 | GEMMA-WARP-13b-2 GPU-resident buffer/execution-context seam | **done — resident kernels, attn-chain 4→1 readbacks, parity** |
 | GEMMA-WARP-13b-3a resident decodeStep wiring | **done — real readbacks/token 344→37, still " Paris"** |
+| GEMMA-WARP-13b-3b submit/fence-coalescing | **done — real fenceWaits/token 834→93, submits 834→454, still " Paris"** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -397,3 +398,38 @@ head) is therefore the trustworthy WARP parity oracle.
     live and buffered stays identical (the session's float[] path, used by the workbench runner, is
     unchanged; the resident path is additive and validated equal). No native-warp default switch; external
     untouched; no Qwen/Smol/T5 change; no batched-prefill / windowed-eviction / .wdmlpack-format change.
+
+- **GEMMA-WARP-13b-3b submit/fence-coalescing — done (fences down ~9×, submits ~halved).** Two coalescing
+  mechanisms layered on the 13b-3a resident path, both kept behind an active `DirectMlGpuBatch` so the old
+  synchronous resident/`float[]` paths remain the always-correct fallback:
+  1. **Deferred fences.** `WarpExecutionContext.dispatch` now submits via `D3D12Bindings.executeOrDefer`
+     (fire-and-forget, fence coalesced into the batch drain) and releases its command list/allocator —
+     fixing a pre-existing one-list/allocator leak per dispatch. `MatMulNBitsKernel.matvecResident` grows a
+     deferred branch (`matvecResidentDeferred`, fresh command list so the batch can `AddRef`/retain it;
+     recording extracted to `recordMatvecResident`) used when a batch is active. `Gemma3WarpLayer.decodeStepResident`
+     opens a **per-layer** batch (bounds retained command lists on the memory-sensitive WARP device) and
+     drains once at layer end; `Gemma3WarpDecodeSession.residentLogits` batches the final-norm + LM head.
+     Because dispatches are deferred, intermediate buffers must outlive the drain — the layer collects them
+     in a scratch list closed only after the batch closes (an eager mid-layer `close()` was freeing GPU
+     memory a not-yet-executed command list still referenced → `DEVICE_REMOVED`); `Gemma3WarpMlp.mlp(ctx, x,
+     scratch)` registers its gate/up/activated the same way.
+  2. **No per-output zero-init.** Every resident kernel fully overwrites its output (RMSNorm, QK-norm, RoPE,
+     scores incl. the masked `-1e30f` sentinel, softmax, value, GeGLU, element-add, matvec), so
+     `WarpExecutionContext.allocate` now uses `WarpGpuBuffer.allocateUninitialized` — dropping the
+     synchronous zero-init upload (one submit **and** one fence) per kernel output, which was the dominant
+     remaining sync cost.
+     Instrumentation: `WarpSubmissionStats.recordSubmit()` (deferred submit, no fence) + `recordFenceWait()`
+     (the batch drain) so the counters stay honest.
+  - **Measured.** Synthetic prefill (5 tokens): resident **submits 955 → 533, fenceWaits 554 → 132** (float
+    path 1269/1269), logits == float[] (top-1 identical). Real Gemma 3 270M decode/token:
+    **fenceWaits 834 → 93** (~9×; readback drains + key/value uploads + per-layer drains), **submits 834 → 454**
+    (zero-init uploads removed), **readbacks 37** (unchanged), **top-1 9079 (" Paris"), next 236761** — identical
+    output.
+  - **Acceptance:** output identical, " Paris" preserved, readbacks stay low (37), submits/fences/token both
+    deutlich below ~834 (454 / 93). No native-warp default switch; external-python untouched; workbench
+    runner still uses the stable `float[]` session path (resident/batched is additive + validated equal).
+  - **Still per-dispatch (not coalesced into one list):** each deferred dispatch is still its own
+    `ExecuteCommandLists`, so submits track op count; the remaining fences are the unavoidable k/v readbacks,
+    the growing key/value uploads, and one drain per layer. Further submit reduction would mean recording a
+    whole layer's dispatches into a single command list (and/or deferring the key/value uploads with batch-
+    retained upload buffers) — a larger, riskier change deferred to a later slice.

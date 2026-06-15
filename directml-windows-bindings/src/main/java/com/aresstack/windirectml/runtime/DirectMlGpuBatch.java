@@ -177,6 +177,8 @@ public class DirectMlGpuBatch implements AutoCloseable {
                     Thread.onSpinWait();
                 }
                 batchFenceWaits.incrementAndGet();
+                // GEMMA-WARP-13b-3b: one fence wait drains every deferred submission since the last drain.
+                com.aresstack.windirectml.windows.WarpSubmissionStats.recordFenceWait();
             } finally {
                 DxgiBindings.release(fence);
             }
