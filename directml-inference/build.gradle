@@ -5,5 +5,9 @@ dependencies {
 }
 
 tasks.withType(Test).configureEach {
-    maxHeapSize = '4g'
+    // 2g is enough now that the WARP weight load is heap-light (off-heap direct buffers) and the heavy
+    // real-model WARP tests are opt-in (-Dgemma.warp.realModel=true); the largest non-gated heap user is
+    // the CPU reference parity test (~1.1 GB float[]). A smaller JVM heap also leaves more system RAM for
+    // the WARP (software) device's buffers.
+    maxHeapSize = '2g'
 }

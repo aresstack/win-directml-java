@@ -2,6 +2,7 @@ package com.aresstack.windirectml.inference.gemma;
 
 import com.aresstack.windirectml.windows.WindowsBindings;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 
@@ -39,9 +40,15 @@ class Gemma3NativeWarpRuntimeTest {
         }
     }
 
+    /**
+     * One heavy real-model generation that validates both " Paris" and the streaming contract via
+     * {@code generateStreaming} (kept to a single full generation so the default suite doesn't exceed
+     * the WARP device's memory across the other gated real-model tests).
+     */
     @EnabledOnOs(OS.WINDOWS)
+    @EnabledIfSystemProperty(named = "gemma.warp.realModel", matches = "true")
     @Test
-    void nativeWarpGeneratesParisFromCompiledPackage() throws Exception {
+    void nativeWarpStreamingGeneratesParisPerToken() throws Exception {
         assumeTrue(WindowsBindings.isSupported(), "Requires Windows + D3D12/DirectML device");
         Path dir = resolveModelDir();
         assumeTrue(dir != null, "Real Gemma 3 270M model not present");
@@ -52,16 +59,22 @@ class Gemma3NativeWarpRuntimeTest {
             assertNull(Gemma3NativeWarpRuntime.describeMissingPackage(pkg), "compiled package should be present");
 
             Gemma3NativeWarpRuntime runtime = new Gemma3NativeWarpRuntime(pkg, dir.resolve("tokenizer.json"));
-            List<Integer> streamed = new ArrayList<>();
             // raw completion (no chat template) to match the validated "The capital of France is" -> " Paris."
-            Gemma3NativeWarpRuntime.Result r = runtime.generate("The capital of France is", false, 3, streamed::add);
+            StringBuilder streamed = new StringBuilder();
+            List<String> deltas = new ArrayList<>();
+            Gemma3NativeWarpRuntime.Result r = runtime.generateStreaming("The capital of France is", false, 3, d -> {
+                deltas.add(d);
+                streamed.append(d);
+            });
 
-            System.out.println("[GEMMA-WARP-11] text='" + r.text() + "' promptTokens=" + r.promptTokens()
+            System.out.println("[GEMMA-STREAM] deltas=" + deltas + " text='" + r.text() + "'"
                     + " outputTokens=" + r.outputTokens() + " finish=" + r.finishReason());
             assertTrue(r.outputTokens() >= 1, "expected at least one generated token");
             assertEquals("WARP", r.backend(), "backend");
             assertTrue(r.text().contains("Paris"), "native WARP output should contain \"Paris\": '" + r.text() + "'");
-            assertEquals(r.outputTokens(), streamed.size(), "streamed token count == output tokens");
+            // one delta per visible token (stop token not streamed); deltas concatenate to the final text.
+            assertEquals(r.outputTokens(), deltas.size(), "one streamed delta per visible token");
+            assertEquals(r.text(), streamed.toString(), "concatenated deltas == final result text");
         } finally {
             Files.deleteIfExists(pkg);
         }

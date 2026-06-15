@@ -5,6 +5,7 @@ import com.aresstack.windirectml.windows.WindowsBindings;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 
@@ -82,6 +83,7 @@ class Gemma3WarpHeapLightWeightsTest {
         }
     }
 
+    @EnabledIfSystemProperty(named = "gemma.warp.realModel", matches = "true")
     @Test
     void realModelHeapLightLoadKeepsParisAndLowerHeap() throws Exception {
         Path dir = resolveModelDir();

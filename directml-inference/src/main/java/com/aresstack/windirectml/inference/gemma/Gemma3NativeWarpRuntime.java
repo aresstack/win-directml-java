@@ -60,11 +60,34 @@ public final class Gemma3NativeWarpRuntime {
         return null;
     }
 
+    /** Buffered generation (no per-token callback). */
+    public Result generate(String promptText, boolean applyChatTemplate, int maxNewTokens) throws IOException {
+        return generateCore(promptText, applyChatTemplate, maxNewTokens, null, null);
+    }
+
     /**
-     * Generate from an already-rendered prompt string. {@code applyChatTemplate} wraps the text in the
-     * Gemma single-user-turn template; pass {@code false} for a raw completion.
+     * Generate from an already-rendered prompt string with a per-token <b>id</b> callback.
+     * {@code applyChatTemplate} wraps the text in the Gemma single-user-turn template; pass {@code false}
+     * for a raw completion. The stop token is excluded from the callback (it is not part of the output).
      */
     public Result generate(String promptText, boolean applyChatTemplate, int maxNewTokens, IntConsumer onToken)
+            throws IOException {
+        return generateCore(promptText, applyChatTemplate, maxNewTokens, onToken, null);
+    }
+
+    /**
+     * Streaming generation: {@code onTextDelta} receives the decoded text for each visible token as it is
+     * produced (the concatenation of all deltas equals {@link Result#text()}). The stop token is not
+     * streamed. Use this for the Workbench live (streaming) output mode.
+     */
+    public Result generateStreaming(String promptText, boolean applyChatTemplate, int maxNewTokens,
+                                    java.util.function.Consumer<String> onTextDelta) throws IOException {
+        return generateCore(promptText, applyChatTemplate, maxNewTokens, null,
+                Objects.requireNonNull(onTextDelta, "onTextDelta"));
+    }
+
+    private Result generateCore(String promptText, boolean applyChatTemplate, int maxNewTokens,
+                                IntConsumer onTokenId, java.util.function.Consumer<String> onTextDelta)
             throws IOException {
         Objects.requireNonNull(promptText, "promptText");
         if (maxNewTokens < 1) {
@@ -93,6 +116,23 @@ public final class Gemma3NativeWarpRuntime {
         int[] promptIds = tokenizer.encode(rendered, true);
 
         Gemma3StopTokenPolicy stop = stopPolicy(config, tokenizer);
+        // Incremental decode for streaming: decode the growing visible-id prefix and emit only the new tail,
+        // so the streamed concatenation matches the final tokenizer.decode of all ids exactly.
+        java.util.List<Integer> visibleIds = new java.util.ArrayList<>();
+        String[] prevText = {""};
+        IntConsumer callback = (onTokenId == null && onTextDelta == null) ? null : id -> {
+            if (onTokenId != null) {
+                onTokenId.accept(id);
+            }
+            if (onTextDelta != null) {
+                visibleIds.add(id);
+                int[] ids = visibleIds.stream().mapToInt(Integer::intValue).toArray();
+                String full = tokenizer.decode(ids);
+                int common = commonPrefixLength(prevText[0], full);
+                prevText[0] = full;
+                onTextDelta.accept(full.substring(common));
+            }
+        };
 
         try {
             WindowsBindings wb = new WindowsBindings();
@@ -100,7 +140,7 @@ public final class Gemma3NativeWarpRuntime {
             try (Gemma3WarpDecodeSession session = new Gemma3WarpDecodeSession(wb, weights)) {
                 Gemma3WarpGenerator generator = new Gemma3WarpGenerator(session, stop);
                 Gemma3GenerationResult result = generator.generate(
-                        new Gemma3GenerationRequest(promptIds, maxNewTokens), onToken);
+                        new Gemma3GenerationRequest(promptIds, maxNewTokens), callback);
                 String text = tokenizer.decode(result.generatedTokenIds());
                 return new Result(text, result.promptTokenCount(), result.outputTokenCount(),
                         result.finishReason(), packagePath, "WARP");
@@ -112,6 +152,15 @@ public final class Gemma3NativeWarpRuntime {
         } catch (Exception e) {
             throw new IOException("Gemma native WARP generation failed", e);
         }
+    }
+
+    private static int commonPrefixLength(String a, String b) {
+        int n = Math.min(a.length(), b.length());
+        int i = 0;
+        while (i < n && a.charAt(i) == b.charAt(i)) {
+            i++;
+        }
+        return i;
     }
 
     private static Gemma3StopTokenPolicy stopPolicy(Gemma3Config config, Gemma3Tokenizer tokenizer) {

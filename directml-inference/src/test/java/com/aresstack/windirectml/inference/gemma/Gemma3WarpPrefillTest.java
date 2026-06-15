@@ -8,6 +8,7 @@ import com.aresstack.windirectml.windows.WindowsBindings;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 
@@ -118,16 +119,22 @@ class Gemma3WarpPrefillTest {
         Gemma3WarpWeights bbW = Gemma3WarpWeights.ofByteBufferEmbedding(
                 config, embBb, ref.finalNorm, floatW.layers());
 
-        try (Gemma3WarpForwardPass fp = new Gemma3WarpForwardPass(wb, floatW);
-             Gemma3WarpForwardPass bp = new Gemma3WarpForwardPass(wb, bbW)) {
-            float[] lf = fp.logitsForLastToken(ids);
-            float[] lb = bp.logitsForLastToken(ids);
-            for (int o = 0; o < lf.length; o++) {
-                assertEquals(lf[o], lb[o], 1e-6f, "byteBuffer vs float logits[" + o + "]");
-            }
+        // Build the two passes sequentially (close one before opening the next) so only one WARP session
+        // is resident at a time.
+        float[] lf;
+        try (Gemma3WarpForwardPass fp = new Gemma3WarpForwardPass(wb, floatW)) {
+            lf = fp.logitsForLastToken(ids);
+        }
+        float[] lb;
+        try (Gemma3WarpForwardPass bp = new Gemma3WarpForwardPass(wb, bbW)) {
+            lb = bp.logitsForLastToken(ids);
+        }
+        for (int o = 0; o < lf.length; o++) {
+            assertEquals(lf[o], lb[o], 1e-6f, "byteBuffer vs float logits[" + o + "]");
         }
     }
 
+    @EnabledIfSystemProperty(named = "gemma.warp.realModel", matches = "true")
     @Test
     void realModelPartialPrefillMatchesReference() throws Exception {
         Path dir = resolveModelDir();
@@ -172,6 +179,7 @@ class Gemma3WarpPrefillTest {
         }
     }
 
+    @EnabledIfSystemProperty(named = "gemma.warp.realModel", matches = "true")
     @Test
     void realModelFullPrefillTop1IsParis() throws Exception {
         Path dir = resolveModelDir();

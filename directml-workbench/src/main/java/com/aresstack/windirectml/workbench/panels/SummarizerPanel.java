@@ -2,6 +2,7 @@ package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.config.generation.GenerationModelRegistry;
 import com.aresstack.windirectml.config.generation.GenerationModelRegistry.Entry;
+import com.aresstack.windirectml.config.generation.GenerationOutputMode;
 import com.aresstack.windirectml.inference.GenerationTokenSink;
 import com.aresstack.windirectml.inference.GeneratedToken;
 import com.aresstack.windirectml.inference.InferenceException;
@@ -59,6 +60,7 @@ public final class SummarizerPanel extends JPanel {
     private final JComboBox<String> modelSelector;
     private final JComboBox<PromptTask> promptTemplateSelector;
     private final JSpinner maxTokensSpinner;
+    private final JCheckBox streamingCheckbox;
 
     public SummarizerPanel(WorkbenchModel model) {
         this.model = model;
@@ -110,6 +112,13 @@ public final class SummarizerPanel extends JPanel {
         runControls.add(new JLabel("Max output tokens:"));
         maxTokensSpinner = new JSpinner(new SpinnerNumberModel(256, 32, 2048, 32));
         runControls.add(maxTokensSpinner);
+
+        streamingCheckbox = new JCheckBox("Streaming output",
+                GenerationOutputMode.fromSystemProperty().isStreaming());
+        streamingCheckbox.setToolTipText("Show tokens live as they are generated. Uncheck to buffer and "
+                + "show the full result at the end. Default and initial value come from "
+                + "-Ddirectml.generation.output / -Ddirectml.generation.streaming.");
+        runControls.add(streamingCheckbox);
         var runBtn = new JButton("Generate / Summarize");
         runBtn.addActionListener(e -> runSummarizer());
         runControls.add(runBtn);
@@ -194,8 +203,10 @@ public final class SummarizerPanel extends JPanel {
         }
 
         int maxTokens = (Integer) maxTokensSpinner.getValue();
+        boolean streaming = streamingCheckbox.isSelected();
         appendResult("Loading generation model: " + selectedModel
-                + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens + ")...");
+                + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens
+                + ", output: " + (streaming ? "streaming" : "buffered") + ")...");
         if (qwenTestModel) {
             appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
         } else if (gemma3Model) {
@@ -223,13 +234,13 @@ public final class SummarizerPanel extends JPanel {
                     if (qwenTestModel) {
                         // Qwen 0.5B: use the shared descriptor's runtime dir so the panel status and the
                         // actual load path agree (directml-int4 / model_q4f16.wdmlpack).
-                        runQwenGeneration(runtimeRegistry.qwen05bRuntimeDir(), promptTask, text, maxTokens, selectedModel);
+                        runQwenGeneration(runtimeRegistry.qwen05bRuntimeDir(), promptTask, text, maxTokens, selectedModel, streaming);
                     } else if (gemma3Model) {
-                        runGemma3Generation(modelDir, promptTask, text, maxTokens, selectedModel);
+                        runGemma3Generation(modelDir, promptTask, text, maxTokens, selectedModel, streaming);
                     } else if (smolLm2Model) {
-                        runSmolLm2Generation(modelDir, promptTask, text, maxTokens);
+                        runSmolLm2Generation(modelDir, promptTask, text, maxTokens, streaming);
                     } else if (isT5Model(selectedModel)) {
-                        runT5Generation(modelDir, promptTask, text, maxTokens, selectedModel);
+                        runT5Generation(modelDir, promptTask, text, maxTokens, selectedModel, streaming);
                     } else {
                         runPhi3Summarizer(modelDir, text, maxTokens);
                     }
@@ -266,10 +277,10 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void runGemma3Generation(Path modelDir, PromptTask task, String text, int maxTokens, String selectedModel)
-            throws Exception {
+    private void runGemma3Generation(Path modelDir, PromptTask task, String text, int maxTokens,
+                                     String selectedModel, boolean streaming) throws Exception {
         if (Gemma3RuntimeMode.fromSystemProperty() == Gemma3RuntimeMode.NATIVE_WARP) {
-            runGemma3NativeWarp(modelDir, task, text, maxTokens, selectedModel);
+            runGemma3NativeWarp(modelDir, task, text, maxTokens, selectedModel, streaming);
             return;
         }
         long start = System.nanoTime();
@@ -304,13 +315,14 @@ public final class SummarizerPanel extends JPanel {
      * back to Python.
      */
     private void runGemma3NativeWarp(Path modelDir, PromptTask task, String text, int maxTokens,
-                                     String selectedModel) {
+                                     String selectedModel, boolean streaming) {
         long start = System.nanoTime();
         Path pkg = Gemma3NativeWarpRuntime.defaultPackagePath(modelDir);
         appendResult("Runtime mode: native-warp-experimental");
         appendResult("Model id: " + selectedModel);
         appendResult("Model directory: " + modelDir);
         appendResult("Backend: WARP");
+        appendResult("Output: " + (streaming ? "streaming" : "buffered"));
         appendResult("Package: " + pkg.getFileName());
         String missing = Gemma3NativeWarpRuntime.describeMissingPackage(pkg);
         if (missing != null) {
@@ -318,16 +330,25 @@ public final class SummarizerPanel extends JPanel {
             return;
         }
         Path tokenizerJson = modelDir.resolve("tokenizer.json");
+        // Route the workbench prompt through the Gemma chat template (Gemma3PromptStrategy emits the same
+        // <start_of_turn>user ... model turn markers); the user's text + selected task instruction are
+        // included. applyChatTemplate=false because the rendered prompt already carries the turn markers.
         String prompt = PromptStrategies.forModel("google/gemma-3-270m-it").renderPrompt(PromptInput.of(task, text));
         appendResult("");
         appendResult("OUTPUT:");
         try {
             Gemma3NativeWarpRuntime runtime = new Gemma3NativeWarpRuntime(pkg, tokenizerJson);
-            // The prompt is already rendered by the model's strategy; do not chat-template again.
-            Gemma3NativeWarpRuntime.Result result = runtime.generate(prompt, false, maxTokens, null);
-            appendResult(result.text().isBlank()
-                    ? "  NOTE: generated text is empty after detokenization." : result.text());
-            appendResult("");
+            Gemma3NativeWarpRuntime.Result result;
+            if (streaming) {
+                // Stream each visible token's decoded text live (stop token is not streamed).
+                result = runtime.generateStreaming(prompt, false, maxTokens, this::appendInline);
+                appendResult(""); // newline after the streamed text
+            } else {
+                result = runtime.generate(prompt, false, maxTokens);
+                appendResult(result.text().isBlank()
+                        ? "  NOTE: generated text is empty after detokenization." : result.text());
+                appendResult("");
+            }
             appendResult("Model loaded and generated in " + elapsedMs(start) + " ms");
             appendResult("Prompt tokens: " + result.promptTokens());
             appendResult("Output tokens: " + result.outputTokens());
@@ -337,7 +358,8 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void runSmolLm2Generation(Path modelDir, PromptTask task, String text, int maxTokens) throws Exception {
+    private void runSmolLm2Generation(Path modelDir, PromptTask task, String text, int maxTokens,
+                                      boolean streaming) throws Exception {
         long start = System.nanoTime();
         SmolLM2WorkbenchRuntimeRunner runner = new SmolLM2WorkbenchRuntimeRunner(modelDir);
         appendResult("Initializing SmolLM2 runtime from " + modelDir
@@ -351,7 +373,10 @@ public final class SummarizerPanel extends JPanel {
         }
         appendResult("OUTPUT:");
         SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(PromptInput.of(task, text), maxTokens,
-                model.getBackend(), new UiTokenSink());
+                model.getBackend(), new UiTokenSink(streaming));
+        if (!streaming) {
+            appendResult(result.text());
+        }
         appendResult("");
         appendResult("Model loaded and generated in " + elapsedMs(start) + " ms");
         appendResult("Requested backend: " + result.requestedBackend());
@@ -445,8 +470,8 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void runT5Generation(Path modelDir, PromptTask task, String text, int maxTokens, String selectedModel)
-            throws InferenceException {
+    private void runT5Generation(Path modelDir, PromptTask task, String text, int maxTokens,
+                                 String selectedModel, boolean streaming) throws InferenceException {
         validateT5ModelFiles(modelDir);
         long start = System.nanoTime();
         String backend = model.getBackend().name().toLowerCase();
@@ -466,10 +491,12 @@ public final class SummarizerPanel extends JPanel {
                     .maxTokens(maxTokens)
                     .temperature(0.0f)
                     .build();
-            InferenceResult result = engine.generate(request, new UiTokenSink());
+            InferenceResult result = engine.generate(request, new UiTokenSink(streaming));
             if (result.getText() == null || result.getText().isBlank()) {
                 appendResult("  NOTE: generated text is empty after detokenization.");
                 appendResult("  Raw output tokens: " + engine.lastOutputTokenPreview());
+            } else if (!streaming) {
+                appendResult(result.getText());
             }
             appendResult("");
             appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
@@ -486,8 +513,8 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
-    private void runQwenGeneration(Path modelDir, PromptTask task, String text, int maxTokens, String selectedModel)
-            throws InferenceException {
+    private void runQwenGeneration(Path modelDir, PromptTask task, String text, int maxTokens,
+                                   String selectedModel, boolean streaming) throws InferenceException {
         String qwenModelFile = model.getQwenModelFile();
         validateQwenModelFiles(modelDir, qwenModelFile);
         long start = System.nanoTime();
@@ -508,7 +535,10 @@ public final class SummarizerPanel extends JPanel {
                     .maxTokens(maxTokens)
                     .temperature(0.0f)
                     .build();
-            InferenceResult result = engine.generate(request, new UiTokenSink());
+            InferenceResult result = engine.generate(request, new UiTokenSink(streaming));
+            if (!streaming && result.getText() != null && !result.getText().isBlank()) {
+                appendResult(result.getText());
+            }
             appendResult("");
             appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
             if (result.getUsage() != null) {
@@ -521,10 +551,20 @@ public final class SummarizerPanel extends JPanel {
         }
     }
 
+    /**
+     * UI token sink. In streaming mode each token's delta is appended live; in buffered mode the deltas
+     * are suppressed and the caller appends the full result text at the end.
+     */
     private final class UiTokenSink implements GenerationTokenSink {
+        private final boolean streaming;
+
+        UiTokenSink(boolean streaming) {
+            this.streaming = streaming;
+        }
+
         @Override
         public void onToken(GeneratedToken token) {
-            if (token != null) {
+            if (streaming && token != null) {
                 appendInline(token.delta());
             }
         }

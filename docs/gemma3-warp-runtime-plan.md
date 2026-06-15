@@ -53,6 +53,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-12 perf/heap measurement (native-warp vs external) | **done — measured; verdict WAIT** (see `gemma3-warp-runtime-performance.md`) |
 | GEMMA-WARP-13a heap-light product weight load | **done — on-heap delta 0 MB at load, still " Paris"** |
 | GEMMA-WORKBENCH-CONVERT-1 UI Convert → model_gemma3.wdmlpack | **done — Convert enabled + produces the package the runtime finds** |
+| GENERATION-STREAMING-1 global streaming switch + Gemma native-warp streaming | **done — default streaming, Gemma streams " Paris." live** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -293,3 +294,31 @@ head) is therefore the trustworthy WARP parity oracle.
   real-convert test (hard-links the model into a temp dir, converts, asserts the package is
   runtime-loadable and the runtime finds it, lifecycle then READY). No native-runtime path change beyond
   the message; no format change; T5/SmolLM2/Qwen lifecycles untouched.
+
+- **GENERATION-STREAMING-1 streaming switch + Gemma native-warp streaming — done.** A family-neutral
+  `GenerationOutputMode` (directml-config) reads `-Ddirectml.generation.output=streaming|buffered` (or
+  `-Ddirectml.generation.streaming=true|false`); default and unknown/empty → STREAMING. The Workbench
+  Summarizer has a `[x] Streaming output` checkbox initialised from that property and toggleable at
+  runtime; the chosen mode flows to every run path. `UiTokenSink(boolean streaming)` appends tokens
+  inline only when streaming (buffered suppresses inline; the run method appends the model's full text at
+  the end), so Qwen/T5/SmolLM2 keep their live streaming and gain a buffered mode without duplicating
+  model logic. Gemma native-warp now streams: `Gemma3NativeWarpRuntime.generateStreaming(prompt, …,
+  Consumer<String> onTextDelta)` emits the decoded text per visible token (incremental prefix-decode so
+  the deltas concatenate exactly to the final text; the stop token is never streamed); buffered uses the
+  no-callback `generate(...)`. **Prompt check:** the native-warp branch already routes through
+  `Gemma3PromptStrategy` (same `<start_of_turn>user … model` markers as `Gemma3ChatTemplate`) including
+  the user's text — the earlier "Okay, I'm ready" output was the model reacting to a summarize-task
+  instruction, not a missing prompt; select template "Keines" (NONE) for a direct answer
+  (`Gemma3PromptRoutingTest` locks this).
+  - Tests: `GenerationOutputModeTest` (default streaming, output/streaming parsing, precedence);
+    `Gemma3PromptRoutingTest` (user text wrapped in chat turn markers); the gated real-model
+    `nativeWarpStreamingGeneratesParisPerToken` (deltas `[ Paris, ., \n]`, concat == final text, one delta
+    per visible token, stop not streamed); the synthetic `Gemma3WarpGeneratorTest.streamingMatchesVisibleResult`
+    already covers the generator streaming contract in the default suite.
+  - **Test-suite hygiene (env):** the heavy real-model WARP end-to-end tests are now opt-in via
+    `-Dgemma.warp.realModel=true` (they each upload ~1 GB to the WARP software device + a ~671 MB off-heap
+    embedding; several in one JVM, or concurrently with a running native-warp Workbench, exhaust the WARP
+    device / system RAM). The inference test heap was lowered 4g→2g (weights are heap-light now; the
+    largest non-gated heap user is the CPU reference at ~1.1 GB), which also leaves more system RAM for the
+    WARP device. Synthetic + device-free GPU tests (incl. the streaming contract) stay in the default
+    suite. No native-warp default switch; external-python untouched; no perf/fused/batched work.
