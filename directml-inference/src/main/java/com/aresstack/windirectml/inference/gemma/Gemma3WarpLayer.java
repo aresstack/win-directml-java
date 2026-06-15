@@ -149,6 +149,52 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         return state;
     }
 
+    /**
+     * Single-token decode step (GEMMA-WARP-10a): run one new token at sequence position {@code pos}
+     * through this layer, appending its k/v to {@code cache} and attending over the cached history
+     * (the visible range — full vs sliding-window — comes from {@link Gemma3AttentionLayout}). Returns
+     * the layer output for the token (residuals applied), to be fed to the next layer.
+     *
+     * <p>Numerically identical to {@link #forward} for the last position of a causal sequence: the new
+     * token's q attends to keys {@code [firstValid(pos), pos]}, exactly as a full-sequence pass would.</p>
+     */
+    public float[] decodeStep(float[] hiddenVec, int pos, Gemma3WarpKvCache cache) throws WindowsNativeException {
+        ensureOpen();
+        Objects.requireNonNull(hiddenVec, "hiddenVec");
+        Objects.requireNonNull(cache, "cache");
+
+        float[] normed = k.rmsNorm().normalize(hiddenVec, inputLayerNorm, eps);
+        float[] qt = qProj.project(normed);
+        float[] kt = kProj.project(normed);
+        float[] vt = vProj.project(normed);
+        qt = k.qkNorm().normalizeHeads(qt, numHeads, headDim, qNorm, eps);
+        kt = k.qkNorm().normalizeHeads(kt, numKvHeads, headDim, kNorm, eps);
+        qt = k.rope().applyToHeads(qt, numHeads, headDim, pos, theta);
+        kt = k.rope().applyToHeads(kt, numKvHeads, headDim, pos, theta);
+
+        cache.put(layer, pos, kt, vt);
+        int seqLen = pos + 1;
+        float[] kFlat = cache.kFlat(layer, seqLen);
+        float[] vFlat = cache.vFlat(layer, seqLen);
+        int firstValid = layout.firstValidKey(layer, pos);
+
+        float[] scores = k.scores().scores(qt, kFlat, numHeads, numKvHeads, headDim, seqLen, pos, firstValid, scale);
+        float[] prob = k.softmax().softmaxRows(scores, numHeads, seqLen);
+        float[] context = k.value().aggregate(prob, vFlat, numHeads, numKvHeads, headDim, seqLen);
+        float[] attnProj = k.rmsNorm().normalize(oProj.project(context), postAttentionLayerNorm, eps);
+
+        float[] out = hiddenVec.clone();
+        for (int i = 0; i < hidden; i++) {
+            out[i] += attnProj[i];
+        }
+        float[] ff = k.rmsNorm().normalize(out, preFeedforwardLayerNorm, eps);
+        float[] down = k.rmsNorm().normalize(mlp.mlp(ff), postFeedforwardLayerNorm, eps);
+        for (int i = 0; i < hidden; i++) {
+            out[i] += down[i];
+        }
+        return out;
+    }
+
     private void ensureOpen() {
         if (closed) {
             throw new IllegalStateException("Gemma3WarpLayer is closed");

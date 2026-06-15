@@ -47,7 +47,8 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-7b WARP RoPE + attention-scores primitives | **done — GPU-validated vs reference** |
 | GEMMA-WARP-8 WARP single-layer (softmax + value + full attention) | **done — GPU-validated vs reference** |
 | GEMMA-WARP-9 WARP full prefill (all layers + embedding + tied LM head) | **done — real model top-1 " Paris" on GPU** |
-| GEMMA-WARP-10 WARP decode session + KV cache | open — next |
+| GEMMA-WARP-10a WARP KV cache + single-token decodeNext | **done — real decode == full recompute on GPU** |
+| GEMMA-WARP-10b WARP streaming generate loop + EOS | open — next |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -161,6 +162,27 @@ head) is therefore the trustworthy WARP parity oracle.
   - **For GEMMA-WARP-10 (decode session) still missing:** a KV cache (append per step; local layers only
     need a windowed cache), a single-token decode step reusing cached k/v, the generate/streaming loop +
     EOS, and (perf) a fused single-submission pipeline instead of per-call upload/readback.
+
+- **GEMMA-WARP-10a KV cache + single-token decode — done, real-model GPU-validated.** `Gemma3WarpKvCache`
+  (per-layer flat `[position][kvDim]` k/v, grows on append; stores the **full** history and applies the
+  local/global sliding window at *read* time via `Gemma3AttentionLayout.firstValidKey` — windowed
+  eviction is a later perf concern), `Gemma3WarpLayer.decodeStep` (single new token: rmsnorm → q/k/v →
+  QK-norm → RoPE at `pos` → append to cache → attention over the visible cached range → o_proj → residual
+  → GeGLU MLP → residual, reusing the shared kernels + the layer's projections), and
+  `Gemma3WarpDecodeSession` (`prefill` then `decodeNext`; **prefill and decode share the one per-token
+  path**, so token `t` attends to `[firstValid(t), t]` exactly as a full-sequence causal pass — prefill's
+  last-token logits equal `Gemma3WarpForwardPass`). Tied LM head lazy; reuses `Gemma3WarpKernels`.
+  Validated on the real device: synthetic prefill+decodeNext exact parity vs the CPU reference for a
+  full-history config **and** a small-sliding-window config (the local window bites as the cache grows),
+  cache length grows correctly, and on the real Gemma 3 270M **prefill top-1 = 9079 (" Paris")** and
+  **decodeNext(9079) top-1 = 236761**, matching the full-recompute WARP forward pass (the cache path ==
+  re-running the whole sequence). Tolerance abs 3e-3 + rel 3e-3 (synthetic logits); top-1 is the asserted
+  real-model metric.
+  - **For GEMMA-WARP-10b (full generation) still missing:** the multi-step greedy generate loop driving
+    `decodeNext` repeatedly, EOS/end-of-turn stopping + the `Gemma3Tokenizer` decode of the produced ids,
+    an `IntConsumer`/streaming callback, and (perf, separate) a fused single-submission pipeline +
+    windowed-eviction KV cache + the ByteBuffer projection-weight path. No workbench wiring / runtime
+    default switch yet.
 - **GEMMA-WARP-2 Tokenizer — RESOLVED (done).** Native `Gemma3Tokenizer` reads `tokenizer.json` only
   (no `tokenizer.model`, no SentencePiece DLL, no Python): normalizer space→`▁`, BPE over the whole
   normalized string (the `Split(" ")` pre-tokenizer is a no-op post-normalization), byte_fallback to
