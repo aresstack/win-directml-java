@@ -67,6 +67,37 @@ public final class Gemma3ReferenceForwardPass {
     }
 
     /**
+     * The post-final-norm hidden vector for the last position (before the LM head) — the device-free
+     * parity oracle for {@link Gemma3WarpForwardPass#finalHiddenForLastToken} (GEMMA-WARP-9a).
+     */
+    public float[] finalHiddenForLastToken(int[] tokenIds) {
+        if (tokenIds == null || tokenIds.length == 0) {
+            throw new IllegalArgumentException("tokenIds must not be empty");
+        }
+        int s = tokenIds.length;
+        int h = config.hiddenSize();
+        float eps = (float) config.rmsNormEps();
+        float[][] hidden = new float[s][h];
+        float embScale = (float) config.embeddingScale();
+        for (int t = 0; t < s; t++) {
+            int id = tokenIds[t];
+            if (id < 0 || id >= config.vocabSize()) {
+                throw new IllegalArgumentException("token id out of range: " + id);
+            }
+            int base = id * h;
+            for (int i = 0; i < h; i++) {
+                hidden[t][i] = weights.embedTokens[base + i] * embScale;
+            }
+        }
+        for (int layer = 0; layer < config.numHiddenLayers(); layer++) {
+            applyLayer(hidden, layer, eps);
+        }
+        float[] last = hidden[s - 1].clone();
+        Gemma3ReferenceMath.rmsNormZeroCentered(last, weights.finalNorm, eps);
+        return last;
+    }
+
+    /**
      * Run a single transformer layer in place over {@code state} ({@code [seqLen][hidden]}) — the
      * device-free parity oracle for {@link Gemma3WarpLayer} (GEMMA-WARP-8). Uses the configured
      * {@code rms_norm_eps}.

@@ -40,7 +40,9 @@ public final class Gemma3WarpActivations {
                 uint i = dtid.x;
                 if (i < count) {
                     float x = asfloat(Input.Load(i * 4));
-                    float inner = %C% * (x + 0.044715f * x * x * x);
+                    // Clamp the tanh argument: tanh saturates to +/-1 well before |arg|~88, where the
+                    // HLSL exp-based tanh overflows float to inf/inf = NaN (real Gemma activations hit this).
+                    float inner = clamp(%C% * (x + 0.044715f * x * x * x), -20.0f, 20.0f);
                     float g = 0.5f * x * (1.0f + tanh(inner));
                     Output.Store(i * 4, asuint(g));
                 }
@@ -63,7 +65,9 @@ public final class Gemma3WarpActivations {
                 if (i < intermediate) {
                     float gate = asfloat(GateUp.Load(i * 4));
                     float up   = asfloat(GateUp.Load((intermediate + i) * 4));
-                    float inner = %C% * (gate + 0.044715f * gate * gate * gate);
+                    // Clamp the tanh argument: tanh saturates to +/-1 well before |arg|~88, where the
+                    // HLSL exp-based tanh overflows float to inf/inf = NaN (real Gemma activations hit this).
+                    float inner = clamp(%C% * (gate + 0.044715f * gate * gate * gate), -20.0f, 20.0f);
                     float gelu = 0.5f * gate * (1.0f + tanh(inner));
                     Output.Store(i * 4, asuint(gelu * up));
                 }

@@ -30,9 +30,12 @@ public final class Gemma3WarpMlp implements AutoCloseable {
     private final WarpDenseProjection upProj;
     private final WarpDenseProjection downProj;
     private final Gemma3WarpGeGluKernel geGlu;
+    private final boolean ownsGeGlu;
     private boolean closed;
 
     /**
+     * Self-contained MLP that owns its GeGLU kernel.
+     *
      * @param wb           initialised bindings (device up)
      * @param hidden       hidden width
      * @param intermediate MLP intermediate width
@@ -42,6 +45,23 @@ public final class Gemma3WarpMlp implements AutoCloseable {
      */
     public Gemma3WarpMlp(WindowsBindings wb, int hidden, int intermediate,
                          float[] gateProj, float[] upProj, float[] downProj) throws WindowsNativeException {
+        this(wb, hidden, intermediate, gateProj, upProj, downProj, new Gemma3WarpGeGluKernel(wb), true);
+    }
+
+    /**
+     * MLP using a <b>shared</b> GeGLU kernel (not owned/closed here) — used by the full model so the
+     * stateless GeGLU kernel is built once across all layers rather than per layer.
+     */
+    public Gemma3WarpMlp(WindowsBindings wb, int hidden, int intermediate,
+                         float[] gateProj, float[] upProj, float[] downProj,
+                         Gemma3WarpGeGluKernel sharedGeGlu) throws WindowsNativeException {
+        this(wb, hidden, intermediate, gateProj, upProj, downProj,
+                Objects.requireNonNull(sharedGeGlu, "sharedGeGlu"), false);
+    }
+
+    private Gemma3WarpMlp(WindowsBindings wb, int hidden, int intermediate,
+                          float[] gateProj, float[] upProj, float[] downProj,
+                          Gemma3WarpGeGluKernel geGlu, boolean ownsGeGlu) throws WindowsNativeException {
         Objects.requireNonNull(wb, "wb");
         if (hidden < 1 || intermediate < 1) {
             throw new IllegalArgumentException("hidden and intermediate must be positive: hidden="
@@ -52,7 +72,8 @@ public final class Gemma3WarpMlp implements AutoCloseable {
         this.gateProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.gate_proj", intermediate, hidden, gateProj);
         this.upProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.up_proj", intermediate, hidden, upProj);
         this.downProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.down_proj", hidden, intermediate, downProj);
-        this.geGlu = new Gemma3WarpGeGluKernel(wb);
+        this.geGlu = geGlu;
+        this.ownsGeGlu = ownsGeGlu;
     }
 
     /**
@@ -95,7 +116,9 @@ public final class Gemma3WarpMlp implements AutoCloseable {
             gateProj.close();
             upProj.close();
             downProj.close();
-            geGlu.close();
+            if (ownsGeGlu) {
+                geGlu.close();
+            }
         }
     }
 }

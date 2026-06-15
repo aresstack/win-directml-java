@@ -46,7 +46,8 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-7a attention layout + RoPE reference (device-free) | **done** (layout 0d83fbd, RoPE this slice) |
 | GEMMA-WARP-7b WARP RoPE + attention-scores primitives | **done — GPU-validated vs reference** |
 | GEMMA-WARP-8 WARP single-layer (softmax + value + full attention) | **done — GPU-validated vs reference** |
-| GEMMA-WARP-9 WARP full prefill (all layers + embedding + LM head) | open — next |
+| GEMMA-WARP-9 WARP full prefill (all layers + embedding + tied LM head) | **done — real model top-1 " Paris" on GPU** |
+| GEMMA-WARP-10 WARP decode session + KV cache | open — next |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -133,9 +134,33 @@ head) is therefore the trustworthy WARP parity oracle.
   element-wise kernels because a layer chains many float kernels against a reference that accumulates
   RMSNorm/RoPE/softmax in double; small realistic weight magnitudes (the normed-input regime). Still a
   building-block composition (CPU readback between kernels), not the fused single-submission pipeline.
-  **For GEMMA-WARP-9 (full prefill) still missing:** embedding lookup ×sqrt(hidden), the 18-layer loop
-  driving `Gemma3WarpLayer` per layer (correct per-layer theta/mask already comes from config), final
-  RMSNorm, and the tied 256k LM head (the heap/perf-critical piece — see the heap open point).
+
+- **GEMMA-WARP-9 full prefill — done, real-model GPU-validated.** `Gemma3WarpEmbedding` (lookup
+  ×sqrt(hidden), reads only the prompt rows), `Gemma3WarpLmHead` (tied to `embed_tokens`, one GPU upload;
+  **heap-light FP32 ByteBuffer** seam + a `float[]` convenience), `Gemma3WarpWeights` (whole-model
+  weights, float[] or direct-ByteBuffer embedding), `Gemma3WarpKernels` (shared stateless kernels built
+  once across all layers), and `Gemma3WarpForwardPass` (`token ids -> embedding -> 18 layers -> final
+  RMSNorm -> tied LM head -> logits`; LM head built lazily so 9a needs no 256k matrix). Validated on the
+  real device: synthetic full-prefill exact parity (incl. tied LM head + the heap-light ByteBuffer path
+  == float[] path), real-model first-4-layer element parity on BF16 weights, and the **full 18-layer
+  real prefill top-1 == 9079 (" Paris")** — matching transformers/the reference. Tolerance abs 3e-3 +
+  rel 3e-3 for the synthetic hidden/logits; **top-1 is the asserted metric for the real model** (no
+  full 256k-logit identity claim).
+  - **Two real-model issues fixed here (both float-vs-double, not logic):**
+    1. **GELU-tanh NaN.** The HLSL `tanh` intrinsic (exp-based) overflows float to `inf/inf = NaN` once
+       its argument exceeds ~88; Gemma's large real activations (e.g. gate ~= 13 -> arg ~= 88) hit this,
+       while synthetic small values never did and the reference uses double `Math.tanh`. Fixed by clamping
+       the GELU-tanh argument to +/-20 (tanh saturates to +/-1 there to float precision — mathematically
+       exact, overflow-safe). The WARP-6 activation tolerances are unaffected (their args stay < 20).
+    2. Shared stateless kernels (`Gemma3WarpKernels`) instead of ~7 per layer — bounded resident
+       kernel/PSO/command-list count at 18-layer scale.
+  - **Heap note:** the WARP LM head/embedding uses a direct FP32 ByteBuffer decoded from the SafeTensors
+    payload (no 164M-weight host `float[]`); the layer projection weights are still host `float[]` (the
+    ByteBuffer projection seam exists and can be wired in the product slice). The reference path keeps
+    its FP32 `float[]` embedding (parity only).
+  - **For GEMMA-WARP-10 (decode session) still missing:** a KV cache (append per step; local layers only
+    need a windowed cache), a single-token decode step reusing cached k/v, the generate/streaming loop +
+    EOS, and (perf) a fused single-submission pipeline instead of per-call upload/readback.
 - **GEMMA-WARP-2 Tokenizer — RESOLVED (done).** Native `Gemma3Tokenizer` reads `tokenizer.json` only
   (no `tokenizer.model`, no SentencePiece DLL, no Python): normalizer space→`▁`, BPE over the whole
   normalized string (the `Split(" ")` pre-tokenizer is a no-op post-normalization), byte_fallback to
