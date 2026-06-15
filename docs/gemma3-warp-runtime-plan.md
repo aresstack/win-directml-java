@@ -48,7 +48,8 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-8 WARP single-layer (softmax + value + full attention) | **done — GPU-validated vs reference** |
 | GEMMA-WARP-9 WARP full prefill (all layers + embedding + tied LM head) | **done — real model top-1 " Paris" on GPU** |
 | GEMMA-WARP-10a WARP KV cache + single-token decodeNext | **done — real decode == full recompute on GPU** |
-| GEMMA-WARP-10b WARP streaming generate loop + EOS | open — next |
+| GEMMA-WARP-10b WARP greedy generate + stop + streaming | **done — real " Paris." multi-step on GPU** |
+| GEMMA-WARP-11 workbench native flag | open — next |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -183,6 +184,24 @@ head) is therefore the trustworthy WARP parity oracle.
     an `IntConsumer`/streaming callback, and (perf, separate) a fused single-submission pipeline +
     windowed-eviction KV cache + the ByteBuffer projection-weight path. No workbench wiring / runtime
     default switch yet.
+
+- **GEMMA-WARP-10b greedy generation — done, real-model GPU-validated.** `Gemma3WarpGenerator`
+  (prefill → select → decodeNext → repeat) over the decode session, with `Gemma3TokenSelector` (greedy =
+  argmax, sampling-ready seam), `Gemma3StopTokenPolicy` (stop-id set; `ofEos` / `ofEosAndEndOfTurn` —
+  Gemma instruct ends a turn with `<end_of_turn>`, not always `<eos>`), `Gemma3GenerationRequest`
+  (promptIds + maxNewTokens) and `Gemma3GenerationResult` (`generatedTokenIds`/`fullTokenIds` both
+  stop-token-free, `FinishReason` STOP_TOKEN/MAX_TOKENS, prompt/output counts). The stop token ends
+  generation, is excluded from the visible output, and is **not** streamed — the `IntConsumer` receives
+  exactly `generatedTokenIds`. Validated on the real device: synthetic multi-step greedy equals a manual
+  greedy loop over the CPU reference; max-tokens and stop-token (stop on the first token → empty output,
+  not streamed) contracts hold; streaming == visible result; and the real Gemma 3 270M generates
+  **"The capital of France is" → ids [9079, 236761, 108] = " Paris."** (first token " Paris", MAX_TOKENS
+  at 3, streaming consistent) — no text-quality claim beyond the first token + stable execution.
+  - **For GEMMA-WARP-11 (workbench) still missing:** a runtime entry point that tokenizes via
+    `Gemma3Tokenizer`/`Gemma3ChatTemplate`, runs `Gemma3WarpGenerator`, and decodes to text behind the
+    workbench's model/runtime descriptor + a `-Dgemma.runtime=native-warp` flag (external-python stays
+    default until proven); plus the heap-light product weight load (ByteBuffer projections, wdmlpack
+    payload) and the perf items above. No runtime default switch / downloader / .wdmlpack change here.
 - **GEMMA-WARP-2 Tokenizer — RESOLVED (done).** Native `Gemma3Tokenizer` reads `tokenizer.json` only
   (no `tokenizer.model`, no SentencePiece DLL, no Python): normalizer space→`▁`, BPE over the whole
   normalized string (the `Split(" ")` pre-tokenizer is a no-op post-normalization), byte_fallback to
