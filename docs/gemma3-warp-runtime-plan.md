@@ -42,7 +42,8 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-10 reference greedy generation | **done** (036493b) |
 | GEMMA-WARP-2 tokenizer + chat template | **done — exact transformers match** |
 | GEMMA-WARP-5a WARP zero-centered RMSNorm + QK-Norm kernels | **done — GPU-validated vs reference** |
-| GEMMA-WARP-5b/6/8/9 WARP MLP / attention / single-layer / prefill | open — next |
+| GEMMA-WARP-6 WARP GeGLU + GELU-tanh MLP | **done — GPU-validated vs reference** |
+| GEMMA-WARP-7/8/9 WARP attention / single-layer / prefill | open — next |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -82,6 +83,22 @@ head) is therefore the trustworthy WARP parity oracle.
   vs reference double sum-of-squares). `head_dim` is supplied by the caller, never derived as
   `hidden/heads`. Still validation building blocks (per-call upload/readback), not yet the fused
   product path.
+
+- **GEMMA-WARP-6 GeGLU + GELU-tanh MLP — done, GPU-validated.** `Gemma3WarpActivations` (HLSL),
+  `Gemma3WarpGeluTanhKernel`, `Gemma3WarpGeGluKernel` (fused `gelu_tanh(gate)*up`), and `Gemma3WarpMlp`
+  composing the three matmuls over the **shared `WarpDenseProjection`** + the GeGLU kernel
+  (`down_proj(gelu_tanh(gate_proj·x) * up_proj·x)`; the pre/post feedforward sandwich norms stay in the
+  5a norm kernels, not in this block). Gemma's **GELU-tanh GeGLU** is kept strictly separate from the
+  Qwen/SmolLM2 SiLU SwiGLU; the decoder-only SwiGlu kernels are untouched. Validated on the real device
+  against the verified reference: GELU-tanh on signed/zero/tail values and a 2048-wide random vector,
+  GeGLU on the real intermediate (incl. zero-gate→0), and the full MLP on a small shape and the real
+  hidden=640/intermediate=2048 shape. Tolerance **abs 1e-4 + rel 1e-4** for the element-wise activation
+  kernels; **abs 1e-3 + rel 1e-3** for the full MLP (three float matmuls accumulate in a different order
+  than the reference dot). `MatMulNBitsKernel.fromDequantizedWeights` uploads the full FP32 matrix
+  (no re-quantization), so this is a true FP32 parity — the real-shape test uses realistic small weight
+  magnitudes (the regime a pre-feedforward-normed input actually produces). ByteBuffer norm-weight
+  upload intentionally skipped (norm/activation vectors are tiny; heap-light matters for the big
+  projections + tied embedding/LM-head).
 - **GEMMA-WARP-2 Tokenizer — RESOLVED (done).** Native `Gemma3Tokenizer` reads `tokenizer.json` only
   (no `tokenizer.model`, no SentencePiece DLL, no Python): normalizer space→`▁`, BPE over the whole
   normalized string (the `Split(" ")` pre-tokenizer is a no-op post-normalization), byte_fallback to

@@ -1,0 +1,101 @@
+package com.aresstack.windirectml.inference.gemma;
+
+import com.aresstack.windirectml.inference.warp.WarpDenseProjection;
+import com.aresstack.windirectml.windows.WindowsBindings;
+import com.aresstack.windirectml.windows.WindowsNativeException;
+
+import java.util.Objects;
+
+/**
+ * WARP/DirectML Gemma 3 MLP block (GEMMA-WARP-6): {@code down_proj( gelu_tanh(gate_proj·x) * up_proj·x )}.
+ *
+ * <p>The GPU mirror of the GeGLU MLP body in {@code Gemma3ReferenceForwardPass} (the pre/post
+ * feedforward sandwich norms are <b>not</b> part of this block — those are the zero-centered RMSNorm
+ * kernels from GEMMA-WARP-5a). The three matmuls reuse the shared {@link WarpDenseProjection}; the
+ * GeGLU activation is {@link Gemma3WarpGeGluKernel}. Weights are row-major {@code [output, input]}
+ * exactly as the reference {@code matvec} expects:</p>
+ * <ul>
+ *   <li>{@code gateProj}, {@code upProj}: {@code [intermediate, hidden]}</li>
+ *   <li>{@code downProj}: {@code [hidden, intermediate]}</li>
+ * </ul>
+ *
+ * <p>This is a validation building block (a CPU readback between projections and the activation), not
+ * yet the fused single-submission product path. Requires {@link WindowsBindings#isSupported()}.</p>
+ */
+public final class Gemma3WarpMlp implements AutoCloseable {
+
+    private final int hidden;
+    private final int intermediate;
+    private final WarpDenseProjection gateProj;
+    private final WarpDenseProjection upProj;
+    private final WarpDenseProjection downProj;
+    private final Gemma3WarpGeGluKernel geGlu;
+    private boolean closed;
+
+    /**
+     * @param wb           initialised bindings (device up)
+     * @param hidden       hidden width
+     * @param intermediate MLP intermediate width
+     * @param gateProj     row-major {@code [intermediate, hidden]}
+     * @param upProj       row-major {@code [intermediate, hidden]}
+     * @param downProj     row-major {@code [hidden, intermediate]}
+     */
+    public Gemma3WarpMlp(WindowsBindings wb, int hidden, int intermediate,
+                         float[] gateProj, float[] upProj, float[] downProj) throws WindowsNativeException {
+        Objects.requireNonNull(wb, "wb");
+        if (hidden < 1 || intermediate < 1) {
+            throw new IllegalArgumentException("hidden and intermediate must be positive: hidden="
+                    + hidden + ", intermediate=" + intermediate);
+        }
+        this.hidden = hidden;
+        this.intermediate = intermediate;
+        this.gateProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.gate_proj", intermediate, hidden, gateProj);
+        this.upProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.up_proj", intermediate, hidden, upProj);
+        this.downProj = WarpDenseProjection.fromDequantizedWeights(wb, "gemma3.down_proj", hidden, intermediate, downProj);
+        this.geGlu = new Gemma3WarpGeGluKernel(wb);
+    }
+
+    /**
+     * Run the MLP for one (already pre-feedforward-normed) hidden vector {@code x} of length
+     * {@code hidden}; returns the {@code down} output of length {@code hidden} (pre post-norm).
+     */
+    public float[] mlp(float[] x) throws WindowsNativeException {
+        ensureOpen();
+        Objects.requireNonNull(x, "x");
+        if (x.length != hidden) {
+            throw new IllegalArgumentException("x length must equal hidden: x=" + x.length + ", hidden=" + hidden);
+        }
+        float[] gate = gateProj.project(x);
+        float[] up = upProj.project(x);
+        float[] gateUp = new float[2 * intermediate];
+        System.arraycopy(gate, 0, gateUp, 0, intermediate);
+        System.arraycopy(up, 0, gateUp, intermediate, intermediate);
+        float[] activated = geGlu.apply(gateUp, intermediate);
+        return downProj.project(activated);
+    }
+
+    public int hidden() {
+        return hidden;
+    }
+
+    public int intermediate() {
+        return intermediate;
+    }
+
+    private void ensureOpen() {
+        if (closed) {
+            throw new IllegalStateException("Gemma3WarpMlp is closed");
+        }
+    }
+
+    @Override
+    public void close() {
+        if (!closed) {
+            closed = true;
+            gateProj.close();
+            upProj.close();
+            downProj.close();
+            geGlu.close();
+        }
+    }
+}
