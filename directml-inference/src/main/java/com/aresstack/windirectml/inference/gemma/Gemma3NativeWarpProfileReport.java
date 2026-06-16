@@ -42,6 +42,7 @@ public final class Gemma3NativeWarpProfileReport {
         out.add("Gemma native WARP profile:");
         out.add("  runtime mode: " + runtimeMode);
         out.add("  backend: " + backend);
+        out.add("  execution: " + p.executionMode().displayLabel());
         out.add("  output mode: " + outputMode);
         out.add("  package: " + packageName);
         out.add("  tokenizer: " + tokenizerName);

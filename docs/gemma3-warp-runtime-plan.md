@@ -59,6 +59,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-13b-3a resident decodeStep wiring | **done — real readbacks/token 344→37, still " Paris"** |
 | GEMMA-WARP-13b-3b submit/fence-coalescing | **done — real fenceWaits/token 834→93, submits 834→454, still " Paris"** |
 | GEMMA-WORKBENCH-PROFILING-1 profile output + runtime UI | **done — Gemma runtime UI-selectable (no JVM flag), detailed phase/WARP-counter profile, 'Show runtime profile' toggle** |
+| GEMMA-WARP-13b-4 resident/batched as native-warp product path | **done — native-warp defaults to resident; real profile 454 submits / 93 fenceWaits / 37 readbacks per decode token, still " Paris"** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -459,3 +460,28 @@ head) is therefore the trustworthy WARP parity oracle.
     stays available. No native-warp default; external-python kept; no fused pipeline / batched prefill /
     windowed-eviction / downloader / .wdmlpack-format change; Qwen/T5/SmolLM2 untouched. Full
     `:directml-inference` + `:directml-encoder` + `:directml-workbench` regression green.
+
+- **GEMMA-WARP-13b-4 resident/batched as native-warp product path — done.** The native-warp Workbench path
+  now drives the validated GPU-resident/batched decode (13b-3a/3b) instead of the synchronous `float[]`
+  `decodeStep`, so the Workbench actually gets the 13b-3b gains and the profile shows the coalesced counters.
+  - **Switch.** `Gemma3WarpExecutionMode` (SYNC | RESIDENT, `-Dgemma.warp.execution`, default RESIDENT).
+    `Gemma3WarpGenerator` gains an execution-mode ctor and picks `session.prefillResident/decodeNextResident`
+    vs `prefill/decodeNext` accordingly (existing ctors stay SYNC, so `Gemma3WarpGeneratorTest` keeps
+    validating the float[] path). `Gemma3NativeWarpRuntime` resolves the mode (default RESIDENT) and passes
+    it; the resolved mode is carried in the profile and shown in the report ("execution: resident-batched").
+  - **Fallback.** `-Dgemma.warp.execution=sync` restores the float[] decode path (debug/fallback); no global
+    default change elsewhere, external-python untouched.
+  - **Per-token counters fixed to decode steady-state.** The profile now snapshots WARP counters at the
+    first-token boundary so the per-token figures cover only the decode region (not prefill-amortised); the
+    totals stay whole-generate.
+  - **Measured.** Synthetic: resident generate == sync generate (identical ids). Real Gemma 3 270M
+    (`-Dgemma.warp.realModel=true`): native-warp now resident; decode steady-state **454 submits / 93 fence
+    waits / 37 readbacks per token** (vs the float[] path's ~834 fenceWaits + ~344 readbacks), generate
+    totals 3729 / 846 / 291 over a 6-token prompt + 3 outputs, decode avg ≈ 426 ms/token, **top-1 " Paris"**
+    unchanged. Streaming stays live; buffered yields the same text.
+  - Tests: `Gemma3WarpExecutionModeTest` (default resident, sync override, parsing); `Gemma3WarpGeneratorTest`
+    resident==sync equivalence; `Gemma3NativeWarpRuntimeTest` gated real asserts resident default + " Paris" +
+    decode per-token bounds; `Gemma3NativeWarpProfileReportTest` (decode-region per-token, execution line).
+    No native-warp global default; no fused pipeline / batched prefill / windowed-eviction / downloader /
+    .wdmlpack-format change; Qwen/T5/SmolLM2 untouched. Full `:directml-inference` + `:directml-encoder` +
+    `:directml-workbench` regression green.

@@ -145,11 +145,15 @@ public final class Gemma3NativeWarpRuntime {
             }
         };
         // Profiling wrapper: the first visible token marks the prefill/decode boundary (prefill = time to
-        // first token), then delegate to the user callback. Always installed, even in buffered mode.
+        // first token), then delegate to the user callback. Always installed, even in buffered mode. The
+        // WARP snapshot at the boundary lets the per-token counters reflect decode steady-state (excluding
+        // the prefill burst).
         long[] firstTokenNanos = {-1L};
+        WarpSubmissionStats.Snapshot[] warpAtFirstToken = {null};
         IntConsumer callback = id -> {
             if (firstTokenNanos[0] < 0) {
                 firstTokenNanos[0] = System.nanoTime();
+                warpAtFirstToken[0] = WarpSubmissionStats.snapshot();
             }
             if (userCallback != null) {
                 userCallback.accept(id);
@@ -162,7 +166,10 @@ public final class Gemma3NativeWarpRuntime {
             wb.init("directml");
             try (Gemma3WarpDecodeSession session = new Gemma3WarpDecodeSession(wb, weights)) {
                 long sessionInitMs = sinceMs(sessionStart);
-                Gemma3WarpGenerator generator = new Gemma3WarpGenerator(session, stop);
+                // GEMMA-WARP-13b-4: native-warp drives the GPU-resident/batched decode path by default
+                // (override with -Dgemma.warp.execution=sync). Same output, far fewer fence waits/readbacks.
+                Gemma3WarpExecutionMode executionMode = Gemma3WarpExecutionMode.fromSystemProperty();
+                Gemma3WarpGenerator generator = new Gemma3WarpGenerator(session, stop, executionMode);
                 // WARP counters for the generate region only (weight upload happened during session init,
                 // before this snapshot, so the deltas isolate prefill + decode).
                 WarpSubmissionStats.Snapshot warpBefore = WarpSubmissionStats.snapshot();
@@ -170,7 +177,12 @@ public final class Gemma3NativeWarpRuntime {
                 Gemma3GenerationResult result = generator.generate(
                         new Gemma3GenerationRequest(promptIds, maxNewTokens), callback);
                 long genEnd = System.nanoTime();
-                WarpSubmissionStats.Snapshot warpDelta = WarpSubmissionStats.snapshot().minus(warpBefore);
+                WarpSubmissionStats.Snapshot warpAfter = WarpSubmissionStats.snapshot();
+                WarpSubmissionStats.Snapshot warpDelta = warpAfter.minus(warpBefore);
+                // Decode-region counters (after the first token) for the steady-state per-token figures.
+                WarpSubmissionStats.Snapshot decodeDelta = warpAtFirstToken[0] != null
+                        ? warpAfter.minus(warpAtFirstToken[0])
+                        : new WarpSubmissionStats.Snapshot(0, 0, 0);
 
                 long prefillMs = firstTokenNanos[0] > 0
                         ? nanosToMs(firstTokenNanos[0] - genStart) : nanosToMs(genEnd - genStart);
@@ -184,7 +196,8 @@ public final class Gemma3NativeWarpRuntime {
                         packageOpenMs, tokenizerLoadMs, weightLoadMs, sessionInitMs,
                         tokenizeMs, prefillMs, decodeTotalMs, detokenizeMs, sinceMs(runtimeStart),
                         result.promptTokenCount(), result.outputTokenCount(),
-                        warpDelta.submits(), warpDelta.fenceWaits(), warpDelta.readbacks());
+                        warpDelta.submits(), warpDelta.fenceWaits(), warpDelta.readbacks(),
+                        decodeDelta.submits(), decodeDelta.fenceWaits(), decodeDelta.readbacks(), executionMode);
                 return new Result(text, result.promptTokenCount(), result.outputTokenCount(),
                         result.finishReason(), packagePath, "WARP", profile);
             } finally {

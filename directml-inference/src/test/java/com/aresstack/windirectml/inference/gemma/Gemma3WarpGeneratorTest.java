@@ -130,6 +130,29 @@ class Gemma3WarpGeneratorTest {
         }
     }
 
+    @Test
+    void residentExecutionMatchesSyncExecution() throws Exception {
+        // 13b-4: the resident/batched product path produces identical ids to the float[] (sync) path.
+        Gemma3Config config = config();
+        Gemma3ReferenceWeights ref = syntheticWeights(config, new Random(2011));
+        int[] prompt = {6, 2, 17, 9, 23};
+        int n = 6;
+
+        try (Gemma3WarpDecodeSession sess = new Gemma3WarpDecodeSession(wb, Gemma3WarpWeights.from(ref))) {
+            Gemma3GenerationResult sync = new Gemma3WarpGenerator(sess, Gemma3TokenSelector.greedy(),
+                    Gemma3StopTokenPolicy.of(), Gemma3WarpExecutionMode.SYNC)
+                    .generate(new Gemma3GenerationRequest(prompt, n));
+            // generate() re-prefills (resets the cache), so reusing the session is fine.
+            Gemma3GenerationResult resident = new Gemma3WarpGenerator(sess, Gemma3TokenSelector.greedy(),
+                    Gemma3StopTokenPolicy.of(), Gemma3WarpExecutionMode.RESIDENT)
+                    .generate(new Gemma3GenerationRequest(prompt, n));
+
+            assertArrayEquals(sync.generatedTokenIds(), resident.generatedTokenIds(),
+                    "resident decode must produce identical ids to the sync float[] path");
+            assertEquals(sync.finishReason(), resident.finishReason(), "same finish reason");
+        }
+    }
+
     @EnabledIfSystemProperty(named = "gemma.warp.realModel", matches = "true")
     @Test
     void realModelGeneratesParisAndStreamsConsistently() throws Exception {

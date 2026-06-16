@@ -79,6 +79,18 @@ class Gemma3NativeWarpRuntimeTest {
             assertEquals(r.outputTokens(), profile.outputTokens(), "profile output tokens");
             assertTrue(profile.weightLoadMs() >= 0 && profile.sessionInitMs() >= 0, "load phases measured");
             assertTrue(profile.submits() > 0, "WARP submits counted for the generate region");
+            // GEMMA-WARP-13b-4: native-warp now drives the resident/batched path by default, so the profile
+            // shows the coalesced 13b-3b counters (fence waits/token well below the ~834 float[] baseline).
+            assertEquals(Gemma3WarpExecutionMode.RESIDENT, profile.executionMode(), "native-warp default is resident");
+            if (profile.decodeSteps() > 0) {
+                // Decode steady-state per-token (excludes the prefill burst): ~93 fence waits / ~37
+                // readbacks after 13b-3b, well below the ~834 float[] baseline.
+                assertTrue(profile.fenceWaitsPerToken() < 200,
+                        "resident fence waits/token must be well below the ~834 float[] baseline: "
+                                + profile.fenceWaitsPerToken());
+                assertTrue(profile.readbacksPerToken() < 80,
+                        "resident readbacks/token must stay low (~37): " + profile.readbacksPerToken());
+            }
             System.out.println("[GEMMA-PROFILE] " + Gemma3NativeWarpProfileReport.detailed(
                     profile, "native-warp-experimental", r.backend(), "streaming",
                     "model_gemma3.wdmlpack", "tokenizer.json", "NONE", 24, 0, profile.runtimeTotalMs()));

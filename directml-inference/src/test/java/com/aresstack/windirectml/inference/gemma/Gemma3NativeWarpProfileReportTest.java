@@ -19,7 +19,9 @@ class Gemma3NativeWarpProfileReportTest {
                 /*packageOpenMs*/ 5, /*tokenizerLoadMs*/ 3, /*weightLoadMs*/ 400, /*sessionInitMs*/ 200,
                 /*tokenizeMs*/ 2, /*prefillMs*/ 120, /*decodeTotalMs*/ 600, /*detokenizeMs*/ 1,
                 /*runtimeTotalMs*/ 1331, /*promptTokens*/ 28, /*outputTokens*/ 27,
-                /*submits*/ 12000, /*fenceWaits*/ 2500, /*readbacks*/ 999);
+                /*submits*/ 12000, /*fenceWaits*/ 2500, /*readbacks*/ 999,
+                /*decodeSubmits*/ 11050, /*decodeFenceWaits*/ 2418, /*decodeReadbacks*/ 962,
+                Gemma3WarpExecutionMode.RESIDENT);
     }
 
     @Test
@@ -32,6 +34,7 @@ class Gemma3NativeWarpProfileReportTest {
         assertTrue(text.contains("Gemma native WARP profile:"), text);
         assertTrue(text.contains("runtime mode: native-warp-experimental"), text);
         assertTrue(text.contains("backend: WARP"), text);
+        assertTrue(text.contains("execution: resident-batched"), text);
         assertTrue(text.contains("output mode: streaming"), text);
         assertTrue(text.contains("package: model_gemma3.wdmlpack"), text);
         assertTrue(text.contains("tokenizer: tokenizer.json"), text);
@@ -80,10 +83,13 @@ class Gemma3NativeWarpProfileReportTest {
     }
 
     @Test
-    void decodeAverageDividesByDecodeSteps() {
-        // outputTokens=27 -> 26 decodeNext steps; 600 ms / 26 ~= 23.08 ms.
+    void perTokenFiguresUseTheDecodeRegionOverDecodeSteps() {
+        // outputTokens=27 -> 26 decodeNext steps; decode total 600 ms / 26 ~= 23.08 ms.
+        assertEquals(26, sampleProfile().decodeSteps());
         assertEquals(600.0 / 26, sampleProfile().decodeAvgPerTokenMs(), 1e-9);
-        // per-token counters divide by outputTokens.
-        assertEquals(12000.0 / 27, sampleProfile().submitsPerToken(), 1e-9);
+        // per-token counters use the decode-region counts (steady-state), not the whole-generate totals.
+        assertEquals(11050.0 / 26, sampleProfile().submitsPerToken(), 1e-9);
+        assertEquals(2418.0 / 26, sampleProfile().fenceWaitsPerToken(), 1e-9);
+        assertEquals(962.0 / 26, sampleProfile().readbacksPerToken(), 1e-9);
     }
 }

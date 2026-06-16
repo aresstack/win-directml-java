@@ -21,6 +21,7 @@ public final class Gemma3WarpGenerator {
     private final Gemma3WarpDecodeSession session;
     private final Gemma3TokenSelector selector;
     private final Gemma3StopTokenPolicy stopPolicy;
+    private final Gemma3WarpExecutionMode executionMode;
 
     public Gemma3WarpGenerator(Gemma3WarpDecodeSession session, Gemma3StopTokenPolicy stopPolicy) {
         this(session, Gemma3TokenSelector.greedy(), stopPolicy);
@@ -28,9 +29,25 @@ public final class Gemma3WarpGenerator {
 
     public Gemma3WarpGenerator(Gemma3WarpDecodeSession session, Gemma3TokenSelector selector,
                                Gemma3StopTokenPolicy stopPolicy) {
+        this(session, selector, stopPolicy, Gemma3WarpExecutionMode.SYNC);
+    }
+
+    /** Convenience: greedy selection with an explicit execution mode (GEMMA-WARP-13b-4). */
+    public Gemma3WarpGenerator(Gemma3WarpDecodeSession session, Gemma3StopTokenPolicy stopPolicy,
+                               Gemma3WarpExecutionMode executionMode) {
+        this(session, Gemma3TokenSelector.greedy(), stopPolicy, executionMode);
+    }
+
+    public Gemma3WarpGenerator(Gemma3WarpDecodeSession session, Gemma3TokenSelector selector,
+                               Gemma3StopTokenPolicy stopPolicy, Gemma3WarpExecutionMode executionMode) {
         this.session = Objects.requireNonNull(session, "session");
         this.selector = Objects.requireNonNull(selector, "selector");
         this.stopPolicy = Objects.requireNonNull(stopPolicy, "stopPolicy");
+        this.executionMode = Objects.requireNonNull(executionMode, "executionMode");
+    }
+
+    public Gemma3WarpExecutionMode executionMode() {
+        return executionMode;
     }
 
     public Gemma3GenerationResult generate(Gemma3GenerationRequest request) throws WindowsNativeException {
@@ -47,7 +64,8 @@ public final class Gemma3WarpGenerator {
         int[] prompt = request.promptIds();
         int maxNew = request.maxNewTokens();
 
-        float[] logits = session.prefill(prompt);
+        boolean resident = executionMode.isResident();
+        float[] logits = resident ? session.prefillResident(prompt) : session.prefill(prompt);
         List<Integer> generated = new ArrayList<>();
         Gemma3GenerationResult.FinishReason reason = Gemma3GenerationResult.FinishReason.MAX_TOKENS;
 
@@ -64,7 +82,7 @@ public final class Gemma3WarpGenerator {
             if (generated.size() >= maxNew) {
                 break; // reason stays MAX_TOKENS; avoid an extra decode step
             }
-            logits = session.decodeNext(next);
+            logits = resident ? session.decodeNextResident(next) : session.decodeNext(next);
         }
 
         int[] gen = generated.stream().mapToInt(Integer::intValue).toArray();
