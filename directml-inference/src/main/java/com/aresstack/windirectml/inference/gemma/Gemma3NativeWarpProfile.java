@@ -33,6 +33,8 @@ public record Gemma3NativeWarpProfile(
         long decodeSubmits,
         long decodeFenceWaits,
         long decodeReadbacks,
+        long decodeDispatches,
+        long decodeUavBarriers,
         Gemma3WarpExecutionMode executionMode) {
 
     /** Sum of the four load phases. */
@@ -63,5 +65,13 @@ public record Gemma3NativeWarpProfile(
 
     public double readbacksPerToken() {
         return decodeSteps() > 0 ? (double) decodeReadbacks / decodeSteps() : 0.0;
+    }
+
+    public double dispatchesPerToken() {
+        return decodeSteps() > 0 ? (double) decodeDispatches / decodeSteps() : 0.0;
+    }
+
+    public double uavBarriersPerToken() {
+        return decodeSteps() > 0 ? (double) decodeUavBarriers / decodeSteps() : 0.0;
     }
 }

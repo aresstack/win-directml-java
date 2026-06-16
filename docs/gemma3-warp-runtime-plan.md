@@ -67,6 +67,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-13f warm/cold profiling + shader warm-up | **done — Gemma3WarpWarmup + gated cold/warm steady-state profile; prefill submits ~constant in prompt len (261/280/355 @ 6/25/100), decode warm ~250 ms/token; finding: decode submit-bound (→ matvec coalescing next), long prefill compute-bound (per-position attention)** |
 | GEMMA-WARP-13g projection/matvec submit reduction | **done — matvec recorded into the layer command list (DML numerics unchanged); real decode submits/token 220→21, fences 21, readbacks 1, top-1 " Paris" identical. Finding: decode avg/token ~250 ms unchanged → decode is compute-bound (matvec FLOPs on WARP), not submit-bound** |
 | GEMMA-WARP-14a matvec compute benchmark + decision | **done — DML-GEMM fastest (~20 ms matvec/decode-token) vs custom WARP-FP32 (~130) / INT4 (~145); DECISION: keep DML. Bigger finding: matvec is only ~20 ms of ~250 ms decode → bottleneck is the many small element/attention dispatches+barriers, not matvec → next lever is kernel fusion** |
+| GEMMA-WARP-14b fuse attention (scores+softmax+value) | **done — Gemma3WarpFusedAttentionContextKernel (flash-attention online softmax, 3 dispatches→1) + dispatches/uavBarriers counters. Real decode/token dispatches 416→380, uav barriers 435→399; submits/fences/readbacks 21/21/1 unchanged; top-1 " Paris" identical. decode avg/token noisy/flat (fused trades 3 dispatches for 1 heavier; ~equal short, better long context)** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -687,3 +688,33 @@ head) is therefore the trustworthy WARP parity oracle.
     hardware GPU (vs the WARP CPU rasterizer) would also reduce the per-dispatch overhead.
   - No production/numeric change; gated benchmark opt-in; Qwen/Smol/T5 untouched. Full `:directml-inference`
     + `:directml-encoder` + `:directml-workbench` regression green.
+
+- **GEMMA-WARP-14b fuse attention (scores+softmax+value) — done.** Replaces the staged 3-dispatch attention
+  middle with one fused kernel, and adds dispatch/barrier counters so the per-token cost is visible now that
+  many dispatches share one submit.
+  - **Counters (Part 1):** `WarpSubmissionStats` gains `dispatches` + `uavBarriers` (bumped in
+    `GpuComputeKernel.recordDispatch`, the DML-GEMM dispatch, and `D3D12Bindings.uavBarrier`); `Snapshot`
+    carries them; `Gemma3NativeWarpProfile`/`Report` expose `dispatches/token` + `uav barriers/token` (decode
+    region) in the `-Ddirectml.generation.profile` block.
+  - **Fused kernel (Part 2):** `Gemma3WarpFusedAttentionContextKernel` computes
+    `context = softmax(scale·q·K_visible)·V_visible` in one dispatch — flash-attention online softmax (running
+    max/sum + rescaled accumulator, no materialised `[seqLen]` scores), one thread group per head, thread c
+    owns output dim c, per-key dot via a group reduction. Same Gemma layout: GQA (`kvHead=head/groupsPerKv`),
+    causal + sliding-window via `[firstValid, queryPos]`, explicit head_dim (≤256). `Gemma3WarpLayer`
+    (`attentionContext` helper) uses it in both resident decode and batched prefill; `-Dgemma.warp.attention=staged`
+    forces the old staged scores→softmax→value path (kept as the parity oracle/fallback); default = fused.
+  - **Numerics:** fused vs staged differ only by fp32 accumulation order; parity tol abs 1e-3 + rel 1e-3,
+    identical top-1/token-IDs. Validated: kernel-level fused==staged (GQA 4/1, head_dim=256, full + local +
+    single-position + no-GQA + mid-head_dim); resident decode fused==staged token IDs (fed identical tokens).
+  - **Measured (real Gemma 3 270M, decode/token):** dispatches **416 → 380**, uav barriers **435 → 399**
+    (−36 each = the 2 saved attention dispatches/barriers × 18 layers); submits/fence waits/readbacks
+    **21/21/1 unchanged**; top-1 9079 (" Paris") identical; streaming live, buffered same text. Warm decode
+    avg/token is noisy/flat (~210–280 ms): fused trades 3 light dispatches for 1 heavier (the per-key group
+    reduction serialises), so the saved per-dispatch overhead is roughly offset on the WARP CPU rasterizer —
+    a small win at long context (100-tok: 208 vs 233 ms), ~equal at short. `build.gradle` forwards
+    `gemma.warp.attention`.
+  - **Next fusion candidate:** the residual+RMSNorm pairs (post-attention add → pre-FF norm; post-FF add →
+    next input norm) and the QK-norm+RoPE chain are the remaining many-small-dispatch clusters; or move off
+    the WARP software rasterizer to a hardware GPU (the per-dispatch overhead is the WARP ceiling). No UI
+    change; gated/opt-in real + profile tests; Qwen/Smol/T5 untouched. Full `:directml-inference` +
+    `:directml-encoder` + `:directml-workbench` regression green.

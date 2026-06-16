@@ -278,6 +278,7 @@ public final class GpuComputeKernel implements AutoCloseable {
             // Dispatch
             int groups = (elementCount + groupSizeX - 1) / groupSizeX;
             mhDispatch.invokeExact(cl, groups, 1, 1);
+            WarpSubmissionStats.recordDispatch(); // GEMMA-WARP-14b: count recorded dispatches
 
         } catch (Throwable t) {
             throw new RuntimeException("GpuComputeKernel.recordDispatch(" + name + ") failed", t);

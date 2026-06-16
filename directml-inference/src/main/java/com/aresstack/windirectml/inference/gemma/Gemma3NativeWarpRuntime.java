@@ -182,7 +182,7 @@ public final class Gemma3NativeWarpRuntime {
                 // Decode-region counters (after the first token) for the steady-state per-token figures.
                 WarpSubmissionStats.Snapshot decodeDelta = warpAtFirstToken[0] != null
                         ? warpAfter.minus(warpAtFirstToken[0])
-                        : new WarpSubmissionStats.Snapshot(0, 0, 0);
+                        : new WarpSubmissionStats.Snapshot(0, 0, 0, 0, 0);
 
                 long prefillMs = firstTokenNanos[0] > 0
                         ? nanosToMs(firstTokenNanos[0] - genStart) : nanosToMs(genEnd - genStart);
@@ -197,7 +197,8 @@ public final class Gemma3NativeWarpRuntime {
                         tokenizeMs, prefillMs, decodeTotalMs, detokenizeMs, sinceMs(runtimeStart),
                         result.promptTokenCount(), result.outputTokenCount(),
                         warpDelta.submits(), warpDelta.fenceWaits(), warpDelta.readbacks(),
-                        decodeDelta.submits(), decodeDelta.fenceWaits(), decodeDelta.readbacks(), executionMode);
+                        decodeDelta.submits(), decodeDelta.fenceWaits(), decodeDelta.readbacks(),
+                        decodeDelta.dispatches(), decodeDelta.uavBarriers(), executionMode);
                 return new Result(text, result.promptTokenCount(), result.outputTokenCount(),
                         result.finishReason(), packagePath, "WARP", profile);
             } finally {

@@ -1751,6 +1751,7 @@ public final class MatMulNBitsKernel implements AutoCloseable {
         } else {
             mhSetDescriptorHeaps.invokeExact(cl, 1, heapArrayPtr);
             mhRecordDispatch.invokeExact(cmdRecorder, cl, compiledGemm, execBindingTable);
+            WarpSubmissionStats.recordDispatch(); // GEMMA-WARP-14b: count the DML GEMM dispatch
         }
         mhResourceBarrier.invokeExact(cl, 1, barrierOutputToCS);
         mhCopyBufferRegion.invokeExact(cl, out.d3d12Buffer(), 0L, outputBuf, 0L, outputBytes);

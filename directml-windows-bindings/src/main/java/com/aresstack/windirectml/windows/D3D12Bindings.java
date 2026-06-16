@@ -428,6 +428,7 @@ public final class D3D12Bindings {
             MethodHandle mh = DxgiBindings.vtableMethod(cmdList, 26,
                     FunctionDescriptor.ofVoid(ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
             mh.invokeExact(cmdList, 1, barrier);
+            WarpSubmissionStats.recordUavBarrier(); // GEMMA-WARP-14b: count recorded UAV barriers
         } catch (Throwable t) {
             log.error("ResourceBarrier (UAV) failed", t);
         }

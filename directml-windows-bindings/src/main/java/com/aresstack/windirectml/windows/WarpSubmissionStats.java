@@ -19,8 +19,24 @@ public final class WarpSubmissionStats {
     private static final AtomicLong SUBMITS = new AtomicLong();
     private static final AtomicLong FENCE_WAITS = new AtomicLong();
     private static final AtomicLong READBACKS = new AtomicLong();
+    private static final AtomicLong DISPATCHES = new AtomicLong();
+    private static final AtomicLong UAV_BARRIERS = new AtomicLong();
 
     private WarpSubmissionStats() {
+    }
+
+    /**
+     * Record one recorded compute dispatch (GEMMA-WARP-14b): bumped per {@code Dispatch} recorded into a
+     * command list (element/attention kernels + the matvec dispatch), independent of how many share a submit.
+     * Once dispatches share one command list, this is the meaningful per-token cost (not submits).
+     */
+    public static void recordDispatch() {
+        DISPATCHES.incrementAndGet();
+    }
+
+    /** Record one UAV barrier recorded into a command list (GEMMA-WARP-14b). */
+    public static void recordUavBarrier() {
+        UAV_BARRIERS.incrementAndGet();
     }
 
     /** Record one command-list submission immediately followed by a blocking fence wait. */
@@ -56,25 +72,30 @@ public final class WarpSubmissionStats {
         SUBMITS.set(0);
         FENCE_WAITS.set(0);
         READBACKS.set(0);
+        DISPATCHES.set(0);
+        UAV_BARRIERS.set(0);
     }
 
     /** Immutable snapshot of the current counters. */
     public static Snapshot snapshot() {
-        return new Snapshot(SUBMITS.get(), FENCE_WAITS.get(), READBACKS.get());
+        return new Snapshot(SUBMITS.get(), FENCE_WAITS.get(), READBACKS.get(),
+                DISPATCHES.get(), UAV_BARRIERS.get());
     }
 
     /** A point-in-time view of the counters; subtract two snapshots to measure a region. */
-    public record Snapshot(long submits, long fenceWaits, long readbacks) {
+    public record Snapshot(long submits, long fenceWaits, long readbacks, long dispatches, long uavBarriers) {
 
         /** This snapshot minus an earlier {@code before} snapshot (the deltas over the measured region). */
         public Snapshot minus(Snapshot before) {
             return new Snapshot(submits - before.submits, fenceWaits - before.fenceWaits,
-                    readbacks - before.readbacks);
+                    readbacks - before.readbacks, dispatches - before.dispatches,
+                    uavBarriers - before.uavBarriers);
         }
 
         @Override
         public String toString() {
-            return "submits=" + submits + " fenceWaits=" + fenceWaits + " readbacks=" + readbacks;
+            return "submits=" + submits + " fenceWaits=" + fenceWaits + " readbacks=" + readbacks
+                    + " dispatches=" + dispatches + " uavBarriers=" + uavBarriers;
         }
     }
 }

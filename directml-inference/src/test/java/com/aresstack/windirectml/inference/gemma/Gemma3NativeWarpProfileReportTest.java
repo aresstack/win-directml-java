@@ -21,6 +21,7 @@ class Gemma3NativeWarpProfileReportTest {
                 /*runtimeTotalMs*/ 1331, /*promptTokens*/ 28, /*outputTokens*/ 27,
                 /*submits*/ 12000, /*fenceWaits*/ 2500, /*readbacks*/ 999,
                 /*decodeSubmits*/ 11050, /*decodeFenceWaits*/ 2418, /*decodeReadbacks*/ 962,
+                /*decodeDispatches*/ 9100, /*decodeUavBarriers*/ 9100,
                 Gemma3WarpExecutionMode.RESIDENT);
     }
 
@@ -65,6 +66,8 @@ class Gemma3NativeWarpProfileReportTest {
         assertTrue(text.contains("submits/token:"), text);
         assertTrue(text.contains("fence waits/token:"), text);
         assertTrue(text.contains("readbacks/token:"), text);
+        assertTrue(text.contains("dispatches/token:"), text);
+        assertTrue(text.contains("uav barriers/token:"), text);
     }
 
     @Test

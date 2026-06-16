@@ -202,6 +202,56 @@ class Gemma3WarpResidentDecodeStepTest {
     }
 
     @Test
+    void residentDecodeFusedAttentionMatchesStaged() throws Exception {
+        // 14b: fused attention context vs the staged scores+softmax+value path must produce the same token
+        // sequence in the resident decode. The attention mode is read at layer construction from
+        // -Dgemma.warp.attention, so build a staged session first, then a fused one fed the SAME tokens.
+        Gemma3Config config = smallConfig();
+        Gemma3ReferenceWeights ref = syntheticWeights(config, new Random(1414));
+        int[] ids = {7, 3, 19, 0, 25, 11, 4};
+        int steps = 6;
+        String prev = System.getProperty("gemma.warp.attention");
+        try {
+            int[] fed = new int[steps];
+            float[][] stagedLogits = new float[steps][];
+            System.setProperty("gemma.warp.attention", "staged");
+            try (Gemma3WarpDecodeSession sess = new Gemma3WarpDecodeSession(wb, Gemma3WarpWeights.from(ref))) {
+                float[] lg = sess.prefillResidentBatched(ids);
+                fed[0] = DecoderOnlyMath.argmax(lg);
+                stagedLogits[0] = lg;
+                for (int i = 1; i < steps; i++) {
+                    lg = sess.decodeNextResident(fed[i - 1]);
+                    fed[i] = DecoderOnlyMath.argmax(lg);
+                    stagedLogits[i] = lg;
+                }
+            }
+            System.setProperty("gemma.warp.attention", "fused");
+            try (Gemma3WarpDecodeSession sess = new Gemma3WarpDecodeSession(wb, Gemma3WarpWeights.from(ref))) {
+                float[] lg = sess.prefillResidentBatched(ids);
+                assertEquals(fed[0], DecoderOnlyMath.argmax(lg), "fused vs staged top-1 at prefill");
+                assertCloseArray(stagedLogits[0], lg);
+                for (int i = 1; i < steps; i++) {
+                    lg = sess.decodeNextResident(fed[i - 1]); // feed the SAME tokens
+                    assertEquals(fed[i], DecoderOnlyMath.argmax(lg), "fused vs staged top-1 at step " + i);
+                    assertCloseArray(stagedLogits[i], lg);
+                }
+            }
+        } finally {
+            if (prev == null) {
+                System.clearProperty("gemma.warp.attention");
+            } else {
+                System.setProperty("gemma.warp.attention", prev);
+            }
+        }
+    }
+
+    private static void assertCloseArray(float[] want, float[] got) {
+        for (int i = 0; i < want.length; i++) {
+            assertClose("logits[" + i + "]", want[i], got[i]);
+        }
+    }
+
+    @Test
     void batchedResidentMatvecEqualsSyncMatvec() throws Exception {
         // 13b-3b: the deferred (batched) matvec must produce the exact same output as the synchronous one.
         int outN = 48;

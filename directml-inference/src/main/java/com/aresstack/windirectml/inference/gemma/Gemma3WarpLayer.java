@@ -52,6 +52,10 @@ public final class Gemma3WarpLayer implements AutoCloseable {
     private final WarpDenseProjection vProj;
     private final WarpDenseProjection oProj;
     private final Gemma3WarpMlp mlp;
+    // GEMMA-WARP-14b: fused attention context is the default; -Dgemma.warp.attention=staged forces the old
+    // staged scores+softmax+value path (kept as the debug/parity oracle). Read once at construction.
+    private final boolean useFusedAttention =
+            !"staged".equalsIgnoreCase(System.getProperty("gemma.warp.attention", "fused"));
     // Lazily-uploaded resident norm weights (GEMMA-WARP-13b-3a), built on first decodeStepResident call.
     private WarpGpuBuffer inputLayerNormBuf;
     private WarpGpuBuffer qNormBuf;
@@ -250,18 +254,13 @@ public final class Gemma3WarpLayer implements AutoCloseable {
             Gemma3WarpResidentKvLayerCache lc = cache.layer(layer);
             k.kvAppend().append(ctx, kr, lc.keys(), kvDim, pos * kvDim);
             k.kvAppend().append(ctx, v, lc.values(), kvDim, pos * kvDim);
-            int seqLen = pos + 1;
             int firstValid = layout.firstValidKey(layer, pos);
-            // The cache buffers are persistent (capacity >= seqLen, valid range [0, seqLen)); do NOT track
+            // The cache buffers are persistent (capacity >= pos+1, valid range [0, pos]); do NOT track
             // them in scratch — they must survive across decode steps.
             WarpGpuBuffer keys = lc.keys();
             WarpGpuBuffer values = lc.values();
 
-            WarpGpuBuffer scores = track(scratch,
-                    k.scores().scores(ctx, qr, keys, numHeads, numKvHeads, headDim, seqLen, pos, firstValid, scale));
-            WarpGpuBuffer prob = track(scratch, k.softmax().softmaxRows(ctx, scores, numHeads, seqLen));
-            WarpGpuBuffer context = track(scratch,
-                    k.value().aggregate(ctx, prob, values, numHeads, numKvHeads, headDim, seqLen));
+            WarpGpuBuffer context = attentionContext(ctx, scratch, qr, keys, values, pos, firstValid);
             WarpGpuBuffer attnProj = track(scratch, oProj.forwardResident(ctx, context));
             WarpGpuBuffer attnProjNorm = track(scratch,
                     k.rmsNorm().normalize(ctx, attnProj, postAttentionLayerNormBuf, eps));
@@ -282,6 +281,26 @@ public final class Gemma3WarpLayer implements AutoCloseable {
             b.close();
         }
         return out;
+    }
+
+    /**
+     * Attention context for one query at {@code queryPos} over the resident KV cache {@code keys}/{@code values}
+     * (GEMMA-WARP-14b): the fused single-dispatch kernel by default, or the staged scores→softmax→value path
+     * when {@code -Dgemma.warp.attention=staged}. Same Gemma layout (GQA, causal + sliding-window via
+     * {@code firstValid..queryPos}, explicit head_dim, scale) either way.
+     */
+    private WarpGpuBuffer attentionContext(WarpExecutionContext ctx, java.util.List<WarpGpuBuffer> scratch,
+                                           WarpGpuBuffer q, WarpGpuBuffer keys, WarpGpuBuffer values,
+                                           int queryPos, int firstValid) throws WindowsNativeException {
+        if (useFusedAttention) {
+            return track(scratch, k.fusedAttention().context(ctx, q, keys, values,
+                    numHeads, numKvHeads, headDim, kvDim, queryPos, firstValid, scale));
+        }
+        int seqLen = queryPos + 1;
+        WarpGpuBuffer scores = track(scratch,
+                k.scores().scores(ctx, q, keys, numHeads, numKvHeads, headDim, seqLen, queryPos, firstValid, scale));
+        WarpGpuBuffer prob = track(scratch, k.softmax().softmaxRows(ctx, scores, numHeads, seqLen));
+        return track(scratch, k.value().aggregate(ctx, prob, values, numHeads, numKvHeads, headDim, seqLen));
     }
 
     /** Register a freshly produced resident buffer for end-of-layer cleanup (after the recording flush). */
@@ -332,16 +351,11 @@ public final class Gemma3WarpLayer implements AutoCloseable {
                 k.kvAppend().append(ctx, kr, lc.keys(), kvDim, p * kvDim);
                 k.kvAppend().append(ctx, vv[p], lc.values(), kvDim, p * kvDim);
             }
-            // 4. per-position attention over the cache [firstValid(p) .. p].
+            // 4. per-position attention over the cache [firstValid(p) .. p] (fused or staged).
             WarpGpuBuffer[] context = new WarpGpuBuffer[seqLen];
             for (int p = 0; p < seqLen; p++) {
-                int sLen = p + 1;
                 int firstValid = layout.firstValidKey(layer, p);
-                WarpGpuBuffer scores = track(scratch,
-                        k.scores().scores(ctx, qr[p], lc.keys(), numHeads, numKvHeads, headDim, sLen, p, firstValid, scale));
-                WarpGpuBuffer prob = track(scratch, k.softmax().softmaxRows(ctx, scores, numHeads, sLen));
-                context[p] = track(scratch,
-                        k.value().aggregate(ctx, prob, lc.values(), numHeads, numKvHeads, headDim, sLen));
+                context[p] = attentionContext(ctx, scratch, qr[p], lc.keys(), lc.values(), p, firstValid);
             }
             // 5. batched o_proj; post-attention norm + residual per position.
             WarpGpuBuffer[] attnProj = projectBatched(ctx, scratch, oProj, context, attnDim, hidden, seqLen);

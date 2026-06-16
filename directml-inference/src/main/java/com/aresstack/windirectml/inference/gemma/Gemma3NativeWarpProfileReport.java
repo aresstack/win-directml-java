@@ -71,6 +71,8 @@ public final class Gemma3NativeWarpProfileReport {
         out.add("    submits: " + p.submits());
         out.add("    fence waits: " + p.fenceWaits());
         out.add("    readbacks: " + p.readbacks());
+        out.add("    dispatches/token: " + num2(p.dispatchesPerToken()));
+        out.add("    uav barriers/token: " + num2(p.uavBarriersPerToken()));
         out.add("    submits/token: " + num2(p.submitsPerToken()));
         out.add("    fence waits/token: " + num2(p.fenceWaitsPerToken()));
         out.add("    readbacks/token: " + num2(p.readbacksPerToken()));
