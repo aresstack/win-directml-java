@@ -64,6 +64,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-13c GPU-resident KV cache | **done — per-layer GPU K/V cache, no per-layer readback; real readbacks/token 38→1, fenceWaits/token 97→21, still " Paris"** |
 | GEMMA-WARP-13d command-list coalescing | **done — UAV dispatches coalesced per layer; real submits/token 418→220, fenceWaits 21 (unchanged), decode ~442→294 ms/token, still " Paris"** |
 | GEMMA-WARP-13e batched prefill | **done — whole prompt in one pass (batched projections + MLP); real prefill submits 1417→261 (6-tok), top-1 still " Paris", decodeNext after batched works** |
+| GEMMA-WARP-13f warm/cold profiling + shader warm-up | **done — Gemma3WarpWarmup + gated cold/warm steady-state profile; prefill submits ~constant in prompt len (261/280/355 @ 6/25/100), decode warm ~250 ms/token; finding: decode submit-bound (→ matvec coalescing next), long prefill compute-bound (per-position attention)** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -597,3 +598,25 @@ head) is therefore the trustworthy WARP parity oracle.
     scratch makes that non-trivial) and coalescing the matvec projections into the layer list (a UAV matvec
     shader or in-list transitions) remain the levers toward ~layer-count submits. The batched matmul reuses
     the shared static batch scratch, so prefill batches run one matmul at a time (fine; bounded VRAM).
+
+- **GEMMA-WARP-13f warm/cold profiling + shader warm-up — done.** Measurement infrastructure only (no
+  kernel/model change), so cold one-time costs no longer hide in the numbers.
+  - **New:** `Gemma3WarpWarmup` (runs one short batched prefill + a few resident decode steps to trigger all
+    lazy shader compiles; changes no logic) and the gated `Gemma3WarpSteadyStateProfileTest` (cold prefill/
+    decode → warm-up → warm prefill+16-token decode for 6/25/100-token prompts, prefill and decode counters
+    measured separately; asserts " Paris" smoke, warm-up doesn't change token IDs, counters present — no ms
+    assertions).
+  - **Measured (real Gemma 3 270M, this host).** COLD prefill(6 tok) 2018 ms / 373 submits, first decode
+    316 ms; lazy shader compile ≈ the cold−warm prefill gap (~480 ms). WARM prefill **261 / 280 / 355
+    submits** for **6 / 25 / 100**-token prompts (≈ constant in prompt length — the 13e batched win) at
+    1538 / 5473 / 20350 ms; WARM decode **~250 ms/token** over 16 tokens, **220 submits/token, 21 fence
+    waits/token, 1 readback/token** (stable, matches 13c/13d). " Paris" green cold and warm.
+  - **Findings → next optimization.** (A) **Decode is submit-bound:** ~220 submits/token ≈ ~250 ms/token
+    (~1.1 ms/submit on WARP) — coalescing the 7 standalone DML-GEMM matvec projections/layer into the layer
+    command list (a UAV matvec shader or in-list resource-state transitions) is the highest-leverage next
+    step and should cut decode time substantially. (B) **Long prefill is now compute-bound, not submit-bound:**
+    submits are ~constant (~300) but time grows with prompt length (per-position attention loop is O(seqLen)
+    dispatches + larger matmuls) — multi-query batched attention would help long prompts but is a bigger/
+    riskier kernel slice. **Recommended next: (A).**
+  - Full `:directml-inference` + `:directml-encoder` + `:directml-workbench` regression green (the profile
+    test is gated/opt-in).
