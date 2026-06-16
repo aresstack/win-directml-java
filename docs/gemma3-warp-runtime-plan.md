@@ -62,6 +62,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-13b-4 resident/batched as native-warp product path | **done — native-warp defaults to resident; real profile 454 submits / 93 fenceWaits / 37 readbacks per decode token, still " Paris"** |
 | WORKBENCH-CLEANUP-STREAMING-ONLY-1 remove extra UI controls | **done — only 'Streaming output' remains; Gemma native chosen by Backend=WARP; profile is a `-Ddirectml.generation.profile` debug path; `-Dgemma.runtime` no longer drives product logic** |
 | GEMMA-WARP-13c GPU-resident KV cache | **done — per-layer GPU K/V cache, no per-layer readback; real readbacks/token 38→1, fenceWaits/token 97→21, still " Paris"** |
+| GEMMA-WARP-13d command-list coalescing | **done — UAV dispatches coalesced per layer; real submits/token 418→220, fenceWaits 21 (unchanged), decode ~442→294 ms/token, still " Paris"** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -535,3 +536,34 @@ head) is therefore the trustworthy WARP parity oracle.
     ≤ 3. No second product path (sync float[] kept as debug/fallback via `-Dgemma.warp.execution=sync`); no
     windowed eviction / batched prefill / UI control / downloader / .wdmlpack-format change; Qwen/Smol/T5
     untouched. Full `:directml-inference` + `:directml-encoder` + `:directml-workbench` regression green.
+
+- **GEMMA-WARP-13d command-list coalescing — done.** After 13c the readbacks were ~1/token but submits
+  stayed ~418/token (one ExecuteCommandLists per kernel), and on WARP the per-submit driver overhead is the
+  decode bottleneck. This slice records consecutive UAV dispatches into one command list.
+  - **Seam:** `WarpExecutionContext` gains a coalescing scope (`beginRecording`/`flushRecording`). Inside
+    it, `dispatch()` accumulates UAV kernels (norms, QK-norm, RoPE, KV append, attention, GeGLU,
+    element-adds) into one lazily-opened command list with a `uavBarrier` after each, submitted once via
+    `executeOrDefer` (deferred into the active per-layer `DirectMlGpuBatch`). `matvec()` (new; used by
+    `WarpDenseProjection.forwardResident`) flushes the pending list, then runs the kernel's **standalone**
+    resident matvec — its copy-based I/O can't safely share a UAV list, so the math is byte-identical to the
+    non-coalesced path (the spec's "kein mathematisches Risiko"). `Gemma3WarpLmHead.logitsResident` returns
+    the resident logits buffer so the final norm + LM-head coalesce before the one readback.
+  - **Fences kept low:** the per-layer `DirectMlGpuBatch` (13c) is retained, so all coalesced lists + matvecs
+    are deferred and the batch drains once per layer — fenceWaits/token stay ~21 (not worse). Lifetime
+    unchanged: scratch buffers freed only after the batch drains.
+  - **Measured.** Synthetic prefill (5 tokens): resident submits 533 → 273, fenceWaits 132 → 52, readbacks 1;
+    logits == float[] (top-1 identical); growth+window parity holds. Real Gemma 3 270M decode/token:
+    **submits/token 418 → 220**, **fence waits/token 21 (unchanged)**, **readbacks/token 1**, **decode avg
+    ~442 → ~294 ms/token** (~33 % faster), top-1 9079 (" Paris"), next 236761 — identical output. Streaming
+    live; buffered same text.
+  - Tests: `Gemma3WarpResidentDecodeStepTest` (resident == float[]; `syntheticResidentPrefillCoalescesCommandLists`
+    asserts resident submits < float-path submits; gated real submits/token < 300); `Gemma3WarpGeneratorTest`
+    resident == sync. No mathematical change (matvec standalone); no UI control / downloader / .wdmlpack-format
+    change; Qwen/Smol/T5 untouched. Full `:directml-inference` + `:directml-encoder` + `:directml-workbench`
+    regression green.
+  - **Still open (toward batched prefill / fewer submits):** the ~220 submits/token are dominated by the 7
+    standalone DML-GEMM matvec projections/layer (kept standalone for exact numerics) + ~5 coalesced UAV runs/
+    layer. Pushing toward layer-count (~20) needs the matvec inside the coalesced list — either a UAV matvec
+    shader (a tiny numeric change) or in-list resource-state transitions for the DML copies. **Batched prefill**
+    (processing all prompt tokens in one pass instead of token-by-token) is the separate next lever for prefill
+    latency and is still open.

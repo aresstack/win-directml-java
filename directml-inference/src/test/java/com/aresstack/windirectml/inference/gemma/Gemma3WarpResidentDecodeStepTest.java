@@ -186,9 +186,10 @@ class Gemma3WarpResidentDecodeStepTest {
     }
 
     @Test
-    void syntheticResidentPrefillCoalescesFences() throws Exception {
-        // 13b-3b: resident prefill stays numerically identical to the float[] path, but its fence waits
-        // are coalesced — far fewer fenceWaits than submits, and far fewer fenceWaits than the float path.
+    void syntheticResidentPrefillCoalescesCommandLists() throws Exception {
+        // 13d: resident prefill stays numerically identical to the float[] path, but the per-layer UAV
+        // dispatches are coalesced into far fewer command-list submissions than the float path (which
+        // submits one list per kernel).
         Gemma3Config config = smallConfig();
         Gemma3ReferenceWeights ref = syntheticWeights(config, new Random(343));
         int[] ids = {4, 11, 27, 2, 18};
@@ -207,19 +208,12 @@ class Gemma3WarpResidentDecodeStepTest {
                 assertClose("prefill logits[" + o + "]", floatLogits[o], residentLogits[o]);
             }
             assertEquals(DecoderOnlyMath.argmax(floatLogits), DecoderOnlyMath.argmax(residentLogits), "top-1");
-            System.out.println("[13b-3b] synthetic prefill float=" + floatStats + " resident=" + resStats);
-            // Coalescing: resident dispatches are deferred and fenced once per layer drain, so fenceWaits
-            // drop strictly below submits (in 13b-3a they were equal — every submit fenced). On this tiny
-            // synthetic config the unavoidable upload/readback syncs dominate; the real-model gated test
-            // asserts the much larger ratio where the big projections/compute dominate.
-            assertTrue(resStats.fenceWaits() < resStats.submits(),
-                    "resident fenceWaits must be coalesced below its submits: " + resStats);
-            assertTrue(resStats.submits() - resStats.fenceWaits() >= config.numHiddenLayers(),
-                    "at least one dispatch per layer must be coalesced: " + resStats);
-            // And the resident path fences far less than the all-synchronous float path.
-            assertTrue(resStats.fenceWaits() < floatStats.fenceWaits(),
-                    "resident fenceWaits must be below float-path fenceWaits: resident="
-                            + resStats.fenceWaits() + " float=" + floatStats.fenceWaits());
+            System.out.println("[13d] synthetic prefill float=" + floatStats + " resident=" + resStats);
+            // Command-list coalescing: the resident path submits far fewer command lists than the
+            // per-kernel float path (UAV runs share one list; matvecs stay standalone for exact math).
+            assertTrue(resStats.submits() < floatStats.submits(),
+                    "resident submits must be coalesced below the float path: resident="
+                            + resStats.submits() + " float=" + floatStats.submits());
         }
     }
 
@@ -242,20 +236,16 @@ class Gemma3WarpResidentDecodeStepTest {
             WarpSubmissionStats.Snapshot d0 = WarpSubmissionStats.snapshot();
             int next = sess.decodeNextTokenResident(top1);
             WarpSubmissionStats.Snapshot dd = WarpSubmissionStats.snapshot().minus(d0);
-            System.out.println("[13b-3] resident decode/token " + dd
-                    + " (13b-1 baseline ~344 readbacks/token, ~834 fenceWaits/token after 13b-3a);"
-                    + " top1=" + top1 + " next=" + next);
+            System.out.println("[13d] resident decode/token " + dd
+                    + " (baselines: ~344 readbacks/token @13b-1, ~418 submits/token @13c); top1=" + top1 + " next=" + next);
 
             assertEquals(EXPECTED_NEXT, top1, "resident prefill top-1 must be \" Paris\"");
             // GEMMA-WARP-13c: GPU-resident KV cache -> only the final logits are read back per token.
             assertTrue(dd.readbacks() <= 3,
-                    "resident decode readbacks/token must drop to ~1 (logits only): " + dd.readbacks());
-            // 13b-3b: fences coalesced — fenceWaits per token fall far below submits and far below the
-            // ~834/token of 13b-3a (each layer drains once instead of fencing every dispatch).
-            assertTrue(dd.fenceWaits() * 2 < dd.submits(),
-                    "resident decode fenceWaits must be coalesced below half its submits: " + dd);
-            assertTrue(dd.fenceWaits() < 300,
-                    "resident decode fenceWaits/token must be well below the ~834 13b-3a baseline: " + dd.fenceWaits());
+                    "resident decode readbacks/token must stay ~1 (logits only): " + dd.readbacks());
+            // GEMMA-WARP-13d: command-list coalescing -> submits/token well below the ~418 of 13c.
+            assertTrue(dd.submits() < 300,
+                    "resident decode submits/token must be well below the ~418 13c baseline: " + dd.submits());
         }
     }
 

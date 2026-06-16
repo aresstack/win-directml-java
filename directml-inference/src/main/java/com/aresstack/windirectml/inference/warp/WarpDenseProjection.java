@@ -150,7 +150,9 @@ public final class WarpDenseProjection implements AutoCloseable {
                     + name + ": input=" + input.elementCount() + ", expected=" + inputSize);
         }
         WarpGpuBuffer output = ctx.allocate(outputSize);
-        kernel.matvecResident(input, output);
+        // Routes through the context: direct-UAV into the open recording list (GEMMA-WARP-13d) when one is
+        // active, else the kernel's standalone resident matvec. Same math either way.
+        ctx.matvec(kernel, input, output);
         return output;
     }
 

@@ -21,12 +21,91 @@ public final class WarpExecutionContext {
 
     private final WindowsBindings wb;
 
+    // GEMMA-WARP-13d command-list coalescing: inside a coalescing scope (beginRecording..flushRecording),
+    // consecutive UAV dispatches accumulate into ONE command list (a UAV barrier after each) and submit
+    // once. A matvec flushes the pending list and runs standalone (its copy-based I/O can't safely share a
+    // UAV command list), so its numerics are byte-identical to the non-coalesced path. The list is opened
+    // lazily on the first dispatch and re-opened after each matvec flush.
+    private boolean coalescing;
+    private Arena recArena;
+    private MemorySegment recAllocator;
+    private MemorySegment recCmdList;
+    private boolean recording; // a command list is currently open within the coalescing scope
+
     public WarpExecutionContext(WindowsBindings wb) {
         this.wb = Objects.requireNonNull(wb, "wb");
     }
 
     public WindowsBindings bindings() {
         return wb;
+    }
+
+    /**
+     * Open a command-list coalescing scope (GEMMA-WARP-13d): within it, consecutive {@link #dispatch} (UAV)
+     * kernels accumulate into one command list submitted once, instead of one submission per kernel.
+     * {@link #matvec} flushes the pending list and runs standalone. Use only for a sequence with no
+     * intervening readback/upload (those need the GPU drained); the resident decode layer qualifies. Not
+     * re-entrant. Pair with {@link #flushRecording}.
+     */
+    public void beginRecording() {
+        if (coalescing) {
+            throw new IllegalStateException("coalescing scope already open");
+        }
+        coalescing = true;
+    }
+
+    /** Whether a coalescing scope is open. */
+    public boolean isRecording() {
+        return coalescing;
+    }
+
+    /** Close the coalescing scope, submitting any pending command list (synchronous when no batch). */
+    public void flushRecording() throws WindowsNativeException {
+        flushOpenList();
+        coalescing = false;
+    }
+
+    /**
+     * Run a resident matvec {@code out = W·in} (GEMMA-WARP-13d). Inside a coalescing scope it first flushes
+     * the pending UAV command list (so ordering holds), then runs the kernel's standalone resident matvec —
+     * its copy-based I/O can't safely share a UAV command list, so the math is byte-identical to the
+     * non-coalesced path. Used by {@code WarpDenseProjection.forwardResident}.
+     */
+    public void matvec(MatMulNBitsKernel kernel, WarpGpuBuffer in, WarpGpuBuffer out)
+            throws WindowsNativeException {
+        Objects.requireNonNull(kernel, "kernel");
+        if (coalescing) {
+            flushOpenList();
+        }
+        kernel.matvecResident(in, out);
+    }
+
+    private void openListIfNeeded() throws WindowsNativeException {
+        if (recording) {
+            return;
+        }
+        MemorySegment dev = wb.getD3d12Device();
+        recArena = Arena.ofConfined();
+        recAllocator = D3D12Bindings.createCommandAllocator(dev, D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, recArena);
+        recCmdList = D3D12Bindings.createCommandList(dev, D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, recAllocator, recArena);
+        recording = true;
+    }
+
+    private void flushOpenList() throws WindowsNativeException {
+        if (!recording) {
+            return;
+        }
+        recording = false;
+        try {
+            D3D12Bindings.executeOrDefer(wb.getD3d12Device(), wb.getCommandQueue(), recCmdList, recAllocator, recArena);
+            DxgiBindings.release(recCmdList);
+            DxgiBindings.release(recAllocator);
+        } finally {
+            recArena.close();
+            recArena = null;
+            recCmdList = null;
+            recAllocator = null;
+        }
     }
 
     /**
@@ -89,6 +168,15 @@ public final class WarpExecutionContext {
     public void dispatch(GpuComputeKernel kernel, long[] uavAddresses, int[] constants, int elementCount)
             throws WindowsNativeException {
         Objects.requireNonNull(kernel, "kernel");
+        if (coalescing) {
+            // GEMMA-WARP-13d: accumulate into one command list (lazily opened) + a UAV barrier so the next
+            // dependent dispatch observes this one's writes; submitted once by the next matvec flush or by
+            // flushRecording().
+            openListIfNeeded();
+            kernel.recordDispatch(recCmdList, uavAddresses, constants, elementCount);
+            D3D12Bindings.uavBarrier(recCmdList, recArena);
+            return;
+        }
         MemorySegment dev = wb.getD3d12Device();
         MemorySegment queue = wb.getCommandQueue();
         try (Arena a = Arena.ofConfined()) {

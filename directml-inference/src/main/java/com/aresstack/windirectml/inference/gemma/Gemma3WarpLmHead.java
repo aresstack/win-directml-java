@@ -82,6 +82,22 @@ public final class Gemma3WarpLmHead implements AutoCloseable {
         }
     }
 
+    /**
+     * Resident vocab-sized logits buffer (GEMMA-WARP-13d): the tied LM-head matvec returned as a resident
+     * {@link WarpGpuBuffer} <b>without</b> the readback, so the caller can record it into a coalesced command
+     * list and read back once after the flush. The caller owns/closes the returned buffer.
+     */
+    public WarpGpuBuffer logitsResident(WarpExecutionContext ctx, WarpGpuBuffer hiddenState)
+            throws WindowsNativeException {
+        if (closed) {
+            throw new IllegalStateException("Gemma3WarpLmHead is closed");
+        }
+        if (hiddenState.elementCount() != hidden) {
+            throw new IllegalArgumentException("hidden length mismatch: " + hiddenState.elementCount() + " != " + hidden);
+        }
+        return projection.forwardResident(ctx, hiddenState);
+    }
+
     @Override
     public void close() {
         if (!closed) {

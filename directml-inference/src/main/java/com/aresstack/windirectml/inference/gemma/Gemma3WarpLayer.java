@@ -222,21 +222,19 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         Objects.requireNonNull(cache, "cache");
         ensureResidentNormWeights(ctx);
 
-        // GEMMA-WARP-13b-3b: open a per-layer submission batch so the layer's pure compute dispatches
-        // (norms, QK-norm, RoPE, attention, GeGLU, element-adds and the resident projections) are
-        // submitted fire-and-forget and their fences coalesced into one drain at batch close, instead
-        // of a CPU wait per kernel. Per-layer (not per-token) bounds the retained command lists —
-        // important on the memory-sensitive WARP device. Without a batch every dispatch falls back to
-        // its own submit + fence wait.
-        //
-        // Because dispatches are deferred, an intermediate buffer must stay alive until the GPU has
-        // actually consumed it (the batch drain), so all scratch buffers are closed only AFTER the batch
-        // closes — eagerly closing them mid-layer would free GPU memory still referenced by a not-yet-
-        // executed command list. Only the returned {@code out} (and the caller-owned {@code hiddenIn})
-        // outlive this method.
+        // GEMMA-WARP-13d: per-layer DirectMlGpuBatch (deferred fences — one drain/layer, as in 13c) PLUS
+        // command-list coalescing — consecutive UAV dispatches (norms, QK-norm, RoPE, KV append, attention,
+        // GeGLU, element-adds) accumulate into one command list submitted once (fire-and-forget into the
+        // batch); each matvec flushes the pending list and runs its standalone resident matvec (deferred
+        // too), keeping the math byte-identical. 13c removed the mid-layer readback, so the layer has no
+        // sync point. All submissions are deferred, so the scratch buffers are freed only AFTER the batch
+        // drains — closing them earlier would free GPU memory still referenced by a not-yet-executed list.
+        // Only the returned {@code out} (and the caller-owned {@code hiddenIn}) outlive this method.
         java.util.List<WarpGpuBuffer> scratch = new java.util.ArrayList<>();
-        WarpGpuBuffer out;
+        WarpGpuBuffer out = null;
         try (DirectMlGpuBatch batch = DirectMlGpuBatch.begin(ctx.bindings())) {
+            ctx.beginRecording();
+            try {
             WarpGpuBuffer normed = track(scratch, k.rmsNorm().normalize(ctx, hiddenIn, inputLayerNormBuf, eps));
             WarpGpuBuffer q = track(scratch, qProj.forwardResident(ctx, normed));
             WarpGpuBuffer k0 = track(scratch, kProj.forwardResident(ctx, normed));
@@ -273,8 +271,12 @@ public final class Gemma3WarpLayer implements AutoCloseable {
             WarpGpuBuffer down = track(scratch, mlp.mlp(ctx, ff, scratch));
             WarpGpuBuffer downNorm = track(scratch, k.rmsNorm().normalize(ctx, down, postFeedforwardLayerNormBuf, eps));
             out = k.elementAdd().add(ctx, hidden1, downNorm);
-            // batch.close() (try-with-resources) drains the layer's deferred submissions in one fence
-            // wait, so every scratch buffer has now been consumed by the GPU and `out` is valid.
+            } finally {
+                // Submit the final pending command list (deferred into the batch) before the drain.
+                ctx.flushRecording();
+            }
+            // batch.close() (try-with-resources) drains the layer's deferred submissions in one fence wait,
+            // so every scratch buffer has now been consumed and `out` is valid before we free them.
         }
         for (WarpGpuBuffer b : scratch) {
             b.close();
@@ -282,7 +284,7 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         return out;
     }
 
-    /** Register a freshly produced resident buffer for end-of-layer cleanup (after the batch drains). */
+    /** Register a freshly produced resident buffer for end-of-layer cleanup (after the recording flush). */
     private static WarpGpuBuffer track(java.util.List<WarpGpuBuffer> scratch, WarpGpuBuffer b) {
         scratch.add(b);
         return b;

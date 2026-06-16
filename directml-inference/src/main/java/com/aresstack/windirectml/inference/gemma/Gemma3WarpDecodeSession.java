@@ -182,16 +182,28 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
         if (finalNormBuf == null) {
             finalNormBuf = ctx().upload(weights.finalNorm());
         }
-        // GEMMA-WARP-13b-3b: coalesce the final-norm dispatch + tied LM-head matvec under one batch; the
-        // logits readback drains it (logits must reach the CPU for token selection — the one readback).
-        // finalHidden feeds the deferred final-norm dispatch, so it must stay alive until that work has
-        // been consumed (the readback drain) — close it only after logits() returns.
+        // GEMMA-WARP-13d: per-layer-style batch (deferred fence) + command-list coalescing for the final
+        // norm + tied LM-head matvec; the single logits readback drains the batch (logits must reach the CPU
+        // for token selection). finalHidden feeds the recorded final-norm, so it stays alive until the drain.
         try (DirectMlGpuBatch batch = DirectMlGpuBatch.begin(wb)) {
-            WarpGpuBuffer normed = kernels.rmsNorm().normalize(ctx(), finalHidden, finalNormBuf, eps);
+            ctx().beginRecording();
+            WarpGpuBuffer normed = null;
+            WarpGpuBuffer logitsBuf = null;
             try {
-                return lmHead().logits(ctx(), normed);
+                normed = kernels.rmsNorm().normalize(ctx(), finalHidden, finalNormBuf, eps);
+                logitsBuf = lmHead().logitsResident(ctx(), normed);
+                ctx().flushRecording();         // submit pending list (deferred into the batch)
+                return logitsBuf.readback();     // drains the deferred work; the one logits readback
             } finally {
-                normed.close();
+                if (ctx().isRecording()) {
+                    ctx().flushRecording();      // error path: ensure the coalescing scope is closed
+                }
+                if (logitsBuf != null) {
+                    logitsBuf.close();
+                }
+                if (normed != null) {
+                    normed.close();
+                }
                 finalHidden.close();
             }
         }
