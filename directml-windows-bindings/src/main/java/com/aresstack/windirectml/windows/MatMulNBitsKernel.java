@@ -1785,6 +1785,52 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     }
 
     /**
+     * Record the resident matvec into a caller-owned command list {@code cl} (GEMMA-WARP-13g), so a whole
+     * decode layer's projections + element kernels share one command list / one submit instead of one
+     * submission per projection. The matvec math (the DML/INT4/FP32 dispatch + its staging copies) is
+     * <b>unchanged</b> — only {@code in}/{@code out} are bracketed with the resource-state transitions the
+     * shared list needs:
+     * <ul>
+     *   <li>{@code in} rests in UNORDERED_ACCESS in the recording (it is a prior kernel's UAV output); it is
+     *       transitioned UAV→COPY_SOURCE for the input copy and back to UAV afterwards;</li>
+     *   <li>{@code out} is a fresh COMMON buffer (implicitly promoted to COPY_DEST by the output copy) and is
+     *       transitioned COPY_DEST→UAV so the next kernel reads it as a UAV.</li>
+     * </ul>
+     * The kernel's private {@code inputBuf}/{@code outputBuf} go COMMON→…→COMMON within the recorded
+     * sequence (self-contained), exactly as in the standalone path. The caller records a UAV barrier after
+     * this call. Same numerics as {@link #matvecResident(WarpGpuBuffer, WarpGpuBuffer)}.
+     */
+    public void recordResidentInto(MemorySegment cl, WarpGpuBuffer in, WarpGpuBuffer out, Arena arena) {
+        if (!prepared) {
+            throw new IllegalStateException("Kernel not prepared");
+        }
+        if (in.elementCount() != K) {
+            throw new IllegalArgumentException("input length " + in.elementCount() + " != K=" + K);
+        }
+        if (out.elementCount() != N) {
+            throw new IllegalArgumentException("output length " + out.elementCount() + " != N=" + N);
+        }
+        long inputBytes = (long) K * Float.BYTES;
+        long outputBytes = (long) N * Float.BYTES;
+        try {
+            D3D12Bindings.transitionBarrier(cl, in.d3d12Buffer(),
+                    D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE, arena);
+            recordMatvecResident(cl, in, out, inputBytes, outputBytes);
+            D3D12Bindings.transitionBarrier(cl, in.d3d12Buffer(),
+                    D3D12Bindings.D3D12_RESOURCE_STATE_COPY_SOURCE,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS, arena);
+            D3D12Bindings.transitionBarrier(cl, out.d3d12Buffer(),
+                    D3D12Bindings.D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12Bindings.D3D12_RESOURCE_STATE_UNORDERED_ACCESS, arena);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new RuntimeException("MatMulNBitsKernel.recordResidentInto failed", t);
+        }
+    }
+
+    /**
      * Compute y = x @ W^T on GPU, writing result into a caller-provided buffer.
      * <p>
      * <b>V1.2 zero-alloc hot path</b>: upload, dispatch, and readback are combined

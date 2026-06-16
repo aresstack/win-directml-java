@@ -164,7 +164,12 @@ class Gemma3WarpResidentDecodeStepTest {
         // path (the KV cache was filled to promptLen).
         Gemma3Config config = smallConfig();
         Gemma3ReferenceWeights ref = syntheticWeights(config, new Random(1305));
-        int[] ids = {7, 3, 19, 0, 25, 11, 4};
+        // Long enough that batched prefill (≈constant submits) beats the now-coalesced tokenwise path
+        // (≈ layers × seqLen submits after 13g); also exercises KV growth (> initial cap 32) + the window.
+        int[] ids = new int[64];
+        for (int i = 0; i < ids.length; i++) {
+            ids[i] = (i * 7 + 3) % 26;
+        }
         int feed = 9;
 
         try (Gemma3WarpDecodeSession sess = new Gemma3WarpDecodeSession(wb, Gemma3WarpWeights.from(ref))) {
@@ -282,25 +287,26 @@ class Gemma3WarpResidentDecodeStepTest {
                     + " (promptTokens=" + FRANCE_IDS.length + ")");
             assertEquals(EXPECTED_NEXT, top1Tokenwise, "tokenwise prefill top-1 must be \" Paris\"");
             assertEquals(EXPECTED_NEXT, top1, "batched prefill top-1 must be \" Paris\"");
-            assertTrue(bpd.submits() < tpd.submits(),
-                    "batched prefill must submit fewer command lists: batched=" + bpd.submits()
-                            + " tokenwise=" + tpd.submits());
+            // NB: after 13g the tokenwise per-token path also coalesces its matvecs, so for this short
+            // 6-token prompt batched (≈constant submits) is not necessarily below tokenwise (≈layers×seqLen);
+            // the batched advantage is length-dependent (see the 13f profile). Parity is the invariant here.
 
             // measure one resident decode token after the batched prefill (cache filled to promptLen)
             WarpSubmissionStats.reset();
             WarpSubmissionStats.Snapshot d0 = WarpSubmissionStats.snapshot();
             int next = sess.decodeNextTokenResident(top1);
             WarpSubmissionStats.Snapshot dd = WarpSubmissionStats.snapshot().minus(d0);
-            System.out.println("[13d] resident decode/token " + dd
-                    + " (baselines: ~344 readbacks/token @13b-1, ~418 submits/token @13c); top1=" + top1 + " next=" + next);
+            System.out.println("[13g] resident decode/token " + dd
+                    + " (baselines: ~418 submits/token @13c, ~220 @13d); top1=" + top1 + " next=" + next);
 
             assertEquals(EXPECTED_NEXT, top1, "resident prefill top-1 must be \" Paris\"");
             // GEMMA-WARP-13c: GPU-resident KV cache -> only the final logits are read back per token.
             assertTrue(dd.readbacks() <= 3,
                     "resident decode readbacks/token must stay ~1 (logits only): " + dd.readbacks());
-            // GEMMA-WARP-13d: command-list coalescing -> submits/token well below the ~418 of 13c.
-            assertTrue(dd.submits() < 300,
-                    "resident decode submits/token must be well below the ~418 13c baseline: " + dd.submits());
+            // GEMMA-WARP-13g: matvec projections recorded into the layer command list -> submits/token well
+            // below the ~220 of 13d (toward ~layer-count). Fence waits stay ~1/layer.
+            assertTrue(dd.submits() < 100,
+                    "resident decode submits/token must be well below the ~220 13d baseline: " + dd.submits());
         }
     }
 

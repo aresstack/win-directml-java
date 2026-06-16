@@ -21,11 +21,12 @@ public final class WarpExecutionContext {
 
     private final WindowsBindings wb;
 
-    // GEMMA-WARP-13d command-list coalescing: inside a coalescing scope (beginRecording..flushRecording),
-    // consecutive UAV dispatches accumulate into ONE command list (a UAV barrier after each) and submit
-    // once. A matvec flushes the pending list and runs standalone (its copy-based I/O can't safely share a
-    // UAV command list), so its numerics are byte-identical to the non-coalesced path. The list is opened
-    // lazily on the first dispatch and re-opened after each matvec flush.
+    // GEMMA-WARP-13d/13g command-list coalescing: inside a coalescing scope (beginRecording..flushRecording),
+    // the layer's dispatches AND its resident matvec projections accumulate into ONE command list (a UAV
+    // barrier after each) and submit once. The matvec records via MatMulNBitsKernel.recordResidentInto
+    // (its dispatch + staging copies unchanged, in/out bracketed with UAV<->COPY transitions), so the math
+    // is byte-identical to the non-coalesced path. The list is opened lazily on the first dispatch/matvec.
+    // The single batched-prefill matmul (matvecBatched) still flushes + runs synchronously (shared scratch).
     private boolean coalescing;
     private Arena recArena;
     private MemorySegment recAllocator;
@@ -66,16 +67,22 @@ public final class WarpExecutionContext {
     }
 
     /**
-     * Run a resident matvec {@code out = W·in} (GEMMA-WARP-13d). Inside a coalescing scope it first flushes
-     * the pending UAV command list (so ordering holds), then runs the kernel's standalone resident matvec —
-     * its copy-based I/O can't safely share a UAV command list, so the math is byte-identical to the
-     * non-coalesced path. Used by {@code WarpDenseProjection.forwardResident}.
+     * Run a resident matvec {@code out = W·in}. Inside a coalescing scope (GEMMA-WARP-13g) it records the
+     * matvec into the shared layer command list via {@link MatMulNBitsKernel#recordResidentInto} (the
+     * projection shares the layer's single submit); the matvec dispatch + staging copies are unchanged, so
+     * the math is byte-identical. Outside a scope it runs the standalone resident matvec. Used by
+     * {@code WarpDenseProjection.forwardResident}.
      */
     public void matvec(MatMulNBitsKernel kernel, WarpGpuBuffer in, WarpGpuBuffer out)
             throws WindowsNativeException {
         Objects.requireNonNull(kernel, "kernel");
         if (coalescing) {
-            flushOpenList();
+            // GEMMA-WARP-13g: record the matvec INTO the shared layer command list (no flush, no separate
+            // submit) — the projection joins the layer's single command list. Numerics unchanged.
+            openListIfNeeded();
+            kernel.recordResidentInto(recCmdList, in, out, recArena);
+            D3D12Bindings.uavBarrier(recCmdList, recArena);
+            return;
         }
         kernel.matvecResident(in, out);
     }

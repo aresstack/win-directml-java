@@ -65,6 +65,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-13d command-list coalescing | **done — UAV dispatches coalesced per layer; real submits/token 418→220, fenceWaits 21 (unchanged), decode ~442→294 ms/token, still " Paris"** |
 | GEMMA-WARP-13e batched prefill | **done — whole prompt in one pass (batched projections + MLP); real prefill submits 1417→261 (6-tok), top-1 still " Paris", decodeNext after batched works** |
 | GEMMA-WARP-13f warm/cold profiling + shader warm-up | **done — Gemma3WarpWarmup + gated cold/warm steady-state profile; prefill submits ~constant in prompt len (261/280/355 @ 6/25/100), decode warm ~250 ms/token; finding: decode submit-bound (→ matvec coalescing next), long prefill compute-bound (per-position attention)** |
+| GEMMA-WARP-13g projection/matvec submit reduction | **done — matvec recorded into the layer command list (DML numerics unchanged); real decode submits/token 220→21, fences 21, readbacks 1, top-1 " Paris" identical. Finding: decode avg/token ~250 ms unchanged → decode is compute-bound (matvec FLOPs on WARP), not submit-bound** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -620,3 +621,34 @@ head) is therefore the trustworthy WARP parity oracle.
     riskier kernel slice. **Recommended next: (A).**
   - Full `:directml-inference` + `:directml-encoder` + `:directml-workbench` regression green (the profile
     test is gated/opt-in).
+
+- **GEMMA-WARP-13g projection/matvec submit reduction — done (DML numerics preserved).** The 7 standalone
+  DML-GEMM matvec projections/layer are now recorded INTO the layer's coalesced command list instead of one
+  submission each.
+  - **How (no new matmul, no numeric change):** `MatMulNBitsKernel.recordResidentInto(cl, in, out, arena)`
+    records the existing resident matvec (the DML/INT4/FP32 dispatch + its staging copies, unchanged) into a
+    caller-owned command list. The kernel's private inputBuf/outputBuf go COMMON→…→COMMON (self-contained,
+    as in the standalone path); only the external `in`/`out` are bracketed with resource-state transitions
+    the shared list needs (`in` UAV↔COPY_SOURCE around the input copy; `out` COPY_DEST→UAV after the output
+    copy) — valid because matvec inputs/outputs always rest in UNORDERED_ACCESS in the recording.
+    `WarpExecutionContext.matvec` now records into the open list (no flush, no separate submit) inside a
+    coalescing scope. So a whole decode layer = one command list = one submit. The standalone matvec stays
+    as the non-coalesced fallback; the batched-prefill matmul (`matvecBatched`) is unchanged.
+  - **Measured.** Synthetic resident prefill submits 273 → 52 (logits == float[] oracle; growth+window
+    parity holds). Real Gemma 3 270M decode/token: **submits 220 → 21** (~layer count), **fence waits 21
+    (unchanged)**, **readbacks 1 (unchanged)**, **top-1 9079 (" Paris"), next 236761 — identical** (DML
+    matvec untouched). Streaming live; buffered same text.
+  - **Key finding — decode is compute-bound, not submit-bound.** Cutting submits 10× (220→21) left warm
+    decode at **~221–252 ms/token** (essentially unchanged from 13f). So on the WARP software rasterizer the
+    bottleneck is the matvec FLOPs themselves (the FP32/DML GEMM on a CPU rasterizer), not the per-submit
+    driver overhead. The earlier 13f "submit-bound" guess was wrong.
+  - **Next optimization → matvec COMPUTE, not submits.** Options: a better-parallelised WARP FP32 matvec
+    (the current shader is ~one thread per output row; tiling/vectorising the 640×{1024,2048} GEMVs would
+    help), INT4 weights to cut memory bandwidth, or accepting WARP's CPU-rasterizer ceiling and validating
+    on a hardware GPU. Long-prefill compute (per-position attention, O(seqLen)) is the other lever. Submits
+    and readbacks are now effectively solved.
+  - Tests: `Gemma3WarpResidentDecodeStepTest` (resident == float[]; gated real decode submits/token < 100 +
+    " Paris"); `syntheticBatchedPrefillMatchesTokenwiseResident` re-tuned to a 64-token prompt (batched <
+    tokenwise once long enough; the short-prompt inequality no longer holds because tokenwise now also
+    coalesces matvecs). No UI / downloader / .wdmlpack-format change; no windowed eviction; Qwen/Smol/T5
+    untouched. Full `:directml-inference` + `:directml-encoder` + `:directml-workbench` regression green.
