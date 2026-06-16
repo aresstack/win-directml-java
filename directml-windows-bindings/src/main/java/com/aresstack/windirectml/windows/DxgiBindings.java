@@ -54,6 +54,10 @@ public final class DxgiBindings {
     static final int VTABLE_RELEASE = 2;
     static final int VTABLE_ENUM_ADAPTERS1 = 12;
     static final int VTABLE_ENUM_WARP_ADAPTER = 27;
+    // IDXGIAdapter1::GetDesc1 — IUnknown(0..2) + IDXGIObject(3..6) + IDXGIAdapter(7..9) + GetDesc1(10).
+    static final int VTABLE_ADAPTER_GET_DESC1 = 10;
+    /** DXGI_ADAPTER_FLAG_SOFTWARE — set for the WARP / software rasterizer adapter. */
+    public static final int DXGI_ADAPTER_FLAG_SOFTWARE = 2;
 
     // ── Lazy-initialised handles ─────────────────────────────────────────
 
@@ -204,6 +208,50 @@ public final class DxgiBindings {
             throw e;
         } catch (Throwable t) {
             throw new WindowsNativeException("EnumAdapters1 invocation failed", t);
+        }
+    }
+
+    /** A DXGI adapter's identity (GEMMA-AUTO-GPU-1): description, PCI vendor/device id, software flag. */
+    public record AdapterDesc(String description, int vendorId, int deviceId, boolean software) {
+        @Override
+        public String toString() {
+            return String.format("%s (vendorId=0x%04X deviceId=0x%04X%s)",
+                    description, vendorId, deviceId, software ? " SOFTWARE/WARP" : "");
+        }
+    }
+
+    /**
+     * Read {@code IDXGIAdapter1::GetDesc1} → {@link AdapterDesc} (GEMMA-AUTO-GPU-1): the adapter description,
+     * PCI vendor/device id, and whether it is the software (WARP) adapter ({@code DXGI_ADAPTER_FLAG_SOFTWARE}).
+     */
+    public static AdapterDesc getAdapterDesc1(MemorySegment adapter, Arena arena) throws WindowsNativeException {
+        try {
+            // DXGI_ADAPTER_DESC1: WCHAR Description[128] (256B) | VendorId@256 | DeviceId@260 | SubSysId@264
+            //   | Revision@268 | DedicatedVideoMemory@272 | DedicatedSystemMemory@280 | SharedSystemMemory@288
+            //   | LUID AdapterLuid@296 | UINT Flags@304   (allocate 320 for alignment)
+            MemorySegment desc = arena.allocate(320, 8);
+            MethodHandle getDesc1 = vtableMethod(adapter, VTABLE_ADAPTER_GET_DESC1,
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+            int hr = (int) getDesc1.invokeExact(adapter, desc);
+            HResult.check(hr, "IDXGIAdapter1::GetDesc1");
+
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 128; i++) {
+                char ch = (char) (desc.get(ValueLayout.JAVA_SHORT, (long) i * 2) & 0xFFFF);
+                if (ch == 0) {
+                    break;
+                }
+                sb.append(ch);
+            }
+            int vendorId = desc.get(ValueLayout.JAVA_INT, 256);
+            int deviceId = desc.get(ValueLayout.JAVA_INT, 260);
+            int flags = desc.get(ValueLayout.JAVA_INT, 304);
+            boolean software = (flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+            return new AdapterDesc(sb.toString().trim(), vendorId, deviceId, software);
+        } catch (WindowsNativeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new WindowsNativeException("IDXGIAdapter1::GetDesc1 failed", t);
         }
     }
 

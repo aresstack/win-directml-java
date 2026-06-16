@@ -29,10 +29,21 @@ public final class Gemma3NativeWarpRuntime {
 
     private final Path packagePath;
     private final Path tokenizerJson;
+    private final WindowsBindings.AdapterMode adapterMode;
 
     public Gemma3NativeWarpRuntime(Path packagePath, Path tokenizerJson) {
+        this(packagePath, tokenizerJson, WindowsBindings.AdapterMode.DEFAULT);
+    }
+
+    /**
+     * GEMMA-AUTO-GPU-1: same native DirectML Gemma runtime, on an explicit DXGI adapter — {@code WARP} for
+     * the software rasterizer, {@code HARDWARE} for the first hardware GPU (or a clear error if none). The
+     * backend stays {@code directml} (DML-GEMM matvec, per 14a) regardless of adapter.
+     */
+    public Gemma3NativeWarpRuntime(Path packagePath, Path tokenizerJson, WindowsBindings.AdapterMode adapterMode) {
         this.packagePath = Objects.requireNonNull(packagePath, "packagePath");
         this.tokenizerJson = Objects.requireNonNull(tokenizerJson, "tokenizerJson");
+        this.adapterMode = Objects.requireNonNull(adapterMode, "adapterMode");
     }
 
     /** Result of a native WARP generation, including a phase/WARP-counter {@link Gemma3NativeWarpProfile}. */
@@ -163,9 +174,14 @@ public final class Gemma3NativeWarpRuntime {
         try {
             WindowsBindings wb = new WindowsBindings();
             long sessionStart = System.nanoTime();
-            wb.init("directml");
+            // GEMMA-AUTO-GPU-1: backend stays "directml" (DML-GEMM matvec); the AdapterMode picks WARP vs a
+            // hardware GPU. The adapter identity is logged by WindowsBindings.init.
+            wb.init("directml", adapterMode);
             try (Gemma3WarpDecodeSession session = new Gemma3WarpDecodeSession(wb, weights)) {
                 long sessionInitMs = sinceMs(sessionStart);
+                // GEMMA-AUTO-GPU-1: capture the bound adapter identity for the profile.
+                String adapterDescription = wb.adapterDesc() != null ? wb.adapterDesc().toString() : "(unknown)";
+                boolean adapterSoftware = wb.isSoftwareAdapter();
                 // GEMMA-WARP-13b-4: native-warp drives the GPU-resident/batched decode path by default
                 // (override with -Dgemma.warp.execution=sync). Same output, far fewer fence waits/readbacks.
                 Gemma3WarpExecutionMode executionMode = Gemma3WarpExecutionMode.fromSystemProperty();
@@ -198,7 +214,8 @@ public final class Gemma3NativeWarpRuntime {
                         result.promptTokenCount(), result.outputTokenCount(),
                         warpDelta.submits(), warpDelta.fenceWaits(), warpDelta.readbacks(),
                         decodeDelta.submits(), decodeDelta.fenceWaits(), decodeDelta.readbacks(),
-                        decodeDelta.dispatches(), decodeDelta.uavBarriers(), executionMode);
+                        decodeDelta.dispatches(), decodeDelta.uavBarriers(), executionMode,
+                        adapterDescription, adapterSoftware);
                 return new Result(text, result.promptTokenCount(), result.outputTokenCount(),
                         result.finishReason(), packagePath, "WARP", profile);
             } finally {

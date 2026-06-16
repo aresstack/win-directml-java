@@ -22,7 +22,7 @@ class Gemma3NativeWarpProfileReportTest {
                 /*submits*/ 12000, /*fenceWaits*/ 2500, /*readbacks*/ 999,
                 /*decodeSubmits*/ 11050, /*decodeFenceWaits*/ 2418, /*decodeReadbacks*/ 962,
                 /*decodeDispatches*/ 9100, /*decodeUavBarriers*/ 9100,
-                Gemma3WarpExecutionMode.RESIDENT);
+                Gemma3WarpExecutionMode.RESIDENT, "WARP (software)", true);
     }
 
     @Test
@@ -35,6 +35,7 @@ class Gemma3NativeWarpProfileReportTest {
         assertTrue(text.contains("Gemma native WARP profile:"), text);
         assertTrue(text.contains("runtime mode: native-warp-experimental"), text);
         assertTrue(text.contains("backend: WARP"), text);
+        assertTrue(text.contains("adapter: "), text);
         assertTrue(text.contains("execution: resident-batched"), text);
         assertTrue(text.contains("output mode: streaming"), text);
         assertTrue(text.contains("package: model_gemma3.wdmlpack"), text);

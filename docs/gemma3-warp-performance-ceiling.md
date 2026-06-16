@@ -104,3 +104,44 @@ adapter, so a hardware GPU is expected to collapse that overhead with no algorit
 **Next step: GEMMA-AUTO-GPU-1** — measure the native Gemma runtime on a hardware/AUTO adapter and compare to
 WARP. Revisit further WARP-CPU fusion (options A–C) only if a hardware GPU is unavailable and WARP must
 remain the target.
+
+## 6. GEMMA-AUTO-GPU-1 result — WARP-CPU vs hardware GPU (measured)
+
+Done. The adapter is now decoupled from the matvec path: `WindowsBindings.AdapterMode` (`WARP` /
+`HARDWARE` / `DEFAULT`) selects the DXGI adapter explicitly while the backend stays `directml` (DML-GEMM
+matvec, per the 14a decision). `Backend = WARP` → explicit WARP software adapter; `Backend = AUTO` → first
+hardware adapter (software/WARP skipped), or a clear `"No hardware DirectML adapter found; use Backend=WARP
+or configure -Dwindirectml.dxgi.adapterIndex."` if none. Gemma+AUTO now routes to the **same native
+DirectML runtime** on the hardware adapter — no external-Python on the normal Gemma product path.
+
+Measured on `WHERETHEHEARTIS` (gated `Gemma3AutoGpuProfileTest`, `-Dgemma.warp.realModel=true
+-Dgemma.auto.gpu=true`), real `gemma-3-270m-it`, 16 output tokens. Adapters resolved: WARP = *Microsoft
+Basic Render Driver* (0x1414/0x008C, software); HARDWARE = *NVIDIA GeForce RTX 5080* (0x10DE/0x2C02).
+
+| prompt | adapter | prefill ms | decode total ms | decode avg/token | submits/tok | dispatches/tok | uav barriers/tok |
+|--------|---------|-----------:|----------------:|-----------------:|------------:|---------------:|-----------------:|
+| A (6 tok)   | WARP     | 6310  | 8913 | **594.2** | 21.0 | 380 | 399 |
+| A (6 tok)   | HARDWARE | 2149  | 3261 | **217.4** | 21.0 | 380 | 399 |
+| B (19 tok)  | WARP     | 3943  | 9080 | **605.3** | 23.4 | 380 | 399 |
+| B (19 tok)  | HARDWARE | 4463  | 3215 | **214.3** | 23.4 | 380 | 399 |
+| C (73 tok)  | WARP     | 9436  | 9079 | **605.3** | 21.0 | 380 | 399 |
+| C (73 tok)  | HARDWARE | 14679 | 3290 | **219.3** | 21.0 | 380 | 399 |
+
+Both adapters produce identical Top-1 " Paris" for "The capital of France is" (Paris smoke green for WARP
+and HARDWARE — no silent wrong output).
+
+**Findings:**
+- **Decode is ~2.7–2.8× faster on the GPU** (~217 ms/token vs ~600 ms/token) with **identical**
+  submit/fence/readback/dispatch/uav-barrier counts. This directly confirms §2: the WARP decode cost is the
+  fixed per-dispatch/per-barrier overhead of ~380 tiny dispatches on the **CPU** rasterizer, not an
+  algorithmic or submit-count problem. The same code, same counts, just runs each dispatch far cheaper on
+  real hardware.
+- **Prefill is mixed**: GPU wins the short prompt (A) but the GPU's first long batched prefill (C, 73 tok)
+  is *slower* than WARP here (14.7 s vs 9.4 s) — consistent with one-time GPU shader compilation / cold
+  batched-prefill cost paid on first hardware use (the HARDWARE leg runs cold after the WARP leg). Steady
+  decode, the metric that matters per token, is the clean ~2.7× GPU win.
+
+**Updated recommendation:** the hardware GPU **is** the product path for native Gemma when a hardware
+adapter is present (`Backend = AUTO`). WARP stays the correct, identical-output fallback for hosts without a
+GPU. Broad WARP-CPU kernel-fusion work (options A–B) remains not worth it: it cannot beat moving the
+unchanged dispatch stream onto real hardware.

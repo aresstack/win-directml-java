@@ -55,6 +55,12 @@ public final class WindowsBindings implements AutoCloseable {
     private boolean closed = false;
     private String selectedBackend = "";
 
+    /** Which DXGI adapter to bind (GEMMA-AUTO-GPU-1), independent of the {@code backend} string. */
+    public enum AdapterMode { DEFAULT, WARP, HARDWARE }
+
+    private AdapterMode adapterMode = AdapterMode.DEFAULT;
+    private DxgiBindings.AdapterDesc adapterDesc; // identity of the bound adapter (null if unreadable)
+
     public WindowsBindings() {
         this(Boolean.getBoolean("windirectml.debug"));
     }
@@ -87,9 +93,27 @@ public final class WindowsBindings implements AutoCloseable {
      * @throws IllegalStateException  if already closed
      */
     public void init(String backend) throws WindowsNativeException {
+        String b = backend == null ? "" : backend.trim();
+        init(backend, "warp".equalsIgnoreCase(b) ? AdapterMode.WARP : AdapterMode.DEFAULT);
+    }
+
+    /**
+     * Initialise the stack with an explicit {@link AdapterMode} (GEMMA-AUTO-GPU-1), decoupling the physical
+     * DXGI adapter from the {@code backend} string. {@code backend} still drives DML/matvec behaviour
+     * (e.g. {@link #isWarpBackend()}); {@code adapterMode} picks the adapter:
+     * <ul>
+     *   <li>{@link AdapterMode#WARP} — the explicit WARP software rasterizer (EnumWarpAdapter);</li>
+     *   <li>{@link AdapterMode#HARDWARE} — the first non-software hardware adapter, or a clear error if none;</li>
+     *   <li>{@link AdapterMode#DEFAULT} — DXGI adapter {@code -Dwindirectml.dxgi.adapterIndex} (default 0).</li>
+     * </ul>
+     * So callers can run the same {@code directml} (DML-GEMM) code path explicitly on WARP or on a hardware
+     * GPU.
+     */
+    public void init(String backend, AdapterMode requestedAdapterMode) throws WindowsNativeException {
         if (closed) throw new IllegalStateException("WindowsBindings already closed");
         if (initialised) return;
-        log.info("WindowsBindings.init(backend={})", backend);
+        this.adapterMode = requestedAdapterMode == null ? AdapterMode.DEFAULT : requestedAdapterMode;
+        log.info("WindowsBindings.init(backend={}, adapterMode={})", backend, this.adapterMode);
         selectedBackend = backend == null ? "" : backend.trim().toLowerCase(java.util.Locale.ROOT);
 
         if (!isSupported()) {
@@ -102,23 +126,33 @@ public final class WindowsBindings implements AutoCloseable {
             log.info("DirectML debug mode requested (-Dwindirectml.debug=true); D3D12 layer enabled={}", ok);
         }
 
-        // 1. DXGI Factory + Adapter
+        // 1. DXGI Factory + Adapter (per the requested AdapterMode)
         int adapterIndex = Integer.getInteger("windirectml.dxgi.adapterIndex", 0);
-
-        if ("warp".equalsIgnoreCase(backend)) {
-            // WARP path: Factory4 → EnumWarpAdapter
-            dxgiFactory = DxgiBindings.createFactory4(arena);
-            dxgiAdapter = DxgiBindings.enumWarpAdapter(dxgiFactory, arena);
-            log.info("Using WARP (software) adapter");
-        } else {
-            // Standard path: Factory1 → EnumAdapters1
-            dxgiFactory = DxgiBindings.createFactory1(arena);
-            dxgiAdapter = DxgiBindings.enumAdapters1(dxgiFactory, adapterIndex, arena);
-            if (dxgiAdapter == null) {
-                throw new WindowsNativeException("No DXGI adapter found at index " + adapterIndex);
+        switch (this.adapterMode) {
+            case WARP -> {
+                dxgiFactory = DxgiBindings.createFactory4(arena);
+                dxgiAdapter = DxgiBindings.enumWarpAdapter(dxgiFactory, arena);
             }
-            log.info("Using DXGI adapter at index {}: {}", adapterIndex, dxgiAdapter);
+            case HARDWARE -> {
+                dxgiFactory = DxgiBindings.createFactory1(arena);
+                dxgiAdapter = selectHardwareAdapter(adapterIndex);
+            }
+            default -> {
+                dxgiFactory = DxgiBindings.createFactory1(arena);
+                dxgiAdapter = DxgiBindings.enumAdapters1(dxgiFactory, adapterIndex, arena);
+                if (dxgiAdapter == null) {
+                    throw new WindowsNativeException("No DXGI adapter found at index " + adapterIndex);
+                }
+            }
         }
+        try {
+            adapterDesc = DxgiBindings.getAdapterDesc1(dxgiAdapter, arena);
+        } catch (WindowsNativeException de) {
+            log.warn("Could not read adapter description: {}", de.getMessage());
+        }
+        log.info("adapter selection: mode={} adapter={} (software/warp={})",
+                this.adapterMode, adapterDesc != null ? adapterDesc : "(desc unavailable)",
+                adapterDesc != null && adapterDesc.software());
 
         // 2. D3D12 device
         d3d12Device = D3D12Bindings.createDevice(
@@ -198,6 +232,47 @@ public final class WindowsBindings implements AutoCloseable {
 
     public boolean isWarpBackend() {
         return "warp".equals(selectedBackend);
+    }
+
+    /** The adapter-selection mode this device was initialised with (GEMMA-AUTO-GPU-1). */
+    public AdapterMode adapterMode() {
+        return adapterMode;
+    }
+
+    /** The bound adapter's description/vendor/device/software identity, or {@code null} if unreadable. */
+    public DxgiBindings.AdapterDesc adapterDesc() {
+        return adapterDesc;
+    }
+
+    /** Whether the bound adapter is the software (WARP) rasterizer (GEMMA-AUTO-GPU-1). */
+    public boolean isSoftwareAdapter() {
+        return adapterMode == AdapterMode.WARP || (adapterDesc != null && adapterDesc.software());
+    }
+
+    /**
+     * Select the first non-software (hardware) DXGI adapter from {@code startIndex} (GEMMA-AUTO-GPU-1).
+     * Throws a clear, actionable error when only the software/WARP adapter is present.
+     */
+    private MemorySegment selectHardwareAdapter(int startIndex) throws WindowsNativeException {
+        for (int i = startIndex; ; i++) {
+            MemorySegment candidate = DxgiBindings.enumAdapters1(dxgiFactory, i, arena);
+            if (candidate == null) {
+                break;
+            }
+            DxgiBindings.AdapterDesc d;
+            try {
+                d = DxgiBindings.getAdapterDesc1(candidate, arena);
+            } catch (WindowsNativeException e) {
+                continue; // unreadable adapter — skip
+            }
+            if (!d.software()) {
+                log.info("HARDWARE adapter selected at index {}: {}", i, d);
+                return candidate;
+            }
+            log.info("Skipping software/WARP adapter at index {}: {}", i, d);
+        }
+        throw new WindowsNativeException("No hardware DirectML adapter found; use Backend=WARP or "
+                + "configure -Dwindirectml.dxgi.adapterIndex.");
     }
 
     /**

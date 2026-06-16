@@ -24,6 +24,7 @@ import com.aresstack.windirectml.inference.prompt.PromptStrategies;
 import com.aresstack.windirectml.inference.prompt.PromptTask;
 import com.aresstack.windirectml.inference.artifact.ModelFamily;
 import com.aresstack.windirectml.runtime.facade.Backend;
+import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.artifact.ModelRuntimeRegistry;
 import com.aresstack.windirectml.workbench.artifact.WorkbenchArtifactGate;
@@ -218,11 +219,12 @@ public final class SummarizerPanel extends JPanel {
         if (qwenTestModel) {
             appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
         } else if (gemma3Model) {
-            if (gemmaUsesNativeWarp(model.getBackend())) {
-                appendResult("  NOTE: Gemma 3 runs the experimental native Java/WARP runtime (Backend = WARP).");
-                appendResult("  NOTE: Weights load from the compiled model_gemma3.wdmlpack; no Python is used.");
+            if (gemmaUsesNativeDirectMl(model.getBackend())) {
+                appendResult("  NOTE: Gemma 3 runs the native Java/DirectML runtime on the "
+                        + (model.getBackend() == Backend.WARP ? "WARP software" : "hardware (AUTO)") + " adapter; no Python.");
+                appendResult("  NOTE: Weights load from the compiled model_gemma3.wdmlpack.");
             } else {
-                appendResult("  NOTE: Gemma 3 uses the external local Python/Transformers probe path (Backend != WARP).");
+                appendResult("  NOTE: Gemma 3 uses the external local Python/Transformers probe path (Backend = CPU).");
             }
         } else if (smolLm2Model) {
             appendResult("  NOTE: WARP runs SmolLM2's dense projections on the D3D12 software rasterizer (CPU); "
@@ -286,10 +288,12 @@ public final class SummarizerPanel extends JPanel {
 
     private void runGemma3Generation(Path modelDir, PromptTask task, String text, int maxTokens,
                                      String selectedModel, boolean streaming, boolean showProfile) throws Exception {
-        // Decision comes from the general Backend selector, not a Gemma-specific control: Backend=WARP runs
-        // the native Java/WARP path; anything else uses the external Python/Transformers probe.
-        if (gemmaUsesNativeWarp(model.getBackend())) {
-            runGemma3NativeWarp(modelDir, task, text, maxTokens, selectedModel, streaming, showProfile);
+        // Decision comes from the general Backend selector, not a Gemma-specific control (GEMMA-AUTO-GPU-1):
+        // Backend=WARP -> native DirectML on the WARP adapter; Backend=AUTO -> native DirectML on a hardware
+        // adapter; anything else (CPU) -> the external Python/Transformers probe.
+        if (gemmaUsesNativeDirectMl(model.getBackend())) {
+            runGemma3NativeWarp(modelDir, task, text, maxTokens, selectedModel, streaming, showProfile,
+                    gemmaAdapterMode(model.getBackend()));
             return;
         }
         long start = System.nanoTime();
@@ -325,13 +329,14 @@ public final class SummarizerPanel extends JPanel {
      * profile (GEMMA-WORKBENCH-PROFILING-1).
      */
     private void runGemma3NativeWarp(Path modelDir, PromptTask task, String text, int maxTokens,
-                                     String selectedModel, boolean streaming, boolean showProfile) {
+                                     String selectedModel, boolean streaming, boolean showProfile,
+                                     WindowsBindings.AdapterMode adapterMode) {
         long start = System.nanoTime();
         Path pkg = Gemma3NativeWarpRuntime.defaultPackagePath(modelDir);
         appendResult("Runtime mode: " + Gemma3RuntimeMode.NATIVE_WARP.displayLabel());
         appendResult("Model id: " + selectedModel);
         appendResult("Model directory: " + modelDir);
-        appendResult("Backend: WARP");
+        appendResult("Backend: " + model.getBackend() + " (adapter: " + adapterMode + ")");
         appendResult("Output: " + (streaming ? "streaming" : "buffered"));
         appendResult("Package: " + pkg.getFileName());
         String missing = Gemma3NativeWarpRuntime.describeMissingPackage(pkg);
@@ -349,7 +354,7 @@ public final class SummarizerPanel extends JPanel {
         appendResult("");
         appendResult("OUTPUT:");
         try {
-            Gemma3NativeWarpRuntime runtime = new Gemma3NativeWarpRuntime(pkg, tokenizerJson);
+            Gemma3NativeWarpRuntime runtime = new Gemma3NativeWarpRuntime(pkg, tokenizerJson, adapterMode);
             Gemma3NativeWarpRuntime.Result result;
             if (streaming) {
                 // Stream each visible token's decoded text live (stop token is not streamed).
@@ -378,7 +383,12 @@ public final class SummarizerPanel extends JPanel {
                 }
             }
         } catch (Exception e) {
-            appendResult("ERROR: " + e.getMessage());
+            String msg = e.getMessage();
+            Throwable cause = e.getCause();
+            if (cause != null && cause.getMessage() != null) {
+                msg = msg + " — " + cause.getMessage(); // surface e.g. "No hardware DirectML adapter found ..."
+            }
+            appendResult("ERROR: " + msg);
         }
     }
 
@@ -653,12 +663,17 @@ public final class SummarizerPanel extends JPanel {
     }
 
     /**
-     * Gemma uses the native Java/WARP path when the general Backend is WARP; any other backend (AUTO/CPU)
-     * uses the external Python/Transformers probe. There is no Gemma-specific runtime control and
-     * {@code -Dgemma.runtime} no longer participates.
+     * Gemma uses the native Java/DirectML runtime for Backend=WARP (WARP adapter) and Backend=AUTO
+     * (hardware adapter) (GEMMA-AUTO-GPU-1); Backend=CPU uses the external Python/Transformers probe. No
+     * Gemma-specific runtime control; {@code -Dgemma.runtime} does not participate.
      */
-    static boolean gemmaUsesNativeWarp(Backend backend) {
-        return backend == Backend.WARP;
+    static boolean gemmaUsesNativeDirectMl(Backend backend) {
+        return backend == Backend.WARP || backend == Backend.AUTO;
+    }
+
+    /** Adapter for the native Gemma path: WARP→software rasterizer, AUTO→first hardware GPU. */
+    static WindowsBindings.AdapterMode gemmaAdapterMode(Backend backend) {
+        return backend == Backend.AUTO ? WindowsBindings.AdapterMode.HARDWARE : WindowsBindings.AdapterMode.WARP;
     }
 
     private static boolean isSmolLm2Model(String modelId) {

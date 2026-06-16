@@ -35,7 +35,9 @@ public record Gemma3NativeWarpProfile(
         long decodeReadbacks,
         long decodeDispatches,
         long decodeUavBarriers,
-        Gemma3WarpExecutionMode executionMode) {
+        Gemma3WarpExecutionMode executionMode,
+        String adapterDescription,
+        boolean adapterSoftware) {
 
     /** Sum of the four load phases. */
     public long loadTotalMs() {
