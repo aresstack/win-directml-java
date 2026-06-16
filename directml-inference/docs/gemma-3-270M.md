@@ -761,6 +761,11 @@ Neuer Runtime-Modus, z. B.:
 -Dgemma.runtime=external
 ```
 
+> **Superseded (WORKBENCH-CLEANUP-STREAMING-ONLY-1):** `-Dgemma.runtime` no longer controls the product
+> path and is not a regular operating control. In the Workbench, Gemma runs the native Java/WARP path when
+> the general **Backend = WARP** (otherwise the external Python probe); there is no Gemma-specific runtime
+> selector. The flag is, at most, a deprecated no-op for the product path.
+
 oder interne Auswahl:
 
 ```text

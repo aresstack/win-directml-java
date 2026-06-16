@@ -60,6 +60,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-13b-3b submit/fence-coalescing | **done — real fenceWaits/token 834→93, submits 834→454, still " Paris"** |
 | GEMMA-WORKBENCH-PROFILING-1 profile output + runtime UI | **done — Gemma runtime UI-selectable (no JVM flag), detailed phase/WARP-counter profile, 'Show runtime profile' toggle** |
 | GEMMA-WARP-13b-4 resident/batched as native-warp product path | **done — native-warp defaults to resident; real profile 454 submits / 93 fenceWaits / 37 readbacks per decode token, still " Paris"** |
+| WORKBENCH-CLEANUP-STREAMING-ONLY-1 remove extra UI controls | **done — only 'Streaming output' remains; Gemma native chosen by Backend=WARP; profile is a `-Ddirectml.generation.profile` debug path; `-Dgemma.runtime` no longer drives product logic** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -484,4 +485,24 @@ head) is therefore the trustworthy WARP parity oracle.
     decode per-token bounds; `Gemma3NativeWarpProfileReportTest` (decode-region per-token, execution line).
     No native-warp global default; no fused pipeline / batched prefill / windowed-eviction / downloader /
     .wdmlpack-format change; Qwen/T5/SmolLM2 untouched. Full `:directml-inference` + `:directml-encoder` +
+    `:directml-workbench` regression green.
+
+- **WORKBENCH-CLEANUP-STREAMING-ONLY-1 remove extra UI controls — done.** Reverts the two extra visible
+  controls added by GEMMA-WORKBENCH-PROFILING-1 while keeping the profiling infrastructure as a debug path.
+  - **Removed (UI + model state):** the "Gemma runtime:" combo + label and its `WorkbenchModel.gemmaRuntimeMode`
+    state/getter/setter (and the `-Dgemma.runtime` seed); the visible "Show runtime profile" checkbox + its
+    state. The only new visible control that remains is **Streaming output** (default on).
+  - **Gemma runtime decision** now comes from the general **Backend**: `SummarizerPanel.gemmaUsesNativeWarp(backend)`
+    = `backend == WARP` → native Java/WARP path (Backend≠WARP → external Python probe). No Gemma-specific
+    selector; `-Dgemma.runtime` no longer participates in product/UI logic (kept only as a label enum +
+    deprecated no-op).
+  - **Profiling kept as debug path:** `Gemma3NativeWarpProfile`/`Report`, `WarpSubmissionStats`, the runtime
+    measurement and `Gemma3NativeWarpRuntimeTest`/`Gemma3NativeWarpProfileReportTest` are unchanged. The
+    detailed profile block is emitted only when started with `-Ddirectml.generation.profile=true`
+    (`SummarizerPanel.SHOW_PROFILE`); otherwise the short summary prints. No checkbox.
+  - Tests: `GemmaRuntimeSelectionTest` rewritten — asserts no Gemma runtime selector field, no visible
+    profile checkbox field, no `WorkbenchModel.get/setGemmaRuntimeMode`, `gemmaUsesNativeWarp` is backend-based
+    and ignores `-Dgemma.runtime`, streaming is the default. Missing-package Convert hint unchanged. No
+    profiling-infrastructure deletion; `WarpSubmissionStats` kept; streaming control kept; no perf/downloader/
+    .wdmlpack-format/Qwen-Smol-T5 change. Full `:directml-inference` + `:directml-encoder` +
     `:directml-workbench` regression green.

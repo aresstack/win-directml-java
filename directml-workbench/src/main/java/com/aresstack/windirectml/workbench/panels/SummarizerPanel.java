@@ -23,6 +23,7 @@ import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.prompt.PromptStrategies;
 import com.aresstack.windirectml.inference.prompt.PromptTask;
 import com.aresstack.windirectml.inference.artifact.ModelFamily;
+import com.aresstack.windirectml.runtime.facade.Backend;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.artifact.ModelRuntimeRegistry;
 import com.aresstack.windirectml.workbench.artifact.WorkbenchArtifactGate;
@@ -54,9 +55,9 @@ public final class SummarizerPanel extends JPanel {
      *  effective model config in the output panel. Off by default to keep normal output lean. */
     private static final boolean DEBUG_PROMPT = Boolean.getBoolean("smollm2.debug.prompt");
 
-    /** Initial value of the "Show runtime profile" toggle ({@code -Ddirectml.generation.profile=true|false};
-     *  default false). The Workbench checkbox is authoritative thereafter. */
-    private static final String PROFILE_PROPERTY = "directml.generation.profile";
+    /** Developer/debug toggle ({@code -Ddirectml.generation.profile=true}, default false): emit the detailed
+     *  phase/WARP-counter runtime profile to the output panel. Diagnostic property only — no UI control. */
+    private static final boolean SHOW_PROFILE = Boolean.getBoolean("directml.generation.profile");
 
     private final WorkbenchModel model;
     private final ModelRuntimeRegistry runtimeRegistry;
@@ -64,10 +65,8 @@ public final class SummarizerPanel extends JPanel {
     private final JTextArea resultArea;
     private final JComboBox<String> modelSelector;
     private final JComboBox<PromptTask> promptTemplateSelector;
-    private final JComboBox<Gemma3RuntimeMode> gemmaRuntimeSelector;
     private final JSpinner maxTokensSpinner;
     private final JCheckBox streamingCheckbox;
-    private final JCheckBox profileCheckbox;
 
     public SummarizerPanel(WorkbenchModel model) {
         this.model = model;
@@ -85,7 +84,6 @@ public final class SummarizerPanel extends JPanel {
             if (selected != null) {
                 model.setSummarizerModel(selected);
                 updatePromptTemplateOptions(selected);
-                updateGemmaRuntimeEnabled(selected);
             }
         });
         modelPanel.add(modelSelector);
@@ -106,35 +104,6 @@ public final class SummarizerPanel extends JPanel {
         });
         modelPanel.add(promptTemplateSelector);
         updatePromptTemplateOptions((String) modelSelector.getSelectedItem());
-
-        // Gemma runtime is selectable here instead of via -Dgemma.runtime (GEMMA-WORKBENCH-PROFILING-1).
-        // External stays the default; Native Java/WARP is experimental. Enabled only when a Gemma model
-        // is selected.
-        modelPanel.add(new JLabel("Gemma runtime:"));
-        gemmaRuntimeSelector = new JComboBox<>(Gemma3RuntimeMode.values());
-        gemmaRuntimeSelector.setSelectedItem(model.getGemmaRuntimeMode());
-        gemmaRuntimeSelector.setRenderer(new DefaultListCellRenderer() {
-            @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                                                          boolean isSelected, boolean cellHasFocus) {
-                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                if (value instanceof Gemma3RuntimeMode mode) {
-                    setText(gemmaRuntimeLabel(mode));
-                }
-                return this;
-            }
-        });
-        gemmaRuntimeSelector.setToolTipText("Gemma execution path. External uses the local Python/Transformers "
-                + "probe; Native Java/WARP (experimental) runs the compiled model_gemma3.wdmlpack on WARP with "
-                + "no Python. Replaces -Dgemma.runtime.");
-        gemmaRuntimeSelector.addActionListener(e -> {
-            Object sel = gemmaRuntimeSelector.getSelectedItem();
-            if (sel instanceof Gemma3RuntimeMode mode) {
-                model.setGemmaRuntimeMode(mode);
-            }
-        });
-        modelPanel.add(gemmaRuntimeSelector);
-        updateGemmaRuntimeEnabled((String) modelSelector.getSelectedItem());
 
         controlsPanel.add(modelPanel, BorderLayout.NORTH);
 
@@ -157,12 +126,6 @@ public final class SummarizerPanel extends JPanel {
                 + "show the full result at the end. Default and initial value come from "
                 + "-Ddirectml.generation.output / -Ddirectml.generation.streaming.");
         runControls.add(streamingCheckbox);
-
-        profileCheckbox = new JCheckBox("Show runtime profile", Boolean.getBoolean(PROFILE_PROPERTY));
-        profileCheckbox.setToolTipText("Show the detailed phase/WARP-counter runtime profile (load + generation "
-                + "timings, submits/fence waits/readbacks). Initial value from -Ddirectml.generation.profile; "
-                + "the checkbox is authoritative.");
-        runControls.add(profileCheckbox);
         var runBtn = new JButton("Generate / Summarize");
         runBtn.addActionListener(e -> runSummarizer());
         runControls.add(runBtn);
@@ -248,19 +211,18 @@ public final class SummarizerPanel extends JPanel {
 
         int maxTokens = (Integer) maxTokensSpinner.getValue();
         boolean streaming = streamingCheckbox.isSelected();
-        boolean showProfile = profileCheckbox.isSelected();
+        boolean showProfile = SHOW_PROFILE;
         appendResult("Loading generation model: " + selectedModel
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens
                 + ", output: " + (streaming ? "streaming" : "buffered") + ")...");
         if (qwenTestModel) {
             appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
         } else if (gemma3Model) {
-            if (model.getGemmaRuntimeMode() == Gemma3RuntimeMode.NATIVE_WARP) {
-                appendResult("  NOTE: Gemma 3 runs the experimental native Java/WARP runtime (selected in 'Gemma runtime').");
+            if (gemmaUsesNativeWarp(model.getBackend())) {
+                appendResult("  NOTE: Gemma 3 runs the experimental native Java/WARP runtime (Backend = WARP).");
                 appendResult("  NOTE: Weights load from the compiled model_gemma3.wdmlpack; no Python is used.");
             } else {
-                appendResult("  NOTE: Gemma 3 uses the external local Python/Transformers probe path (default).");
-                appendResult("  NOTE: Switch 'Gemma runtime' to Native Java/WARP (experimental) to try the native path.");
+                appendResult("  NOTE: Gemma 3 uses the external local Python/Transformers probe path (Backend != WARP).");
             }
         } else if (smolLm2Model) {
             appendResult("  NOTE: WARP runs SmolLM2's dense projections on the D3D12 software rasterizer (CPU); "
@@ -324,7 +286,9 @@ public final class SummarizerPanel extends JPanel {
 
     private void runGemma3Generation(Path modelDir, PromptTask task, String text, int maxTokens,
                                      String selectedModel, boolean streaming, boolean showProfile) throws Exception {
-        if (model.getGemmaRuntimeMode() == Gemma3RuntimeMode.NATIVE_WARP) {
+        // Decision comes from the general Backend selector, not a Gemma-specific control: Backend=WARP runs
+        // the native Java/WARP path; anything else uses the external Python/Transformers probe.
+        if (gemmaUsesNativeWarp(model.getBackend())) {
             runGemma3NativeWarp(modelDir, task, text, maxTokens, selectedModel, streaming, showProfile);
             return;
         }
@@ -688,17 +652,13 @@ public final class SummarizerPanel extends JPanel {
         return modelId != null && modelId.startsWith(GEMMA3_MODEL_ID_PREFIX);
     }
 
-    /** Enable the Gemma runtime selector only when a Gemma model is selected (it is Gemma-specific). */
-    private void updateGemmaRuntimeEnabled(String selectedModel) {
-        if (gemmaRuntimeSelector != null) {
-            gemmaRuntimeSelector.setEnabled(isGemma3Model(selectedModel));
-        }
-    }
-
-    /** Friendly label for the Gemma runtime selector. */
-    static String gemmaRuntimeLabel(Gemma3RuntimeMode mode) {
-        return mode == Gemma3RuntimeMode.NATIVE_WARP
-                ? "Native Java/WARP (experimental)" : "External Python / Transformers";
+    /**
+     * Gemma uses the native Java/WARP path when the general Backend is WARP; any other backend (AUTO/CPU)
+     * uses the external Python/Transformers probe. There is no Gemma-specific runtime control and
+     * {@code -Dgemma.runtime} no longer participates.
+     */
+    static boolean gemmaUsesNativeWarp(Backend backend) {
+        return backend == Backend.WARP;
     }
 
     private static boolean isSmolLm2Model(String modelId) {
