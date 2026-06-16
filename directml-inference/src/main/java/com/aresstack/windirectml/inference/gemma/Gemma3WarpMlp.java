@@ -166,6 +166,45 @@ public final class Gemma3WarpMlp implements AutoCloseable {
         return downProj.forwardResident(ctx, activated);
     }
 
+    /**
+     * Batched resident MLP for prefill (GEMMA-WARP-13e): runs gate/up/down as batched matmuls over all
+     * {@code seqLen} positions (gathered into contiguous buffers via {@code rowCopy}), with the GeGLU
+     * applied per position. Same math as {@code seqLen} {@link #mlp(WarpExecutionContext, WarpGpuBuffer)}
+     * calls. All intermediates are registered in {@code scratch} for end-of-layer cleanup.
+     */
+    public WarpGpuBuffer[] mlpBatched(WarpExecutionContext ctx, Gemma3WarpRowCopyKernel rowCopy,
+                                      java.util.List<WarpGpuBuffer> scratch, WarpGpuBuffer[] x, int seqLen)
+            throws WindowsNativeException {
+        ensureOpen();
+        WarpGpuBuffer batchX = track(scratch, ctx.allocate(seqLen * hidden));
+        for (int p = 0; p < seqLen; p++) {
+            rowCopy.copy(ctx, x[p], 0, batchX, p * hidden, hidden);
+        }
+        WarpGpuBuffer gateBatch = track(scratch, gateProj.forwardResidentBatched(ctx, batchX, seqLen));
+        WarpGpuBuffer upBatch = track(scratch, upProj.forwardResidentBatched(ctx, batchX, seqLen));
+        WarpGpuBuffer batchAct = track(scratch, ctx.allocate(seqLen * intermediate));
+        for (int p = 0; p < seqLen; p++) {
+            WarpGpuBuffer gateRow = track(scratch, ctx.allocate(intermediate));
+            rowCopy.copy(ctx, gateBatch, p * intermediate, gateRow, 0, intermediate);
+            WarpGpuBuffer upRow = track(scratch, ctx.allocate(intermediate));
+            rowCopy.copy(ctx, upBatch, p * intermediate, upRow, 0, intermediate);
+            WarpGpuBuffer act = track(scratch, geGlu.apply(ctx, gateRow, upRow, intermediate));
+            rowCopy.copy(ctx, act, 0, batchAct, p * intermediate, intermediate);
+        }
+        WarpGpuBuffer downBatch = track(scratch, downProj.forwardResidentBatched(ctx, batchAct, seqLen));
+        WarpGpuBuffer[] down = new WarpGpuBuffer[seqLen];
+        for (int p = 0; p < seqLen; p++) {
+            down[p] = track(scratch, ctx.allocate(hidden));
+            rowCopy.copy(ctx, downBatch, p * hidden, down[p], 0, hidden);
+        }
+        return down;
+    }
+
+    private static WarpGpuBuffer track(java.util.List<WarpGpuBuffer> scratch, WarpGpuBuffer b) {
+        scratch.add(b);
+        return b;
+    }
+
     public int hidden() {
         return hidden;
     }

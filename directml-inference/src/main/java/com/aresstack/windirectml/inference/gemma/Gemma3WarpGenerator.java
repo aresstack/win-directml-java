@@ -65,7 +65,8 @@ public final class Gemma3WarpGenerator {
         int maxNew = request.maxNewTokens();
 
         boolean resident = executionMode.isResident();
-        float[] logits = resident ? session.prefillResident(prompt) : session.prefill(prompt);
+        // GEMMA-WARP-13e: resident prefill runs the batched path (whole prompt at once); sync path unchanged.
+        float[] logits = resident ? session.prefillResidentBatched(prompt) : session.prefill(prompt);
         List<Integer> generated = new ArrayList<>();
         Gemma3GenerationResult.FinishReason reason = Gemma3GenerationResult.FinishReason.MAX_TOKENS;
 

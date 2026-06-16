@@ -127,6 +127,46 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
         return DecoderOnlyMath.argmax(prefillResident(promptIds));
     }
 
+    /**
+     * Batched resident prefill (GEMMA-WARP-13e): processes the whole prompt at once — all positions through
+     * each layer with batched projections + batched MLP and one GPU-resident KV append per position — instead
+     * of the token-by-token {@link #prefillResident}. Same result; far fewer submits for long prompts. Only
+     * the last position's logits are computed (the LM head runs once). The token-by-token
+     * {@link #prefillResident} stays as the debug/fallback oracle.
+     */
+    public float[] prefillResidentBatched(int[] promptIds) throws WindowsNativeException {
+        ensureOpen();
+        if (promptIds == null || promptIds.length == 0) {
+            throw new IllegalArgumentException("promptIds must not be empty");
+        }
+        int seqLen = promptIds.length;
+        residentKv().reset();
+        residentKv().ensureCapacity(ctx(), seqLen);
+        float[][] emb = weights.hasByteBufferEmbedding()
+                ? Gemma3WarpEmbedding.lookupScaled(weights.embeddingFp32Le(), promptIds, hidden, embeddingScale)
+                : Gemma3WarpEmbedding.lookupScaled(weights.embeddingFloat(), promptIds, hidden, embeddingScale);
+        WarpGpuBuffer[] h = new WarpGpuBuffer[seqLen];
+        for (int p = 0; p < seqLen; p++) {
+            h[p] = ctx().upload(emb[p]);
+        }
+        for (Gemma3WarpLayer layer : layers) {
+            WarpGpuBuffer[] next = layer.forwardPrefillBatched(ctx(), h, residentKv());
+            for (WarpGpuBuffer b : h) {
+                b.close();
+            }
+            h = next;
+        }
+        residentKv().commitLength(seqLen);
+        for (int p = 0; p < seqLen - 1; p++) {
+            h[p].close();
+        }
+        return residentLogits(h[seqLen - 1]); // closes the last hidden
+    }
+
+    public int prefillNextTokenResidentBatched(int[] promptIds) throws WindowsNativeException {
+        return DecoderOnlyMath.argmax(prefillResidentBatched(promptIds));
+    }
+
     /** Resident single-token decode — same result as {@link #decodeNext}. */
     public float[] decodeNextResident(int tokenId) throws WindowsNativeException {
         ensureOpen();

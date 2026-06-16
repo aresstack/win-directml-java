@@ -157,6 +157,46 @@ class Gemma3WarpResidentDecodeStepTest {
     }
 
     @Test
+    void syntheticBatchedPrefillMatchesTokenwiseResident() throws Exception {
+        // 13e: batched prefill (whole prompt at once) == token-by-token resident prefill, with far fewer
+        // submits. smallConfig has slidingWindow=2 so local layers are windowed + full layers see all
+        // history; the prompt exercises both. Then decodeNext after batched prefill matches the tokenwise
+        // path (the KV cache was filled to promptLen).
+        Gemma3Config config = smallConfig();
+        Gemma3ReferenceWeights ref = syntheticWeights(config, new Random(1305));
+        int[] ids = {7, 3, 19, 0, 25, 11, 4};
+        int feed = 9;
+
+        try (Gemma3WarpDecodeSession sess = new Gemma3WarpDecodeSession(wb, Gemma3WarpWeights.from(ref))) {
+            WarpSubmissionStats.Snapshot t0 = WarpSubmissionStats.snapshot();
+            float[] tokenwise = sess.prefillResident(ids);
+            long tokenwiseSubmits = WarpSubmissionStats.snapshot().minus(t0).submits();
+            float[] tokenwiseNext = sess.decodeNextResident(feed);
+
+            WarpSubmissionStats.Snapshot b0 = WarpSubmissionStats.snapshot();
+            float[] batched = sess.prefillResidentBatched(ids);
+            long batchedSubmits = WarpSubmissionStats.snapshot().minus(b0).submits();
+            float[] batchedNext = sess.decodeNextResident(feed);
+
+            for (int o = 0; o < tokenwise.length; o++) {
+                assertClose("prefill logits[" + o + "]", tokenwise[o], batched[o]);
+            }
+            assertEquals(DecoderOnlyMath.argmax(tokenwise), DecoderOnlyMath.argmax(batched),
+                    "batched prefill top-1 must match tokenwise resident prefill");
+            for (int o = 0; o < tokenwiseNext.length; o++) {
+                assertClose("decodeNext-after-prefill logits[" + o + "]", tokenwiseNext[o], batchedNext[o]);
+            }
+            assertEquals(DecoderOnlyMath.argmax(tokenwiseNext), DecoderOnlyMath.argmax(batchedNext),
+                    "decodeNext after batched prefill must match decodeNext after tokenwise prefill");
+            System.out.println("[13e] synthetic prefill submits: tokenwise=" + tokenwiseSubmits
+                    + " batched=" + batchedSubmits + " (promptTokens=" + ids.length + ")");
+            assertTrue(batchedSubmits < tokenwiseSubmits,
+                    "batched prefill must submit fewer command lists: batched=" + batchedSubmits
+                            + " tokenwise=" + tokenwiseSubmits);
+        }
+    }
+
+    @Test
     void batchedResidentMatvecEqualsSyncMatvec() throws Exception {
         // 13b-3b: the deferred (batched) matvec must produce the exact same output as the synchronous one.
         int outN = 48;
@@ -230,8 +270,23 @@ class Gemma3WarpResidentDecodeStepTest {
         Gemma3WarpWeights weights = Gemma3WarpWeights.ofByteBufferEmbedding(config, embBb, finalNorm, layers);
 
         try (Gemma3WarpDecodeSession sess = new Gemma3WarpDecodeSession(wb, weights)) {
-            int top1 = sess.prefillNextTokenResident(FRANCE_IDS);
-            // measure one resident decode token
+            // 13e: token-by-token prefill (oracle) vs batched prefill (product path) — counters + parity.
+            WarpSubmissionStats.Snapshot tp0 = WarpSubmissionStats.snapshot();
+            int top1Tokenwise = sess.prefillNextTokenResident(FRANCE_IDS);
+            WarpSubmissionStats.Snapshot tpd = WarpSubmissionStats.snapshot().minus(tp0);
+
+            WarpSubmissionStats.Snapshot bp0 = WarpSubmissionStats.snapshot();
+            int top1 = sess.prefillNextTokenResidentBatched(FRANCE_IDS);
+            WarpSubmissionStats.Snapshot bpd = WarpSubmissionStats.snapshot().minus(bp0);
+            System.out.println("[13e] prefill tokenwise=" + tpd + " batched=" + bpd
+                    + " (promptTokens=" + FRANCE_IDS.length + ")");
+            assertEquals(EXPECTED_NEXT, top1Tokenwise, "tokenwise prefill top-1 must be \" Paris\"");
+            assertEquals(EXPECTED_NEXT, top1, "batched prefill top-1 must be \" Paris\"");
+            assertTrue(bpd.submits() < tpd.submits(),
+                    "batched prefill must submit fewer command lists: batched=" + bpd.submits()
+                            + " tokenwise=" + tpd.submits());
+
+            // measure one resident decode token after the batched prefill (cache filled to promptLen)
             WarpSubmissionStats.reset();
             WarpSubmissionStats.Snapshot d0 = WarpSubmissionStats.snapshot();
             int next = sess.decodeNextTokenResident(top1);

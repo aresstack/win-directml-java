@@ -290,6 +290,113 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         return b;
     }
 
+    /**
+     * Batched resident prefill of this layer (GEMMA-WARP-13e): processes all {@code seqLen} prompt
+     * positions at once. The four attention projections and the MLP run as batched matmuls (one per
+     * projection for the whole sequence, gathered into contiguous buffers via the row-copy kernel); the
+     * element-wise/attention kernels run per position (reusing the validated single-query kernels), and the
+     * k/v for every position are appended to the GPU-resident KV cache. Numerically identical to running
+     * {@link #decodeStepResident} for positions 0..seqLen-1 in order. {@code h[p]} is position {@code p}'s
+     * input hidden; returns position {@code p}'s output hidden (caller owns both; {@code h[p]} is consumed
+     * via the residuals but not closed here).
+     */
+    public WarpGpuBuffer[] forwardPrefillBatched(WarpExecutionContext ctx, WarpGpuBuffer[] h,
+                                                 Gemma3WarpResidentKvCache cache) throws WindowsNativeException {
+        ensureOpen();
+        Objects.requireNonNull(ctx, "ctx");
+        Objects.requireNonNull(cache, "cache");
+        ensureResidentNormWeights(ctx);
+        int seqLen = h.length;
+        int attnDim = numHeads * headDim;
+        java.util.List<WarpGpuBuffer> scratch = new java.util.ArrayList<>();
+        WarpGpuBuffer[] out = new WarpGpuBuffer[seqLen];
+        ctx.beginRecording();
+        try {
+            // 1. input RMSNorm per position.
+            WarpGpuBuffer[] normed = new WarpGpuBuffer[seqLen];
+            for (int p = 0; p < seqLen; p++) {
+                normed[p] = track(scratch, k.rmsNorm().normalize(ctx, h[p], inputLayerNormBuf, eps));
+            }
+            // 2. batched q/k/v projections.
+            WarpGpuBuffer[] q = projectBatched(ctx, scratch, qProj, normed, hidden, attnDim, seqLen);
+            WarpGpuBuffer[] kk = projectBatched(ctx, scratch, kProj, normed, hidden, kvDim, seqLen);
+            WarpGpuBuffer[] vv = projectBatched(ctx, scratch, vProj, normed, hidden, kvDim, seqLen);
+            // 3. per-position QK-norm + RoPE; append k/v to the resident cache.
+            Gemma3WarpResidentKvLayerCache lc = cache.layer(layer);
+            WarpGpuBuffer[] qr = new WarpGpuBuffer[seqLen];
+            for (int p = 0; p < seqLen; p++) {
+                WarpGpuBuffer qn = track(scratch, k.qkNorm().normalizeHeads(ctx, q[p], numHeads, headDim, qNormBuf, eps));
+                WarpGpuBuffer kn = track(scratch, k.qkNorm().normalizeHeads(ctx, kk[p], numKvHeads, headDim, kNormBuf, eps));
+                qr[p] = track(scratch, k.rope().applyToHeads(ctx, qn, numHeads, headDim, p, theta));
+                WarpGpuBuffer kr = track(scratch, k.rope().applyToHeads(ctx, kn, numKvHeads, headDim, p, theta));
+                k.kvAppend().append(ctx, kr, lc.keys(), kvDim, p * kvDim);
+                k.kvAppend().append(ctx, vv[p], lc.values(), kvDim, p * kvDim);
+            }
+            // 4. per-position attention over the cache [firstValid(p) .. p].
+            WarpGpuBuffer[] context = new WarpGpuBuffer[seqLen];
+            for (int p = 0; p < seqLen; p++) {
+                int sLen = p + 1;
+                int firstValid = layout.firstValidKey(layer, p);
+                WarpGpuBuffer scores = track(scratch,
+                        k.scores().scores(ctx, qr[p], lc.keys(), numHeads, numKvHeads, headDim, sLen, p, firstValid, scale));
+                WarpGpuBuffer prob = track(scratch, k.softmax().softmaxRows(ctx, scores, numHeads, sLen));
+                context[p] = track(scratch,
+                        k.value().aggregate(ctx, prob, lc.values(), numHeads, numKvHeads, headDim, sLen));
+            }
+            // 5. batched o_proj; post-attention norm + residual per position.
+            WarpGpuBuffer[] attnProj = projectBatched(ctx, scratch, oProj, context, attnDim, hidden, seqLen);
+            WarpGpuBuffer[] hidden1 = new WarpGpuBuffer[seqLen];
+            for (int p = 0; p < seqLen; p++) {
+                WarpGpuBuffer an = track(scratch, k.rmsNorm().normalize(ctx, attnProj[p], postAttentionLayerNormBuf, eps));
+                hidden1[p] = track(scratch, k.elementAdd().add(ctx, h[p], an));
+            }
+            // 6. pre-FF norm, batched MLP, post-FF norm + residual.
+            WarpGpuBuffer[] ff = new WarpGpuBuffer[seqLen];
+            for (int p = 0; p < seqLen; p++) {
+                ff[p] = track(scratch, k.rmsNorm().normalize(ctx, hidden1[p], preFeedforwardLayerNormBuf, eps));
+            }
+            WarpGpuBuffer[] down = mlp.mlpBatched(ctx, k.rowCopy(), scratch, ff, seqLen);
+            for (int p = 0; p < seqLen; p++) {
+                WarpGpuBuffer dn = track(scratch, k.rmsNorm().normalize(ctx, down[p], postFeedforwardLayerNormBuf, eps));
+                out[p] = k.elementAdd().add(ctx, hidden1[p], dn); // returned — not tracked
+            }
+        } finally {
+            ctx.flushRecording();
+        }
+        for (WarpGpuBuffer b : scratch) {
+            b.close();
+        }
+        return out;
+    }
+
+    /**
+     * Batched projection over a sequence (GEMMA-WARP-13e): gather the per-position {@code in[p]} vectors
+     * into one contiguous buffer, run the batched matmul, and scatter the result back to per-position
+     * buffers (all via the row-copy kernel + the resident batched matmul). Falls back to per-position
+     * {@link WarpDenseProjection#forwardResident} when batching is unavailable.
+     */
+    private WarpGpuBuffer[] projectBatched(WarpExecutionContext ctx, java.util.List<WarpGpuBuffer> scratch,
+                                           WarpDenseProjection proj, WarpGpuBuffer[] in, int inDim, int outDim,
+                                           int seqLen) throws WindowsNativeException {
+        WarpGpuBuffer[] out = new WarpGpuBuffer[seqLen];
+        if (!proj.supportsBatchedResident() || seqLen > com.aresstack.windirectml.windows.MatMulNBitsKernel.maxBatchRows()) {
+            for (int p = 0; p < seqLen; p++) {
+                out[p] = track(scratch, proj.forwardResident(ctx, in[p]));
+            }
+            return out;
+        }
+        WarpGpuBuffer batchIn = track(scratch, ctx.allocate(seqLen * inDim));
+        for (int p = 0; p < seqLen; p++) {
+            k.rowCopy().copy(ctx, in[p], 0, batchIn, p * inDim, inDim);
+        }
+        WarpGpuBuffer batchOut = track(scratch, proj.forwardResidentBatched(ctx, batchIn, seqLen));
+        for (int p = 0; p < seqLen; p++) {
+            out[p] = track(scratch, ctx.allocate(outDim));
+            k.rowCopy().copy(ctx, batchOut, p * outDim, out[p], 0, outDim);
+        }
+        return out;
+    }
+
     private void ensureResidentNormWeights(WarpExecutionContext ctx) throws WindowsNativeException {
         if (inputLayerNormBuf == null) {
             inputLayerNormBuf = ctx.upload(inputLayerNorm);

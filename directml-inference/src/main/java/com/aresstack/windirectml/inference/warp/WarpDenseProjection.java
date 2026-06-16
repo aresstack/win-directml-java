@@ -156,6 +156,33 @@ public final class WarpDenseProjection implements AutoCloseable {
         return output;
     }
 
+    /**
+     * GPU-resident batched projection (GEMMA-WARP-13e): {@code out[rows, outputSize] = in[rows, inputSize]
+     * · Wᵀ} for a contiguous resident input batch, returning a new contiguous resident output — no CPU
+     * round-trip. Numerically identical to {@code rows} consecutive {@link #forwardResident} calls. Requires
+     * {@link #supportsBatchedResident()} (else the caller falls back to per-row {@link #forwardResident}).
+     */
+    public WarpGpuBuffer forwardResidentBatched(WarpExecutionContext ctx, WarpGpuBuffer inBatch, int rows)
+            throws WindowsNativeException {
+        ensureOpen();
+        Objects.requireNonNull(ctx, "ctx");
+        if (rows < 1) {
+            throw new IllegalArgumentException("rows must be positive for " + name + ": " + rows);
+        }
+        if (inBatch.elementCount() < (long) rows * inputSize) {
+            throw new IllegalArgumentException("WARP dense projection resident batch input too short for "
+                    + name + ": " + inBatch.elementCount() + " < " + ((long) rows * inputSize));
+        }
+        WarpGpuBuffer output = ctx.allocate(rows * outputSize);
+        ctx.matvecBatched(kernel, inBatch, output, rows);
+        return output;
+    }
+
+    /** Whether {@link #forwardResidentBatched} is available (batched matmul scratch ready). */
+    public boolean supportsBatchedResident() {
+        return kernel.supportsBatch();
+    }
+
     /** Project one vector, allocating the output. */
     public float[] project(float[] input) {
         float[] output = new float[outputSize];

@@ -80,6 +80,21 @@ public final class WarpExecutionContext {
         kernel.matvecResident(in, out);
     }
 
+    /**
+     * Run a resident <b>batched</b> matmul {@code out[rows,N] = in[rows,K] · Wᵀ} (GEMMA-WARP-13e). Inside a
+     * coalescing scope it first flushes the pending UAV list (so the gathered input is on the GPU), then
+     * runs the kernel's synchronous resident batched matmul (the shared batch scratch can't be deferred).
+     * Used by {@code WarpDenseProjection.forwardResidentBatched} for batched prefill projections.
+     */
+    public void matvecBatched(MatMulNBitsKernel kernel, WarpGpuBuffer in, WarpGpuBuffer out, int rows)
+            throws WindowsNativeException {
+        Objects.requireNonNull(kernel, "kernel");
+        if (coalescing) {
+            flushOpenList();
+        }
+        kernel.matmulBatchResident(in, out, rows);
+    }
+
     private void openListIfNeeded() throws WindowsNativeException {
         if (recording) {
             return;

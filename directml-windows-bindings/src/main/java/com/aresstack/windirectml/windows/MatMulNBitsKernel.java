@@ -2216,6 +2216,106 @@ public final class MatMulNBitsKernel implements AutoCloseable {
     }
 
     /**
+     * GPU-resident batched matmul (GEMMA-WARP-13e): {@code out[M,N] = in[M,K] @ W^T} reading {@code in}
+     * from a resident {@link WarpGpuBuffer} and writing {@code out} into a resident buffer — no CPU upload
+     * or readback. Same shared batch shader + scratch as {@link #matmulBatch}, so it is one combined submit
+     * + fence wait (the static scratch is reused across kernels, so this is intentionally synchronous and
+     * not deferred). Mathematically identical to {@code M} consecutive {@link #matvecResident} calls.
+     *
+     * @param in  resident input, {@code >= M*K} floats (row-major)
+     * @param out resident output, {@code >= M*N} floats (row-major)
+     * @param M   rows in the batch; must be in {@code [1, MAX_BATCH_M]} and {@link #supportsBatch()} true
+     */
+    public void matmulBatchResident(WarpGpuBuffer in, WarpGpuBuffer out, int M) {
+        if (!prepared) {
+            throw new IllegalStateException("Kernel not prepared");
+        }
+        if (M < 1 || M > MAX_BATCH_M) {
+            throw new IllegalArgumentException("M out of range [1, " + MAX_BATCH_M + "]: " + M);
+        }
+        if (in.elementCount() < (long) M * K) {
+            throw new IllegalArgumentException("resident batch input too short: " + in.elementCount() + " < " + ((long) M * K));
+        }
+        if (out.elementCount() < (long) M * N) {
+            throw new IllegalArgumentException("resident batch output too short: " + out.elementCount() + " < " + ((long) M * N));
+        }
+        if (!batchEnabled) {
+            throw new UnsupportedOperationException("batched matmul unavailable (scratch alloc failed)");
+        }
+        try {
+            ensureBatchCapacity(M);
+        } catch (Throwable e) {
+            batchEnabled = false;
+            throw new UnsupportedOperationException("batched matmul scratch alloc failed: "
+                    + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
+        }
+
+        long inputBytes = (long) M * K * Float.BYTES;
+        long outputBytes = (long) M * N * Float.BYTES;
+        int nTilesFp32 = (N + 15) / 16;
+        int mTilesFp32 = (M + 15) / 16;
+        int nTiles = useInt4Gpu ? (N + 15) / 16 : nTilesFp32;
+        int[] batchConstants = useInt4Gpu
+                ? new int[]{N, K, int4BlockSize, M, nTiles}
+                : new int[]{N, K, M, nTilesFp32};
+        long[] batchUavs = useInt4Gpu
+                ? new long[]{
+                D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4WeightBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4ScalesBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4ZpBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4BatchOutputBuf)}
+                : new long[]{
+                D3D12Bindings.getGpuVirtualAddress(int4BatchInputBuf),
+                D3D12Bindings.getGpuVirtualAddress(weightBuf),
+                D3D12Bindings.getGpuVirtualAddress(int4BatchOutputBuf)};
+        GpuComputeKernel batchShader = useInt4Gpu ? sharedInt4BatchShader : sharedFp32BatchShader;
+        int dispatchElements = mTilesFp32 * nTiles * 256;
+
+        try {
+            int hr = (int) mhResetAllocator.invokeExact(execAllocator);
+            HResult.check(hr, "CommandAllocator::Reset");
+            hr = (int) mhResetCmdList.invokeExact(execCmdList, execAllocator, MemorySegment.NULL);
+            HResult.check(hr, "CommandList::Reset");
+
+            // GPU->GPU copy resident input into the shared batch input buffer (instead of upload-heap copy).
+            mhCopyBufferRegion.invokeExact(execCmdList, int4BatchInputBuf, 0L, in.d3d12Buffer(), 0L, inputBytes);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchInputToUAV);
+            batchShader.recordDispatch(execCmdList, batchUavs, batchConstants, dispatchElements);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchOutputToCS);
+            // GPU->GPU copy the result into the resident output buffer (instead of readback-heap copy).
+            mhCopyBufferRegion.invokeExact(execCmdList, out.d3d12Buffer(), 0L, int4BatchOutputBuf, 0L, outputBytes);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchInputToCommon);
+            mhResourceBarrier.invokeExact(execCmdList, 1, barrierBatchOutputToCommon);
+
+            hr = (int) mhCloseCmdList.invokeExact(execCmdList);
+            HResult.check(hr, "CommandList::Close");
+            mhExecuteCmdLists.invokeExact(wb.getCommandQueue(), 1, cmdListArrayPtr);
+            fenceValue++;
+            hr = (int) mhQueueSignal.invokeExact(wb.getCommandQueue(), execFence, fenceValue);
+            HResult.check(hr, "Queue::Signal");
+            long deadline = System.currentTimeMillis() + 120_000;
+            while ((long) mhFenceGetCompleted.invokeExact(execFence) < fenceValue) {
+                if (System.currentTimeMillis() > deadline) {
+                    throw new WindowsNativeException("GPU fence timeout after 120000 ms in matmulBatchResident(M=" + M + ")");
+                }
+                Thread.onSpinWait();
+            }
+            // One combined submit + fence wait, no readback (output stays resident).
+            WarpSubmissionStats.recordSubmitAndFenceWait();
+        } catch (WindowsNativeException e) {
+            throw new RuntimeException("MatMulNBitsKernel.matmulBatchResident failed", e);
+        } catch (Throwable t) {
+            throw new RuntimeException("MatMulNBitsKernel.matmulBatchResident failed", t);
+        }
+    }
+
+    /** Max rows supported by one {@link #matmulBatchResident} call. */
+    public static int maxBatchRows() {
+        return MAX_BATCH_M;
+    }
+
+    /**
      * Compute a long prefill batch by splitting it into bounded GPU batches.
      * <p>
      * The shared batch scratch buffers are intentionally capped at

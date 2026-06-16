@@ -63,6 +63,7 @@ stopping. Open points are resolved with the user at the end.
 | WORKBENCH-CLEANUP-STREAMING-ONLY-1 remove extra UI controls | **done — only 'Streaming output' remains; Gemma native chosen by Backend=WARP; profile is a `-Ddirectml.generation.profile` debug path; `-Dgemma.runtime` no longer drives product logic** |
 | GEMMA-WARP-13c GPU-resident KV cache | **done — per-layer GPU K/V cache, no per-layer readback; real readbacks/token 38→1, fenceWaits/token 97→21, still " Paris"** |
 | GEMMA-WARP-13d command-list coalescing | **done — UAV dispatches coalesced per layer; real submits/token 418→220, fenceWaits 21 (unchanged), decode ~442→294 ms/token, still " Paris"** |
+| GEMMA-WARP-13e batched prefill | **done — whole prompt in one pass (batched projections + MLP); real prefill submits 1417→261 (6-tok), top-1 still " Paris", decodeNext after batched works** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -567,3 +568,32 @@ head) is therefore the trustworthy WARP parity oracle.
     shader (a tiny numeric change) or in-list resource-state transitions for the DML copies. **Batched prefill**
     (processing all prompt tokens in one pass instead of token-by-token) is the separate next lever for prefill
     latency and is still open.
+
+- **GEMMA-WARP-13e batched prefill — done.** Prefill no longer repeats the per-token decode step for every
+  prompt token; it processes the whole prompt in one pass per layer.
+  - **New:** `MatMulNBitsKernel.matmulBatchResident` (resident batched matmul `out[M,N]=in[M,K]·Wᵀ` on the
+    shared batch shader, one submit, GPU→GPU I/O); `WarpDenseProjection.forwardResidentBatched` +
+    `supportsBatchedResident`; `WarpExecutionContext.matvecBatched`; `Gemma3WarpRowCopyKernel` (UAV
+    gather/scatter `dst[dstOff+i]=src[srcOff+i]`, coalesces with the other dispatches);
+    `Gemma3WarpMlp.mlpBatched`; `Gemma3WarpLayer.forwardPrefillBatched` (batched q/k/v/o + MLP projections,
+    per-position QK-norm/RoPE/attention reusing the validated single-query kernels, all k/v appended to the
+    GPU-resident KV cache); `Gemma3WarpDecodeSession.prefillResidentBatched` (batched embedding → layers →
+    final norm + LM head once for the last position).
+  - **Product path:** `Gemma3WarpGenerator` resident prefill now calls `prefillResidentBatched`; the
+    token-by-token `prefillResident` stays as the debug/fallback oracle (the `float[]` sync path is also
+    unchanged). Long prompts (> the batch cap) fall back to per-position projections automatically.
+  - **Exact-ish parity:** the batched matmul uses the shared tiled batch shader vs the single matvec's DML
+    GEMM, so results match within fp32 tolerance (logits assertClose + identical top-1), not bit-for-bit.
+  - **Measured.** Synthetic prefill (7 tokens, slidingWindow=2): batched == tokenwise (logits + top-1 +
+    decodeNext-after), submits 374 → 66. Real Gemma 3 270M (6-token prompt): prefill submits 1417 → 261
+    (~5.4×), readbacks 1, fenceWaits 228 → 260 (synchronous batched matmuls), top-1 9079 (" Paris") for both
+    tokenwise and batched; decodeNext after batched prefill works; streaming " Paris" live. Decode unchanged
+    (220 submits/token, 294 ms/token from 13d).
+  - Tests: `syntheticBatchedPrefillMatchesTokenwiseResident` (parity + decodeNext-after + submits<tokenwise);
+    gated real asserts batched top-1 " Paris" + prefill submits < tokenwise; `Gemma3WarpGeneratorTest` /
+    streaming unchanged. No UI / downloader / .wdmlpack-format change; no windowed eviction; Qwen/Smol/T5
+    untouched. Full `:directml-inference` + `:directml-encoder` + `:directml-workbench` regression green.
+  - **Still open:** prefill fence waits rose slightly (synchronous batched matmuls) — deferring them (shared
+    scratch makes that non-trivial) and coalescing the matvec projections into the layer list (a UAV matvec
+    shader or in-list transitions) remain the levers toward ~layer-count submits. The batched matmul reuses
+    the shared static batch scratch, so prefill batches run one matmul at a time (fine; bounded VRAM).
