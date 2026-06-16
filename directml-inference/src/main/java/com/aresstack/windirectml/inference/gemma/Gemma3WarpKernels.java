@@ -19,6 +19,7 @@ public final class Gemma3WarpKernels implements AutoCloseable {
     private final Gemma3WarpAttentionValueKernel value;
     private final Gemma3WarpGeGluKernel geGlu;
     private final Gemma3WarpElementAddKernel elementAdd;
+    private final Gemma3WarpFusedNormAddKernel fusedNormAdd;
     private final Gemma3WarpKvAppendKernel kvAppend;
     private final Gemma3WarpRowCopyKernel rowCopy;
     private final Gemma3WarpFusedAttentionContextKernel fusedAttention;
@@ -33,6 +34,7 @@ public final class Gemma3WarpKernels implements AutoCloseable {
         this.value = new Gemma3WarpAttentionValueKernel(wb);
         this.geGlu = new Gemma3WarpGeGluKernel(wb);
         this.elementAdd = new Gemma3WarpElementAddKernel(wb);
+        this.fusedNormAdd = new Gemma3WarpFusedNormAddKernel(wb);
         this.kvAppend = new Gemma3WarpKvAppendKernel(wb);
         this.rowCopy = new Gemma3WarpRowCopyKernel(wb);
         this.fusedAttention = new Gemma3WarpFusedAttentionContextKernel(wb);
@@ -70,6 +72,10 @@ public final class Gemma3WarpKernels implements AutoCloseable {
         return elementAdd;
     }
 
+    public Gemma3WarpFusedNormAddKernel fusedNormAdd() {
+        return fusedNormAdd;
+    }
+
     public Gemma3WarpKvAppendKernel kvAppend() {
         return kvAppend;
     }
@@ -94,6 +100,7 @@ public final class Gemma3WarpKernels implements AutoCloseable {
             value.close();
             geGlu.close();
             elementAdd.close();
+            fusedNormAdd.close();
             kvAppend.close();
             rowCopy.close();
             fusedAttention.close();

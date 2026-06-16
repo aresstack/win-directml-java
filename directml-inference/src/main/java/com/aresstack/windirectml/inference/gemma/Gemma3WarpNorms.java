@@ -69,6 +69,57 @@ public final class Gemma3WarpNorms {
             """;
 
     // ═══════════════════════════════════════════════════════════════════
+    // Fused zero-centered RMSNorm + residual add (GEMMA-WARP-15): the post-attention and
+    // post-feedforward sublayers do `out = residual + rmsnorm(x, weight)`, which the resident decode/
+    // prefill path previously ran as two dispatches (RMSNorm then element-add) with a UAV barrier between.
+    // Folding the residual add into the norm's final store loop removes one dispatch + one UAV barrier per
+    // sublayer (2 per layer) with no extra serial work — the add is fully parallel. Byte-identical to
+    // running ZERO_CENTERED_RMSNORM_HLSL then ELEMENT_ADD_HLSL (same float ops, same order: r + y).
+    //   out[i] = residual[i] + x[i] * rsqrt(mean(x^2) + eps) * (1 + weight[i])
+    //   Root params: u0=Input, u1=Weight, u2=Residual, u3=Output, b0={dim, eps_bits}
+    //   Dispatch: exactly ONE group (the shader strides over dim).
+    // ═══════════════════════════════════════════════════════════════════
+    public static final String ZERO_CENTERED_RMSNORM_ADD_HLSL = """
+            RWByteAddressBuffer Input    : register(u0);
+            RWByteAddressBuffer Weight   : register(u1);
+            RWByteAddressBuffer Residual : register(u2);
+            RWByteAddressBuffer Output   : register(u3);
+            cbuffer CB : register(b0) { uint dim; uint eps_bits; };
+
+            groupshared float gs_sum[256];
+
+            [numthreads(256, 1, 1)]
+            void CSMain(uint gi : SV_GroupIndex) {
+                float eps = asfloat(eps_bits);
+
+                float partial = 0.0;
+                for (uint i = gi; i < dim; i += 256) {
+                    float v = asfloat(Input.Load(i * 4));
+                    partial += v * v;
+                }
+                gs_sum[gi] = partial;
+                GroupMemoryBarrierWithGroupSync();
+
+                for (uint stride = 128; stride > 0; stride >>= 1) {
+                    if (gi < stride) {
+                        gs_sum[gi] += gs_sum[gi + stride];
+                    }
+                    GroupMemoryBarrierWithGroupSync();
+                }
+
+                float rms_inv = rsqrt(gs_sum[0] / (float)dim + eps);
+
+                // Gemma is zero-centered: scale by (1 + weight); then add the residual in the same store.
+                for (uint i = gi; i < dim; i += 256) {
+                    float v = asfloat(Input.Load(i * 4));
+                    float w = asfloat(Weight.Load(i * 4));
+                    float r = asfloat(Residual.Load(i * 4));
+                    Output.Store(i * 4, asuint(r + v * rms_inv * (1.0f + w)));
+                }
+            }
+            """;
+
+    // ═══════════════════════════════════════════════════════════════════
     // QK-Norm: zero-centered RMSNorm applied PER HEAD over head_dim.
     //   Input layout: [numHeads * headDim] (head h at offset h*headDim)
     //   Weight: [headDim], shared across all heads (Gemma's q_norm / k_norm)

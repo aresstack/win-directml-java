@@ -25,6 +25,7 @@ No invented figures.
 | 13g | matvec projections recorded into the layer list | submits **220 → 21**; decode ≈ 250 ms **unchanged** |
 | 14a | matvec compute benchmark + decision | DML-GEMM ≈ **20 ms** matvec/token vs custom WARP-FP32 ≈130 / INT4 ≈145 → keep DML |
 | 14b | fused attention (scores+softmax+value → 1) + dispatch/barrier counters | dispatches **416 → 380**, uav barriers **435 → 399**; decode flat |
+| 15 | fused post-attn/post-ff RMSNorm + residual add (norm+add → 1) | dispatches **380 → 344**, uav barriers **399 → 363**; decode flat (WARP ~600 ms, GPU ~210 ms) |
 
 Consolidated per-decode-token trajectory (real model):
 
@@ -145,3 +146,59 @@ and HARDWARE — no silent wrong output).
 adapter is present (`Backend = AUTO`). WARP stays the correct, identical-output fallback for hosts without a
 GPU. Broad WARP-CPU kernel-fusion work (options A–B) remains not worth it: it cannot beat moving the
 unchanged dispatch stream onto real hardware.
+
+## 7. GEMMA-WARP-15 — per-layer dispatch breakdown + one more fusion (measured)
+
+Done. First a per-decode-token, per-layer dispatch breakdown (`Gemma3DecodeDispatchBreakdown`, validated
+against the empirical 380/token), then the single largest remaining fusion candidate.
+
+**Decode dispatch breakdown — 21 dispatches/layer (×18) + 2 tail = 380/token (pre-15):**
+
+| group | per layer | per token | kind |
+|-------|----------:|----------:|------|
+| q/k/v/o projection | 4 | 72 | DML-GEMM (kept) |
+| mlp gate/up/down | 3 | 54 | DML-GEMM (kept) |
+| rmsnorm (input, pre-ff) | 2 | 36 | small WARP (feeds a matvec — not fuseable) |
+| **rmsnorm post-attn/post-ff** | **2** | **36** | **small WARP — fused with the add below** |
+| **residual element-add** | **2** | **36** | **small WARP — fused with the norm above** |
+| qk-norm (q, k) | 2 | 36 | small WARP |
+| rope (q, k) | 2 | 36 | small WARP |
+| kv-append (k, v) | 2 | 36 | small WARP |
+| fused attention | 1 | 18 | small WARP (already fused in 14b) |
+| geglu | 1 | 18 | small WARP |
+| tail: final rmsnorm + lm-head | — | 2 | 1 small WARP + 1 DML-GEMM |
+
+The 7 DML-GEMM matvecs/layer are kept (14a). Of the 14 small WARP dispatches/layer, the **largest fuseable
+group is the post-norm + residual-add chain**: Gemma post-norms each sublayer output, then adds it to the
+residual (`out = residual + rmsnorm(x, w)`), which ran as two dispatches (RMSNorm, then element-add) with a
+UAV barrier between — at both the post-attention and post-feedforward points (4 dispatches/layer combined).
+
+**Chosen candidate (only this one):** fuse RMSNorm + residual-add into one kernel
+(`Gemma3WarpFusedNormAddKernel`, `ZERO_CENTERED_RMSNORM_ADD_HLSL`) — the residual add folds into the norm's
+final store loop, fully parallel, no extra serial work (unlike 14b's attention fusion). Used at the two
+post-norm sites in `decodeStepResident` and `forwardPrefillBatched`. Byte-identical to the two-kernel path
+(unit-tested vs the CPU reference). DML-GEMM, INT4, the .wdmlpack format and the qk-norm/rope/kv groups are
+untouched.
+
+**Measured (`Gemma3AutoGpuProfileTest`, real `gemma-3-270m-it`, 16 output tokens):**
+
+| metric | before (14b) | after (15) |
+|--------|-------------:|-----------:|
+| dispatches/token | 380 | **344** (−36 = 2/layer×18) |
+| uav barriers/token | 399 | **363** (−36) |
+| submits/token | 21 | 21 |
+| fence waits/token | 21 | 21 |
+| readbacks/token | 1 | 1 |
+| decode avg/token (WARP) | ~600 ms | ~600–660 ms (flat/noisy) |
+| decode avg/token (RTX 5080) | ~217 ms | ~200–230 ms (flat/noisy) |
+
+Top-1 " Paris" (token 9079) identical for WARP and HARDWARE — Paris smoke green.
+
+**Finding (reinforces 14b):** the fusion removes the predicted 36 dispatches + 36 barriers/token (≈9.5%)
+and 2 scratch buffers/layer, but **decode wall-clock stays flat within noise** on both WARP and the GPU.
+Dispatch/barrier *count* is no longer the lever — on WARP the per-dispatch CPU-rasterizer compute dominates;
+on the GPU 344 small dispatches/token is already cheap and not the bottleneck. This closes out broad
+small-kernel fusion as a WARP wall-clock lever (count is now lean: 7 matvecs + 12 small WARP dispatches +
+tail). Further WARP-CPU decode speedups would need a structurally different approach (e.g. a single
+per-layer megakernel — high risk, uncertain payoff per §3); the GPU path (`Backend = AUTO`) remains the
+real product lever.

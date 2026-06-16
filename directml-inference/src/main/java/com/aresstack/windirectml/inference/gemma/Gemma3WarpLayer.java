@@ -262,14 +262,14 @@ public final class Gemma3WarpLayer implements AutoCloseable {
 
             WarpGpuBuffer context = attentionContext(ctx, scratch, qr, keys, values, pos, firstValid);
             WarpGpuBuffer attnProj = track(scratch, oProj.forwardResident(ctx, context));
-            WarpGpuBuffer attnProjNorm = track(scratch,
-                    k.rmsNorm().normalize(ctx, attnProj, postAttentionLayerNormBuf, eps));
-            WarpGpuBuffer hidden1 = track(scratch, k.elementAdd().add(ctx, hiddenIn, attnProjNorm));
+            // GEMMA-WARP-15: fused post-attention RMSNorm + residual add (one dispatch instead of two).
+            WarpGpuBuffer hidden1 = track(scratch,
+                    k.fusedNormAdd().normAdd(ctx, attnProj, postAttentionLayerNormBuf, hiddenIn, eps));
 
             WarpGpuBuffer ff = track(scratch, k.rmsNorm().normalize(ctx, hidden1, preFeedforwardLayerNormBuf, eps));
             WarpGpuBuffer down = track(scratch, mlp.mlp(ctx, ff, scratch));
-            WarpGpuBuffer downNorm = track(scratch, k.rmsNorm().normalize(ctx, down, postFeedforwardLayerNormBuf, eps));
-            out = k.elementAdd().add(ctx, hidden1, downNorm);
+            // GEMMA-WARP-15: fused post-feedforward RMSNorm + residual add.
+            out = k.fusedNormAdd().normAdd(ctx, down, postFeedforwardLayerNormBuf, hidden1, eps);
             } finally {
                 // Submit the final pending command list (deferred into the batch) before the drain.
                 ctx.flushRecording();
@@ -361,8 +361,9 @@ public final class Gemma3WarpLayer implements AutoCloseable {
             WarpGpuBuffer[] attnProj = projectBatched(ctx, scratch, oProj, context, attnDim, hidden, seqLen);
             WarpGpuBuffer[] hidden1 = new WarpGpuBuffer[seqLen];
             for (int p = 0; p < seqLen; p++) {
-                WarpGpuBuffer an = track(scratch, k.rmsNorm().normalize(ctx, attnProj[p], postAttentionLayerNormBuf, eps));
-                hidden1[p] = track(scratch, k.elementAdd().add(ctx, h[p], an));
+                // GEMMA-WARP-15: fused post-attention RMSNorm + residual add.
+                hidden1[p] = track(scratch,
+                        k.fusedNormAdd().normAdd(ctx, attnProj[p], postAttentionLayerNormBuf, h[p], eps));
             }
             // 6. pre-FF norm, batched MLP, post-FF norm + residual.
             WarpGpuBuffer[] ff = new WarpGpuBuffer[seqLen];
@@ -371,8 +372,8 @@ public final class Gemma3WarpLayer implements AutoCloseable {
             }
             WarpGpuBuffer[] down = mlp.mlpBatched(ctx, k.rowCopy(), scratch, ff, seqLen);
             for (int p = 0; p < seqLen; p++) {
-                WarpGpuBuffer dn = track(scratch, k.rmsNorm().normalize(ctx, down[p], postFeedforwardLayerNormBuf, eps));
-                out[p] = k.elementAdd().add(ctx, hidden1[p], dn); // returned — not tracked
+                // GEMMA-WARP-15: fused post-feedforward RMSNorm + residual add (returned — not tracked).
+                out[p] = k.fusedNormAdd().normAdd(ctx, down[p], postFeedforwardLayerNormBuf, hidden1[p], eps);
             }
         } finally {
             ctx.flushRecording();
