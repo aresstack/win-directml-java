@@ -61,6 +61,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WORKBENCH-PROFILING-1 profile output + runtime UI | **done — Gemma runtime UI-selectable (no JVM flag), detailed phase/WARP-counter profile, 'Show runtime profile' toggle** |
 | GEMMA-WARP-13b-4 resident/batched as native-warp product path | **done — native-warp defaults to resident; real profile 454 submits / 93 fenceWaits / 37 readbacks per decode token, still " Paris"** |
 | WORKBENCH-CLEANUP-STREAMING-ONLY-1 remove extra UI controls | **done — only 'Streaming output' remains; Gemma native chosen by Backend=WARP; profile is a `-Ddirectml.generation.profile` debug path; `-Dgemma.runtime` no longer drives product logic** |
+| GEMMA-WARP-13c GPU-resident KV cache | **done — per-layer GPU K/V cache, no per-layer readback; real readbacks/token 38→1, fenceWaits/token 97→21, still " Paris"** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -506,3 +507,31 @@ head) is therefore the trustworthy WARP parity oracle.
     profiling-infrastructure deletion; `WarpSubmissionStats` kept; streaming control kept; no perf/downloader/
     .wdmlpack-format/Qwen-Smol-T5 change. Full `:directml-inference` + `:directml-encoder` +
     `:directml-workbench` regression green.
+
+- **GEMMA-WARP-13c GPU-resident KV cache — done.** Removes the last per-layer host round-trip from the
+  native-warp resident path: previously `decodeStepResident` read the new token's k/v back to the CPU
+  (`kr.readback()`/`v.readback()`), wrote a host `Gemma3WarpKvCache`, and re-uploaded the whole visible
+  K/V each layer (~2 readbacks + 2 uploads/layer → readbacks/token ≈ 38). Now k/v stay on the GPU.
+  - **New:** `Gemma3WarpResidentKvCache` + `Gemma3WarpResidentKvLayerCache` (per-layer device K/V buffers,
+    capacity×kvDim, full history; window applied as a read-time mask, no eviction). `Gemma3WarpKvAppendKernel`
+    appends the new token's k/v into the cache via a **UAV write** (`cache[pos*kvDim + i] = src[i]`), so the
+    `executeOrDefer` UAV barrier orders it before the attention read — same resident model as the other
+    kernels, batch-safe. `WarpExecutionContext.copyRegionInto` does the rare cache growth (doubling + prefix
+    copy) synchronously outside the batch. The attention-scores/value kernels now accept a cache buffer
+    larger than the visible region (validation `>=` instead of `==`).
+  - **decodeStepResident:** appends kr/v into `cache.layer(l)` and runs scores/value reading the cache K/V
+    buffers in place; no `kr.readback()`/`v.readback()`, no per-layer upload. The cache buffers are
+    persistent (not tracked in the layer scratch). The session grows the cache before the per-layer batch.
+    The host `Gemma3WarpKvCache` stays only for the sync/`float[]` debug path.
+  - **Measured.** Synthetic prefill (5 tokens): resident readbacks **41 → 1**, fenceWaits **132 → 52**,
+    submits 533 → 493 (vs float path 1269/1269); resident logits == float[] (top-1 identical). Growth+window
+    parity: GPU-KV ids == float[] ids across 45 positions (initial cap 32 → grows) with slidingWindow=2
+    (local windowed + full layers), 1 readback per logits call. Real Gemma 3 270M decode/token:
+    **readbacks/token 38.42 → 1.00**, **fence waits/token 96.58 → 21.00**, submits/token 471 → 418,
+    decode avg ≈ 442 ms/token, **top-1 9079 (" Paris"), next 236761** — identical output. Streaming live;
+    buffered same text.
+  - Tests: `Gemma3WarpResidentDecodeStepTest` (resident==float[] now via GPU-KV; readbacks ≤ 3;
+    growth+window parity); `Gemma3WarpGeneratorTest` resident==sync; gated real " Paris" with readbacks/token
+    ≤ 3. No second product path (sync float[] kept as debug/fallback via `-Dgemma.warp.execution=sync`); no
+    windowed eviction / batched prefill / UI control / downloader / .wdmlpack-format change; Qwen/Smol/T5
+    untouched. Full `:directml-inference` + `:directml-encoder` + `:directml-workbench` regression green.

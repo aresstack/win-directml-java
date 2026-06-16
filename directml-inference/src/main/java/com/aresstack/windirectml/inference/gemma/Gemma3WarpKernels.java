@@ -19,6 +19,7 @@ public final class Gemma3WarpKernels implements AutoCloseable {
     private final Gemma3WarpAttentionValueKernel value;
     private final Gemma3WarpGeGluKernel geGlu;
     private final Gemma3WarpElementAddKernel elementAdd;
+    private final Gemma3WarpKvAppendKernel kvAppend;
     private boolean closed;
 
     public Gemma3WarpKernels(WindowsBindings wb) throws WindowsNativeException {
@@ -30,6 +31,7 @@ public final class Gemma3WarpKernels implements AutoCloseable {
         this.value = new Gemma3WarpAttentionValueKernel(wb);
         this.geGlu = new Gemma3WarpGeGluKernel(wb);
         this.elementAdd = new Gemma3WarpElementAddKernel(wb);
+        this.kvAppend = new Gemma3WarpKvAppendKernel(wb);
     }
 
     public Gemma3WarpRmsNormKernel rmsNorm() {
@@ -64,6 +66,10 @@ public final class Gemma3WarpKernels implements AutoCloseable {
         return elementAdd;
     }
 
+    public Gemma3WarpKvAppendKernel kvAppend() {
+        return kvAppend;
+    }
+
     @Override
     public void close() {
         if (!closed) {
@@ -76,6 +82,7 @@ public final class Gemma3WarpKernels implements AutoCloseable {
             value.close();
             geGlu.close();
             elementAdd.close();
+            kvAppend.close();
         }
     }
 }

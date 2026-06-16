@@ -88,8 +88,9 @@ class Gemma3NativeWarpRuntimeTest {
                 assertTrue(profile.fenceWaitsPerToken() < 200,
                         "resident fence waits/token must be well below the ~834 float[] baseline: "
                                 + profile.fenceWaitsPerToken());
-                assertTrue(profile.readbacksPerToken() < 80,
-                        "resident readbacks/token must stay low (~37): " + profile.readbacksPerToken());
+                assertTrue(profile.readbacksPerToken() < 10,
+                        "GPU-resident KV cache (13c) -> readbacks/token ~1 (logits only): "
+                                + profile.readbacksPerToken());
             }
             System.out.println("[GEMMA-PROFILE] " + Gemma3NativeWarpProfileReport.detailed(
                     profile, "native-warp-experimental", r.backend(), "streaming",

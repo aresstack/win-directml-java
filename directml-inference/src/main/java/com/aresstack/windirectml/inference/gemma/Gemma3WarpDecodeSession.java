@@ -37,6 +37,7 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
     private Gemma3WarpLmHead lmHead; // lazily built on first logits
     private WarpExecutionContext residentCtx; // lazily built for the resident path (13b-3a)
     private WarpGpuBuffer finalNormBuf;       // resident final-norm weight (13b-3a)
+    private Gemma3WarpResidentKvCache residentKv; // GPU-resident KV cache for the resident path (13c)
     private boolean closed;
 
     public Gemma3WarpDecodeSession(WindowsBindings wb, Gemma3WarpWeights weights) throws WindowsNativeException {
@@ -110,14 +111,14 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
         if (promptIds == null || promptIds.length == 0) {
             throw new IllegalArgumentException("promptIds must not be empty");
         }
-        cache.reset();
+        residentKv().reset();
         WarpGpuBuffer last = null;
         for (int t = 0; t < promptIds.length; t++) {
             if (last != null) {
                 last.close();
             }
             last = stepTokenResident(promptIds[t], t);
-            cache.commitLength(t + 1);
+            residentKv().commitLength(t + 1);
         }
         return residentLogits(last);
     }
@@ -129,12 +130,12 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
     /** Resident single-token decode — same result as {@link #decodeNext}. */
     public float[] decodeNextResident(int tokenId) throws WindowsNativeException {
         ensureOpen();
-        if (cache.length() == 0) {
+        if (residentKv().length() == 0) {
             throw new IllegalStateException("decodeNextResident requires a prior prefill");
         }
-        int pos = cache.length();
+        int pos = residentKv().length();
         WarpGpuBuffer hidden = stepTokenResident(tokenId, pos);
-        cache.commitLength(pos + 1);
+        residentKv().commitLength(pos + 1);
         return residentLogits(hidden);
     }
 
@@ -149,6 +150,14 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
         return residentCtx;
     }
 
+    /** Lazily-built GPU-resident KV cache for the native-warp product path (GEMMA-WARP-13c). */
+    private Gemma3WarpResidentKvCache residentKv() throws WindowsNativeException {
+        if (residentKv == null) {
+            residentKv = new Gemma3WarpResidentKvCache(ctx(), config.numHiddenLayers(), config.keyValueDim(), 32);
+        }
+        return residentKv;
+    }
+
     private WarpGpuBuffer stepTokenResident(int tokenId, int pos) throws WindowsNativeException {
         if (tokenId < 0 || tokenId >= config.vocabSize()) {
             throw new IllegalArgumentException("token id out of range: " + tokenId);
@@ -157,9 +166,12 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
         float[] embedRow = weights.hasByteBufferEmbedding()
                 ? Gemma3WarpEmbedding.lookupScaled(weights.embeddingFp32Le(), one, hidden, embeddingScale)[0]
                 : Gemma3WarpEmbedding.lookupScaled(weights.embeddingFloat(), one, hidden, embeddingScale)[0];
+        // Grow the resident KV cache for this position OUTSIDE the per-layer batch (growth copies + frees
+        // the old buffers synchronously, which must not race with deferred work).
+        residentKv().ensureCapacity(ctx(), pos + 1);
         WarpGpuBuffer hiddenB = ctx().upload(embedRow);
         for (Gemma3WarpLayer layer : layers) {
-            WarpGpuBuffer next = layer.decodeStepResident(ctx(), hiddenB, pos, cache);
+            WarpGpuBuffer next = layer.decodeStepResident(ctx(), hiddenB, pos, residentKv());
             hiddenB.close();
             hiddenB = next;
         }
@@ -232,6 +244,9 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
             }
             if (finalNormBuf != null) {
                 finalNormBuf.close();
+            }
+            if (residentKv != null) {
+                residentKv.close();
             }
         }
     }

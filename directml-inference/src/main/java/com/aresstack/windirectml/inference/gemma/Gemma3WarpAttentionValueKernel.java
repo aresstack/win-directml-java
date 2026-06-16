@@ -115,7 +115,8 @@ public final class Gemma3WarpAttentionValueKernel implements AutoCloseable {
             throw new IllegalArgumentException("numHeads must be a multiple of numKvHeads");
         }
         int kvDim = numKvHeads * headDim;
-        if (prob.elementCount() != numHeads * cols || values.elementCount() != cols * kvDim) {
+        // values may be a larger GPU-resident KV cache (GEMMA-WARP-13c): only [0, cols) is read.
+        if (prob.elementCount() != numHeads * cols || values.elementCount() < cols * kvDim) {
             throw new IllegalArgumentException("prob/values length mismatch");
         }
         int groupsPerKv = numHeads / numKvHeads;

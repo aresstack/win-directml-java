@@ -45,6 +45,37 @@ public final class WarpExecutionContext {
     }
 
     /**
+     * GPU→GPU copy of {@code elementCount} floats from {@code src[srcElementOffset]} into
+     * {@code dst[dstElementOffset]} (GEMMA-WARP-13c), framed by COMMON↔COPY_DEST transition barriers so the
+     * copy is ordered against later use of {@code dst}. Intended for infrequent resident KV-cache growth
+     * <b>outside</b> a {@link com.aresstack.windirectml.runtime.DirectMlGpuBatch} (then it is synchronous,
+     * so the source/old buffer may be freed right after). Per-token cache appends use the UAV-write append
+     * kernel instead, which fits the deferred batch's UAV-barrier model.
+     */
+    public void copyRegionInto(WarpGpuBuffer dst, int dstElementOffset, WarpGpuBuffer src,
+                               int srcElementOffset, int elementCount) throws WindowsNativeException {
+        MemorySegment dev = wb.getD3d12Device();
+        MemorySegment queue = wb.getCommandQueue();
+        long bytes = (long) elementCount * Float.BYTES;
+        long dstOff = (long) dstElementOffset * Float.BYTES;
+        long srcOff = (long) srcElementOffset * Float.BYTES;
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment allocator = D3D12Bindings.createCommandAllocator(
+                    dev, D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, a);
+            MemorySegment cmdList = D3D12Bindings.createCommandList(
+                    dev, D3D12Bindings.D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, a);
+            D3D12Bindings.transitionBarrier(cmdList, dst.d3d12Buffer(),
+                    D3D12Bindings.D3D12_RESOURCE_STATE_COMMON, D3D12Bindings.D3D12_RESOURCE_STATE_COPY_DEST, a);
+            D3D12Bindings.copyBufferRegion(cmdList, dst.d3d12Buffer(), dstOff, src.d3d12Buffer(), srcOff, bytes);
+            D3D12Bindings.transitionBarrier(cmdList, dst.d3d12Buffer(),
+                    D3D12Bindings.D3D12_RESOURCE_STATE_COPY_DEST, D3D12Bindings.D3D12_RESOURCE_STATE_COMMON, a);
+            D3D12Bindings.executeOrDefer(dev, queue, cmdList, allocator, a);
+            DxgiBindings.release(cmdList);
+            DxgiBindings.release(allocator);
+        }
+    }
+
+    /**
      * Record + submit one compute-kernel dispatch over GPU-resident buffers (no readback). The
      * {@code uavAddresses} are {@link WarpGpuBuffer#gpuAddress()} values in the kernel's UAV order.
      *

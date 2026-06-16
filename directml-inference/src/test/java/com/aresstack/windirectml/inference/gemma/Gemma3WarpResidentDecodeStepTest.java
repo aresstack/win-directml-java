@@ -93,6 +93,9 @@ class Gemma3WarpResidentDecodeStepTest {
                     + " residentReadbacks=" + residentRb + " (promptTokens=" + ids.length + ")");
             assertTrue(residentRb < floatRb, "resident must do fewer readbacks: resident="
                     + residentRb + " float=" + floatRb);
+            // GEMMA-WARP-13c: the GPU-resident KV cache removes the per-layer k/v readbacks; only the final
+            // logits are read back (1 per prefill), not 2×layers.
+            assertTrue(residentRb <= 3, "resident prefill should read back only the final logits: " + residentRb);
         }
     }
 
@@ -114,6 +117,42 @@ class Gemma3WarpResidentDecodeStepTest {
                 assertClose("decodeNext logits[" + o + "]", floatNext[o], residentNext[o]);
             }
             assertEquals(DecoderOnlyMath.argmax(floatNext), DecoderOnlyMath.argmax(residentNext), "decode top-1");
+        }
+    }
+
+    @Test
+    void residentGpuKvCacheMatchesFloatPathAcrossGrowthAndWindow() throws Exception {
+        // 13c: the GPU-resident KV cache matches the host float[] path across cache growth (initial cap 32)
+        // and the sliding window (smallConfig slidingWindow=2 -> local layers windowed; full layers see the
+        // whole history). Both paths are fed identical tokens so any divergence is a real cache bug.
+        Gemma3Config config = smallConfig();
+        Gemma3ReferenceWeights ref = syntheticWeights(config, new Random(13031));
+        int[] prompt = {7, 3, 19, 0, 25};
+        int decodeSteps = 40; // 5 + 40 = 45 positions > initial capacity 32 -> exercises growth
+
+        try (Gemma3WarpDecodeSession sess = new Gemma3WarpDecodeSession(wb, Gemma3WarpWeights.from(ref))) {
+            // float[] oracle: greedy ids
+            int[] floatIds = new int[decodeSteps + 1];
+            float[] fl = sess.prefill(prompt);
+            floatIds[0] = DecoderOnlyMath.argmax(fl);
+            for (int i = 1; i <= decodeSteps; i++) {
+                fl = sess.decodeNext(floatIds[i - 1]);
+                floatIds[i] = DecoderOnlyMath.argmax(fl);
+            }
+
+            // resident GPU-KV, fed the SAME tokens; argmax must agree at every step.
+            WarpSubmissionStats.reset();
+            WarpSubmissionStats.Snapshot r0 = WarpSubmissionStats.snapshot();
+            float[] rl = sess.prefillResident(prompt);
+            assertEquals(floatIds[0], DecoderOnlyMath.argmax(rl), "step 0 (prefill) top-1");
+            for (int i = 1; i <= decodeSteps; i++) {
+                rl = sess.decodeNextResident(floatIds[i - 1]);
+                assertEquals(floatIds[i], DecoderOnlyMath.argmax(rl), "resident GPU-KV top-1 at step " + i);
+            }
+            long rb = WarpSubmissionStats.snapshot().minus(r0).readbacks();
+            System.out.println("[13c] growth+window readbacks=" + rb + " over " + (decodeSteps + 1) + " logits calls");
+            // ~1 readback per logits call (no per-layer k/v readbacks) -> bounded by the number of steps.
+            assertTrue(rb <= decodeSteps + 2, "no per-layer readbacks expected: " + rb);
         }
     }
 
@@ -208,8 +247,9 @@ class Gemma3WarpResidentDecodeStepTest {
                     + " top1=" + top1 + " next=" + next);
 
             assertEquals(EXPECTED_NEXT, top1, "resident prefill top-1 must be \" Paris\"");
-            assertTrue(dd.readbacks() < 100,
-                    "resident decode readbacks/token must be well below the ~344 baseline: " + dd.readbacks());
+            // GEMMA-WARP-13c: GPU-resident KV cache -> only the final logits are read back per token.
+            assertTrue(dd.readbacks() <= 3,
+                    "resident decode readbacks/token must drop to ~1 (logits only): " + dd.readbacks());
             // 13b-3b: fences coalesced — fenceWaits per token fall far below submits and far below the
             // ~834/token of 13b-3a (each layer drains once instead of fencing every dispatch).
             assertTrue(dd.fenceWaits() * 2 < dd.submits(),

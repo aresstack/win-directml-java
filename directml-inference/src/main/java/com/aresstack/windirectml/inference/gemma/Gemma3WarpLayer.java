@@ -215,7 +215,7 @@ public final class Gemma3WarpLayer implements AutoCloseable {
      * resident buffer (the caller closes the input buffer it passed in).
      */
     public WarpGpuBuffer decodeStepResident(WarpExecutionContext ctx, WarpGpuBuffer hiddenIn, int pos,
-                                            Gemma3WarpKvCache cache) throws WindowsNativeException {
+                                            Gemma3WarpResidentKvCache cache) throws WindowsNativeException {
         ensureOpen();
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(hiddenIn, "hiddenIn");
@@ -246,13 +246,18 @@ public final class Gemma3WarpLayer implements AutoCloseable {
             WarpGpuBuffer qr = track(scratch, k.rope().applyToHeads(ctx, qn, numHeads, headDim, pos, theta));
             WarpGpuBuffer kr = track(scratch, k.rope().applyToHeads(ctx, kn, numKvHeads, headDim, pos, theta));
 
-            // Only readback: the new token's k (normed+roped) and v (raw) into the host KV cache. The
-            // readback waits the GPU, which also drains the deferred dispatches recorded above.
-            cache.put(layer, pos, kr.readback(), v.readback());
+            // GEMMA-WARP-13c: append the new token's k (normed+roped) and v (raw) into the GPU-resident KV
+            // cache via a UAV write — no CPU readback. The attention kernels read the cache buffers in
+            // place; the executeOrDefer UAV barrier orders the append before the score/value reads.
+            Gemma3WarpResidentKvLayerCache lc = cache.layer(layer);
+            k.kvAppend().append(ctx, kr, lc.keys(), kvDim, pos * kvDim);
+            k.kvAppend().append(ctx, v, lc.values(), kvDim, pos * kvDim);
             int seqLen = pos + 1;
             int firstValid = layout.firstValidKey(layer, pos);
-            WarpGpuBuffer keys = track(scratch, ctx.upload(cache.kFlat(layer, seqLen)));
-            WarpGpuBuffer values = track(scratch, ctx.upload(cache.vFlat(layer, seqLen)));
+            // The cache buffers are persistent (capacity >= seqLen, valid range [0, seqLen)); do NOT track
+            // them in scratch — they must survive across decode steps.
+            WarpGpuBuffer keys = lc.keys();
+            WarpGpuBuffer values = lc.values();
 
             WarpGpuBuffer scores = track(scratch,
                     k.scores().scores(ctx, qr, keys, numHeads, numKvHeads, headDim, seqLen, pos, firstValid, scale));

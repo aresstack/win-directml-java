@@ -128,7 +128,8 @@ public final class Gemma3WarpAttentionScoresKernel implements AutoCloseable {
             throw new IllegalArgumentException("numHeads must be a multiple of numKvHeads");
         }
         int kvDim = numKvHeads * headDim;
-        if (q.elementCount() != numHeads * headDim || keys.elementCount() != seqLen * kvDim) {
+        // keys may be a larger GPU-resident KV cache (GEMMA-WARP-13c): only [0, seqLen) is read.
+        if (q.elementCount() != numHeads * headDim || keys.elementCount() < seqLen * kvDim) {
             throw new IllegalArgumentException("q/keys length mismatch");
         }
         int groupsPerKv = numHeads / numKvHeads;
