@@ -66,6 +66,7 @@ stopping. Open points are resolved with the user at the end.
 | GEMMA-WARP-13e batched prefill | **done — whole prompt in one pass (batched projections + MLP); real prefill submits 1417→261 (6-tok), top-1 still " Paris", decodeNext after batched works** |
 | GEMMA-WARP-13f warm/cold profiling + shader warm-up | **done — Gemma3WarpWarmup + gated cold/warm steady-state profile; prefill submits ~constant in prompt len (261/280/355 @ 6/25/100), decode warm ~250 ms/token; finding: decode submit-bound (→ matvec coalescing next), long prefill compute-bound (per-position attention)** |
 | GEMMA-WARP-13g projection/matvec submit reduction | **done — matvec recorded into the layer command list (DML numerics unchanged); real decode submits/token 220→21, fences 21, readbacks 1, top-1 " Paris" identical. Finding: decode avg/token ~250 ms unchanged → decode is compute-bound (matvec FLOPs on WARP), not submit-bound** |
+| GEMMA-WARP-14a matvec compute benchmark + decision | **done — DML-GEMM fastest (~20 ms matvec/decode-token) vs custom WARP-FP32 (~130) / INT4 (~145); DECISION: keep DML. Bigger finding: matvec is only ~20 ms of ~250 ms decode → bottleneck is the many small element/attention dispatches+barriers, not matvec → next lever is kernel fusion** |
 | GEMMA-WARP-10 WARP decode session + KV cache | open — depends on WARP kernels |
 | GEMMA-WARP-11 workbench native flag | open — depends on tokenizer + WARP |
 | GEMMA-WARP-12 perf/heap comparison | open — depends on WARP |
@@ -652,3 +653,37 @@ head) is therefore the trustworthy WARP parity oracle.
     tokenwise once long enough; the short-prompt inequality no longer holds because tokenwise now also
     coalesces matvecs). No UI / downloader / .wdmlpack-format change; no windowed eviction; Qwen/Smol/T5
     untouched. Full `:directml-inference` + `:directml-encoder` + `:directml-workbench` regression green.
+
+- **GEMMA-WARP-14a matvec compute benchmark + decision — done (measurement, no production change).** After
+  13g found decode compute-bound, this benchmarks the three matvec implementations for the real Gemma 270M
+  projection shapes (M=1 decode) and picks a direction. `Gemma3WarpMatvecBenchmarkTest` (gated opt-in,
+  `-Dgemma.warp.bench=true`) builds each impl on a fresh device (DML on `directml`, the custom shaders on
+  `warp`), warms up, and times `matvecResident`. (`directml-inference/build.gradle` now also forwards
+  `gemma.warp.bench` / `gemma.warp.execution` / `directml.generation.profile`.)
+  - **Measured (this host, ms/call, M=1):** DML-GEMM is fastest for **every** shape:
+
+    | shape | N | K | DML-GEMM | WARP-FP32 | INT4-WARP |
+    |-------|---|---|----------|-----------|-----------|
+    | q_proj | 1024 | 640 | 0.194 | 0.633 | 0.544 |
+    | k/v_proj | 256 | 640 | ~0.15 | ~0.33 | ~0.31 |
+    | o_proj | 640 | 1024 | 0.145 | 0.572 | 0.590 |
+    | gate/up_proj | 2048 | 640 | ~0.149 | ~0.79 | ~0.88 |
+    | down_proj | 640 | 2048 | 0.149 | 0.873 | 0.953 |
+    | lm_head | 262144 | 640 | **1.034** | **51.835** | **64.376** |
+
+    Estimated matvec ms/decode-token (18 layers × 7 proj + lm_head): **DML-GEMM ≈ 20.5, WARP-FP32 ≈ 129.6,
+    INT4-WARP ≈ 145.0**. The custom one-thread-per-row WARP shaders are 3–6× slower than DML for the small
+    projections and ~50–60× slower for the 256k-row LM head.
+  - **DECISION: keep DML-GEMM** for the resident matvec — it is already the product path and is decisively
+    fastest here. Do **not** switch to the custom FP32/INT4 WARP shaders; INT4 also wouldn't help (and would
+    need quantised Gemma weights).
+  - **Bigger finding — matvec is NOT the decode bottleneck.** DML matvec is only **~20 ms** of the ~250 ms
+    decode/token. The remaining ~230 ms is the many small per-layer element/attention dispatches (RMSNorm,
+    QK-norm, RoPE, KV-append, scores, softmax, value, GeGLU, element-adds — ~15/layer × 18 ≈ 270 tiny
+    dispatches) plus a UAV barrier between each, whose fixed per-dispatch/per-barrier cost on the WARP
+    software rasterizer dominates. So 13g's "compute-bound on matvec" was imprecise: it is dispatch/
+    barrier-bound on the small element kernels. **Next lever: kernel fusion** (fuse RMSNorm+residual, the
+    QK-norm/RoPE chain, the attention chain) to cut dispatch + barrier count — not a faster matvec. A
+    hardware GPU (vs the WARP CPU rasterizer) would also reduce the per-dispatch overhead.
+  - No production/numeric change; gated benchmark opt-in; Qwen/Smol/T5 untouched. Full `:directml-inference`
+    + `:directml-encoder` + `:directml-workbench` regression green.
