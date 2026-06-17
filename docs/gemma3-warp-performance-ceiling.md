@@ -432,6 +432,7 @@ decode/token: ~452 ms → ~525 ms (16: projection fusion) → ~500 ms steady
 | `-Dgemma.warp.groupProfile=true` | `Gemma3WarpDecodeGroupProfileTest` | per-kernel-group decode timing (§9) |
 | `-Dgemma.warp.lmHeadProbe=true` | `Gemma3WarpLmHeadShapeProbeTest` | LM-head GEMM shape comparison (§10) |
 | `-Dgemma.warp.quantProbe=true` | `Gemma3WarpPrecisionFeasibilityProbeTest` | fp16/bf16 weight numeric feasibility (§11) |
+| `-Dgemma.warp.bf16Probe=true` | `Gemma3Bf16{Pack,EmbeddingLoad,ProjectionLoad}…ProbeTest` | BF16 host-memory packaging (§13–§16) |
 | `-Dgemma.auto.gpu=true` | `Gemma3AutoGpuProfileTest` | WARP-vs-hardware comparison (AUTO-GPU-1) |
 | `-Dgemma.perf.probe=true` | `Gemma3WarpPerformanceProbeTest` | legacy perf probe |
 | `-Ddirectml.generation.profile=true` | Workbench / runtime | the existing native-WARP profile report |
@@ -586,3 +587,35 @@ model). The decoder-only family's own fused path still uses `fp32LittleEndian()`
 change. The remaining FP32 lives only in the device buffers (the fp32-GEMM floor) and small norm vectors.
 There is no further sizeable host-RAM item to convert, so the BF16 packaging effort is complete; any future
 reduction of the device FP32 would require an fp16 GEMM operator (out of scope, no speed benefit, §11).
+
+## 16. GEMMA-BF16-PACK-CLOSEOUT — BF16 host-memory line finalized (no new optimization)
+
+Closes the BF16 host-memory line (§13–§15). Documentation/stabilization only — no code change, no new
+optimization, no PACK-4.
+
+**Final state — BF16 packaging is a host-RAM optimization, not a speed one:**
+- The BF16 payload was **already** in the `.wdmlpack` (it is the verbatim BF16 SafeTensors image, §13) — no
+  format change was ever needed or made, and existing packages stay valid.
+- FP32 was only ever materialised at **runtime load**. The retained host weights are now kept **BF16**
+  (embedding/LM head §14 + all layer projections §15); FP32 is produced only **transiently** for the device
+  upload/prepacking.
+- The **device buffers stay FP32** because the DML GEMM path is FP32 — that is the unchanged decode floor.
+- Net: **~511 MB less system RAM** (1022.5 → 511.3 MB for the matmul weights), **lossless**, **decode
+  avg/token unchanged** (~570 ms; no per-token path changed), **Paris (9079) green**, **QKV/GateUp fusion
+  preserved** (the BF16 parts are widened transiently and stacked into the same fused device weights).
+
+**Probes / tests:** all BF16 real-model probes are gated (`-Dgemma.warp.realModel=true` +
+`-Dgemma.warp.bf16Probe=true`); the only non-gated BF16 tests are pure-CPU unit tests
+(`Gemma3Bf16WeightViewTest`, `WarpWeightSourceTest`). The default test run stays light. **Caveat
+(documented):** running **two** full Gemma WARP sessions in one JVM can exhaust the software device's system
+RAM and raise `DXGI_ERROR_DEVICE_REMOVED`; the product runtime only ever holds **one** session, and the
+gated projection probe therefore uses one BF16 session + byte-level parity rather than two live sessions.
+
+**Runtime stays silent / product path unchanged:** the BF16 host-view code adds **no logs** to the normal
+runtime, **no UI switch, no runtime selector, no visible research mode**. The product path is unchanged:
+`Backend = WARP` → native Gemma WARP runtime on the explicit WARP software adapter (**no Python**);
+`Backend = AUTO` → optional hardware adapter; `Backend = CPU` → the external Python probe only (not WARP).
+QKV/GateUp fusion and the BF16 retained host views are active on the product WARP path.
+
+**Status:** the Gemma WARP line is complete — speed at the fp32 compute ceiling (§1–§12) and host memory
+minimized via lossless BF16 retention (§13–§16). No further BF16-pack or WARP-speed slice is planned.
