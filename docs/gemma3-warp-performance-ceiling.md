@@ -617,5 +617,8 @@ runtime, **no UI switch, no runtime selector, no visible research mode**. The pr
 `Backend = AUTO` → optional hardware adapter; `Backend = CPU` → the external Python probe only (not WARP).
 QKV/GateUp fusion and the BF16 retained host views are active on the product WARP path.
 
-**Status:** the Gemma WARP line is complete — speed at the fp32 compute ceiling (§1–§12) and host memory
-minimized via lossless BF16 retention (§13–§16). No further BF16-pack or WARP-speed slice is planned.
+**Status:** the Gemma WARP line is complete — speed at the fp32 compute ceiling (§1–§12), host memory
+minimized via lossless BF16 retention (§13–§16), and the Workbench product path finalized (GEMMA-PRODUCT-1/2
++ closeout: native WARP/AUTO, no Python on the product path, gated-HF token handling, no visible
+research/`experimental`/`probe`/`planned` wording; see `gemma3-warp-runtime-plan.md`). No further BF16-pack,
+WARP-speed, or Gemma product slice is planned.

@@ -27,10 +27,27 @@ stopping. Open points are resolved with the user at the end.
 | softcapping | none (attn & final null) |
 | tie_word_embeddings | (absent → Gemma ties embed↔lm_head) |
 
+## Status: COMPLETE
+
+The Gemma 3 270M-it WARP line is finished end to end:
+- **Speed** (GEMMA-WARP-13*–19 + closeout): submits/fences/readbacks minimized, projection groups fused;
+  WARP decode at its fp32 DML-GEMM compute ceiling (~500 ms/token). Quantization is not a WARP speed lever.
+- **Host memory** (GEMMA-BF16-PACK-1–3 + closeout): retained host weights are BF16 end to end (~511 MB less
+  system RAM), lossless, no `.wdmlpack` format change, decode unchanged.
+- **Product path** (GEMMA-PRODUCT-1–2 + closeout): Gemma is a normal Workbench model —
+  `Backend = WARP` runs the native Java/DirectML runtime on the explicit WARP software adapter (CPU-only, no
+  Python/Transformers/ONNX); `Backend = AUTO` runs the same native runtime on the first hardware adapter
+  (optional accelerator, clear message when none); `Backend = CPU` is the legacy external Python path only.
+  Missing `model_gemma3.wdmlpack` → a clear Download→Convert message (no silent Python fallback). The gated
+  HF token lives in `%APPDATA%/.directml/download-overrides.json` (`huggingFaceTokens`, sent only to
+  huggingface.co; 401/403 → clear gated-access hint). No visible runtime selector, profiling toggle, research
+  mode, or `experimental`/`probe`/`planned` wording. Paris smoke (" Paris", 9079) green on WARP and HARDWARE.
+
 ## Slice status
 
 | Slice | Status |
 |-------|--------|
+| GEMMA-PRODUCT-CLOSEOUT finalize the Gemma product path | **done — docs closed (this section). Removed the last visible "probe" wording from the legacy CPU notes (SummarizerPanel) + the registry note; lock-in test `gemmaProductMetadataHasNoResearchOrPlannedWording` (note + native label carry no experimental/probe/planned/"until a native"). Verified WARP/AUTO native (no Python), Python only on CPU, clear product error messages, HF-token location documented. Paris unaffected (label/doc only). Regression 3 modules green.** |
 | GEMMA-WARP-1 family shell + config/inspect | **done** (7b1dd3c) |
 | GEMMA-WARP-2 tokenizer + chat template | pending |
 | GEMMA-WARP-3 wdmlpack compiler shell | pending |

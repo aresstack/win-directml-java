@@ -96,6 +96,20 @@ class GemmaRuntimeSelectionTest {
     }
 
     @Test
+    void gemmaProductMetadataHasNoResearchOrPlannedWording() {
+        // GEMMA-PRODUCT-CLOSEOUT: the gemma-3-270m-it registry note (product metadata) and the visible native
+        // runtime label carry no research/planned residue.
+        String note = GenerationModelRegistry.findByModelId("google/gemma-3-270m-it").notes().toLowerCase();
+        for (String banned : new String[]{"experimental", "probe", "planned", "until a native",
+                "runtime integration is planned"}) {
+            assertFalse(note.contains(banned), "gemma-3-270m-it note must not contain '" + banned + "': " + note);
+        }
+        String label = Gemma3RuntimeMode.NATIVE_WARP.displayLabel().toLowerCase();
+        assertFalse(label.contains("experimental") || label.contains("probe") || label.contains("planned"),
+                "native runtime label must be a product label: " + label);
+    }
+
+    @Test
     void streamingIsTheDefaultOutputMode() {
         String prevOut = System.getProperty(GenerationOutputMode.OUTPUT_PROPERTY);
         String prevStream = System.getProperty(GenerationOutputMode.STREAMING_PROPERTY);

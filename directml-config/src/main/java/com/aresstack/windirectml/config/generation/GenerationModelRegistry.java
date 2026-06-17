@@ -282,8 +282,8 @@ public final class GenerationModelRegistry {
                         "model/google/gemma-3-270m-it"),
                 "Instruction-tuned compact Gemma 3. Runs in the Workbench on the native Java/DirectML runtime: "
                         + "Backend=WARP uses the CPU-only software adapter, Backend=AUTO an optional hardware "
-                        + "adapter; Backend=CPU uses the external Python/Transformers probe. Weights load from the "
-                        + "compiled model_gemma3.wdmlpack."));
+                        + "adapter; Backend=CPU uses the legacy external Python/Transformers path. Weights load "
+                        + "from the compiled model_gemma3.wdmlpack."));
 
         entries.add(new Entry(
                 "google/gemma-3-270m",

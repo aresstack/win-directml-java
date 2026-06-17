@@ -224,7 +224,7 @@ public final class SummarizerPanel extends JPanel {
                         + (model.getBackend() == Backend.WARP ? "WARP software" : "hardware (AUTO)") + " adapter; no Python.");
                 appendResult("  NOTE: Weights load from the compiled model_gemma3.wdmlpack.");
             } else {
-                appendResult("  NOTE: Gemma 3 uses the external local Python/Transformers probe path (Backend = CPU).");
+                appendResult("  NOTE: Gemma 3 uses the legacy external local Python/Transformers path (Backend = CPU).");
             }
         } else if (smolLm2Model) {
             appendResult("  NOTE: WARP runs SmolLM2's dense projections on the D3D12 software rasterizer (CPU); "
@@ -298,7 +298,7 @@ public final class SummarizerPanel extends JPanel {
         }
         long start = System.nanoTime();
         Gemma3ExternalRuntimeRunner runner = new Gemma3ExternalRuntimeRunner(modelDir);
-        appendResult("Initializing Gemma 3 external probe from " + modelDir + "...");
+        appendResult("Initializing Gemma 3 legacy external Python runtime from " + modelDir + "...");
         appendResult("Python command: " + System.getProperty("gemma3.python",
                 System.getenv("GEMMA3_PYTHON") == null ? "python" : System.getenv("GEMMA3_PYTHON")));
         appendResult("");
