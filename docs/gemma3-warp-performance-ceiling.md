@@ -29,6 +29,7 @@ No invented figures.
 | 16 | fused QKV + GateUp projection groups (3→1 q/k/v, 2→1 gate/up DML-GEMMs) | dispatches **344 → 290**, uav barriers **363 → 309**; **WARP decode ~600 → ~525 ms (~15%)**, GPU ~210 → ~150 ms |
 | 17 | projection-fusion hardening + measured per-group timing breakdown (no new optimization) | parity/edge tests; **WARP decode is matmul-bound: lm-head 52%, the 5 GEMMs ~90%, all element kernels ~10%** |
 | 18 | LM-head DML-GEMM shape probe (measure only) | **baseline GEMV (265 ms) is optimal**; GEMM M=1 3.3× slower, row-blocking neutral/worse → WARP at its fp32 DML-GEMM compute ceiling |
+| 19 | quantization/precision feasibility probe (decide only) | **Decision D: quantization does not help WARP speed**; 16-bit weight storage is lossless (model is BF16) but a memory-only lever, not speed |
 
 Consolidated per-decode-token trajectory (real model):
 
@@ -341,3 +342,58 @@ The only structural levers left are out of scope here (quantization to cut FLOPs
 **Recommendation: LM head stays as-is; treat WARP decode as at its fp32 compute ceiling. Any further WARP
 speedup needs a FLOP reduction (quantization) — a separate, larger decision — otherwise the hardware GPU
 (`Backend = AUTO`) remains the optional accelerator.**
+
+## 11. GEMMA-WARP-19 — quantization / precision feasibility (decision only)
+
+Done, decision only — no production quantization, no `.wdmlpack`/runtime change. §10 left WARP at its fp32
+DML-GEMM compute ceiling; this slice asks whether reduced precision / fewer FLOPs is a sensible WARP lever.
+
+**What exists already (grounded in the code):**
+- The product GEMM is a DirectML `DML_OPERATOR_GEMM` on **FP32** tensors (`MatMulNBitsKernel`, weights
+  dequantized to FP32 at load). Every projection + the LM head use it.
+- An **INT4** custom HLSL matvec (`int4Shader`, AWQ block-128, "~8× less memory bandwidth") is already
+  implemented (the Phi-3 path) and gateable — so INT4 is buildable without new infrastructure.
+- There is **no FP16/BF16 GEMM operator** wired (the GEMM is FP32-only) and **no INT8/MatMulInteger** path
+  in the WARP GEMM.
+
+**Measured — numeric feasibility of 16-bit weights** (`Gemma3WarpPrecisionFeasibilityProbeTest`,
+`-Dgemma.warp.realModel=true -Dgemma.warp.quantProbe=true`, WARP adapter): rounding the LM-head weights to
+FP16 / BF16 and running them through the existing FP32 GEMM.
+
+| variant | operator path | weight | Top-1 | maxAbsDev | meanAbsDev |
+|---------|---------------|-------:|------:|----------:|-----------:|
+| fp32 (baseline) | DML GEMM FLOAT32 | 640 MB | = | 0 | 0 |
+| fp16 weights | DML GEMM FLOAT32 (fp16-rounded) | 320 MB | = (identical) | 0.0000 | 0.000000 |
+| bf16 weights | DML GEMM FLOAT32 (bf16-rounded) | 320 MB | = (identical) | 0.0000 | 0.000000 |
+
+The deviation is **exactly zero** because the `gemma-3-270m-it` weights are **stored in BF16** (verified:
+all safetensors dtypes = BF16). So our FP32 is bf16 widened, and 16-bit storage round-trips losslessly. The
+FP32 product path gives " Paris" (9079); 16-bit weights keep the full-vocab Top-1.
+
+**Why quantization does not help WARP *speed* (the relevant levers):**
+- **INT4:** already measured **~7× slower on WARP** in §1/14a (custom INT4 matvec ≈145 ms vs DML-GEMM
+  ≈20 ms per per-layer matvec). INT4's benefit is memory bandwidth; WARP is a **CPU software rasterizer that
+  is compute-bound** (§9), so the bandwidth saving is irrelevant and the unpack adds CPU work. INT4 is also
+  lossy and would need its own packed format + scales/zero-points.
+- **FP16/BF16 compute:** no operator wired, and on the WARP CPU rasterizer fp16 arithmetic is emulated with
+  no throughput gain; halving memory does not speed up a compute-bound matmul. Building an fp16 GEMM operator
+  is real work with ~no expected WARP speedup.
+- **INT8/MatMulInteger:** same bandwidth-not-the-bottleneck logic on WARP; not wired.
+
+**Decision: D — quantization does not pay off for WARP *speed*; WARP stays the stable FP32 baseline (~500
+ms/token).** WARP is at its fp32 DML-GEMM compute ceiling and reduced precision cannot move a compute-bound
+CPU matmul. The one genuinely free win is **16-bit weight *storage*** (the model is already BF16: ~2× smaller
+weights, lossless) — but that is a **memory** decision, not a speed one, and still needs a 16-bit-storage GEMM
+path; it must be its own deliberate slice, not folded into a perf slice.
+
+- **WARP** = the stable CPU-only product path (no Python, no ONNX RT, no extra DLLs), ~500 ms/token at its
+  fp32 compute ceiling.
+- **AUTO/GPU** = the optional accelerator (`Backend = AUTO`, ~150 ms/token on this host's RTX 5080), not the
+  product focus.
+- **Quantization** = a separate product decision (memory via 16-bit storage, or a different backend), **not**
+  a WARP speed optimization — explicitly out of scope for the perf-slice line.
+
+**Should GEMMA-WARP-20 be a real quantization slice? No — not for speed.** Recommendation: stop the WARP
+*speed*-optimization line here (it is at the fp32 compute ceiling). A future quantization slice would only be
+justified as a **memory** effort (lossless 16-bit weight storage) and should be scoped and approved as its
+own product decision, not as a continuation of the perf line.
