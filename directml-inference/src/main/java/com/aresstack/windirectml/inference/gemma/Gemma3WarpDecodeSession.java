@@ -151,9 +151,7 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
         int seqLen = promptIds.length;
         residentKv().reset();
         residentKv().ensureCapacity(ctx(), seqLen);
-        float[][] emb = weights.hasByteBufferEmbedding()
-                ? Gemma3WarpEmbedding.lookupScaled(weights.embeddingFp32Le(), promptIds, hidden, embeddingScale)
-                : Gemma3WarpEmbedding.lookupScaled(weights.embeddingFloat(), promptIds, hidden, embeddingScale);
+        float[][] emb = weights.embedScaled(promptIds, embeddingScale);
         WarpGpuBuffer[] h = new WarpGpuBuffer[seqLen];
         for (int p = 0; p < seqLen; p++) {
             h[p] = ctx().upload(emb[p]);
@@ -212,9 +210,7 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
             throw new IllegalArgumentException("token id out of range: " + tokenId);
         }
         int[] one = {tokenId};
-        float[] embedRow = weights.hasByteBufferEmbedding()
-                ? Gemma3WarpEmbedding.lookupScaled(weights.embeddingFp32Le(), one, hidden, embeddingScale)[0]
-                : Gemma3WarpEmbedding.lookupScaled(weights.embeddingFloat(), one, hidden, embeddingScale)[0];
+        float[] embedRow = weights.embedScaled(one, embeddingScale)[0];
         // Grow the resident KV cache for this position OUTSIDE the per-layer batch (growth copies + frees
         // the old buffers synchronously, which must not race with deferred work).
         residentKv().ensureCapacity(ctx(), pos + 1);
@@ -287,9 +283,7 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
             throw new IllegalArgumentException("token id out of range: " + tokenId);
         }
         int[] one = {tokenId};
-        float[] hiddenVec = weights.hasByteBufferEmbedding()
-                ? Gemma3WarpEmbedding.lookupScaled(weights.embeddingFp32Le(), one, hidden, embeddingScale)[0]
-                : Gemma3WarpEmbedding.lookupScaled(weights.embeddingFloat(), one, hidden, embeddingScale)[0];
+        float[] hiddenVec = weights.embedScaled(one, embeddingScale)[0];
         for (Gemma3WarpLayer layer : layers) {
             hiddenVec = layer.decodeStep(hiddenVec, pos, cache);
         }
@@ -303,9 +297,7 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
 
     private Gemma3WarpLmHead lmHead() {
         if (lmHead == null) {
-            lmHead = weights.hasByteBufferEmbedding()
-                    ? Gemma3WarpLmHead.fromFp32ByteBuffer(wb, config.vocabSize(), hidden, weights.embeddingFp32Le())
-                    : Gemma3WarpLmHead.fromFloatArray(wb, config.vocabSize(), hidden, weights.embeddingFloat());
+            lmHead = weights.buildLmHead(wb);
         }
         return lmHead;
     }

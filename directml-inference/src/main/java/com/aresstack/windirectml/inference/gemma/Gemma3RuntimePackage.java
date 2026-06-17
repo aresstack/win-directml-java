@@ -94,8 +94,11 @@ public final class Gemma3RuntimePackage {
                     FileChannel.MapMode.READ_ONLY, header.payloadOffset(), header.payloadLength());
             SafeTensorsReader.SafeTensorsFile file = SafeTensorsReader.readFromBuffer(packagePath, payload);
 
-            ByteBuffer embedding = Gemma3WeightBufferView.decodeFp32LittleEndian(
-                    entry(file, Gemma3TensorNameMapper.EMBED_TOKENS));
+            // GEMMA-BF16-PACK-2: retain the tied embedding/LM head as BF16 (~half the host RAM) when the
+            // payload is BF16 — rows are widened to FP32 on demand for the lookup and once for the LM-head
+            // device upload. Non-BF16 payloads keep the FP32 decode. No .wdmlpack format change (the layer
+            // projections are unchanged — that is a possible later BF16-PACK-3).
+            SafeTensorsReader.SafeTensorEntry embEntry = entry(file, Gemma3TensorNameMapper.EMBED_TOKENS);
             float[] finalNorm = Gemma3ReferenceWeights.decodeFloats(entry(file, Gemma3TensorNameMapper.FINAL_NORM));
 
             int n = config.numHiddenLayers();
@@ -116,6 +119,11 @@ public final class Gemma3RuntimePackage {
                         buffer(file, Gemma3TensorNameMapper.downProj(i)),
                         floats(file, Gemma3TensorNameMapper.postFeedforwardLayerNorm(i)));
             }
+            if ("BF16".equals(embEntry.dtype())) {
+                return Gemma3WarpWeights.ofBf16Embedding(config, Gemma3Bf16WeightView.ofBf16Copy(embEntry),
+                        finalNorm, layers);
+            }
+            ByteBuffer embedding = Gemma3WeightBufferView.decodeFp32LittleEndian(embEntry);
             return Gemma3WarpWeights.ofByteBufferEmbedding(config, embedding, finalNorm, layers);
         }
     }

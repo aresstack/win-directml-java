@@ -33,6 +33,24 @@ public final class Gemma3WarpEmbedding {
         return out;
     }
 
+    /**
+     * Lookup + scale from a retained BF16 view (GEMMA-BF16-PACK-2): only the requested token rows are
+     * widened BF16→FP32 and scaled. Numerically identical to the FP32-buffer lookup for a BF16 source.
+     */
+    public static float[][] lookupScaled(Gemma3Bf16WeightView embedding, int[] ids, int hidden, float scale) {
+        if (embedding.cols() != hidden) {
+            throw new IllegalArgumentException("embedding cols " + embedding.cols() + " != hidden " + hidden);
+        }
+        float[][] out = new float[ids.length][hidden];
+        for (int t = 0; t < ids.length; t++) {
+            if (ids[t] < 0 || ids[t] >= embedding.rows()) {
+                throw new IllegalArgumentException("token id out of range: " + ids[t]);
+            }
+            embedding.decodeRowScaled(ids[t], scale, out[t]);
+        }
+        return out;
+    }
+
     /** Lookup + scale from a {@code [vocab, hidden]} row-major little-endian FP32 {@link ByteBuffer}. */
     public static float[][] lookupScaled(ByteBuffer embeddingFp32Le, int[] ids, int hidden, float scale) {
         if (embeddingFp32Le.order() != ByteOrder.LITTLE_ENDIAN) {

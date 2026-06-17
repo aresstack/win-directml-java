@@ -40,6 +40,19 @@ public final class Gemma3WarpLmHead implements AutoCloseable {
         return new Gemma3WarpLmHead(vocab, hidden, p);
     }
 
+    /**
+     * Heap-light from a retained BF16 view (GEMMA-BF16-PACK-2): the device weight buffer is FP32 (the DML
+     * GEMM is FP32), so the BF16 weights are widened once into a transient FP32 buffer for the upload and
+     * then released — the retained host copy stays BF16 (~half the RAM). Numerically identical to
+     * {@link #fromFp32ByteBuffer} for a BF16 source.
+     */
+    public static Gemma3WarpLmHead fromBf16View(WindowsBindings wb, int vocab, int hidden, Gemma3Bf16WeightView view) {
+        Objects.requireNonNull(view, "view");
+        WarpDenseProjection p = WarpDenseProjection.fromDequantizedWeights(
+                wb, "gemma3.lm_head", vocab, hidden, view.inflateToFp32());
+        return new Gemma3WarpLmHead(vocab, hidden, p);
+    }
+
     /** Build from a row-major {@code [vocab, hidden]} {@code float[]} (reference/synthetic). */
     public static Gemma3WarpLmHead fromFloatArray(WindowsBindings wb, int vocab, int hidden, float[] embedding) {
         Objects.requireNonNull(embedding, "embedding");

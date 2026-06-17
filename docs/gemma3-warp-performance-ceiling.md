@@ -518,3 +518,39 @@ operator — out of scope and shown to give no speed benefit (§11).
 - If host memory is not a constraint on the target workstation, this can be **deferred** — there is no disk,
   speed, or correctness reason to do it. It is purely a memory/packaging product decision, separate from the
   WARP speed line.
+
+## 14. GEMMA-BF16-PACK-2 — tied embedding/LM-head kept BF16 in host RAM (memory only)
+
+Done — the narrow, lowest-risk item from §13: the tied embedding / LM head is now **retained as BF16** in
+host RAM instead of being widened to a retained FP32 ByteBuffer at load. Memory only, **no `.wdmlpack`
+format change, no package migration, no GPU/GEMM change, no speed promise**. The layer projections are
+untouched (a possible later BF16-PACK-3).
+
+**Design (encapsulated, not ByteBuffer logic sprayed through the runtime):**
+- `Gemma3Bf16WeightView` — a retained BF16 host view (`rows*cols*2` bytes) with `decodeRowScaled` (widen one
+  row on demand for the embedding lookup) and `inflateToFp32` (one transient full widen for the LM-head
+  device upload; the device buffer stays FP32 for the fp32 GEMM).
+- `Gemma3WarpWeights` gained an `ofBf16Embedding` representation and two domain methods — `embedScaled(ids,
+  scale)` ("embeddingLookup reads token embeddings") and `buildLmHead(wb)` ("lmHeadProjection uses the tied
+  weight") — so the session and forward pass no longer branch on the storage form (float[] / FP32 BB / BF16).
+- `Gemma3RuntimePackage.loadWarpWeightsHeapLight` retains BF16 for a BF16 payload (the product model),
+  FP32 otherwise.
+
+**Measured (real `gemma-3-270m-it`, WARP adapter):**
+
+| metric | FP32 (before) | BF16 (after) |
+|--------|--------------:|-------------:|
+| retained embedding host RAM | 640 MB | **320 MB** (−320 MB) |
+| embedding decode/copy at load | 1690 ms | **127 ms** (~13× faster — bulk copy vs widening 167M floats) |
+| decode avg/token | 570.6 ms | 577.1 ms (**+1.1%, within noise**) |
+| embedding row decode (ids 0/1/9079/last/random) | — | **byte-identical** to FP32 |
+| Paris (token 9079) | ✓ | ✓ |
+
+Only the tied embedding/LM-head host copy is affected. The FP32 **device** buffer is unchanged (fp32 GEMM
+floor). Net: ~320 MB less system RAM and a faster load, lossless, decode unchanged.
+
+**Recommendation — BF16-PACK-3 (layer projections): only if more host RAM is needed.** The same technique
+would save ~191 MB more (the projection host buffers, §13), but it touches all q/k/v/o + gate/up + down per
+layer and the fused-projection packing (`fromFusedWeightSources` would inflate BF16 parts), so it is more
+code for a smaller, more spread-out gain. Recommended **only if** host RAM is still a constraint after this
+slice; otherwise stop here — the big, isolated 320 MB item is done.

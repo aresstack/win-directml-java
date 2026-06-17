@@ -51,9 +51,7 @@ public final class Gemma3WarpForwardPass implements AutoCloseable {
 
     private Gemma3WarpLmHead lmHead() {
         if (lmHead == null) {
-            lmHead = weights.hasByteBufferEmbedding()
-                    ? Gemma3WarpLmHead.fromFp32ByteBuffer(wb, config.vocabSize(), hidden, weights.embeddingFp32Le())
-                    : Gemma3WarpLmHead.fromFloatArray(wb, config.vocabSize(), hidden, weights.embeddingFloat());
+            lmHead = weights.buildLmHead(wb);
         }
         return lmHead;
     }
@@ -64,9 +62,7 @@ public final class Gemma3WarpForwardPass implements AutoCloseable {
         if (tokenIds == null || tokenIds.length == 0) {
             throw new IllegalArgumentException("tokenIds must not be empty");
         }
-        float[][] state = weights.hasByteBufferEmbedding()
-                ? Gemma3WarpEmbedding.lookupScaled(weights.embeddingFp32Le(), tokenIds, hidden, embeddingScale)
-                : Gemma3WarpEmbedding.lookupScaled(weights.embeddingFloat(), tokenIds, hidden, embeddingScale);
+        float[][] state = weights.embedScaled(tokenIds, embeddingScale);
         for (Gemma3WarpLayer layer : layers) {
             layer.forward(state);
         }
