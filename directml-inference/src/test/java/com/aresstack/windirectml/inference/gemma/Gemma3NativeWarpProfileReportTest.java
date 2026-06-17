@@ -28,12 +28,12 @@ class Gemma3NativeWarpProfileReportTest {
     @Test
     void detailedReportCarriesEverySpecField() {
         List<String> lines = Gemma3NativeWarpProfileReport.detailed(
-                sampleProfile(), "native-warp-experimental", "WARP", "streaming",
+                sampleProfile(), "native-warp", "WARP", "streaming",
                 "model_gemma3.wdmlpack", "tokenizer.json", "summarize", 142, 4, 1400);
         String text = String.join("\n", lines);
 
         assertTrue(text.contains("Gemma native WARP profile:"), text);
-        assertTrue(text.contains("runtime mode: native-warp-experimental"), text);
+        assertTrue(text.contains("runtime mode: native-warp"), text);
         assertTrue(text.contains("backend: WARP"), text);
         assertTrue(text.contains("adapter: "), text);
         assertTrue(text.contains("execution: resident-batched"), text);
@@ -74,11 +74,11 @@ class Gemma3NativeWarpProfileReportTest {
     @Test
     void summaryReportIsShortAndOmitsPerPhaseDetail() {
         List<String> lines = Gemma3NativeWarpProfileReport.summary(
-                "native-warp-experimental", 28, 27, "STOP_TOKEN", 1400);
+                "native-warp", 28, 27, "STOP_TOKEN", 1400);
         String text = String.join("\n", lines);
         assertTrue(lines.size() <= 6, "summary should be short: " + lines);
         assertTrue(text.contains("Model loaded and generated in 1400 ms"), text);
-        assertTrue(text.contains("Runtime mode: native-warp-experimental"), text);
+        assertTrue(text.contains("Runtime mode: native-warp"), text);
         assertTrue(text.contains("Prompt tokens: 28"), text);
         assertTrue(text.contains("Output tokens: 27"), text);
         assertTrue(text.contains("Finish reason: STOP_TOKEN"), text);

@@ -3,15 +3,17 @@ package com.aresstack.windirectml.inference.gemma;
 /**
  * Selects the Gemma 3 workbench execution path (GEMMA-WARP-11).
  *
- * <p>The default stays the {@link #EXTERNAL} local Python/Transformers probe; the native Java/WARP
- * runtime ({@link #NATIVE_WARP}) is experimental and only used when explicitly requested via
- * {@code -Dgemma.runtime=native-warp}. An explicit native flag never silently falls back to Python — it
- * either runs natively or fails with a clear message.</p>
+ * <p>{@link #NATIVE_WARP} is the product path: the native Java/DirectML runtime that the Workbench uses for
+ * {@code Backend = WARP} (CPU-only software adapter) and {@code Backend = AUTO} (optional hardware adapter).
+ * It never silently falls back to Python — it either runs natively or fails with a clear message.
+ * {@link #EXTERNAL} is the legacy local Python/Transformers probe, used only for {@code Backend = CPU}. The
+ * choice comes from the general Backend selector; {@code -Dgemma.runtime} no longer drives the product path
+ * (GEMMA-AUTO-GPU-1).</p>
  */
 public enum Gemma3RuntimeMode {
 
     EXTERNAL("external-python-transformers"),
-    NATIVE_WARP("native-warp-experimental");
+    NATIVE_WARP("native-warp");
 
     /** System property that selects the runtime: {@code external} (default) or {@code native-warp}. */
     public static final String PROPERTY = "gemma.runtime";

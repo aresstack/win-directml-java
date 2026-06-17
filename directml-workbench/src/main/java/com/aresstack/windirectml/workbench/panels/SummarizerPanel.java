@@ -323,7 +323,7 @@ public final class SummarizerPanel extends JPanel {
     }
 
     /**
-     * Experimental native Java/WARP Gemma 3 path (selected via the 'Gemma runtime' control, no JVM flag).
+     * Native Java/DirectML Gemma 3 product path (chosen by the general Backend: WARP/AUTO -> native).
      * Loads weights from the compiled {@code model_gemma3.wdmlpack}; on a missing package it fails clearly
      * rather than falling back to Python. With {@code showProfile} it prints the detailed phase/WARP-counter
      * profile (GEMMA-WORKBENCH-PROFILING-1).

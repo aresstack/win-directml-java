@@ -87,6 +87,15 @@ class GemmaRuntimeSelectionTest {
     }
 
     @Test
+    void gemmaNativeRuntimeLabelHasNoResearchWording() {
+        // GEMMA-PRODUCT-2: the visible native runtime label is a product label, not "experimental"/"probe".
+        String label = Gemma3RuntimeMode.NATIVE_WARP.displayLabel().toLowerCase();
+        assertFalse(label.contains("experimental"), "native runtime label must not say 'experimental': " + label);
+        assertFalse(label.contains("probe"), "native runtime label must not say 'probe': " + label);
+        assertEquals("native-warp", Gemma3RuntimeMode.NATIVE_WARP.displayLabel());
+    }
+
+    @Test
     void streamingIsTheDefaultOutputMode() {
         String prevOut = System.getProperty(GenerationOutputMode.OUTPUT_PROPERTY);
         String prevStream = System.getProperty(GenerationOutputMode.STREAMING_PROPERTY);
