@@ -12,9 +12,10 @@ tasks.withType(Test).configureEach {
     maxHeapSize = '2g'
     // Forward the opt-in gemma test toggles from the Gradle CLI to the test JVM (Gradle does not pass
     // -D through by default). Unset -> gated real-model/perf tests stay disabled and the suite is green.
-    ['gemma.warp.realModel', 'gemma.auto.gpu', 'gemma.warp.groupProfile', 'gemma.perf.probe',
-     'gemma.testModelDir', 'gemma.runtime', 'gemma.warp.bench', 'gemma.warp.execution', 'gemma.warp.attention',
-     'directml.generation.profile', 'directml.generation.output', 'directml.generation.streaming'].each { key ->
+    ['gemma.warp.realModel', 'gemma.auto.gpu', 'gemma.warp.groupProfile', 'gemma.warp.lmHeadProbe',
+     'gemma.perf.probe', 'gemma.testModelDir', 'gemma.runtime', 'gemma.warp.bench', 'gemma.warp.execution',
+     'gemma.warp.attention', 'directml.generation.profile', 'directml.generation.output',
+     'directml.generation.streaming'].each { key ->
         def value = System.getProperty(key)
         if (value != null) {
             systemProperty(key, value)

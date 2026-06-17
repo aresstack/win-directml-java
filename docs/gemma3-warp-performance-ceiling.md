@@ -28,6 +28,7 @@ No invented figures.
 | 15 | fused post-attn/post-ff RMSNorm + residual add (norm+add → 1) | dispatches **380 → 344**, uav barriers **399 → 363**; decode flat (WARP ~600 ms, GPU ~210 ms) |
 | 16 | fused QKV + GateUp projection groups (3→1 q/k/v, 2→1 gate/up DML-GEMMs) | dispatches **344 → 290**, uav barriers **363 → 309**; **WARP decode ~600 → ~525 ms (~15%)**, GPU ~210 → ~150 ms |
 | 17 | projection-fusion hardening + measured per-group timing breakdown (no new optimization) | parity/edge tests; **WARP decode is matmul-bound: lm-head 52%, the 5 GEMMs ~90%, all element kernels ~10%** |
+| 18 | LM-head DML-GEMM shape probe (measure only) | **baseline GEMV (265 ms) is optimal**; GEMM M=1 3.3× slower, row-blocking neutral/worse → WARP at its fp32 DML-GEMM compute ceiling |
 
 Consolidated per-decode-token trajectory (real model):
 
@@ -304,3 +305,39 @@ finding.)
   cannot move WARP wall-clock (confirms §7); and the **attention/KV data path** (1.5%) is negligible on WARP.
 
 WARP stays the product path; AUTO/GPU stays the optional control path.
+
+## 10. GEMMA-WARP-18 — LM-head DML-GEMM shape probe (measured; result: keep baseline)
+
+Done, measurement only — the product LM-head path is unchanged. The §9 lever (the tied LM head, 52% of WARP
+decode) was probed for a better DML-GEMM shape. `Gemma3WarpLmHeadShapeProbeTest`
+(`-Dgemma.warp.realModel=true -Dgemma.warp.lmHeadProbe=true`), explicit WARP adapter, real model, matmul-only
+timing (warm + averaged), every variant fed the same input and verified to keep the full-vocab Top-1; the
+product session separately confirms " Paris" (9079).
+
+| variant | layout | dispatches | lm-head ms/token | decode est ms | mem | Top-1 |
+|---------|--------|-----------:|-----------------:|--------------:|-----|------:|
+| **baseline-matvec (GEMV)** | `[262144,640]·[640]` | 1 | **265.5** | 506 | 640 MB | = |
+| batched-m1 (GEMM M=1) | `[1,640]·[262144,640]ᵀ` | 1 | 874.0 | 1115 | 640 MB | = |
+| rowblock-4-matvec | 4×`[65536,640]` coalesced | 4 | 267.5 | 508 | 640 MB | = |
+| rowblock-16-matvec | 16×`[16384,640]` coalesced | 16 | 281.2 | 522 | 640 MB | = |
+
+(real decode ≈ 506 ms/token; rest-of-decode ≈ 241 ms; all variants identical Top-1; Paris green.)
+
+**Findings:**
+1. **Which is fastest?** The **current baseline GEMV (`matvecResident`, 265 ms)** — nothing beats it.
+2. **Gain?** None. The GEMM M=1 form is **3.3× slower** (874 ms — the batched shader is not tuned for a
+   single row), and row-blocking is **neutral to worse** (4 blocks +0.7%, 16 blocks +5.9% from per-dispatch
+   overhead).
+3. **Extra memory?** None — all variants are the same 640 MB tied weights (row-blocking just slices them; 0
+   overhead, but also 0 speedup).
+4. **Production-ready variant?** No — none is worth productizing.
+5. **GEMMA-WARP-19?** Do **not** change the LM head. It is already optimal in DML-GEMM form.
+
+**Ceiling note:** the LM head is ~168M MACs/token at ~265 ms ≈ **0.6 GMAC/s** effective; the MLP GEMMs sit
+at the same throughput (~70M MACs/130 ms). WARP decode is now at its **fp32 DML-GEMM compute ceiling** on the
+CPU rasterizer — the time is raw FLOPs, not shape/overhead. Within the allowed constraints (DML-GEMM, fp32,
+no `.wdmlpack`/INT4/custom-kernel change) there is no faster LM head, and the MLP GEMMs face the same wall.
+The only structural levers left are out of scope here (quantization to cut FLOPs, or the optional GPU path).
+**Recommendation: LM head stays as-is; treat WARP decode as at its fp32 compute ceiling. Any further WARP
+speedup needs a FLOP reduction (quantization) — a separate, larger decision — otherwise the hardware GPU
+(`Backend = AUTO`) remains the optional accelerator.**
