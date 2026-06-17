@@ -458,3 +458,63 @@ heavy probes are skipped and the suite stays light.
 
 The per-session `Gemma projection fusion: …` line was lowered from INFO to DEBUG so the normal runtime emits
 no extra Gemma decode log. No behaviour, kernel, format, runtime-default or UI change.
+
+## 13. GEMMA-BF16-PACK-1 — lossless 16-bit weight storage (investigation only)
+
+A **memory/packaging** investigation, explicitly **not** a speed slice and not a continuation of the WARP
+speed line (§12). No format change, no product-path change. `Gemma3Bf16PackFeasibilityProbeTest`
+(`-Dgemma.warp.realModel=true -Dgemma.warp.bf16Probe=true`).
+
+**What is BF16 already:** every matmul weight (the tied embedding/LM head and all q/k/v/o + gate/up + down
+projections) is **BF16** in the SafeTensors file (verified). The norm vectors are tiny.
+
+**Where FP32 is created today:** the `.wdmlpack` payload is the **verbatim SafeTensors image**, so the
+package is **already BF16 on disk** — there is *no FP32 on disk to shrink*. FP32 is materialised at
+**runtime load**: `Gemma3WeightBufferView.decodeFp32LittleEndian` widens BF16→FP32 into direct off-heap
+ByteBuffers, retained in `Gemma3WarpWeights` (the embedding buffer is also read every token by the
+embedding lookup; the projection buffers are held by the layer weights). Those FP32 weights are then
+uploaded to the device buffers (also FP32) that the **fp32 DML GEMM** reads.
+
+**Memory accounting (measured, real model):**
+
+| group | BF16 (disk/source) | FP32 (runtime widen) | host saving if kept BF16 |
+|-------|-------------------:|---------------------:|-------------------------:|
+| tied embedding / LM head | 320 MB | 640 MB | **320 MB** |
+| layer projections (q/k/v/o, gate/up, down) | 191 MB | 383 MB | 191 MB |
+| norm vectors (float[]) | — | 0.2 MB | — |
+| **total matmul weights** | **511 MB** | **1022 MB** | **511 MB** |
+
+A BF16→FP32 inflate is byte-identical to the current FP32 decode (verified on the embedding); the FP32
+product path gives " Paris" (9079).
+
+**Answers to the investigation questions:**
+1. *Which weights are BF16?* All matmul weights (embedding/LM head + every projection); norms are float[].
+2. *Where does FP32 storage arise?* Only at runtime: the heap-light loader widens BF16→FP32 into retained
+   off-heap ByteBuffers, and the device/GEMM buffers are FP32. **None on disk.**
+3. *What strictly needs FP32?* The **device buffers**, because the DML GEMM operator is FP32
+   (`DML_TENSOR_DATA_TYPE_FLOAT32`). The embedding *lookup* needs FP32 values per row but can inflate them
+   on the fly.
+4. *Can a BF16 payload fit `.wdmlpack`?* It already does — the payload is the verbatim BF16 SafeTensors. **No
+   format or manifest change is needed**; storing BF16 is the status quo.
+5. *Is runtime prepacking BF16→FP32 at load better than persisting FP32?* The runtime already does exactly
+   this (decode-on-load); nothing persists FP32. The open choice is only *what the runtime keeps in host RAM*
+   — FP32 (today) or BF16-and-inflate-at-use.
+6. *What package/manifest change for persistent BF16?* **None** — it is already BF16.
+
+**Realistic saving:** up to **~511 MB of host/system RAM** by retaining the decoded weights as BF16 and
+inflating BF16→FP32 (a) per row in the embedding lookup and (b) streaming into the GPU upload staging,
+instead of widening to FP32 ByteBuffers at load. The single highest-value, lowest-risk item is the
+**embedding lookup buffer (320 MB)**, which must be retained anyway. The **device buffers stay FP32** (the
+fp32 GEMM floor, ~1022 MB; on WARP these live in system RAM); reducing *those* would need an fp16 GEMM
+operator — out of scope and shown to give no speed benefit (§11).
+
+**Decision — BF16-PACK-2: recommended only as a deliberate host-memory optimization, not now-by-default.**
+- It is a **system-RAM** win (~up to 511 MB; embedding 320 MB), **lossless**, with **no `.wdmlpack` format
+  change**, **no GPU/GEMM change**, **no speed impact**, and **no package migration** (existing packages stay
+  valid — they are already BF16).
+- Scope for a future **GEMMA-BF16-PACK-2** (if memory is prioritised): change the *runtime load* to keep the
+  embedding (and optionally projection) weights as BF16 buffers and inflate at use/upload; start with the
+  embedding lookup. Keep the FP32 device buffers (fp32 GEMM).
+- If host memory is not a constraint on the target workstation, this can be **deferred** — there is no disk,
+  speed, or correctness reason to do it. It is purely a memory/packaging product decision, separate from the
+  WARP speed line.
