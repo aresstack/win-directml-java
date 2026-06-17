@@ -27,6 +27,7 @@ No invented figures.
 | 14b | fused attention (scores+softmax+value → 1) + dispatch/barrier counters | dispatches **416 → 380**, uav barriers **435 → 399**; decode flat |
 | 15 | fused post-attn/post-ff RMSNorm + residual add (norm+add → 1) | dispatches **380 → 344**, uav barriers **399 → 363**; decode flat (WARP ~600 ms, GPU ~210 ms) |
 | 16 | fused QKV + GateUp projection groups (3→1 q/k/v, 2→1 gate/up DML-GEMMs) | dispatches **344 → 290**, uav barriers **363 → 309**; **WARP decode ~600 → ~525 ms (~15%)**, GPU ~210 → ~150 ms |
+| 17 | projection-fusion hardening + measured per-group timing breakdown (no new optimization) | parity/edge tests; **WARP decode is matmul-bound: lm-head 52%, the 5 GEMMs ~90%, all element kernels ~10%** |
 
 Consolidated per-decode-token trajectory (real model):
 
@@ -242,3 +243,64 @@ better than several small matmuls — and each fused matvec saves its staging co
 the structural win small-kernel fusion could not deliver: the lever on WARP is **GEMM shape/count**, not
 element-dispatch count. Remaining matmuls/layer are now 4 (QKV, O, GateUp, Down) + the tied LM head. The
 GPU path benefits too (~30% faster decode) and remains the optional accelerator (`Backend = AUTO`).
+
+## 9. GEMMA-WARP-17 — hardening + measured per-group timing (no new optimization)
+
+Two deliverables, no new optimization. (1) Hardened the GEMMA-WARP-16 projection fusion as the product
+path; (2) measured where the WARP decode token time actually goes, per kernel group, to choose the next
+lever from data.
+
+**Hardening.** Added explicit parity (`WarpDenseProjectionFusionParityTest`: a fused projection == the
+separate parts, for the 3-part QKV and 2-part GateUp shapes) and fail-fast guards (mismatched input width
+or a wrong-sized part throws — never a silent wrong fused matrix). `WarpGpuBuffer.slice` edge cases
+(`WarpGpuBufferSliceTest`: bounds/offset, the 4-byte-aligned VA offset, no re-slice/readback on a view,
+non-owning `close()`, and a functional UAV-binding check). `Gemma3WarpMlp.mlpBatched` now falls back to the
+per-position fused MLP when batched matmul is unavailable or the row cap is exceeded (symmetric with the
+QKV batched path) — no silent mis-shaped matmul. QKV/GateUp fusion stays active.
+
+**Measured per-group timing.** New opt-in `WarpGroupProfiler` + `WarpExecutionContext.mark/endGroup`
+(`-Dgemma.warp.realModel=true -Dgemma.warp.groupProfile=true`, `Gemma3WarpDecodeGroupProfileTest`). The
+normal runtime is untouched (no sink attached → `mark()` is a no-op, coalescing/the deferred batch are
+unchanged). In profile mode the decode keeps coalescing but drops the deferred batch, so each `mark()`
+boundary flushes+fences that group's command list once and times it — one submit/fence per group,
+representative of the coalesced pipeline (profiled total ≈ real coalesced decode, e.g. 531 ≈ 522 ms/token
+on WARP, confirming the attribution is accurate).
+
+Measured on the **explicit WARP software adapter** (the CPU-only product path), real `gemma-3-270m-it`,
+warm decode tokens:
+
+| group | dispatches/token | ms/token | % of decode |
+|-------|-----------------:|---------:|------------:|
+| **lm-head** (tied, 262144×640) | 1 | ~278 | **52.3%** |
+| **gate+up projection** | 18 | ~90 | **17.0%** |
+| qkv projection | 18 | ~41 | 7.8% |
+| down projection | 18 | ~40 | 7.6% |
+| o projection | 18 | ~28 | 5.2% |
+| qk-norm + rope + kv-append | 108 | ~15 | 2.8% |
+| attention-context | 18 | ~8 | 1.5% |
+| input / preff / post-attn / postff norms | 18 ea | ~6 ea | ~1.1% ea |
+| geglu | 18 | ~6 | 1.1% |
+| final-rmsnorm + logits-readback + token-selection | — | ~2 | ~0.3% |
+
+Paris smoke green on WARP (token 9079).
+
+**Finding — WARP decode is matmul-bound, and LM-head-bound:** the five GEMMs are **~90%** of the WARP decode
+token, the tied **LM head alone is 52%** (a 262144×640 FP32 matvec run every token on the CPU rasterizer),
+and **all element/attention kernels together are only ~10%**. This is the same adapter the §7/§8 work runs
+on, and it explains both prior results cleanly: §7's small-kernel fusion was flat because those kernels are
+a tenth of the time; §8's GEMM fusion was a real win because GEMMs are nine-tenths. (For contrast, on the
+hardware GPU the distribution is flat ~7–8%/group and the LM head is ~1% — so this is specifically a WARP
+finding.)
+
+**Recommendation for GEMMA-WARP-18 (measure, do not blindly build):**
+- *Biggest remaining lever:* the **tied LM head (52%)**. It is a `[262144, 640]·[640]` FP32 matvec every
+  token. Investigate, data-first, whether a better DML-GEMM shape/path helps on WARP — e.g. the batched/
+  tiled matmul config, or row-blocking the 262144 output — keeping DML-GEMM (no custom/INT4 kernel, no
+  `.wdmlpack` change). Greedy decode still needs all logits (argmax), so the matmul itself is the target,
+  not skipping outputs.
+- *Second lever:* the **MLP GEMMs (GateUp 17% + Down 7.6% ≈ 25%)** — check the GateUp/Down GEMM shapes on
+  WARP (the intermediate=2048 matmuls dominate the per-layer cost).
+- *Do not pursue:* further **small-element fusion** (qk-norm/rope/kv-append 2.8%, each norm/geglu ~1%) — it
+  cannot move WARP wall-clock (confirms §7); and the **attention/KV data path** (1.5%) is negligible on WARP.
+
+WARP stays the product path; AUTO/GPU stays the optional control path.

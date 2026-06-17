@@ -240,17 +240,26 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         // sync point. All submissions are deferred, so the scratch buffers are freed only AFTER the batch
         // drains — closing them earlier would free GPU memory still referenced by a not-yet-executed list.
         // Only the returned {@code out} (and the caller-owned {@code hiddenIn}) outlive this method.
+        // GEMMA-WARP-17: in group-profiling mode skip only the deferred batch (keep coalescing), so each
+        // ctx.mark(..) boundary flushes+fences that group's coalesced list and times it — one submit/fence
+        // per group, representative of the product pipeline. The normal path is unchanged (one coalesced,
+        // deferred batch per layer); the mark(..) calls are no-ops when no group sink is attached.
+        boolean profiling = ctx.isGroupProfiling();
         java.util.List<WarpGpuBuffer> scratch = new java.util.ArrayList<>();
         WarpGpuBuffer out = null;
-        try (DirectMlGpuBatch batch = DirectMlGpuBatch.begin(ctx.bindings())) {
+        DirectMlGpuBatch batch = profiling ? null : DirectMlGpuBatch.begin(ctx.bindings());
+        try {
             ctx.beginRecording();
             try {
+            ctx.mark("input-rmsnorm");
             WarpGpuBuffer normed = track(scratch, k.rmsNorm().normalize(ctx, hiddenIn, inputLayerNormBuf, eps));
             // GEMMA-WARP-16: one fused QKV DML-GEMM; q/k/v are zero-copy slice views of its output.
+            ctx.mark("qkv-projection");
             WarpGpuBuffer qkv = track(scratch, qkvProj.forwardResident(ctx, normed));
             WarpGpuBuffer q = qkv.slice(0, attnDim);
             WarpGpuBuffer k0 = qkv.slice(attnDim, kvDim);
             WarpGpuBuffer v = qkv.slice(attnDim + kvDim, kvDim);
+            ctx.mark("qk-norm+rope+kv-append");
             WarpGpuBuffer qn = track(scratch, k.qkNorm().normalizeHeads(ctx, q, numHeads, headDim, qNormBuf, eps));
             WarpGpuBuffer kn = track(scratch, k.qkNorm().normalizeHeads(ctx, k0, numKvHeads, headDim, kNormBuf, eps));
             WarpGpuBuffer qr = track(scratch, k.rope().applyToHeads(ctx, qn, numHeads, headDim, pos, theta));
@@ -268,22 +277,35 @@ public final class Gemma3WarpLayer implements AutoCloseable {
             WarpGpuBuffer keys = lc.keys();
             WarpGpuBuffer values = lc.values();
 
+            ctx.mark("attention-context");
             WarpGpuBuffer context = attentionContext(ctx, scratch, qr, keys, values, pos, firstValid);
+            ctx.mark("o-projection");
             WarpGpuBuffer attnProj = track(scratch, oProj.forwardResident(ctx, context));
             // GEMMA-WARP-15: fused post-attention RMSNorm + residual add (one dispatch instead of two).
+            ctx.mark("post-attn-norm+add");
             WarpGpuBuffer hidden1 = track(scratch,
                     k.fusedNormAdd().normAdd(ctx, attnProj, postAttentionLayerNormBuf, hiddenIn, eps));
 
+            ctx.mark("preff-rmsnorm");
             WarpGpuBuffer ff = track(scratch, k.rmsNorm().normalize(ctx, hidden1, preFeedforwardLayerNormBuf, eps));
-            WarpGpuBuffer down = track(scratch, mlp.mlp(ctx, ff, scratch));
+            WarpGpuBuffer down = track(scratch, mlp.mlp(ctx, ff, scratch)); // mlp marks gateup/geglu/down
             // GEMMA-WARP-15: fused post-feedforward RMSNorm + residual add.
+            ctx.mark("postff-norm+add");
             out = k.fusedNormAdd().normAdd(ctx, down, postFeedforwardLayerNormBuf, hidden1, eps);
+            // GEMMA-WARP-17: close the layer's last timing group now, so the per-layer scratch teardown
+            // below is not attributed to it (no-op when not profiling).
+            ctx.endGroup();
             } finally {
                 // Submit the final pending command list (deferred into the batch) before the drain.
                 ctx.flushRecording();
             }
-            // batch.close() (try-with-resources) drains the layer's deferred submissions in one fence wait,
-            // so every scratch buffer has now been consumed and `out` is valid before we free them.
+            // batch.close() drains the layer's deferred submissions in one fence wait, so every scratch
+            // buffer has now been consumed and `out` is valid before we free them. (Profiling: per-group
+            // synchronous flushes already drained the work.)
+        } finally {
+            if (batch != null) {
+                batch.close();
+            }
         }
         for (WarpGpuBuffer b : scratch) {
             b.close();

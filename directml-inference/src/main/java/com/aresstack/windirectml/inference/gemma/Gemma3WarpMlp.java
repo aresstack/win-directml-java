@@ -156,10 +156,14 @@ public final class Gemma3WarpMlp implements AutoCloseable {
             throw new IllegalArgumentException("x length must equal hidden: x=" + x.elementCount() + ", hidden=" + hidden);
         }
         // GEMMA-WARP-16: one fused GateUp DML-GEMM; its [gate | up] output feeds the single-buffer GeGLU.
+        // GEMMA-WARP-17: mark(..) is a no-op unless a group profiler is attached.
+        ctx.mark("gateup-projection");
         WarpGpuBuffer gateUp = gateUpProj.forwardResident(ctx, x);
         scratch.add(gateUp);
+        ctx.mark("geglu");
         WarpGpuBuffer activated = geGlu.apply(ctx, gateUp, intermediate);
         scratch.add(activated);
+        ctx.mark("down-projection");
         return downProj.forwardResident(ctx, activated);
     }
 
@@ -173,6 +177,17 @@ public final class Gemma3WarpMlp implements AutoCloseable {
                                       java.util.List<WarpGpuBuffer> scratch, WarpGpuBuffer[] x, int seqLen)
             throws WindowsNativeException {
         ensureOpen();
+        // GEMMA-WARP-17 hardening: fall back to the per-position fused MLP when batched matmul is
+        // unavailable or the sequence exceeds the batch row cap — never silently mis-shape a batched matmul.
+        boolean batchable = gateUpProj.supportsBatchedResident() && downProj.supportsBatchedResident()
+                && seqLen <= com.aresstack.windirectml.windows.MatMulNBitsKernel.maxBatchRows();
+        if (!batchable) {
+            WarpGpuBuffer[] downPerPos = new WarpGpuBuffer[seqLen];
+            for (int p = 0; p < seqLen; p++) {
+                downPerPos[p] = track(scratch, mlp(ctx, x[p], scratch));
+            }
+            return downPerPos;
+        }
         WarpGpuBuffer batchX = track(scratch, ctx.allocate(seqLen * hidden));
         for (int p = 0; p < seqLen; p++) {
             rowCopy.copy(ctx, x[p], 0, batchX, p * hidden, hidden);

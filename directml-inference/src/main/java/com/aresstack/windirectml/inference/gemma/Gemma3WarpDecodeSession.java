@@ -231,18 +231,29 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
         // GEMMA-WARP-13d: per-layer-style batch (deferred fence) + command-list coalescing for the final
         // norm + tied LM-head matvec; the single logits readback drains the batch (logits must reach the CPU
         // for token selection). finalHidden feeds the recorded final-norm, so it stays alive until the drain.
-        try (DirectMlGpuBatch batch = DirectMlGpuBatch.begin(wb)) {
+        // GEMMA-WARP-17: in group-profiling mode run synchronously (no batch/coalescing) so the tail groups
+        // (final-rmsnorm, lm-head, logits-readback) are individually timed by the mark(..) boundaries.
+        boolean profiling = ctx().isGroupProfiling();
+        DirectMlGpuBatch batch = profiling ? null : DirectMlGpuBatch.begin(wb);
+        try {
             ctx().beginRecording();
             WarpGpuBuffer normed = null;
             WarpGpuBuffer logitsBuf = null;
             try {
+                ctx().mark("final-rmsnorm");
                 normed = kernels.rmsNorm().normalize(ctx(), finalHidden, finalNormBuf, eps);
+                ctx().mark("lm-head");
                 logitsBuf = lmHead().logitsResident(ctx(), normed);
-                ctx().flushRecording();         // submit pending list (deferred into the batch)
-                return logitsBuf.readback();     // drains the deferred work; the one logits readback
+                if (!profiling) {
+                    ctx().flushRecording();     // submit pending list (deferred into the batch)
+                }
+                ctx().mark("logits-readback");
+                float[] result = logitsBuf.readback(); // drains the deferred work; the one logits readback
+                ctx().endGroup();               // close the tail so token-selection is attributed separately
+                return result;
             } finally {
                 if (ctx().isRecording()) {
-                    ctx().flushRecording();      // error path: ensure the coalescing scope is closed
+                    ctx().flushRecording();      // close the coalescing scope (both modes)
                 }
                 if (logitsBuf != null) {
                     logitsBuf.close();
@@ -252,7 +263,20 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
                 }
                 finalHidden.close();
             }
+        } finally {
+            if (batch != null) {
+                batch.close();
+            }
         }
+    }
+
+    /**
+     * GEMMA-WARP-17: attach (or clear with {@code null}) an opt-in per-group decode timing profiler. While
+     * attached, the resident decode/logits path runs synchronously so each kernel group is individually
+     * timed (see {@link WarpGroupProfiler}). Measurement-only; the normal runtime never attaches one.
+     */
+    public void setGroupProfiler(WarpGroupProfiler profiler) {
+        ctx().setGroupSink(profiler == null ? null : profiler::record);
     }
 
     private float[] stepToken(int tokenId, int pos) throws WindowsNativeException {

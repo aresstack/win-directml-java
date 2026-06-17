@@ -33,8 +33,63 @@ public final class WarpExecutionContext {
     private MemorySegment recCmdList;
     private boolean recording; // a command list is currently open within the coalescing scope
 
+    // GEMMA-WARP-17: opt-in coarse group timing. When a sink is attached the caller still coalesces each
+    // group's dispatches into one command list (as the product path does) but runs WITHOUT a deferred
+    // batch, so mark()/endGroup() flush+fence the group's list synchronously and attribute the elapsed
+    // wall-clock + recorded-dispatch delta to that group — one submit/fence per group, representative of
+    // the coalesced pipeline. Null in the normal runtime (mark()/endGroup() return immediately, zero cost).
+    private WarpGroupSink groupSink;
+    private String curGroup;
+    private long curGroupT0;
+    private long curGroupDispatchBefore;
+
     public WarpExecutionContext(WindowsBindings wb) {
         this.wb = Objects.requireNonNull(wb, "wb");
+    }
+
+    /** Attach (or clear with {@code null}) the opt-in per-group timing sink (GEMMA-WARP-17). */
+    public void setGroupSink(WarpGroupSink sink) {
+        this.groupSink = sink;
+    }
+
+    /** Whether group timing is active — callers skip coalescing/the deferred batch so groups are measurable. */
+    public boolean isGroupProfiling() {
+        return groupSink != null;
+    }
+
+    /**
+     * Close the current timing group (flushing+fencing its coalesced command list) and start a new one named
+     * {@code name} (GEMMA-WARP-17). No-op when no sink is attached.
+     */
+    public void mark(String name) throws WindowsNativeException {
+        if (groupSink == null) {
+            return;
+        }
+        closeCurrentGroup();
+        curGroup = name;
+        curGroupT0 = System.nanoTime();
+        curGroupDispatchBefore = WarpSubmissionStats.snapshot().dispatches();
+    }
+
+    /** Close the current timing group without starting a new one (e.g. end of the tail). No-op when off. */
+    public void endGroup() throws WindowsNativeException {
+        if (groupSink == null) {
+            return;
+        }
+        closeCurrentGroup();
+    }
+
+    private void closeCurrentGroup() throws WindowsNativeException {
+        if (curGroup == null) {
+            return;
+        }
+        // Flush+fence the group's coalesced list (no batch active in profile mode → executeAndWait), so the
+        // elapsed wall-clock is the group's GPU time for one submit/fence.
+        flushOpenList();
+        long nanos = System.nanoTime() - curGroupT0;
+        long dispatches = WarpSubmissionStats.snapshot().dispatches() - curGroupDispatchBefore;
+        groupSink.record(curGroup, dispatches, nanos);
+        curGroup = null;
     }
 
     public WindowsBindings bindings() {
