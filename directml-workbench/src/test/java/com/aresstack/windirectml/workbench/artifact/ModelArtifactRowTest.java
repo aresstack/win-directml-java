@@ -1,7 +1,7 @@
 package com.aresstack.windirectml.workbench.artifact;
 
 import com.aresstack.windirectml.inference.artifact.CompilerMissingLifecycle;
-import com.aresstack.windirectml.inference.artifact.Gemma3DownloadLifecycle;
+import com.aresstack.windirectml.inference.artifact.Gemma3PackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
 import com.aresstack.windirectml.inference.artifact.ModelConversionResult;
 import com.aresstack.windirectml.inference.artifact.ModelFamily;
@@ -85,20 +85,26 @@ class ModelArtifactRowTest {
 
 
     @Test
-    void gemmaDownloadOnlyRowDoesNotReportCompilerImplementationError() throws IOException {
+    void gemma3UsesCompilerConvertLifecycleNotDownloadOnly() throws IOException {
+        // WORKBENCH-MODEL-STATUS-3: Gemma is compiler-backed (Gemma3PackageLifecycle). With raw files present
+        // and no package yet, the row offers Convert (Download -> Convert) — never the old "Download only".
         Files.writeString(tempDir.resolve("model.safetensors"), "weights");
         Files.writeString(tempDir.resolve("config.json"), "{}");
         Files.writeString(tempDir.resolve("tokenizer.json"), "{}");
 
-        ModelArtifactRow row = new ModelArtifactRow(ModelFamily.GEMMA3, () -> tempDir, Gemma3DownloadLifecycle::new);
+        ModelArtifactRow row = new ModelArtifactRow(ModelFamily.GEMMA3, () -> tempDir, Gemma3PackageLifecycle::new);
 
         ModelArtifactRow.RowView view = row.refresh();
-        assertEquals("Download only", view.convertLabel());
-        assertFalse(view.convertEnabled());
+        assertEquals("Convert", view.convertLabel());
+        assertTrue(view.convertEnabled());
         assertFalse(view.ready());
-        assertEquals("Gemma 3 — download: ready (raw files complete)", view.statusText());
+        assertTrue(view.statusText().contains("model_gemma3.wdmlpack"),
+                "missing-package status must point at the Convert target: " + view.statusText());
+        String text = view.statusText().toLowerCase();
+        assertFalse(text.contains("download only") || text.contains("download-only"),
+                "Gemma must not show a download-only status: " + view.statusText());
         assertFalse(view.statusText().contains("package compiler not implemented"));
-        assertTrue(view.convertTooltip().contains("Download-only model candidate"));
+        assertFalse(view.convertTooltip().toLowerCase().contains("download-only"));
     }
 
     @Test

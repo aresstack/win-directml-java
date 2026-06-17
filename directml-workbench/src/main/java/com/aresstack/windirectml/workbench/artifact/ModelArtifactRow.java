@@ -96,25 +96,12 @@ public final class ModelArtifactRow {
     }
 
     private String compilerMissingStatusText(ModelArtifactStatus s) {
-        if (family == ModelFamily.GEMMA3) {
-            return gemmaDownloadOnlyStatusText(s);
-        }
+        // No compiler for this family yet → downloadable but not executable. (Gemma is no longer a
+        // download-only family — it has Gemma3PackageLifecycle / Convert; WORKBENCH-MODEL-STATUS-3.)
         return new StringBuilder(family.displayName())
                 .append(" — raw: ").append(pretty(s.rawState()))
                 .append(" — package compiler not implemented (downloadable, not executable)")
                 .toString();
-    }
-
-    private String gemmaDownloadOnlyStatusText(ModelArtifactStatus s) {
-        StringBuilder sb = new StringBuilder(family.displayName()).append(" — download: ");
-        if (s.rawState() == RawAssetState.RAW_VALID) {
-            return sb.append("ready (raw files complete)").toString();
-        }
-        sb.append("incomplete");
-        if (!s.reason().isBlank()) {
-            sb.append(" — ").append(s.reason());
-        }
-        return sb.toString();
     }
 
     private static String convertLabel(ModelArtifactStatus s, ModelConversionPlan p) {
@@ -122,7 +109,7 @@ public final class ModelArtifactRow {
             case CONVERT -> "Convert";
             case RECONVERT -> "Reconvert";
             case REPAIR -> "Repair package";
-            case NOT_SUPPORTED -> downloadOnlyCandidate(p) ? "Download only" : "Compiler missing";
+            case NOT_SUPPORTED -> "Compiler missing";
             case INSPECT -> rawUnavailable(s) ? "Download first" : "Inspect";
         };
     }
@@ -140,18 +127,11 @@ public final class ModelArtifactRow {
             case CONVERT -> "Build the runtime package from the downloaded source";
             case RECONVERT -> "Rebuild the runtime package (" + p.reason() + ")";
             case REPAIR -> "Rebuild the unusable package (" + p.reason() + ")";
-            case NOT_SUPPORTED -> downloadOnlyCandidate(p)
-                    ? p.reason()
-                    : "Package compiler not implemented for this family — downloadable, not executable";
+            case NOT_SUPPORTED -> "Package compiler not implemented for this family — downloadable, not executable";
             case INSPECT -> rawUnavailable(s)
                     ? "Download the raw model files first, then Convert"
                     : "Re-check the current artifact status";
         };
-    }
-
-    private static boolean downloadOnlyCandidate(ModelConversionPlan p) {
-        String reason = p.reason().toLowerCase(java.util.Locale.ROOT);
-        return reason.contains("download/probe") || reason.contains("download-only");
     }
 
     private static boolean rawUnavailable(ModelArtifactStatus s) {

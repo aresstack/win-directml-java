@@ -40,9 +40,10 @@ user-visible residue, so this slice confirms it and locks it in with `WorkbenchM
   runner. WARP/AUTO never use Python/Transformers/ONNX-Runtime; no silent Python fallback (a missing Gemma
   package fails with a clear Download→Convert message).
 - **Download-tab status is correct for Gemma.** `DefaultModelArtifactService` wires `Gemma3PackageLifecycle`
-  (`hasCompiler()=true` → Convert/READY). The old `Gemma3DownloadLifecycle` (download/probe-only) and the
-  `ModelArtifactRow.gemmaDownloadOnlyStatusText` branch are now unreachable for Gemma (dead remnants, not
-  user-visible); left in place to keep this audit slice minimal — candidates for a later cleanup.
+  (`hasCompiler()=true` → Convert/READY). The old download/probe-only remnants — `Gemma3DownloadLifecycle`,
+  `ModelArtifactRow.gemmaDownloadOnlyStatusText`, and the `downloadOnlyCandidate` "Download only" label — were
+  **removed in WORKBENCH-MODEL-STATUS-3**. `NOT_SUPPORTED` now uniformly renders "Compiler missing" (package
+  compiler not implemented) for any compiler-less family; Gemma is not one of them.
 
 ## Gemma reference (unchanged)
 

@@ -14,8 +14,9 @@ import java.util.Optional;
  * {@link Gemma3WdmlPackCompiler} and {@link Gemma3RuntimePackage} so the Workbench can <b>Convert</b> a
  * downloaded Gemma 3 directory into the runtime package the native WARP runtime expects.
  *
- * <p>Supersedes {@code Gemma3DownloadLifecycle} (download/probe-only, no compiler → Convert disabled) in
- * the product wiring (DownloadPanel + DefaultModelArtifactService). The package name is exactly
+ * <p>This is the product Gemma lifecycle (DownloadPanel + DefaultModelArtifactService): download → Convert →
+ * runtime-loadable package. (The earlier download/probe-only lifecycle was removed in
+ * WORKBENCH-MODEL-STATUS-3.) The package name is exactly
  * {@link Gemma3WdmlPackCompiler#DEFAULT_OUTPUT_NAME} ({@code model_gemma3.wdmlpack}), the same file
  * {@code Gemma3NativeWarpRuntime} loads.</p>
  */
