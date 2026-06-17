@@ -34,7 +34,7 @@ public final class Gemma3WarpLayerWeights {
     private final float[] preFeedforwardLayerNorm;
     private final float[] postFeedforwardLayerNorm;
 
-    // Per projection: exactly one of (array, buffer) is non-null.
+    // Per projection: exactly one of (array, buffer, bf16 view) is non-null.
     private final float[] qArr;
     private final float[] kArr;
     private final float[] vArr;
@@ -49,6 +49,15 @@ public final class Gemma3WarpLayerWeights {
     private final ByteBuffer gateBuf;
     private final ByteBuffer upBuf;
     private final ByteBuffer downBuf;
+    // GEMMA-BF16-PACK-3: retained BF16 host views; widened to a transient FP32 buffer only for the device
+    // upload/prepacking (fused QKV / GateUp). Half the retained host RAM of the FP32 ByteBuffer form.
+    private final Gemma3Bf16WeightView qView;
+    private final Gemma3Bf16WeightView kView;
+    private final Gemma3Bf16WeightView vView;
+    private final Gemma3Bf16WeightView oView;
+    private final Gemma3Bf16WeightView gateView;
+    private final Gemma3Bf16WeightView upView;
+    private final Gemma3Bf16WeightView downView;
 
     /** {@code float[]} projection form (reference/tests). */
     public Gemma3WarpLayerWeights(
@@ -62,6 +71,7 @@ public final class Gemma3WarpLayerWeights {
         this(inputLayerNorm, qNorm, kNorm, postAttentionLayerNorm, preFeedforwardLayerNorm, postFeedforwardLayerNorm,
                 req(qProj, "qProj"), req(kProj, "kProj"), req(vProj, "vProj"), req(oProj, "oProj"),
                 req(gateProj, "gateProj"), req(upProj, "upProj"), req(downProj, "downProj"),
+                null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null);
     }
 
@@ -70,7 +80,10 @@ public final class Gemma3WarpLayerWeights {
             float[] preFeedforwardLayerNorm, float[] postFeedforwardLayerNorm,
             float[] qArr, float[] kArr, float[] vArr, float[] oArr, float[] gateArr, float[] upArr, float[] downArr,
             ByteBuffer qBuf, ByteBuffer kBuf, ByteBuffer vBuf, ByteBuffer oBuf,
-            ByteBuffer gateBuf, ByteBuffer upBuf, ByteBuffer downBuf) {
+            ByteBuffer gateBuf, ByteBuffer upBuf, ByteBuffer downBuf,
+            Gemma3Bf16WeightView qView, Gemma3Bf16WeightView kView, Gemma3Bf16WeightView vView,
+            Gemma3Bf16WeightView oView, Gemma3Bf16WeightView gateView, Gemma3Bf16WeightView upView,
+            Gemma3Bf16WeightView downView) {
         this.inputLayerNorm = Objects.requireNonNull(inputLayerNorm, "inputLayerNorm");
         this.qNorm = Objects.requireNonNull(qNorm, "qNorm");
         this.kNorm = Objects.requireNonNull(kNorm, "kNorm");
@@ -91,6 +104,13 @@ public final class Gemma3WarpLayerWeights {
         this.gateBuf = gateBuf;
         this.upBuf = upBuf;
         this.downBuf = downBuf;
+        this.qView = qView;
+        this.kView = kView;
+        this.vView = vView;
+        this.oView = oView;
+        this.gateView = gateView;
+        this.upView = upView;
+        this.downView = downView;
     }
 
     /** Heap-light projection form: the seven projections as direct little-endian FP32 {@link ByteBuffer}s. */
@@ -106,7 +126,31 @@ public final class Gemma3WarpLayerWeights {
                 preFeedforwardLayerNorm, postFeedforwardLayerNorm,
                 null, null, null, null, null, null, null,
                 req(qProj, "qProj"), req(kProj, "kProj"), req(vProj, "vProj"), req(oProj, "oProj"),
-                req(gateProj, "gateProj"), req(upProj, "upProj"), req(downProj, "downProj"));
+                req(gateProj, "gateProj"), req(upProj, "upProj"), req(downProj, "downProj"),
+                null, null, null, null, null, null, null);
+    }
+
+    /**
+     * Heap-light projection form with the seven projections retained as <b>BF16</b> host views
+     * (GEMMA-BF16-PACK-3): ~half the host RAM of {@link #ofByteBufferProjections}. Each is widened to a
+     * transient FP32 buffer only for the device upload (the fused QKV / GateUp build); the QKV/GateUp fusion
+     * is preserved (the layer still stacks q/k/v and gate/up into one device weight).
+     */
+    public static Gemma3WarpLayerWeights ofBf16Projections(
+            float[] inputLayerNorm,
+            Gemma3Bf16WeightView qProj, Gemma3Bf16WeightView kProj, Gemma3Bf16WeightView vProj,
+            Gemma3Bf16WeightView oProj,
+            float[] qNorm, float[] kNorm,
+            float[] postAttentionLayerNorm,
+            float[] preFeedforwardLayerNorm,
+            Gemma3Bf16WeightView gateProj, Gemma3Bf16WeightView upProj, Gemma3Bf16WeightView downProj,
+            float[] postFeedforwardLayerNorm) {
+        return new Gemma3WarpLayerWeights(inputLayerNorm, qNorm, kNorm, postAttentionLayerNorm,
+                preFeedforwardLayerNorm, postFeedforwardLayerNorm,
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null,
+                reqV(qProj, "qProj"), reqV(kProj, "kProj"), reqV(vProj, "vProj"), reqV(oProj, "oProj"),
+                reqV(gateProj, "gateProj"), reqV(upProj, "upProj"), reqV(downProj, "downProj"));
     }
 
     public static Gemma3WarpLayerWeights from(Gemma3ReferenceWeights.Layer layer) {
@@ -147,36 +191,40 @@ public final class Gemma3WarpLayerWeights {
     }
 
     public WarpWeightSource qSource(int outputRows, int inputColumns) {
-        return source("gemma3.q_proj", outputRows, inputColumns, qBuf, qArr);
+        return source("gemma3.q_proj", outputRows, inputColumns, qBuf, qArr, qView);
     }
 
     public WarpWeightSource kSource(int outputRows, int inputColumns) {
-        return source("gemma3.k_proj", outputRows, inputColumns, kBuf, kArr);
+        return source("gemma3.k_proj", outputRows, inputColumns, kBuf, kArr, kView);
     }
 
     public WarpWeightSource vSource(int outputRows, int inputColumns) {
-        return source("gemma3.v_proj", outputRows, inputColumns, vBuf, vArr);
+        return source("gemma3.v_proj", outputRows, inputColumns, vBuf, vArr, vView);
     }
 
     public WarpWeightSource oSource(int outputRows, int inputColumns) {
-        return source("gemma3.o_proj", outputRows, inputColumns, oBuf, oArr);
+        return source("gemma3.o_proj", outputRows, inputColumns, oBuf, oArr, oView);
     }
 
     public WarpWeightSource gateSource(int outputRows, int inputColumns) {
-        return source("gemma3.gate_proj", outputRows, inputColumns, gateBuf, gateArr);
+        return source("gemma3.gate_proj", outputRows, inputColumns, gateBuf, gateArr, gateView);
     }
 
     public WarpWeightSource upSource(int outputRows, int inputColumns) {
-        return source("gemma3.up_proj", outputRows, inputColumns, upBuf, upArr);
+        return source("gemma3.up_proj", outputRows, inputColumns, upBuf, upArr, upView);
     }
 
     public WarpWeightSource downSource(int outputRows, int inputColumns) {
-        return source("gemma3.down_proj", outputRows, inputColumns, downBuf, downArr);
+        return source("gemma3.down_proj", outputRows, inputColumns, downBuf, downArr, downView);
     }
 
     private static WarpWeightSource source(String name, int outputRows, int inputColumns,
-                                           ByteBuffer buf, float[] arr) {
-        // ByteBuffer wins when present; the float[] supplier is only invoked otherwise.
+                                           ByteBuffer buf, float[] arr, Gemma3Bf16WeightView view) {
+        // GEMMA-BF16-PACK-3: a retained BF16 view widens to a transient FP32 buffer on demand (lazy); else a
+        // retained FP32 ByteBuffer wins when present; else the float[] fallback supplier.
+        if (view != null) {
+            return WarpWeightSource.ofLazyFp32(name, outputRows, inputColumns, view::inflateToFp32);
+        }
         return WarpWeightSource.of(name, outputRows, inputColumns, buf, () -> arr);
     }
 
@@ -186,5 +234,9 @@ public final class Gemma3WarpLayerWeights {
 
     private static ByteBuffer req(ByteBuffer b, String name) {
         return Objects.requireNonNull(b, name);
+    }
+
+    private static Gemma3Bf16WeightView reqV(Gemma3Bf16WeightView v, String name) {
+        return Objects.requireNonNull(v, name);
     }
 }

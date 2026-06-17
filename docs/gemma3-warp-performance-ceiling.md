@@ -554,3 +554,35 @@ would save ~191 MB more (the projection host buffers, §13), but it touches all 
 layer and the fused-projection packing (`fromFusedWeightSources` would inflate BF16 parts), so it is more
 code for a smaller, more spread-out gain. Recommended **only if** host RAM is still a constraint after this
 slice; otherwise stop here — the big, isolated 320 MB item is done.
+
+## 15. GEMMA-BF16-PACK-3 — layer projections kept BF16 in host RAM (memory only; line closed)
+
+Done — the layer projections (q/k/v/o + gate/up + down) are now **retained as BF16** host views too, widened
+to FP32 only transiently for the device upload. Memory only; **no `.wdmlpack` format change, no GPU/GEMM
+change, no speed change** (PACK-3 touches only the load path — the device weights stay FP32 and no per-token
+path changes). **The QKV/GateUp fusion (GEMMA-WARP-16) is preserved**: the layer still stacks q/k/v and
+gate/up into one device weight; only the per-part source is now a lazily-widened BF16 view.
+
+**Design (encapsulated):** `WarpWeightSource.ofLazyFp32` + `resolveFp32LittleEndian()` — a source whose FP32
+bytes are produced lazily/transiently (no retained FP32); `Gemma3WarpLayerWeights.ofBf16Projections` holds
+seven `Gemma3Bf16WeightView`s and its `qSource/…/downSource` return lazy-FP32 sources; the fused/single
+`WarpDenseProjection` builders use `resolveFp32LittleEndian()` so the QKV/GateUp stacking is unchanged.
+`Gemma3RuntimePackage.loadWarpWeightsHeapLight` retains BF16 projections when they are all BF16 (the product
+model). The decoder-only family's own fused path still uses `fp32LittleEndian()` and is unaffected.
+
+**Measured (real `gemma-3-270m-it`, WARP adapter):**
+
+| metric | FP32 (before) | BF16 (after) |
+|--------|--------------:|-------------:|
+| layer-projection host RAM | 382.5 MB | **191.3 MB** (−191.3 MB) |
+| **cumulative (embedding + projections, PACK-2+3)** | **1022.5 MB** | **511.3 MB** (−511.3 MB) |
+| BF16 package load (full weights) | — | 320 ms |
+| decode avg/token | ~570 ms | 571.2 ms (unchanged — load-only change) |
+| projection bytes (layer 0, all 7) BF16→FP32 vs FP32 decode | — | **byte-identical** |
+| Paris (token 9079) | ✓ | ✓ |
+
+**BF16-pack line — closed.** The retained host weights for the Gemma WARP path are now BF16 end-to-end
+(embedding/LM head + all projections): **~511 MB less system RAM**, lossless, decode unchanged, no format
+change. The remaining FP32 lives only in the device buffers (the fp32-GEMM floor) and small norm vectors.
+There is no further sizeable host-RAM item to convert, so the BF16 packaging effort is complete; any future
+reduction of the device FP32 would require an fp16 GEMM operator (out of scope, no speed benefit, §11).

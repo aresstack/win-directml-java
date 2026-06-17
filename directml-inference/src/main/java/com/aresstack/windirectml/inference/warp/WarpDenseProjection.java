@@ -87,7 +87,9 @@ public final class WarpDenseProjection implements AutoCloseable {
      */
     public static WarpDenseProjection fromWeightSource(WindowsBindings windowsBindings, WarpWeightSource source) {
         Objects.requireNonNull(source, "source");
-        ByteBuffer fp32 = source.fp32LittleEndian();
+        // resolveFp32LittleEndian() returns the retained FP32 slice, or a BF16-backed source's transient widen
+        // (GEMMA-BF16-PACK-3), or null to fall through to the float[] path.
+        ByteBuffer fp32 = source.resolveFp32LittleEndian();
         if (fp32 != null) {
             return fromDequantizedWeights(windowsBindings, source.name(),
                     source.outputRows(), source.inputColumns(), fp32);
@@ -146,7 +148,9 @@ public final class WarpDenseProjection implements AutoCloseable {
     }
 
     private static ByteBuffer toLittleEndianFp32(WarpWeightSource part) {
-        ByteBuffer fp32 = part.fp32LittleEndian();
+        // GEMMA-BF16-PACK-3: a BF16-backed part widens to a transient FP32 buffer here (for the fused stack),
+        // not retained as FP32. Retained FP32 parts return their slice; float[] parts are wrapped.
+        ByteBuffer fp32 = part.resolveFp32LittleEndian();
         if (fp32 != null) {
             return fp32;
         }

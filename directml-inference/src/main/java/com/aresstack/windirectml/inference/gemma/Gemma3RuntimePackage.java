@@ -102,22 +102,43 @@ public final class Gemma3RuntimePackage {
             float[] finalNorm = Gemma3ReferenceWeights.decodeFloats(entry(file, Gemma3TensorNameMapper.FINAL_NORM));
 
             int n = config.numHiddenLayers();
+            // GEMMA-BF16-PACK-3: retain the layer projections as BF16 host views when they are all BF16
+            // (the product model), widening to FP32 only transiently for the device upload. Otherwise keep
+            // the FP32 ByteBuffer decode. The QKV/GateUp fusion is unchanged (the layer still stacks them).
+            boolean projectionsBf16 = projectionsAreBf16(file);
             Gemma3WarpLayerWeights[] layers = new Gemma3WarpLayerWeights[n];
             for (int i = 0; i < n; i++) {
-                layers[i] = Gemma3WarpLayerWeights.ofByteBufferProjections(
-                        floats(file, Gemma3TensorNameMapper.inputLayerNorm(i)),
-                        buffer(file, Gemma3TensorNameMapper.qProj(i)),
-                        buffer(file, Gemma3TensorNameMapper.kProj(i)),
-                        buffer(file, Gemma3TensorNameMapper.vProj(i)),
-                        buffer(file, Gemma3TensorNameMapper.oProj(i)),
-                        floats(file, Gemma3TensorNameMapper.qNorm(i)),
-                        floats(file, Gemma3TensorNameMapper.kNorm(i)),
-                        floats(file, Gemma3TensorNameMapper.postAttentionLayerNorm(i)),
-                        floats(file, Gemma3TensorNameMapper.preFeedforwardLayerNorm(i)),
-                        buffer(file, Gemma3TensorNameMapper.gateProj(i)),
-                        buffer(file, Gemma3TensorNameMapper.upProj(i)),
-                        buffer(file, Gemma3TensorNameMapper.downProj(i)),
-                        floats(file, Gemma3TensorNameMapper.postFeedforwardLayerNorm(i)));
+                if (projectionsBf16) {
+                    layers[i] = Gemma3WarpLayerWeights.ofBf16Projections(
+                            floats(file, Gemma3TensorNameMapper.inputLayerNorm(i)),
+                            bf16View(file, Gemma3TensorNameMapper.qProj(i)),
+                            bf16View(file, Gemma3TensorNameMapper.kProj(i)),
+                            bf16View(file, Gemma3TensorNameMapper.vProj(i)),
+                            bf16View(file, Gemma3TensorNameMapper.oProj(i)),
+                            floats(file, Gemma3TensorNameMapper.qNorm(i)),
+                            floats(file, Gemma3TensorNameMapper.kNorm(i)),
+                            floats(file, Gemma3TensorNameMapper.postAttentionLayerNorm(i)),
+                            floats(file, Gemma3TensorNameMapper.preFeedforwardLayerNorm(i)),
+                            bf16View(file, Gemma3TensorNameMapper.gateProj(i)),
+                            bf16View(file, Gemma3TensorNameMapper.upProj(i)),
+                            bf16View(file, Gemma3TensorNameMapper.downProj(i)),
+                            floats(file, Gemma3TensorNameMapper.postFeedforwardLayerNorm(i)));
+                } else {
+                    layers[i] = Gemma3WarpLayerWeights.ofByteBufferProjections(
+                            floats(file, Gemma3TensorNameMapper.inputLayerNorm(i)),
+                            buffer(file, Gemma3TensorNameMapper.qProj(i)),
+                            buffer(file, Gemma3TensorNameMapper.kProj(i)),
+                            buffer(file, Gemma3TensorNameMapper.vProj(i)),
+                            buffer(file, Gemma3TensorNameMapper.oProj(i)),
+                            floats(file, Gemma3TensorNameMapper.qNorm(i)),
+                            floats(file, Gemma3TensorNameMapper.kNorm(i)),
+                            floats(file, Gemma3TensorNameMapper.postAttentionLayerNorm(i)),
+                            floats(file, Gemma3TensorNameMapper.preFeedforwardLayerNorm(i)),
+                            buffer(file, Gemma3TensorNameMapper.gateProj(i)),
+                            buffer(file, Gemma3TensorNameMapper.upProj(i)),
+                            buffer(file, Gemma3TensorNameMapper.downProj(i)),
+                            floats(file, Gemma3TensorNameMapper.postFeedforwardLayerNorm(i)));
+                }
             }
             if ("BF16".equals(embEntry.dtype())) {
                 return Gemma3WarpWeights.ofBf16Embedding(config, Gemma3Bf16WeightView.ofBf16Copy(embEntry),
@@ -141,7 +162,26 @@ public final class Gemma3RuntimePackage {
         return Gemma3WeightBufferView.decodeFp32LittleEndian(entry(file, name));
     }
 
+    private static Gemma3Bf16WeightView bf16View(SafeTensorsReader.SafeTensorsFile file, String name)
+            throws IOException {
+        return Gemma3Bf16WeightView.ofBf16Copy(entry(file, name));
+    }
+
     private static float[] floats(SafeTensorsReader.SafeTensorsFile file, String name) throws IOException {
         return Gemma3ReferenceWeights.decodeFloats(entry(file, name));
+    }
+
+    /** Whether layer 0's seven projections are all BF16 (HF layers are uniform — the GEMMA-BF16-PACK-3 gate). */
+    private static boolean projectionsAreBf16(SafeTensorsReader.SafeTensorsFile file) throws IOException {
+        for (String name : new String[]{
+                Gemma3TensorNameMapper.qProj(0), Gemma3TensorNameMapper.kProj(0),
+                Gemma3TensorNameMapper.vProj(0), Gemma3TensorNameMapper.oProj(0),
+                Gemma3TensorNameMapper.gateProj(0), Gemma3TensorNameMapper.upProj(0),
+                Gemma3TensorNameMapper.downProj(0)}) {
+            if (!"BF16".equals(entry(file, name).dtype())) {
+                return false;
+            }
+        }
+        return true;
     }
 }

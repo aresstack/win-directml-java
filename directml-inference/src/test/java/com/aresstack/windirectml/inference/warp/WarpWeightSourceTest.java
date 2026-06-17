@@ -51,4 +51,38 @@ class WarpWeightSourceTest {
         assertArrayEquals(new float[]{5, 6, 7, 8}, src.dequantizedRowMajor(), 0.0f);
         assertEquals(1, fallbackCalls.get());
     }
+
+    // ── GEMMA-BF16-PACK-3: lazy/transient FP32 source ──────────────────────────────────────
+
+    @Test
+    void retainedFp32IsReturnedByResolve() {
+        ByteBuffer le = ByteBuffer.allocate(4 * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        WarpWeightSource src = WarpWeightSource.of("w", 2, 2, le, () -> {
+            throw new AssertionError("fallback must not run");
+        });
+        ByteBuffer resolved = src.resolveFp32LittleEndian();
+        assertEquals(4 * Float.BYTES, resolved.remaining());
+        assertEquals(ByteOrder.LITTLE_ENDIAN, resolved.order());
+    }
+
+    @Test
+    void floatOnlySourceResolvesToNull() {
+        WarpWeightSource src = WarpWeightSource.of("w", 1, 4, null, () -> new float[]{1, 2, 3, 4});
+        assertNull(src.resolveFp32LittleEndian(), "no FP32 source -> caller uses the float[] path");
+    }
+
+    @Test
+    void lazyFp32SourceInvokesSupplierOnlyOnResolve() {
+        ByteBuffer transient32 = ByteBuffer.allocate(2 * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        AtomicInteger calls = new AtomicInteger();
+        WarpWeightSource src = WarpWeightSource.ofLazyFp32("w", 2, 1, () -> {
+            calls.incrementAndGet();
+            return transient32;
+        });
+        assertNull(src.fp32LittleEndian(), "lazy source has no retained FP32 slice");
+        assertEquals(0, calls.get(), "supplier must not run before resolve");
+        ByteBuffer resolved = src.resolveFp32LittleEndian();
+        assertEquals(ByteOrder.LITTLE_ENDIAN, resolved.order());
+        assertEquals(1, calls.get(), "supplier runs once on resolve");
+    }
 }
