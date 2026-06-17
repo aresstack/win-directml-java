@@ -30,6 +30,7 @@ No invented figures.
 | 17 | projection-fusion hardening + measured per-group timing breakdown (no new optimization) | parity/edge tests; **WARP decode is matmul-bound: lm-head 52%, the 5 GEMMs ~90%, all element kernels ~10%** |
 | 18 | LM-head DML-GEMM shape probe (measure only) | **baseline GEMV (265 ms) is optimal**; GEMM M=1 3.3× slower, row-blocking neutral/worse → WARP at its fp32 DML-GEMM compute ceiling |
 | 19 | quantization/precision feasibility probe (decide only) | **Decision D: quantization does not help WARP speed**; 16-bit weight storage is lossless (model is BF16) but a memory-only lever, not speed |
+| CLOSEOUT | finalize + stabilize the WARP speed line (no new optimization) | docs finalized; all real-model probes gated; normal runtime quiet; WARP/AUTO product path unchanged & documented |
 
 Consolidated per-decode-token trajectory (real model):
 
@@ -397,3 +398,63 @@ path; it must be its own deliberate slice, not folded into a perf slice.
 *speed*-optimization line here (it is at the fp32 compute ceiling). A future quantization slice would only be
 justified as a **memory** effort (lossless 16-bit weight storage) and should be scoped and approved as its
 own product decision, not as a continuation of the perf line.
+
+## 12. GEMMA-WARP-CLOSEOUT — final state of the WARP speed line (no new optimization)
+
+This closes the WARP decode speed-optimization line (slices 13*–19). No new optimization; this is
+documentation + a small log-quietening stabilization.
+
+### Final verdict
+
+- **WARP** is the **stable CPU-only product path** (no Python, no ONNX Runtime, no extra native DLLs):
+  ~500 ms/token at its **fp32 DML-GEMM compute ceiling**. The decode is matmul-bound (LM head 52%, the five
+  GEMMs ~90%; §9). Submits/fences/readbacks/dispatches are minimized (21/21/1/290 per token) and the large
+  projection groups are fused (§8). Within the product constraints (DML-GEMM, fp32, no `.wdmlpack`/INT4/custom
+  -kernel change) the WARP speed lever is exhausted.
+- **AUTO / GPU** is the **optional accelerator** (`Backend = AUTO` → first hardware DirectML adapter, ~150
+  ms/token on this host's RTX 5080). Same native code path, not the product focus.
+- **Quantization** is **not a WARP speed measure** (§11, Decision D). 16-bit weight *storage* is lossless
+  (the model is already BF16) but a **separate memory/packaging** decision, never folded into a perf slice.
+
+### Trajectory (real `gemma-3-270m-it`, WARP decode/token)
+
+```
+submits:      1140 → 21        readbacks:   344 → 1
+fence waits:   834 → 21        dispatches:  416 → 290
+decode/token: ~452 ms → ~525 ms (16: projection fusion) → ~500 ms steady
+```
+
+### Profiling / probe properties (all opt-in; off in the normal runtime and the default test run)
+
+| property | gate | what it does |
+|----------|------|--------------|
+| `-Dgemma.warp.realModel=true` | enables the heavy real-model gated tests | required by every real-model probe |
+| `-Dgemma.warp.groupProfile=true` | `Gemma3WarpDecodeGroupProfileTest` | per-kernel-group decode timing (§9) |
+| `-Dgemma.warp.lmHeadProbe=true` | `Gemma3WarpLmHeadShapeProbeTest` | LM-head GEMM shape comparison (§10) |
+| `-Dgemma.warp.quantProbe=true` | `Gemma3WarpPrecisionFeasibilityProbeTest` | fp16/bf16 weight numeric feasibility (§11) |
+| `-Dgemma.auto.gpu=true` | `Gemma3AutoGpuProfileTest` | WARP-vs-hardware comparison (AUTO-GPU-1) |
+| `-Dgemma.perf.probe=true` | `Gemma3WarpPerformanceProbeTest` | legacy perf probe |
+| `-Ddirectml.generation.profile=true` | Workbench / runtime | the existing native-WARP profile report |
+| `-Dgemma.warp.attention=staged` | runtime | debug/oracle staged attention (default is fused) |
+| `-Dgemma.warp.execution=sync` | runtime | debug float[] decode fallback (default is resident) |
+
+The group profiler attaches **only** when a gated test calls `setGroupProfiler`; the normal runtime never
+attaches one (`WarpExecutionContext.mark/endGroup` are no-ops), so coalescing/the deferred batch and the
+per-token cost are unchanged. The default `:directml-inference:test` run leaves all the above unset, so the
+heavy probes are skipped and the suite stays light.
+
+### Product path (verified, unchanged)
+
+- `Backend = WARP` → native DirectML on the **explicit WARP software adapter** (`AdapterMode.WARP`); **no
+  Python**.
+- `Backend = AUTO` → native DirectML on the **first hardware adapter** (`AdapterMode.HARDWARE`), or a clear
+  "no hardware adapter" message; optional.
+- `Backend = CPU` → the external Python/Transformers probe (the only Python path — **not** the WARP path).
+- No Gemma runtime selector (`-Dgemma.runtime` does not participate), no new UI switch, no visible research
+  mode. The Workbench drives Gemma over native WARP by default with AUTO optional, via the existing Backend
+  control only.
+
+### Stabilization in this slice
+
+The per-session `Gemma projection fusion: …` line was lowered from INFO to DEBUG so the normal runtime emits
+no extra Gemma decode log. No behaviour, kernel, format, runtime-default or UI change.
