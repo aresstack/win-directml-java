@@ -202,7 +202,10 @@ public final class SummarizerPanel extends JPanel {
                 appendResult("ERROR: Model '" + selectedModel + "' is unsupported in this runtime.");
                 return;
             }
-            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !qwenTestModel && !gemma3Model && !smolLm2Model) {
+            // Runnable models (SHIPPED/EXPERIMENTAL) are never blocked here; only genuinely PLANNED models are.
+            // Qwen 0.5B is EXPERIMENTAL now, so it no longer needs a hard-coded exemption (WORKBENCH-MODEL-STATUS-2);
+            // gemma/smollm2 PLANNED *base* checkpoints still route to their family handler for a clear message.
+            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !gemma3Model && !smolLm2Model) {
                 appendResult("ERROR: Model '" + selectedModel + "' is selectable but not executable yet.");
                 appendResult("  Status: planned. Runtime support is in progress for family "
                         + entry.architecture().token() + ".");

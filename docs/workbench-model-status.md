@@ -15,7 +15,7 @@ user-visible residue, so this slice confirms it and locks it in with `WorkbenchM
 |--------------|----------|------|------|-----|-----------------|------------|--------|
 | **Gemma 3 270M-it** | yes | native DirectML (WARP software adapter) | native DirectML (first hardware adapter, optional) | legacy external Python | EXPERIMENTAL (internal, not shown) | **yes — product** | Closed out. Download tab = `Gemma3PackageLifecycle` (Convert/READY). No visible research label (runtime label `native-warp`). |
 | Gemma 3 270M (base) | yes | native (no product package) | native | legacy external Python | PLANNED | no | Base checkpoint; selecting it without a package → clear Download→Convert message (no silent Python). |
-| **Qwen2.5-Coder-0.5B-it** | yes | native DirectML INT4 (`model_q4f16.wdmlpack`) | native DirectML INT4 | engine backend | PLANNED (registry, conservative) | **yes** | Routed via `QwenInferenceEngine` (the qwen-test-model exemption), so the PLANNED guard does not block it. Registry status is stale-conservative but not user-visible. No Python. |
+| **Qwen2.5-Coder-0.5B-it** | yes | native DirectML INT4 (`model_q4f16.wdmlpack`) | native DirectML INT4 | engine backend | EXPERIMENTAL | **yes** | Runnable by status (WORKBENCH-MODEL-STATUS-2) — the PLANNED-guard `qwenTestModel` exemption was removed; `isQwenTestModel` now only routes to `QwenInferenceEngine` (like the other families' routing). No Python. |
 | Qwen2.5-Coder 1.5B / 3B | yes | — | — | — | PLANNED | no | "selectable but not executable yet" (honest guard message). |
 | **SmolLM2-135M / 360M** | yes | native dense projections on the D3D12 software rasterizer (CPU) | hardware GPU when present, else Java reference | native | EXPERIMENTAL | **yes — from `.wdmlpack`** | No Python. Requires a prebuilt package (Download→Convert). |
 | **T5 / Flan-T5 / CodeT5** | yes | native from `.wdmlpack` | native | native | EXPERIMENTAL | **yes — from `.wdmlpack`** | Seq2seq. No Python. `T5InferenceEngine`. |
@@ -29,8 +29,10 @@ user-visible residue, so this slice confirms it and locks it in with `WorkbenchM
   (PRODUCT-2) and the Gemma "probe" notes → "legacy external Python" (closeout). No `Runtime integration is
   planned` string exists anywhere in the repo (verified); locked by `WorkbenchModelStatusAuditTest`.
 - **Executable models are not blocked.** The Summarizer's PLANNED guard only fires for genuinely
-  not-executable PLANNED models (Phi-3.5, Qwen 1.5B/3B, Gemma base); Gemma/SmolLM2/T5/Phi-3 are EXPERIMENTAL
-  (runnable) and Qwen 0.5B is exempted via the qwen-test-model path. Locked by the audit test.
+  not-executable PLANNED models (Phi-3.5, Qwen 1.5B/3B, Gemma base); Gemma/SmolLM2/T5/Phi-3 and Qwen 0.5B
+  are EXPERIMENTAL (runnable). Qwen 0.5B is runnable by status — the `qwenTestModel` PLANNED-guard exemption
+  was removed in WORKBENCH-MODEL-STATUS-2 (the predicate now only routes to `QwenInferenceEngine`). Locked by
+  the audit test.
 - **Not-executable models are clearly marked**, both in the Summarizer ("selectable but not executable yet.
   Status: planned…") and in the Download tab (`package compiler not implemented (downloadable, not
   executable)` for families without a compiler).

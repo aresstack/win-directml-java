@@ -202,20 +202,20 @@ public final class GenerationModelRegistry {
                 "Successor to Phi-3 Mini with improved instruction following. "
                         + "Same architecture; expected to work with ONNX GenAI path."));
 
-        // --- Qwen2.5-Coder: planned until runtime loads/generates ---
+        // --- Qwen2.5-Coder 0.5B: runnable via the native DirectML INT4 runtime; 1.5B/3B still planned ---
         entries.add(new Entry(
                 "Qwen/Qwen2.5-Coder-0.5B-Instruct",
                 Architecture.CAUSAL_LM,
                 "Alibaba/Qwen",
                 "0.5B",
                 ChatTemplate.CHATML,
-                Status.PLANNED,
+                Status.EXPERIMENTAL,
                 Arrays.asList(
                         "model/qwen2.5-coder-0.5b-directml-int4",
                         "model/qwen2.5-coder-0.5b-instruct",
                         "model/Qwen/Qwen2.5-Coder-0.5B-Instruct"),
-                "Smallest Qwen2.5-Coder variant. Target for initial Qwen "
-                        + "runtime bring-up (code explanation, math reasoning)."));
+                "Smallest Qwen2.5-Coder variant. Runs in the Workbench via the native DirectML INT4 runtime "
+                        + "(QwenInferenceEngine) from the compiled model_q4f16.wdmlpack; no Python."));
 
         entries.add(new Entry(
                 "Qwen/Qwen2.5-Coder-1.5B-Instruct",

@@ -25,21 +25,23 @@ class GenerationModelRegistryTest {
     }
 
     @Test
-    void registryContainsQwenModelsAsPlanned() {
-        String[] qwenIds = {
-                "Qwen/Qwen2.5-Coder-0.5B-Instruct",
-                "Qwen/Qwen2.5-Coder-1.5B-Instruct",
-                "Qwen/Qwen2.5-Coder-3B-Instruct"
-        };
-        for (String id : qwenIds) {
+    void qwen05bIsExperimentalAndRunnableWhileLargerVariantsStayPlanned() {
+        // WORKBENCH-MODEL-STATUS-2: Qwen 0.5B runs via the native DirectML INT4 runtime -> EXPERIMENTAL/runnable;
+        // the 1.5B/3B variants have no runtime/artifacts yet -> PLANNED/not runnable.
+        GenerationModelRegistry.Entry qwen05 = GenerationModelRegistry.findByModelId("Qwen/Qwen2.5-Coder-0.5B-Instruct");
+        assertNotNull(qwen05, "registry must contain Qwen 0.5B");
+        assertEquals(GenerationModelRegistry.Status.EXPERIMENTAL, qwen05.status(), "Qwen 0.5B is runnable");
+        assertTrue(qwen05.isRunnable());
+        assertEquals(ChatTemplate.CHATML, qwen05.chatTemplate());
+        assertTrue(qwen05.isCausalLM());
+
+        for (String id : new String[]{"Qwen/Qwen2.5-Coder-1.5B-Instruct", "Qwen/Qwen2.5-Coder-3B-Instruct"}) {
             GenerationModelRegistry.Entry entry = GenerationModelRegistry.findByModelId(id);
             assertNotNull(entry, "registry must contain " + id);
-            assertEquals(GenerationModelRegistry.Status.PLANNED, entry.status(),
-                    id + " should be planned");
+            assertEquals(GenerationModelRegistry.Status.PLANNED, entry.status(), id + " should be planned");
             assertEquals(ChatTemplate.CHATML, entry.chatTemplate());
             assertTrue(entry.isCausalLM());
-            assertFalse(entry.isRunnable(),
-                    id + " must NOT be advertised as runnable");
+            assertFalse(entry.isRunnable(), id + " must NOT be advertised as runnable");
         }
     }
 
@@ -104,11 +106,16 @@ class GenerationModelRegistryTest {
     }
 
     @Test
-    void noQwenModelIsRunnable() {
+    void onlyQwen05bIsRunnableAmongQwenVariants() {
+        // WORKBENCH-MODEL-STATUS-2: Qwen 0.5B is runnable (native DirectML INT4); 1.5B/3B are not yet.
         List<GenerationModelRegistry.Entry> runnable = GenerationModelRegistry.runnableEntries();
+        assertTrue(runnable.stream().anyMatch(e -> e.modelId().equals("Qwen/Qwen2.5-Coder-0.5B-Instruct")),
+                "Qwen 0.5B must be runnable");
         for (GenerationModelRegistry.Entry e : runnable) {
-            assertFalse(e.modelId().toLowerCase(Locale.ROOT).contains("qwen"),
-                    "No Qwen model should be runnable yet: " + e.modelId());
+            String id = e.modelId().toLowerCase(Locale.ROOT);
+            if (id.contains("qwen")) {
+                assertTrue(id.contains("0.5b"), "only Qwen 0.5B may be runnable: " + e.modelId());
+            }
         }
     }
 
@@ -157,7 +164,7 @@ class GenerationModelRegistryTest {
     void entriesByStatusFiltersCorrectly() {
         List<GenerationModelRegistry.Entry> planned =
                 GenerationModelRegistry.entriesByStatus(GenerationModelRegistry.Status.PLANNED);
-        assertTrue(planned.size() >= 3, "at least Phi-3.5 + 3 Qwen should be planned");
+        assertTrue(planned.size() >= 3, "at least Phi-3.5 + Qwen 1.5B/3B + Gemma base should be planned");
         for (GenerationModelRegistry.Entry e : planned) {
             assertEquals(GenerationModelRegistry.Status.PLANNED, e.status());
         }

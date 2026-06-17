@@ -328,7 +328,7 @@ including the per-layer command-list coalescing (see
 |---------------------------------------------------------------|-----------------|----------|---------------|----------|-----------------|----------------------|
 | `microsoft/Phi-3-mini-4k-instruct-onnx` (DirectML INT4 build) | INT4 GroupQuant | ✅        | ✅             | paged    | 🧪 experimental | `directml-inference` |
 | `microsoft/Phi-3.5-mini-instruct-onnx`                        | TBD             | –        | –             | –        | 🚧 planned      | –                    |
-| `Qwen2.5-Coder-0.5B-Instruct` (ONNX source TBD/research)      | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
+| `Qwen2.5-Coder-0.5B-Instruct`                                 | INT4 AWQ b128   | ✅        | ✅             | paged    | 🧪 experimental | `directml-inference` |
 | `Qwen2.5-Coder-1.5B-Instruct` (ONNX source TBD/research)      | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
 | `Qwen2.5-Coder-3B-Instruct` (ONNX source TBD/research)        | INT4 AWQ b128   | –        | –             | –        | 🚧 planned      | TBD/planned          |
 
@@ -355,7 +355,7 @@ for text generation. The summarizer model selector is populated from
 |-----------------------------------------|------------|-----------------|-------------------|-----------------------------------------------------------------------------------------------------------|
 | `microsoft/Phi-3-mini-4k-instruct-onnx` | summarizer | 🧪 experimental | ✅ downloadable    | First supported summarizer backend. CPU + DirectML. ~2.3 GB INT4 ONNX graph.                              |
 | `microsoft/Phi-3.5-mini-instruct-onnx`  | summarizer | 🚧 planned      | ❌ not yet         | Successor; expected same ONNX GenAI path once graph is published.                                         |
-| `Qwen/Qwen2.5-Coder-0.5B-Instruct`      | causal-lm  | 🚧 planned      | ❌ not yet         | Qwen2.5-Coder 0.5B, CPU-first. ChatML template. See [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md). |
+| `Qwen/Qwen2.5-Coder-0.5B-Instruct`      | causal-lm  | 🧪 experimental | ✅ runnable        | Qwen2.5-Coder 0.5B. Native DirectML INT4 runtime (`model_q4f16.wdmlpack`), no Python. ChatML template. See [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md). |
 | `Qwen/Qwen2.5-Coder-1.5B-Instruct`      | causal-lm  | 🚧 planned      | ❌ not yet         | Scale-up candidate (~1 GB INT4). Blocked on 0.5B runtime verification.                                    |
 | `Qwen/Qwen2.5-Coder-3B-Instruct`        | causal-lm  | 🚧 planned      | ❌ not yet         | Scale-up candidate (~2 GB INT4). Blocked on 0.5B runtime verification.                                    |
 | `ellamind/summarizer-v6-llama-v2`       | summarizer | ⛔ unsupported   | ❌                 | Llama-v2 fine-tune; no local runtime path in this project.                                                |

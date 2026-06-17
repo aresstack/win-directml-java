@@ -42,6 +42,7 @@ class WorkbenchModelStatusAuditTest {
         // These have a working Workbench runtime (native DirectML/WARP or wdmlpack-backed) -> must be runnable.
         for (String id : new String[]{
                 "google/gemma-3-270m-it",
+                "Qwen/Qwen2.5-Coder-0.5B-Instruct",
                 "HuggingFaceTB/SmolLM2-135M-Instruct",
                 "HuggingFaceTB/SmolLM2-360M-Instruct",
                 "Salesforce/codet5-small",
@@ -53,6 +54,16 @@ class WorkbenchModelStatusAuditTest {
             assertNotNull(e, id + " must be registered");
             assertTrue(e.isRunnable(), id + " must be runnable (SHIPPED/EXPERIMENTAL), not blocked as planned");
         }
+    }
+
+    @Test
+    void qwen05bIsRunnableByStatusNotByException() {
+        // WORKBENCH-MODEL-STATUS-2: Qwen 0.5B is executable, so it is EXPERIMENTAL (runnable) by status and no
+        // longer needs the qwenTestModel PLANNED-guard exemption to run.
+        Entry e = GenerationModelRegistry.findByModelId("Qwen/Qwen2.5-Coder-0.5B-Instruct");
+        assertNotNull(e);
+        assertEquals(Status.EXPERIMENTAL, e.status(), "Qwen 0.5B is runnable -> EXPERIMENTAL, not PLANNED");
+        assertTrue(e.isRunnable());
     }
 
     @Test

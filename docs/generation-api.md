@@ -77,7 +77,7 @@ GenerationModelRegistry      – static registry of known generation checkpoints
 |---------------------------------------|--------------|--------------|----------------------------------------------|
 | microsoft/Phi-3-mini-4k-instruct-onnx | CAUSAL_LM    | experimental | Active summarizer/generation backend         |
 | microsoft/Phi-3.5-mini-instruct-onnx  | CAUSAL_LM    | planned      | Successor to Phi-3 Mini                      |
-| Qwen/Qwen2.5-Coder-0.5B-Instruct      | CAUSAL_LM    | planned      | Workbench-visible CPU test path; not shipped |
+| Qwen/Qwen2.5-Coder-0.5B-Instruct      | CAUSAL_LM    | experimental | Runnable via native DirectML INT4 runtime (no Python) |
 | Qwen/Qwen2.5-Coder-1.5B-Instruct      | CAUSAL_LM    | planned      | Scale-up candidate                           |
 | Qwen/Qwen2.5-Coder-3B-Instruct        | CAUSAL_LM    | planned      | Largest planned local deployment             |
 
