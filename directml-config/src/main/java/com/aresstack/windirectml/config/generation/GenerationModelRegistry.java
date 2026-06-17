@@ -280,8 +280,10 @@ public final class GenerationModelRegistry {
                 Arrays.asList(
                         "model/gemma-3-270m-it",
                         "model/google/gemma-3-270m-it"),
-                "Instruction-tuned compact Gemma 3 candidate. Runs in the Workbench through the explicit "
-                        + "external Python/Transformers probe path until a native Java/WARP Gemma runtime exists."));
+                "Instruction-tuned compact Gemma 3. Runs in the Workbench on the native Java/DirectML runtime: "
+                        + "Backend=WARP uses the CPU-only software adapter, Backend=AUTO an optional hardware "
+                        + "adapter; Backend=CPU uses the external Python/Transformers probe. Weights load from the "
+                        + "compiled model_gemma3.wdmlpack."));
 
         entries.add(new Entry(
                 "google/gemma-3-270m",

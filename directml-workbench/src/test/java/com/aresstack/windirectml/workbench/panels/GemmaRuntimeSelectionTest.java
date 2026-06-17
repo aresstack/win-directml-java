@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.workbench.panels;
 
+import com.aresstack.windirectml.config.generation.GenerationModelRegistry;
 import com.aresstack.windirectml.config.generation.GenerationOutputMode;
 import com.aresstack.windirectml.inference.gemma.Gemma3RuntimeMode;
 import com.aresstack.windirectml.runtime.facade.Backend;
@@ -71,6 +72,18 @@ class GemmaRuntimeSelectionTest {
                 System.setProperty(Gemma3RuntimeMode.PROPERTY, prev);
             }
         }
+    }
+
+    @Test
+    void gemma3ItIsSelectableAndRunnableAsAProduct() {
+        // GEMMA-PRODUCT-1: the instruction-tuned Gemma 3 270M is a real, selectable, runnable product entry
+        // (in the dropdown source = entries(), EXPERIMENTAL so the "planned/not executable" guard is skipped).
+        GenerationModelRegistry.Entry e = GenerationModelRegistry.findByModelId("google/gemma-3-270m-it");
+        assertTrue(e != null, "google/gemma-3-270m-it must be registered");
+        assertTrue(GenerationModelRegistry.entries().contains(e), "must be in the summarizer dropdown source");
+        assertTrue(e.isRunnable(), "must be runnable (not blocked by the PLANNED guard)");
+        assertEquals(GenerationModelRegistry.Status.EXPERIMENTAL, e.status());
+        assertEquals(GenerationModelRegistry.Architecture.CAUSAL_LM, e.architecture());
     }
 
     @Test
