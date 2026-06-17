@@ -47,10 +47,11 @@ public final class Gemma3WarpLayer implements AutoCloseable {
 
     private final Gemma3WarpKernels k;
     private final boolean ownsKernels;
-    private final WarpDenseProjection qProj;
-    private final WarpDenseProjection kProj;
-    private final WarpDenseProjection vProj;
+    // GEMMA-WARP-16: q/k/v share one fused QKV DML-GEMM; its output is sliced into Q (attnDim), K (kvDim),
+    // V (kvDim) views. o_proj stays separate. attnDim/kvDim are the slice widths.
+    private final WarpDenseProjection qkvProj;
     private final WarpDenseProjection oProj;
+    private final int attnDim;
     private final Gemma3WarpMlp mlp;
     // GEMMA-WARP-14b: fused attention context is the default; -Dgemma.warp.attention=staged forces the old
     // staged scores+softmax+value path (kept as the debug/parity oracle). Read once at construction.
@@ -106,9 +107,10 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         int attnDim = config.attentionDim();
         int inter = config.intermediateSize();
         this.intermediate = inter;
-        this.qProj = WarpDenseProjection.fromWeightSource(wb, w.qSource(attnDim, hidden));
-        this.kProj = WarpDenseProjection.fromWeightSource(wb, w.kSource(kvDim, hidden));
-        this.vProj = WarpDenseProjection.fromWeightSource(wb, w.vSource(kvDim, hidden));
+        this.attnDim = attnDim;
+        // GEMMA-WARP-16: fuse q/k/v into one DML-GEMM ([attnDim+kvDim+kvDim, hidden]); slice the output.
+        this.qkvProj = WarpDenseProjection.fromFusedWeightSources(wb, "gemma3.qkv_proj",
+                java.util.List.of(w.qSource(attnDim, hidden), w.kSource(kvDim, hidden), w.vSource(kvDim, hidden)));
         this.oProj = WarpDenseProjection.fromWeightSource(wb, w.oSource(hidden, attnDim));
         this.mlp = new Gemma3WarpMlp(wb, hidden, inter,
                 w.gateSource(inter, hidden), w.upSource(inter, hidden), w.downSource(hidden, inter), kernels.geGlu());
@@ -129,9 +131,11 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         float[] vFlat = new float[s * kvDim];
         for (int t = 0; t < s; t++) {
             float[] normed = k.rmsNorm().normalize(state[t], inputLayerNorm, eps);
-            float[] qt = qProj.project(normed);
-            float[] kt = kProj.project(normed);
-            float[] vt = vProj.project(normed);
+            // GEMMA-WARP-16: one fused QKV projection, then slice into q/k/v (byte-identical to 3 matmuls).
+            float[] qkv = qkvProj.project(normed);
+            float[] qt = java.util.Arrays.copyOfRange(qkv, 0, attnDim);
+            float[] kt = java.util.Arrays.copyOfRange(qkv, attnDim, attnDim + kvDim);
+            float[] vt = java.util.Arrays.copyOfRange(qkv, attnDim + kvDim, attnDim + 2 * kvDim);
             qt = k.qkNorm().normalizeHeads(qt, numHeads, headDim, qNorm, eps);
             kt = k.qkNorm().normalizeHeads(kt, numKvHeads, headDim, kNorm, eps);
             qt = k.rope().applyToHeads(qt, numHeads, headDim, t, theta);
@@ -181,9 +185,11 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         Objects.requireNonNull(cache, "cache");
 
         float[] normed = k.rmsNorm().normalize(hiddenVec, inputLayerNorm, eps);
-        float[] qt = qProj.project(normed);
-        float[] kt = kProj.project(normed);
-        float[] vt = vProj.project(normed);
+        // GEMMA-WARP-16: one fused QKV projection, then slice into q/k/v.
+        float[] qkv = qkvProj.project(normed);
+        float[] qt = java.util.Arrays.copyOfRange(qkv, 0, attnDim);
+        float[] kt = java.util.Arrays.copyOfRange(qkv, attnDim, attnDim + kvDim);
+        float[] vt = java.util.Arrays.copyOfRange(qkv, attnDim + kvDim, attnDim + 2 * kvDim);
         qt = k.qkNorm().normalizeHeads(qt, numHeads, headDim, qNorm, eps);
         kt = k.qkNorm().normalizeHeads(kt, numKvHeads, headDim, kNorm, eps);
         qt = k.rope().applyToHeads(qt, numHeads, headDim, pos, theta);
@@ -240,9 +246,11 @@ public final class Gemma3WarpLayer implements AutoCloseable {
             ctx.beginRecording();
             try {
             WarpGpuBuffer normed = track(scratch, k.rmsNorm().normalize(ctx, hiddenIn, inputLayerNormBuf, eps));
-            WarpGpuBuffer q = track(scratch, qProj.forwardResident(ctx, normed));
-            WarpGpuBuffer k0 = track(scratch, kProj.forwardResident(ctx, normed));
-            WarpGpuBuffer v = track(scratch, vProj.forwardResident(ctx, normed));
+            // GEMMA-WARP-16: one fused QKV DML-GEMM; q/k/v are zero-copy slice views of its output.
+            WarpGpuBuffer qkv = track(scratch, qkvProj.forwardResident(ctx, normed));
+            WarpGpuBuffer q = qkv.slice(0, attnDim);
+            WarpGpuBuffer k0 = qkv.slice(attnDim, kvDim);
+            WarpGpuBuffer v = qkv.slice(attnDim + kvDim, kvDim);
             WarpGpuBuffer qn = track(scratch, k.qkNorm().normalizeHeads(ctx, q, numHeads, headDim, qNormBuf, eps));
             WarpGpuBuffer kn = track(scratch, k.qkNorm().normalizeHeads(ctx, k0, numKvHeads, headDim, kNormBuf, eps));
             WarpGpuBuffer qr = track(scratch, k.rope().applyToHeads(ctx, qn, numHeads, headDim, pos, theta));
@@ -336,10 +344,32 @@ public final class Gemma3WarpLayer implements AutoCloseable {
             for (int p = 0; p < seqLen; p++) {
                 normed[p] = track(scratch, k.rmsNorm().normalize(ctx, h[p], inputLayerNormBuf, eps));
             }
-            // 2. batched q/k/v projections.
-            WarpGpuBuffer[] q = projectBatched(ctx, scratch, qProj, normed, hidden, attnDim, seqLen);
-            WarpGpuBuffer[] kk = projectBatched(ctx, scratch, kProj, normed, hidden, kvDim, seqLen);
-            WarpGpuBuffer[] vv = projectBatched(ctx, scratch, vProj, normed, hidden, kvDim, seqLen);
+            // 2. one fused batched QKV projection (GEMMA-WARP-16); q/k/v are slice views of its output.
+            WarpGpuBuffer[] q = new WarpGpuBuffer[seqLen];
+            WarpGpuBuffer[] kk = new WarpGpuBuffer[seqLen];
+            WarpGpuBuffer[] vv = new WarpGpuBuffer[seqLen];
+            int qkvOut = attnDim + 2 * kvDim;
+            if (qkvProj.supportsBatchedResident()
+                    && seqLen <= com.aresstack.windirectml.windows.MatMulNBitsKernel.maxBatchRows()) {
+                WarpGpuBuffer batchIn = track(scratch, ctx.allocate(seqLen * hidden));
+                for (int p = 0; p < seqLen; p++) {
+                    k.rowCopy().copy(ctx, normed[p], 0, batchIn, p * hidden, hidden);
+                }
+                WarpGpuBuffer batchOut = track(scratch, qkvProj.forwardResidentBatched(ctx, batchIn, seqLen));
+                for (int p = 0; p < seqLen; p++) {
+                    int base = p * qkvOut;
+                    q[p] = batchOut.slice(base, attnDim);
+                    kk[p] = batchOut.slice(base + attnDim, kvDim);
+                    vv[p] = batchOut.slice(base + attnDim + kvDim, kvDim);
+                }
+            } else {
+                for (int p = 0; p < seqLen; p++) {
+                    WarpGpuBuffer qkv = track(scratch, qkvProj.forwardResident(ctx, normed[p]));
+                    q[p] = qkv.slice(0, attnDim);
+                    kk[p] = qkv.slice(attnDim, kvDim);
+                    vv[p] = qkv.slice(attnDim + kvDim, kvDim);
+                }
+            }
             // 3. per-position QK-norm + RoPE; append k/v to the resident cache.
             Gemma3WarpResidentKvLayerCache lc = cache.layer(layer);
             WarpGpuBuffer[] qr = new WarpGpuBuffer[seqLen];
@@ -423,6 +453,16 @@ public final class Gemma3WarpLayer implements AutoCloseable {
         }
     }
 
+    /** GEMMA-WARP-16: whether q/k/v run as one fused QKV DML-GEMM (always true for this build). */
+    public boolean qkvFused() {
+        return true;
+    }
+
+    /** GEMMA-WARP-16: whether gate/up run as one fused GateUp DML-GEMM (delegates to the MLP). */
+    public boolean gateUpFused() {
+        return mlp.gateUpFused();
+    }
+
     private void ensureOpen() {
         if (closed) {
             throw new IllegalStateException("Gemma3WarpLayer is closed");
@@ -433,9 +473,7 @@ public final class Gemma3WarpLayer implements AutoCloseable {
     public void close() {
         if (!closed) {
             closed = true;
-            qProj.close();
-            kProj.close();
-            vProj.close();
+            qkvProj.close();
             oProj.close();
             mlp.close();
             closeBuffer(inputLayerNormBuf);

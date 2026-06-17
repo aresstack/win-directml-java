@@ -26,17 +26,26 @@ class Gemma3DecodeDispatchBreakdownTest {
     }
 
     @Test
-    void currentBreakdownReflectsTheNormAddFusion() {
+    void currentBreakdownReflectsNormAddAndProjectionFusion() {
         Gemma3DecodeDispatchBreakdown c = Gemma3DecodeDispatchBreakdown.current(GEMMA_LAYERS);
-        assertEquals(19, c.dispatchesPerLayer(), "19 dispatches/layer after the norm+add fusion");
-        assertEquals(344, c.dispatchesPerToken(), "2 fewer dispatches/layer * 18 layers");
+        // 21 (pre-15) - 2 (15 norm+add) - 3 (16: qkv 3->1, gate/up 2->1) = 16 dispatches/layer.
+        assertEquals(16, c.dispatchesPerLayer(), "16 dispatches/layer after norm+add + projection fusion");
+        assertEquals(290, c.dispatchesPerToken(), "16/layer * 18 + 2 tail");
     }
 
     @Test
-    void fusionSavesExactlyTwoDispatchesPerLayer() {
+    void projectionFusionRemovesThreeDispatchesPerLayer() {
+        // GEMMA-WARP-16 alone: qkv (3->1) + gate/up (2->1) = 3 fewer dispatches/layer vs the 15 state (19/layer).
+        int after16 = Gemma3DecodeDispatchBreakdown.current(GEMMA_LAYERS).dispatchesPerToken();
+        int state15 = 19 * GEMMA_LAYERS + 2; // 344
+        assertEquals(3 * GEMMA_LAYERS, state15 - after16, "projection fusion removes 3 dispatches/layer");
+    }
+
+    @Test
+    void allFusionsTogetherRemove90DispatchesPerToken() {
         int before = Gemma3DecodeDispatchBreakdown.baseline(GEMMA_LAYERS).dispatchesPerToken();
         int after = Gemma3DecodeDispatchBreakdown.current(GEMMA_LAYERS).dispatchesPerToken();
-        assertEquals(2 * GEMMA_LAYERS, before - after, "norm+add fusion removes 2 dispatches/layer");
+        assertEquals(90, before - after, "380 -> 290 across 15 (norm+add) + 16 (projection) fusions");
     }
 
     @Test

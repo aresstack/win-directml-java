@@ -66,14 +66,17 @@ public final class Gemma3DecodeDispatchBreakdown {
     }
 
     /**
-     * The post-GEMMA-WARP-15 decode breakdown: the post-attn/post-ff RMSNorm and the two residual
-     * element-adds are fused into a single {@code rmsnorm+residual-add} kernel (2 dispatches/layer instead
-     * of 4), so the layer runs 19 dispatches and the per-token total is 344 for 18 layers.
+     * The current decode breakdown (post GEMMA-WARP-15 norm+add fusion AND GEMMA-WARP-16 projection fusion):
+     * q/k/v are one fused QKV DML-GEMM (was 3) and gate/up are one fused GateUp DML-GEMM (was 2), and the
+     * post-attn/post-ff RMSNorm+residual-add are fused (15). The layer runs 16 dispatches and the per-token
+     * total is 290 for 18 layers (380 → 344 by 15 → 290 by 16).
      */
     public static Gemma3DecodeDispatchBreakdown current(int numLayers) {
         List<Group> g = new ArrayList<>();
-        g.add(new Group("qkvo-projection (DML-GEMM)", 4, false, true));
-        g.add(new Group("mlp gate/up/down (DML-GEMM)", 3, false, true));
+        g.add(new Group("qkv projection (fused DML-GEMM)", 1, false, true));
+        g.add(new Group("o projection (DML-GEMM)", 1, false, true));
+        g.add(new Group("gate+up projection (fused DML-GEMM)", 1, false, true));
+        g.add(new Group("down projection (DML-GEMM)", 1, false, true));
         g.add(new Group("rmsnorm (input, pre-ff)", 2, true, false));
         g.add(new Group("fused rmsnorm+residual-add (post-attn, post-ff)", 2, true, false));
         g.add(new Group("qk-norm (q, k)", 2, true, false));

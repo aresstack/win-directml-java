@@ -26,6 +26,7 @@ No invented figures.
 | 14a | matvec compute benchmark + decision | DML-GEMM ≈ **20 ms** matvec/token vs custom WARP-FP32 ≈130 / INT4 ≈145 → keep DML |
 | 14b | fused attention (scores+softmax+value → 1) + dispatch/barrier counters | dispatches **416 → 380**, uav barriers **435 → 399**; decode flat |
 | 15 | fused post-attn/post-ff RMSNorm + residual add (norm+add → 1) | dispatches **380 → 344**, uav barriers **399 → 363**; decode flat (WARP ~600 ms, GPU ~210 ms) |
+| 16 | fused QKV + GateUp projection groups (3→1 q/k/v, 2→1 gate/up DML-GEMMs) | dispatches **344 → 290**, uav barriers **363 → 309**; **WARP decode ~600 → ~525 ms (~15%)**, GPU ~210 → ~150 ms |
 
 Consolidated per-decode-token trajectory (real model):
 
@@ -202,3 +203,42 @@ small-kernel fusion as a WARP wall-clock lever (count is now lean: 7 matvecs + 1
 tail). Further WARP-CPU decode speedups would need a structurally different approach (e.g. a single
 per-layer megakernel — high risk, uncertain payoff per §3); the GPU path (`Backend = AUTO`) remains the
 real product lever.
+
+## 8. GEMMA-WARP-16 — fuse the projection groups (measured)
+
+Done. Where §7 fused *small* element kernels (count down, wall-clock flat), GEMMA-WARP-16 reduces the
+*large* DML-GEMM projection groups: the per-layer q/k/v projections become **one fused QKV DML-GEMM**
+(`[attnDim+2·kvDim, hidden]`, output sliced into Q/K/V zero-copy views) and gate/up become **one fused
+GateUp DML-GEMM** (`[2·intermediate, hidden]`, its `[gate|up]` output feeds the existing single-buffer
+GeGLU directly). DML-GEMM stays — no custom FP32/INT4 matvec, no INT4 rebuild, no `.wdmlpack` change. The
+fused weights are packed at runtime load only (`WarpDenseProjection.fromFusedWeightSources` →
+`MatMulNBitsKernel.fromFusedFp32ByteBuffers`, heap-light when the source has an FP32 LE slice); the file
+format is untouched. The output slices use a new non-owning `WarpGpuBuffer.slice` view (base VA + 4-byte
+aligned offset), so there is **no extra copy** to split the fused output. Byte-identical to separate
+projections (same per-row dot products); the float[] oracle paths slice the output too.
+
+Per layer: q/k/v (3 matmuls → 1) + gate/up (2 → 1) = **3 fewer dispatches/layer × 18 = 54 fewer/token**.
+
+**Measured (`Gemma3AutoGpuProfileTest`, real `gemma-3-270m-it`, 16 output tokens):**
+
+| metric | before (15) | after (16) |
+|--------|------------:|-----------:|
+| dispatches/token | 344 | **290** (−54 = 3/layer×18) |
+| uav barriers/token | 363 | **309** (−54) |
+| submits/token | 21 | 21 |
+| fence waits/token | 21 | 21 |
+| readbacks/token | 1 | 1 |
+| decode avg/token (WARP) | ~600–660 ms | **~524–533 ms (~15–20% faster)** |
+| total gen ms (WARP) | A 15339 / B 16775 / C 23287 | **A 13189 / B 13509 / C 17031** |
+| decode avg/token (RTX 5080) | ~200–230 ms | ~144–154 ms |
+
+QKV fused active=**true**, GateUp fused active=**true**. Top-1 " Paris" (token 9079) identical for WARP and
+HARDWARE — Paris smoke green.
+
+**Finding (the real WARP lever):** unlike §7, fusing the *large* projection groups **does** move WARP
+wall-clock (~15–20% faster decode, and prefill/total drop further from the batched fused projections).
+Fewer, larger GEMMs read the shared hidden state once and use the WARP CPU rasterizer's SIMD/cache far
+better than several small matmuls — and each fused matvec saves its staging copies + UAV barrier. This is
+the structural win small-kernel fusion could not deliver: the lever on WARP is **GEMM shape/count**, not
+element-dispatch count. Remaining matmuls/layer are now 4 (QKV, O, GateUp, Down) + the tied LM head. The
+GPU path benefits too (~30% faster decode) and remains the optional accelerator (`Backend = AUTO`).

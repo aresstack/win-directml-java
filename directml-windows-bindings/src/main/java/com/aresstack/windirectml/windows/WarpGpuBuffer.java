@@ -21,15 +21,27 @@ public final class WarpGpuBuffer implements AutoCloseable {
     private final Arena arena;
     private final MemorySegment buffer;
     private final int elementCount;
+    // GEMMA-WARP-16: a slice view shares the parent's D3D12 buffer at a byte offset and does not own the
+    // allocation (arena == null). Used to read a sub-region (e.g. the Q/K/V parts of a fused QKV matmul
+    // output) as a kernel UAV without a copy. byteOffset is 0 for an owning buffer.
+    private final long byteOffset;
+    private final boolean view;
     private boolean closed;
 
     private WarpGpuBuffer(MemorySegment device, MemorySegment queue, Arena arena,
                           MemorySegment buffer, int elementCount) {
+        this(device, queue, arena, buffer, elementCount, 0L, false);
+    }
+
+    private WarpGpuBuffer(MemorySegment device, MemorySegment queue, Arena arena,
+                          MemorySegment buffer, int elementCount, long byteOffset, boolean view) {
         this.device = device;
         this.queue = queue;
         this.arena = arena;
         this.buffer = buffer;
         this.elementCount = elementCount;
+        this.byteOffset = byteOffset;
+        this.view = view;
     }
 
     /** Allocate a zero-initialised resident buffer of {@code elementCount} floats. */
@@ -88,21 +100,48 @@ public final class WarpGpuBuffer implements AutoCloseable {
         return elementCount;
     }
 
-    /** The buffer's GPU virtual address, for use as a kernel UAV. */
+    /** The buffer's GPU virtual address (plus the slice offset for a view), for use as a kernel UAV. */
     public long gpuAddress() {
         ensureOpen();
-        return D3D12Bindings.getGpuVirtualAddress(buffer);
+        return D3D12Bindings.getGpuVirtualAddress(buffer) + byteOffset;
+    }
+
+    /**
+     * A non-owning slice view of {@code sliceCount} floats starting at element {@code elementOffset}
+     * (GEMMA-WARP-16). It shares this buffer's D3D12 resource at the corresponding byte offset and is
+     * usable as a kernel UAV input ({@link #gpuAddress()} returns the offset address; the 4-byte element
+     * offset satisfies the D3D12 root-descriptor alignment). The view does not own the allocation:
+     * {@link #close()} is a no-op and it must not outlive the parent buffer. It cannot be sliced again,
+     * read back, or used as a resident-matvec output target.
+     */
+    public WarpGpuBuffer slice(int elementOffset, int sliceCount) {
+        ensureOpen();
+        if (view) {
+            throw new IllegalStateException("cannot slice a slice view");
+        }
+        if (elementOffset < 0 || sliceCount < 1 || (long) elementOffset + sliceCount > elementCount) {
+            throw new IllegalArgumentException("slice [" + elementOffset + ", " + (elementOffset + sliceCount)
+                    + ") out of bounds for elementCount=" + elementCount);
+        }
+        return new WarpGpuBuffer(device, queue, null, buffer, sliceCount,
+                byteOffset + (long) elementOffset * Float.BYTES, true);
     }
 
     /** The underlying D3D12 buffer resource (package-internal: for GPU→GPU copies, e.g. resident matvec). */
     MemorySegment d3d12Buffer() {
         ensureOpen();
+        if (view) {
+            throw new IllegalStateException("a slice view has no standalone D3D12 buffer (offset binding only)");
+        }
         return buffer;
     }
 
     /** Copy the buffer contents back to a host {@code float[]} (one readback). */
     public float[] readback() throws WindowsNativeException {
         ensureOpen();
+        if (view) {
+            throw new IllegalStateException("cannot read back a slice view");
+        }
         try (Arena a = Arena.ofConfined()) {
             return D3D12Bindings.readbackFloats(device, queue, buffer, elementCount, a);
         }
@@ -118,8 +157,11 @@ public final class WarpGpuBuffer implements AutoCloseable {
     public void close() {
         if (!closed) {
             closed = true;
-            DxgiBindings.release(buffer);
-            arena.close();
+            if (!view) {
+                // A slice view does not own the D3D12 buffer/arena — only the parent releases them.
+                DxgiBindings.release(buffer);
+                arena.close();
+            }
         }
     }
 }

@@ -29,8 +29,9 @@ public final class Gemma3WarpMlp implements AutoCloseable {
 
     private final int hidden;
     private final int intermediate;
-    private final WarpDenseProjection gateProj;
-    private final WarpDenseProjection upProj;
+    // GEMMA-WARP-16: gate/up share one fused GateUp DML-GEMM whose [gate | up] output feeds the GeGLU
+    // directly (the single-buffer GeGLU already expects that layout). down_proj stays separate.
+    private final WarpDenseProjection gateUpProj;
     private final WarpDenseProjection downProj;
     private final Gemma3WarpGeGluKernel geGlu;
     private final boolean ownsGeGlu;
@@ -96,8 +97,8 @@ public final class Gemma3WarpMlp implements AutoCloseable {
         }
         this.hidden = hidden;
         this.intermediate = intermediate;
-        this.gateProj = WarpDenseProjection.fromWeightSource(wb, gateProj);
-        this.upProj = WarpDenseProjection.fromWeightSource(wb, upProj);
+        this.gateUpProj = WarpDenseProjection.fromFusedWeightSources(wb, "gemma3.gate_up_proj",
+                java.util.List.of(gateProj, upProj));
         this.downProj = WarpDenseProjection.fromWeightSource(wb, downProj);
         this.geGlu = geGlu;
         this.ownsGeGlu = ownsGeGlu;
@@ -118,11 +119,8 @@ public final class Gemma3WarpMlp implements AutoCloseable {
         if (x.length != hidden) {
             throw new IllegalArgumentException("x length must equal hidden: x=" + x.length + ", hidden=" + hidden);
         }
-        float[] gate = gateProj.project(x);
-        float[] up = upProj.project(x);
-        float[] gateUp = new float[2 * intermediate];
-        System.arraycopy(gate, 0, gateUp, 0, intermediate);
-        System.arraycopy(up, 0, gateUp, intermediate, intermediate);
+        // GEMMA-WARP-16: one fused GateUp projection yields the [gate | up] vector the GeGLU expects.
+        float[] gateUp = gateUpProj.project(x);
         float[] activated = geGlu.apply(gateUp, intermediate);
         return downProj.project(activated);
     }
@@ -157,11 +155,10 @@ public final class Gemma3WarpMlp implements AutoCloseable {
         if (x.elementCount() != hidden) {
             throw new IllegalArgumentException("x length must equal hidden: x=" + x.elementCount() + ", hidden=" + hidden);
         }
-        WarpGpuBuffer gate = gateProj.forwardResident(ctx, x);
-        scratch.add(gate);
-        WarpGpuBuffer up = upProj.forwardResident(ctx, x);
-        scratch.add(up);
-        WarpGpuBuffer activated = geGlu.apply(ctx, gate, up, intermediate);
+        // GEMMA-WARP-16: one fused GateUp DML-GEMM; its [gate | up] output feeds the single-buffer GeGLU.
+        WarpGpuBuffer gateUp = gateUpProj.forwardResident(ctx, x);
+        scratch.add(gateUp);
+        WarpGpuBuffer activated = geGlu.apply(ctx, gateUp, intermediate);
         scratch.add(activated);
         return downProj.forwardResident(ctx, activated);
     }
@@ -180,15 +177,12 @@ public final class Gemma3WarpMlp implements AutoCloseable {
         for (int p = 0; p < seqLen; p++) {
             rowCopy.copy(ctx, x[p], 0, batchX, p * hidden, hidden);
         }
-        WarpGpuBuffer gateBatch = track(scratch, gateProj.forwardResidentBatched(ctx, batchX, seqLen));
-        WarpGpuBuffer upBatch = track(scratch, upProj.forwardResidentBatched(ctx, batchX, seqLen));
+        // GEMMA-WARP-16: one fused GateUp batched matmul; each row p is [gate_p | up_p], sliced for GeGLU.
+        WarpGpuBuffer gateUpBatch = track(scratch, gateUpProj.forwardResidentBatched(ctx, batchX, seqLen));
         WarpGpuBuffer batchAct = track(scratch, ctx.allocate(seqLen * intermediate));
         for (int p = 0; p < seqLen; p++) {
-            WarpGpuBuffer gateRow = track(scratch, ctx.allocate(intermediate));
-            rowCopy.copy(ctx, gateBatch, p * intermediate, gateRow, 0, intermediate);
-            WarpGpuBuffer upRow = track(scratch, ctx.allocate(intermediate));
-            rowCopy.copy(ctx, upBatch, p * intermediate, upRow, 0, intermediate);
-            WarpGpuBuffer act = track(scratch, geGlu.apply(ctx, gateRow, upRow, intermediate));
+            WarpGpuBuffer gateUpRow = gateUpBatch.slice(p * 2 * intermediate, 2 * intermediate);
+            WarpGpuBuffer act = track(scratch, geGlu.apply(ctx, gateUpRow, intermediate));
             rowCopy.copy(ctx, act, 0, batchAct, p * intermediate, intermediate);
         }
         WarpGpuBuffer downBatch = track(scratch, downProj.forwardResidentBatched(ctx, batchAct, seqLen));
@@ -203,6 +197,11 @@ public final class Gemma3WarpMlp implements AutoCloseable {
     private static WarpGpuBuffer track(java.util.List<WarpGpuBuffer> scratch, WarpGpuBuffer b) {
         scratch.add(b);
         return b;
+    }
+
+    /** GEMMA-WARP-16: whether gate/up run as one fused GateUp DML-GEMM (always true for this build). */
+    public boolean gateUpFused() {
+        return true;
     }
 
     public int hidden() {
@@ -223,8 +222,7 @@ public final class Gemma3WarpMlp implements AutoCloseable {
     public void close() {
         if (!closed) {
             closed = true;
-            gateProj.close();
-            upProj.close();
+            gateUpProj.close();
             downProj.close();
             if (ownsGeGlu) {
                 geGlu.close();

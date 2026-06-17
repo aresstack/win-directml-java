@@ -116,6 +116,46 @@ public final class WarpDenseProjection implements AutoCloseable {
         return new WarpDenseProjection(name, inputSize, outputSize, kernel);
     }
 
+    /**
+     * Build a fused projection by vertically stacking several {@link WarpWeightSource} parts that share the same
+     * input width (GEMMA-WARP-16): e.g. {@code q|k|v} or {@code gate|up} into one {@code [Σ outputRows, inputColumns]}
+     * DML-GEMM. Prefers each part's heap-light FP32 little-endian slice; a part without one is wrapped from its
+     * {@code float[]} fallback into a little-endian buffer (one-time, at load). Numerically identical to running the
+     * parts as separate projections (same per-row dot products), so the fused output sliced into the parts equals the
+     * concatenation of the separate outputs.
+     */
+    public static WarpDenseProjection fromFusedWeightSources(WindowsBindings windowsBindings, String name,
+                                                             List<WarpWeightSource> parts) {
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(parts, "parts");
+        if (parts.isEmpty()) {
+            throw new IllegalArgumentException("fused projection " + name + " needs at least one part");
+        }
+        int inputColumns = parts.get(0).inputColumns();
+        int totalRows = 0;
+        java.util.List<ByteBuffer> partsLe = new java.util.ArrayList<>(parts.size());
+        for (WarpWeightSource part : parts) {
+            if (part.inputColumns() != inputColumns) {
+                throw new IllegalArgumentException("fused projection " + name + " parts must share inputColumns: "
+                        + part.inputColumns() + " != " + inputColumns);
+            }
+            totalRows += part.outputRows();
+            partsLe.add(toLittleEndianFp32(part));
+        }
+        return fromFusedFp32(windowsBindings, name, totalRows, inputColumns, partsLe);
+    }
+
+    private static ByteBuffer toLittleEndianFp32(WarpWeightSource part) {
+        ByteBuffer fp32 = part.fp32LittleEndian();
+        if (fp32 != null) {
+            return fp32;
+        }
+        float[] arr = part.dequantizedRowMajor();
+        ByteBuffer bb = ByteBuffer.allocate(Math.multiplyExact(arr.length, Float.BYTES)).order(ByteOrder.LITTLE_ENDIAN);
+        bb.asFloatBuffer().put(arr);
+        return bb; // position 0, limit = capacity → remaining() == arr.length * 4
+    }
+
     public String name() {
         return name;
     }

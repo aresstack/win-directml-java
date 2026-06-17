@@ -24,6 +24,9 @@ import java.util.Objects;
  */
 public final class Gemma3WarpDecodeSession implements AutoCloseable {
 
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger(Gemma3WarpDecodeSession.class);
+
     private final Gemma3WarpWeights weights;
     private final Gemma3Config config;
     private final int hidden;
@@ -52,6 +55,9 @@ public final class Gemma3WarpDecodeSession implements AutoCloseable {
         for (int i = 0; i < layers.length; i++) {
             layers[i] = new Gemma3WarpLayer(wb, config, i, weights.layers()[i], kernels);
         }
+        // GEMMA-WARP-16: report the projection-fusion state (q/k/v → one DML-GEMM, gate/up → one DML-GEMM).
+        LOG.info("GEMMA-WARP-16 projection fusion: QKV fused active={}, GateUp fused active={}",
+                layers[0].qkvFused(), layers[0].gateUpFused());
         this.cache = new Gemma3WarpKvCache(config.numHiddenLayers(), config.keyValueDim(), 16);
     }
 
