@@ -203,9 +203,10 @@ public final class SummarizerPanel extends JPanel {
                 return;
             }
             // Runnable models (SHIPPED/EXPERIMENTAL) are never blocked here; only genuinely PLANNED models are.
-            // Qwen 0.5B is EXPERIMENTAL now, so it no longer needs a hard-coded exemption (WORKBENCH-MODEL-STATUS-2);
-            // gemma/smollm2 PLANNED *base* checkpoints still route to their family handler for a clear message.
-            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !gemma3Model && !smolLm2Model) {
+            // No hard-coded family exemptions for status-runnable models (Qwen 0.5B: STATUS-2; SmolLM2:
+            // SMOLLM2-PRODUCT-AUDIT-1 — both EXPERIMENTAL). gemma3Model stays: the Gemma *base* checkpoint is
+            // PLANNED but routes to the Gemma handler for a clear missing-package message.
+            if (entry.status() == GenerationModelRegistry.Status.PLANNED && !gemma3Model) {
                 appendResult("ERROR: Model '" + selectedModel + "' is selectable but not executable yet.");
                 appendResult("  Status: planned. Runtime support is in progress for family "
                         + entry.architecture().token() + ".");
@@ -499,11 +500,11 @@ public final class SummarizerPanel extends JPanel {
                 + ", scratch: " + com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport.formatBytes(report.totalScratchBytes()));
         appendResult("  Kernel steps: " + report.kernelStepCount() + ", alignment: " + report.alignmentBytes() + " bytes");
         if (report.preparedButNotExecutable()) {
-            if (report.directMlProbeAvailable()) {
-                appendResult("  DirectML/WARP probe available; kernel execution is the next WARP implementation step.");
-            } else {
-                appendResult("  Native executor missing; prepared upload/session metadata is available for the next WARP implementation step.");
-            }
+            // SMOLLM2-PRODUCT-AUDIT-1: the native WARP executor exists; this state means it is not executable
+            // for this package/host, so the runtime uses the CPU reference runtime. Surface the precise reason
+            // instead of implying WARP is unimplemented; the "Runtime fallback" line above carries the same.
+            appendResult("  WARP path prepared but not executable here; using the CPU reference runtime"
+                    + (report.reason().isBlank() ? "." : " (" + report.reason() + ")."));
         }
     }
 

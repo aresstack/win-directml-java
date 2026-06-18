@@ -254,7 +254,9 @@ public final class GenerationModelRegistry {
                         "model/smollm2-135m-instruct",
                         "model/HuggingFaceTB/SmolLM2-135M-Instruct"),
                 "Very small decoder-only candidate for simple local summaries. "
-                        + "Runs through the SmolLM2 reference runtime from a compiled wdmlpack package."));
+                        + "Runs from a compiled wdmlpack package via the native DirectML/WARP runtime (dense "
+                        + "projections on the D3D12 software rasterizer; CPU reference-runtime fallback when no "
+                        + "WARP device); no Python."));
 
         entries.add(new Entry(
                 "HuggingFaceTB/SmolLM2-360M-Instruct",
@@ -267,7 +269,9 @@ public final class GenerationModelRegistry {
                         "model/smollm2-360m-instruct",
                         "model/HuggingFaceTB/SmolLM2-360M-Instruct"),
                 "Small decoder-only candidate and likely best sub-0.5B fallback. "
-                        + "Runs through the SmolLM2 reference runtime from a compiled wdmlpack package."));
+                        + "Runs from a compiled wdmlpack package via the native DirectML/WARP runtime (dense "
+                        + "projections on the D3D12 software rasterizer; CPU reference-runtime fallback when no "
+                        + "WARP device); no Python."));
 
         // --- Gemma 3: gated compact decoder-only candidate for external Workbench probing ---
         entries.add(new Entry(

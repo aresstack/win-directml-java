@@ -67,6 +67,22 @@ class WorkbenchModelStatusAuditTest {
     }
 
     @Test
+    void smolLm2IsRunnableByStatusWithHonestNotes() {
+        // SMOLLM2-PRODUCT-AUDIT-1: both SmolLM2 variants are EXPERIMENTAL/runnable (no PLANNED-guard exemption
+        // needed), and their notes carry no stale planned/probe/not-implemented wording.
+        for (String id : new String[]{"HuggingFaceTB/SmolLM2-135M-Instruct", "HuggingFaceTB/SmolLM2-360M-Instruct"}) {
+            Entry e = GenerationModelRegistry.findByModelId(id);
+            assertNotNull(e, id + " must be registered");
+            assertEquals(Status.EXPERIMENTAL, e.status(), id + " is runnable -> EXPERIMENTAL");
+            assertTrue(e.isRunnable());
+            String note = e.notes() == null ? "" : e.notes().toLowerCase();
+            for (String banned : new String[]{"planned", "not implemented", "probe", "runtime integration"}) {
+                assertFalse(note.contains(banned), id + " note has stale wording '" + banned + "': " + note);
+            }
+        }
+    }
+
+    @Test
     void genuinelyNotExecutableModelsStayPlanned() {
         // Selectable but clearly not executable yet -> PLANNED (the Summarizer shows the honest guard message).
         for (String id : new String[]{
