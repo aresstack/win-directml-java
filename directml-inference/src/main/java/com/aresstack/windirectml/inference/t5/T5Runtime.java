@@ -9,14 +9,16 @@ import java.util.Objects;
  * Seq2seq T5 runtime. The default {@link #load} path is the validated Java reference runtime; the
  * {@link #loadWarp} family routes the dense projections (attention/feed-forward + LM-head matvecs) through
  * the WARP/DirectML boundary while layer norms, attention softmax, and relative-position bias stay on the
- * reference path. The WARP boundary executes but is not yet correctness-certified (see {@link #UNSUPPORTED_MESSAGE}
- * and {@code doc/problems.md}); the reference runtime remains the certified path.
+ * reference path. The WARP boundary is real-certified end-to-end (CPU == WARP, greedy) for the four curated T5
+ * models — t5-small, flan-t5-small, codet5-small, codet5-base-multi-sum (T5-REALMODEL-CERT-1..4); for any other
+ * T5 model it executes but is not certified, and the reference runtime remains the always-validated path.
  */
 public final class T5Runtime implements AutoCloseable {
     /**
-     * Historical marker that the WARP boundary path is not yet correctness-certified. It is no longer thrown
-     * (the boundary pipelines run); package-level certification claims still scope themselves to the reference
-     * engine via this reference. The wording is retained as a stable javadoc anchor across the manifest policy.
+     * Historical marker that the WARP boundary path was not certified at package-compile time. It is no longer
+     * thrown (the boundary pipelines run, and the curated T5 models are now real-certified — see the class
+     * javadoc); package-level certification claims still scope themselves to the reference engine via this
+     * reference. The wording is retained as a stable javadoc anchor across the manifest policy.
      */
     public static final String UNSUPPORTED_MESSAGE = "T5 WARP runtime is not certified yet.";
 

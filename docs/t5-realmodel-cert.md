@@ -1,4 +1,13 @@
-# T5 real-model correctness cert prep (T5-REALMODEL-CERT-PREP-1)
+# T5 real-model correctness cert (prep + CERT-1..4 + closeout)
+
+> **Status (T5-PRODUCT-CLOSEOUT): all four curated T5 models are real-certified** — `google-t5/t5-small`,
+> `google/flan-t5-small`, `Salesforce/codet5-small`, `Salesforce/codet5-base-multi-sum` (CPU reference == WARP
+> mixed, greedy; token ids + text identical; T5-REALMODEL-CERT-1..4). **Certification scope:** exactly these four;
+> any other or newly-added T5/CodeT5 model must run its own gated cert before being called certified — there is no
+> blanket guarantee for arbitrary T5-family models. CPU stays the always-validated path; WARP/AUTO are the mixed
+> DirectML path, now certified against CPU for the four. A prebuilt `.wdmlpack` is mandatory and Download → Convert
+> is the prerequisite. No Python on any T5 path. Real-model + synthetic certs stay opt-in; downloaded `model/...`
+> artifacts are git-ignored.
 
 `T5-CORRECTNESS-CERT-1` could only measure the WARP/AUTO mixed path against the CPU reference on a *synthetic*
 package (verdict **D** — no real T5 artifact present). This note prepares the **primary** real-model so the gated

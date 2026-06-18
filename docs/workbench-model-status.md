@@ -77,11 +77,11 @@ T5/Flan-T5/CodeT5 are honest, executable Workbench paths — audit/labels only, 
   LM-head WARP boundaries): the dense projections (attention/feed-forward + LM-head matvecs) run through
   DirectML on the WARP software adapter (WARP) or first hardware adapter (AUTO) via the shared
   `WarpDenseProjection` / `MatMulNBitsKernel`, while layer norms, attention softmax, and relative-position bias
-  stay on the CPU reference path. This mixed path **executes but is not yet correctness-certified** — it is
-  surfaced as experimental, not as a finished native runtime. The panel prints the precise stage routing as the
-  execution mode (e.g. `reference` or `warp-encoder-boundary+warp-decoder-boundary+warp-lm-head`). **No Python
-  on any T5 path** (the engine consumes only the `.wdmlpack`; it never runs ONNX/PyTorch/HF through a foreign
-  runtime).
+  stay on the CPU reference path. (At audit time this mixed path was *not yet* correctness-certified and was
+  surfaced as experimental; it has since been real-certified end-to-end for all four curated T5 models — see the
+  certification sections below.) The panel prints the precise stage routing as the execution mode (e.g.
+  `reference` or `warp-encoder-boundary+warp-decoder-boundary+warp-lm-head`). **No Python on any T5 path** (the
+  engine consumes only the `.wdmlpack`; it never runs ONNX/PyTorch/HF through a foreign runtime).
 - **Missing package** → `T5InferenceEngine` fails fast (lifecycle `validateOrThrowBeforeInference`; the panel's
   `validateT5ModelFiles` adds a clear "Download or compile the selected T5 model first" message). Runtime never
   compiles.
@@ -187,6 +187,25 @@ entire curated T5 family is real-certified; the panel NOTE now states all four a
 the experimental/uncertified group). The downloaded artifacts under `model/t5-small/`, `model/flan-t5-small/`,
 `model/codet5-small/` and `model/codet5-base-multi-sum/` are git-ignored. Tests:
 `T5MixedRuntimeCorrectnessCertTest` (`directml-inference`). See `t5-realmodel-cert.md` for the prep recipe.
+
+### T5 product status (T5-PRODUCT-CLOSEOUT)
+
+Final state of the curated T5/Flan-T5/CodeT5 family as a Workbench product path:
+- **All four curated models are real-certified** (CPU reference == WARP mixed, greedy, token ids + text identical):
+  `google-t5/t5-small`, `google/flan-t5-small`, `Salesforce/codet5-small`, `Salesforce/codet5-base-multi-sum`
+  (T5-REALMODEL-CERT-1..4). The gated cert asserts this parity for every present model.
+- **CPU** = the always-validated Java reference seq2seq runtime. **WARP/AUTO** = the mixed DirectML path (dense
+  projections on the WARP software adapter / first hardware adapter, the rest on the CPU reference), now
+  real-certified against CPU for the four curated models. **No Python** on any T5 path.
+- **A prebuilt `.wdmlpack` is mandatory** (the engine never compiles at inference) and **Download → Convert is the
+  prerequisite** to produce it. Missing package → clear fail-fast message.
+- **Certification scope / product boundary:** the certification covers exactly these four curated models. Any other
+  or newly-added T5/CodeT5 model is **not** automatically certified — it must run its own real-model cert
+  (`T5MixedRuntimeCorrectnessCertTest`, opt-in) before being described as certified. No blanket guarantee for
+  arbitrary T5-family models.
+- **Gating / artifacts:** the real-model and synthetic certs stay opt-in (`-Dt5.realModel=true`,
+  `-Dt5.correctness.cert=true`); the standard regression stays light. Downloaded `model/...` artifacts are
+  git-ignored and never committed.
 
 ## Gemma reference (unchanged)
 
