@@ -237,6 +237,12 @@ public final class SummarizerPanel extends JPanel {
             appendResult("  NOTE: Requires a prebuilt model.wdmlpack. Use the Download tab -> Convert; inference never compiles.");
         } else if (isT5Model(selectedModel)) {
             appendResult("  NOTE: T5-family models run only from a prebuilt .wdmlpack. Use the Download tab -> Convert; inference never compiles.");
+            appendResult("  NOTE: Backend = CPU runs the validated Java reference seq2seq runtime. Backend = WARP/AUTO routes the "
+                    + "dense projections (attention/feed-forward + LM-head matmuls) through DirectML on the WARP software / "
+                    + "hardware adapter, while layer norms, attention softmax, and relative-position bias stay on the CPU "
+                    + "reference path; this mixed path is experimental and not yet correctness-certified. No Python on any T5 path.");
+            appendResult("  NOTE: The exact stage routing is printed below as the execution mode (e.g. 'reference' or "
+                    + "'warp-encoder-boundary+warp-decoder-boundary+warp-lm-head').");
         }
 
         new SwingWorker<Void, Void>() {

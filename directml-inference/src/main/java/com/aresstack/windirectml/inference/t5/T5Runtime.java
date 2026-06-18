@@ -6,10 +6,19 @@ import com.aresstack.windirectml.windows.WindowsBindings;
 import java.util.Objects;
 
 /**
- * API shell for the future T5 WARP runtime.
+ * Seq2seq T5 runtime. The default {@link #load} path is the validated Java reference runtime; the
+ * {@link #loadWarp} family routes the dense projections (attention/feed-forward + LM-head matvecs) through
+ * the WARP/DirectML boundary while layer norms, attention softmax, and relative-position bias stay on the
+ * reference path. The WARP boundary executes but is not yet correctness-certified (see {@link #UNSUPPORTED_MESSAGE}
+ * and {@code doc/problems.md}); the reference runtime remains the certified path.
  */
 public final class T5Runtime implements AutoCloseable {
-    public static final String UNSUPPORTED_MESSAGE = "T5 WARP runtime is not implemented yet.";
+    /**
+     * Historical marker that the WARP boundary path is not yet correctness-certified. It is no longer thrown
+     * (the boundary pipelines run); package-level certification claims still scope themselves to the reference
+     * engine via this reference. The wording is retained as a stable javadoc anchor across the manifest policy.
+     */
+    public static final String UNSUPPORTED_MESSAGE = "T5 WARP runtime is not certified yet.";
 
     private final T5RuntimePackage runtimePackage;
     private final T5Weights weights;

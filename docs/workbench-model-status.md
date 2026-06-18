@@ -18,7 +18,7 @@ user-visible residue, so this slice confirms it and locks it in with `WorkbenchM
 | **Qwen2.5-Coder-0.5B-it** | yes | native DirectML INT4 (`model_q4f16.wdmlpack`) | native DirectML INT4 | engine backend | EXPERIMENTAL | **yes** | Runnable by status (WORKBENCH-MODEL-STATUS-2) — the PLANNED-guard `qwenTestModel` exemption was removed; `isQwenTestModel` now only routes to `QwenInferenceEngine` (like the other families' routing). No Python. |
 | Qwen2.5-Coder 1.5B / 3B | yes | — | — | — | PLANNED | no | "selectable but not executable yet" (honest guard message). |
 | **SmolLM2-135M / 360M** | yes | native DirectML/WARP (dense projections on the D3D12 software rasterizer), CPU reference-runtime fallback when no WARP device | hardware GPU when present, else CPU reference runtime | reference runtime | EXPERIMENTAL | **yes — from `.wdmlpack`** | No Python. Missing package → clear "Use Download tab → Convert". Audited honest in SMOLLM2-PRODUCT-AUDIT-1 (see below). |
-| **T5 / Flan-T5 / CodeT5** | yes | native from `.wdmlpack` | native | native | EXPERIMENTAL | **yes — from `.wdmlpack`** | Seq2seq. No Python. `T5InferenceEngine`. |
+| **T5 / Flan-T5 / CodeT5** | yes | mixed: dense projections + LM-head on DirectML/WARP, rest on CPU reference (uncertified) | same on hardware adapter | validated Java reference seq2seq | EXPERIMENTAL | **yes — from `.wdmlpack`** | Seq2seq. No Python. `T5InferenceEngine`. CPU=certified path; WARP/AUTO=experimental mixed path. Audited honest in T5-PRODUCT-AUDIT-1 (see below). |
 | **Phi-3 mini (onnx)** | yes | `Phi3Summarizer`/`Phi3InferenceEngine` (backend forwarded) | same | same | EXPERIMENTAL | yes (runtime present) | Runs via the Phi-3 engine; the panel notes "no direct ONNX execution / from a wdmlpack". Exact engine internals not re-verified in this Gemma-scoped audit. No Python. |
 | Phi-3.5 mini (onnx) | yes | — | — | — | PLANNED | no | "selectable but not executable yet". |
 
@@ -64,6 +64,34 @@ SmolLM2 135M/360M are honest, executable Workbench paths — no Runtime-optimiza
   legacy `SmolLM2DirectMlWarpExecutor` "probe" ("kernels not implemented yet") is a diagnostic opt-in
   (`-Dsmollm2.warp.executor=probe`), not the product path. Registry notes updated to describe the native
   WARP + reference-fallback path.
+
+## T5 audit (T5-PRODUCT-AUDIT-1)
+
+T5/Flan-T5/CodeT5 are honest, executable Workbench paths — audit/labels only, no T5 runtime change:
+- **Selectable + runnable.** All four curated models (`Salesforce/codet5-small`,
+  `Salesforce/codet5-base-multi-sum`, `google-t5/t5-small`, `google/flan-t5-small`) are `EXPERIMENTAL` → in
+  the dropdown and runnable by status. They are not `PLANNED`, so the Summarizer's PLANNED guard never blocks
+  them and no T5 guard exemption exists (unlike the old Qwen/SmolLM2 exemptions there was never one to remove).
+- **Routing (honest, no overclaim).** `Backend = CPU` → the **validated** Java reference seq2seq runtime
+  (`T5Runtime.load`). `Backend = WARP / AUTO` → a **mixed** path (`T5Runtime.loadWarp` = encoder + decoder +
+  LM-head WARP boundaries): the dense projections (attention/feed-forward + LM-head matvecs) run through
+  DirectML on the WARP software adapter (WARP) or first hardware adapter (AUTO) via the shared
+  `WarpDenseProjection` / `MatMulNBitsKernel`, while layer norms, attention softmax, and relative-position bias
+  stay on the CPU reference path. This mixed path **executes but is not yet correctness-certified** — it is
+  surfaced as experimental, not as a finished native runtime. The panel prints the precise stage routing as the
+  execution mode (e.g. `reference` or `warp-encoder-boundary+warp-decoder-boundary+warp-lm-head`). **No Python
+  on any T5 path** (the engine consumes only the `.wdmlpack`; it never runs ONNX/PyTorch/HF through a foreign
+  runtime).
+- **Missing package** → `T5InferenceEngine` fails fast (lifecycle `validateOrThrowBeforeInference`; the panel's
+  `validateT5ModelFiles` adds a clear "Download or compile the selected T5 model first" message). Runtime never
+  compiles.
+- **Stale wording fixed.** Added an honest panel NOTE that WARP/AUTO is the mixed, uncertified path and CPU is
+  the validated one (previously the panel only said "runs from a prebuilt .wdmlpack" and never disclosed the
+  mixed routing — a user picking WARP could assume a fully native runtime). Corrected the stale `T5Runtime`
+  class javadoc ("API shell for the future T5 WARP runtime" — the WARP boundary pipelines exist) and the
+  `UNSUPPORTED_MESSAGE` constant ("…not implemented yet" → "…not certified yet"; it is no longer thrown and is
+  retained only as a javadoc anchor for the package-level certification scope). Registry notes already used
+  internal "Experimental …" wording with no `planned`/`probe`/`not implemented`/`runtime integration` residue.
 
 ## Gemma reference (unchanged)
 

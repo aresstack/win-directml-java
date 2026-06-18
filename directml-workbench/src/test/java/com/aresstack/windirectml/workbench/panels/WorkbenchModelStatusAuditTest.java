@@ -83,6 +83,28 @@ class WorkbenchModelStatusAuditTest {
     }
 
     @Test
+    void t5FamilyIsRunnableByStatusWithHonestNotes() {
+        // T5-PRODUCT-AUDIT-1: every curated T5/Flan-T5/CodeT5 model is EXPERIMENTAL/runnable (no PLANNED-guard
+        // exemption needed -- they are not PLANNED), and the registry notes carry no stale planned/probe/
+        // not-implemented wording. Internal "experimental" wording is allowed; "runtime integration is planned"
+        // is not.
+        for (String id : new String[]{
+                "Salesforce/codet5-small",
+                "Salesforce/codet5-base-multi-sum",
+                "google-t5/t5-small",
+                "google/flan-t5-small"}) {
+            Entry e = GenerationModelRegistry.findByModelId(id);
+            assertNotNull(e, id + " must be registered");
+            assertEquals(Status.EXPERIMENTAL, e.status(), id + " is runnable -> EXPERIMENTAL");
+            assertTrue(e.isRunnable());
+            String note = e.notes() == null ? "" : e.notes().toLowerCase();
+            for (String banned : new String[]{"planned", "not implemented", "probe", "runtime integration"}) {
+                assertFalse(note.contains(banned), id + " note has stale wording '" + banned + "': " + note);
+            }
+        }
+    }
+
+    @Test
     void genuinelyNotExecutableModelsStayPlanned() {
         // Selectable but clearly not executable yet -> PLANNED (the Summarizer shows the honest guard message).
         for (String id : new String[]{
