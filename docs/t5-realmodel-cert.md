@@ -94,6 +94,12 @@ includes them (each skips cleanly until downloaded):
 the capital of France?"` → token ids `[1410:▁France]` / text `France` identical on CPU and WARP (greedy;
 executionMode `warp-encoder-boundary+warp-decoder-boundary+warp-lm-head`).
 
-The cert asserts this parity for any present model. CodeT5 remains uncertified (skip until downloaded). The
-`model/t5-small/` and `model/flan-t5-small/` artifacts are git-ignored. No Gemma/Qwen/SmolLM2/Phi change. See
-`workbench-model-status.md` for the full result.
+`Salesforce/codet5-small` is **real-certified (T5-REALMODEL-CERT-3, verdict A)** — the CodeT5 special case
+(`pytorch_model.bin` Torch checkpoint + `vocab.json`/`merges.txt` BPE tokenizer, no safetensors/SentencePiece). Prompt
+`"def add(a, b):\n    return a + b"` → token ids `[1:<s>, 32099:<extra_id_0>, 30::]` identical on CPU and WARP. It is
+a pretrained base checkpoint, so the output is span-corruption sentinels (low quality) but byte-identical across
+paths — the cert measures CPU-vs-WARP parity, not output quality.
+
+The cert asserts this parity for any present model. codet5-base-multi-sum remains uncertified (skip until
+downloaded). The `model/t5-small/`, `model/flan-t5-small/` and `model/codet5-small/` artifacts are git-ignored. No
+Gemma/Qwen/SmolLM2/Phi change. See `workbench-model-status.md` for the full result.
