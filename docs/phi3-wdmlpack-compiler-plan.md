@@ -10,7 +10,18 @@
 > gated real Phi-3-mini compile (`-Dphi3.compile.realModel=true`) now **runs within the standard 2 GB test heap** and
 > produces a real `model_phi3.wdmlpack` — **711 tensors, 32 layers, ~2.39 GB**.
 >
-> **Lifecycle/gate wired; runtime smoke deferred (PHI3-WORKBENCH-RUNNABLE-1 — decision C).** `Phi3PackageLifecycle`
+> **Phi-3-mini is now Workbench-runnable (PHI3-RUNTIME-HEAPLIGHT-1 — decision A).** `Phi3RuntimePackage.weights()`
+> is heap-light: `QuantizedWeight` was made buffer-backed (qweight/zeropoints reference the package's mmap'd
+> `RuntimeTensor` buffers off-heap; matvec/matmul bulk-read each INT4 block via absolute `ByteBuffer.get`), so a
+> package load no longer copies the ~2 GB of INT4 to the heap. The gated decode smoke runs within the **standard 2 GB
+> test heap** (`heapUsed≈783 MB`, output "Red"). `SummarizerPanel.runPhi3Summarizer` now runs Phi-3 from the
+> compiled `model_phi3.wdmlpack` via the native Java/DirectML `Phi3Runtime` (CPU; no Python, no ONNX Runtime) instead
+> of raw ONNX. **Phi-3-mini flipped PLANNED → EXPERIMENTAL / runnable**; Phi-3.5 stays PLANNED. wdmlpack format
+> unchanged; the ONNX `Phi3Weights.load` route and the GPU `Phi3GpuKernels` (which materialize byte[] on demand via
+> the kept `qWeight()` accessor) still work; small Qwen/T5/SmolLM2 packages unaffected. Gated smoke:
+> `:directml-inference:test --tests '*Phi3WdmlPackCompilerTest' -Dphi3.realModel=true [-Dphi3.testModelDir=...]`.
+>
+> **Lifecycle/gate wired; runtime smoke deferred (PHI3-WORKBENCH-RUNNABLE-1 — decision C, superseded above).** `Phi3PackageLifecycle`
 > (`hasCompiler()=true`) now replaces `CompilerMissingLifecycle(PHI3)` in `WorkbenchArtifactGate`,
 > `DefaultModelArtifactService` and the `DownloadPanel` Phi row: Phi-3 is downloadable **and** convertible to
 > `model_phi3.wdmlpack`, and a compiled package is detected READY via the **light** structural

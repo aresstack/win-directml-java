@@ -13,18 +13,24 @@ import static org.junit.jupiter.api.Assertions.*;
 class GenerationModelRegistryTest {
 
     @Test
-    void registryContainsPhi3PlannedNotExecutableInWorkbench() {
-        // PHI3-PRODUCT-AUDIT-1: Phi-3-mini is selectable + downloadable but NOT executable in the Workbench
-        // (the homogeneous artifact gate has no wdmlpack compiler for Phi-3 and blocks raw-weight execution).
-        // It is therefore PLANNED, not EXPERIMENTAL -- the registry must not promise a runnable model.
+    void registryContainsPhi3MiniExperimentalRunnable() {
+        // PHI3-RUNTIME-HEAPLIGHT-1: Phi-3-mini now runs in the Workbench from a compiled model_phi3.wdmlpack
+        // (heap-light package load -> native Java/DirectML Phi3Runtime; gated decode smoke green), so it is
+        // EXPERIMENTAL/runnable by status. Phi-3.5 stays PLANNED.
         GenerationModelRegistry.Entry phi3 =
                 GenerationModelRegistry.findByModelId("microsoft/Phi-3-mini-4k-instruct-onnx");
         assertNotNull(phi3, "Phi-3 must be in the generation registry");
         assertEquals(GenerationModelRegistry.Architecture.CAUSAL_LM, phi3.architecture());
-        assertEquals(GenerationModelRegistry.Status.PLANNED, phi3.status());
+        assertEquals(GenerationModelRegistry.Status.EXPERIMENTAL, phi3.status());
         assertEquals(ChatTemplate.PHI3, phi3.chatTemplate());
         assertTrue(phi3.isCausalLM());
-        assertFalse(phi3.isRunnable());
+        assertTrue(phi3.isRunnable());
+
+        GenerationModelRegistry.Entry phi35 =
+                GenerationModelRegistry.findByModelId("microsoft/Phi-3.5-mini-instruct-onnx");
+        assertNotNull(phi35);
+        assertEquals(GenerationModelRegistry.Status.PLANNED, phi35.status(), "Phi-3.5 stays PLANNED");
+        assertFalse(phi35.isRunnable());
     }
 
     @Test

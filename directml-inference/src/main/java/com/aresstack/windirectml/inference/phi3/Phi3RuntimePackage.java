@@ -129,14 +129,6 @@ public final class Phi3RuntimePackage {
         return out;
     }
 
-    private static byte[] bytes(RuntimeTensorCatalog catalog, String name) throws IOException {
-        RuntimeTensor tensor = require(catalog, name);
-        ByteBuffer buf = tensor.rawDataBuffer();
-        byte[] out = new byte[tensor.rawByteLength()];
-        buf.get(out);
-        return out;
-    }
-
     private static QuantizedWeight quantized(RuntimeTensorCatalog catalog, String role) throws IOException {
         RuntimeTensor q = require(catalog, Phi3WdmlPackRoles.qweight(role));
         long[] dims = q.dims();
@@ -144,10 +136,11 @@ public final class Phi3RuntimePackage {
             throw new IOException("Phi-3 qweight '" + role + "' must encode dims [N,K,blockSize], got "
                     + dims.length + " dims");
         }
-        byte[] qWeight = bytes(catalog, Phi3WdmlPackRoles.qweight(role));
+        RuntimeTensor zp = require(catalog, Phi3WdmlPackRoles.zeropoints(role));
         float[] scales = floats(catalog, Phi3WdmlPackRoles.scales(role));
-        byte[] zeroPoints = bytes(catalog, Phi3WdmlPackRoles.zeropoints(role));
-        return new QuantizedWeight(qWeight, scales, zeroPoints,
+        // PHI3-RUNTIME-HEAPLIGHT-1: reference the mmap'd qweight/zeropoints buffers directly (off-heap) instead of
+        // copying ~2 GB of INT4 bytes to the heap. scales (small) stay a converted float[].
+        return new QuantizedWeight(q.rawDataBuffer(), scales, zp.rawDataBuffer(),
                 (int) dims[0], (int) dims[1], (int) dims[2]);
     }
 

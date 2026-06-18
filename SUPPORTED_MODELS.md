@@ -99,7 +99,7 @@ status / embedFamily` classification without duplicating metadata.
 | `openai/gpt-oss-120b`                     | decoder    | ⛔ unsupported   | – (not for embed) | Decoder-only LLM. Rejected by the `embed` endpoint.                                                                                    |
 | `casperhansen/llama-3.3-70b-instruct-awq` | decoder    | ⛔ unsupported   | – (not for embed) | Llama 3.3 70B AWQ-quantised decoder-only LLM. Rejected by the `embed` endpoint.                                                        |
 | `ellamind/summarizer-v6-llama-v2`         | summarizer | ⛔ unsupported   | – (not for embed) | Llama-v2 summarizer fine-tune. Belongs to a future text-generation/summarize ticket, not the embed endpoint.                           |
-| `microsoft/Phi-3-mini-4k-instruct-onnx`   | summarizer | 🚧 planned (Workbench) | CPU + DirectML (sidecar only) | Native Java/DirectML decoder (`Phi3InferenceEngine`, no Python/ONNX Runtime) over ONNX-format weights. Runs via the sidecar `summarize` path. Workbench: now downloadable + convertible to `model_phi3.wdmlpack` (`Phi3PackageLifecycle`), but the Summarizer runtime is **not yet enabled** (PLANNED) pending a heap-light runtime loader. See PHI3-PRODUCT-AUDIT-1 / PHI3-WORKBENCH-RUNNABLE-1. |
+| `microsoft/Phi-3-mini-4k-instruct-onnx`   | summarizer | 🧪 experimental | CPU (Workbench, from wdmlpack) + DirectML (sidecar) | Native Java/DirectML decoder (no Python/ONNX Runtime). Workbench: Download → Convert → `model_phi3.wdmlpack`, then the Summarizer runs it heap-light via `Phi3RuntimePackage` → `Phi3Runtime` (CPU). Also runs via the sidecar `summarize` path. Runnable since PHI3-RUNTIME-HEAPLIGHT-1. |
 | `microsoft/Phi-3.5-mini-instruct-onnx`    | summarizer | 🚧 planned      | – (planned)       | Phi-3 successor; same architecture. Not executable in the Workbench (no wdmlpack compiler).                                            |
 
 Passing a decoder / summarizer ID to `-Dembed.model` fails with the
@@ -353,7 +353,7 @@ for text generation. The summarizer model selector is populated from
 
 | `modelId`                               | `useCase`  | `status`        | Workbench support | Notes                                                                                                     |
 |-----------------------------------------|------------|-----------------|-------------------|-----------------------------------------------------------------------------------------------------------|
-| `microsoft/Phi-3-mini-4k-instruct-onnx` | summarizer | 🚧 planned (Workbench) | ⬇️ downloadable + convertible, runtime not yet enabled | Native Java/DirectML decoder (no Python/ONNX Runtime), ~2.3 GB INT4 ONNX-format weights. Sidecar `summarize` runs it; Workbench Convert produces `model_phi3.wdmlpack` (`Phi3PackageLifecycle`) but the Summarizer runtime is PLANNED pending a heap-light loader. See PHI3-PRODUCT-AUDIT-1 / PHI3-WORKBENCH-RUNNABLE-1. |
+| `microsoft/Phi-3-mini-4k-instruct-onnx` | summarizer | 🧪 experimental | ✅ runnable (Download → Convert → run) | Native Java/DirectML decoder (no Python/ONNX Runtime), ~2.3 GB INT4. Workbench Convert produces `model_phi3.wdmlpack` (`Phi3PackageLifecycle`) and the Summarizer runs it heap-light (`Phi3RuntimePackage` → `Phi3Runtime`, CPU). Runnable since PHI3-RUNTIME-HEAPLIGHT-1. |
 | `microsoft/Phi-3.5-mini-instruct-onnx`  | summarizer | 🚧 planned      | ❌ not yet         | Successor; same architecture. Not executable in the Workbench (no wdmlpack compiler).                     |
 | `Qwen/Qwen2.5-Coder-0.5B-Instruct`      | causal-lm  | 🧪 experimental | ✅ runnable        | Qwen2.5-Coder 0.5B. Native DirectML INT4 runtime (`model_q4f16.wdmlpack`), no Python. ChatML template. See [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md). |
 | `Qwen/Qwen2.5-Coder-1.5B-Instruct`      | causal-lm  | 🚧 planned      | ❌ not yet         | Scale-up candidate (~1 GB INT4). Blocked on 0.5B runtime verification.                                    |
@@ -377,25 +377,23 @@ for text generation. The summarizer model selector is populated from
 
 ### 3.2 Workbench Summarizer smoke test (manual)
 
-> **Phi-3 is not yet runnable in the Workbench Summarizer (PHI3-PRODUCT-AUDIT-1 / PHI3-WORKBENCH-RUNNABLE-1).**
-> Download + Convert now produce a valid `model_phi3.wdmlpack` (`Phi3PackageLifecycle`), but the Summarizer runtime
-> is still PLANNED (a heap-light runtime loader is needed before it runs within a sane heap). The historical note
-> below still describes the original audit state.
+> **Phi-3-mini is runnable in the Workbench Summarizer (PHI3-RUNTIME-HEAPLIGHT-1).** Download → Convert produces
+> `model_phi3.wdmlpack` (`Phi3PackageLifecycle`), and the Summarizer runs it heap-light via `Phi3RuntimePackage` →
+> native `Phi3Runtime` (CPU; no Python/ONNX Runtime). Status is EXPERIMENTAL/runnable. The steps below are the
+> current Workbench smoke; the historical "not executable" note further down describes the original audit state.
 >
-> **Phi-3 is not executable in the Workbench (PHI3-PRODUCT-AUDIT-1).** The homogeneous artifact gate has no
-> wdmlpack compiler for Phi-3, so selecting `microsoft/Phi-3-mini-4k-instruct-onnx` in the Summarizer tab is blocked
-> with "selectable but not executable yet" (Phi-3 is `PLANNED`). The Phi-3 download remains available, and the
-> native Phi-3 engine still runs via the **sidecar `summarize` JSON-RPC path** (§3.1). The Workbench smoke test
-> below applies again once a Phi-3 wdmlpack compiler exists; for an executable Workbench summarizer today use a
-> certified T5 model (see `docs/t5-realmodel-cert.md`) or Gemma/Qwen.
+> _Historical (PHI3-PRODUCT-AUDIT-1): Phi-3 was temporarily not executable in the Workbench while it lacked a
+> wdmlpack compiler. That is resolved — PHI3-WDMLPACK-COMPILER-1/2 added the compiler and PHI3-RUNTIME-HEAPLIGHT-1
+> made the package load heap-light, so the smoke below applies again (now with a Convert step)._
 
 1. Download Phi-3 from the Workbench **Download** tab (button:
    "Download Phi-3 Mini 4K Instruct (Summarizer)").
-2. Switch to the **Summarizer** tab.
-3. Select `microsoft/Phi-3-mini-4k-instruct-onnx` from the model dropdown.
-4. Paste a longer text (≥3 sentences).
-5. Click **Summarize**.
-6. Verify that the output area shows generated summary text (not
+2. **Convert** the downloaded model to `model_phi3.wdmlpack` from the Download tab (the Phi-3 row's package action).
+3. Switch to the **Summarizer** tab.
+4. Select `microsoft/Phi-3-mini-4k-instruct-onnx` from the model dropdown.
+5. Paste a longer text (≥3 sentences).
+6. Click **Summarize**.
+7. Verify that the output area shows generated summary text (not
    extractive sentences).
 
 ### 3.3 Qwen2.5-Coder 0.5B CPU smoke test (manual)

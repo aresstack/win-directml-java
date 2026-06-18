@@ -182,14 +182,13 @@ public final class GenerationModelRegistry {
                 "Microsoft",
                 "3.8B",
                 ChatTemplate.PHI3,
-                Status.PLANNED,
+                Status.EXPERIMENTAL,
                 Arrays.asList(
                         "model/phi-3-mini-4k-instruct-onnx",
                         "model/microsoft/Phi-3-mini-4k-instruct-onnx"),
-                "Selectable and downloadable (INT4 ONNX weights, ~2.3 GB) but not executable in the Workbench: "
-                        + "the homogeneous lifecycle has no wdmlpack compiler for Phi-3, so the artifact gate blocks "
-                        + "raw-weight execution. A native Java/DirectML decoder (Phi3InferenceEngine, no Python/ONNX "
-                        + "Runtime) exists in the library/tests only."));
+                "Runs from a compiled model_phi3.wdmlpack (Download tab -> Convert) via the native Java/DirectML "
+                        + "Phi-3 decoder (heap-light package load, CPU path); INT4 ~2.3 GB. No Python, no ONNX "
+                        + "Runtime. Inference never compiles; a missing package gives a clear Convert message."));
 
         entries.add(new Entry(
                 "microsoft/Phi-3.5-mini-instruct-onnx",

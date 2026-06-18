@@ -12,6 +12,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -109,11 +110,33 @@ class Phi3WdmlPackCompilerTest {
         assertEquals(7 + 22 * cfg.numHiddenLayers(), catalog.size(), "expected full Phi-3 role-tensor count");
     }
 
-    // PHI3-WORKBENCH-RUNNABLE-1: a full package->weights()->Phi3Runtime decode smoke is intentionally NOT committed
-    // here. The eager weights() reconstruction needs ~3 GB heap and, together with the 2.39 GB package mmap,
-    // over-commits the host's free RAM inside the forked test JVM (the JVM is OS-killed, not a clean failure). The
-    // runtime decode smoke + the PLANNED->EXPERIMENTAL status flip are deferred to a heap-light Phi runtime-package
-    // loader slice (decision C). See docs/phi3-wdmlpack-compiler-plan.md.
+    @Test
+    @EnabledIf("realModelSmokeEnabled")
+    void realPhi3MiniDecodeSmokeFromPackage() throws Exception {
+        Path modelDir = resolveRealModelDir();
+        assertNotNull(modelDir, "real Phi-3 model dir must be present when -Dphi3.realModel=true");
+        Path output = tempDir.resolve("model_phi3.wdmlpack");
+        Phi3WdmlPackCompiler.compile(new Phi3CompileOptions(modelDir, output, true));
+
+        // PHI3-RUNTIME-HEAPLIGHT-1: package -> Phi3Weights (qweight/zeropoints reference the mmap'd buffers,
+        // off-heap) -> Phi3Runtime (CPU) -> short greedy decode. This now runs within the standard 2 GB test heap.
+        Phi3RuntimePackage pkg = Phi3RuntimePackage.open(output);
+        Phi3Config cfg = pkg.config();
+        Phi3Weights weights = pkg.weights();
+        try {
+            Phi3Tokenizer tokenizer = Phi3Tokenizer.load(modelDir.resolve("tokenizer.json"));
+            Phi3Runtime runtime = new Phi3Runtime(cfg, weights, tokenizer, null, null);
+            String prompt = "<|user|>\nName one primary color.<|end|>\n<|assistant|>\n";
+            String out = runtime.generate(prompt, 8);
+            System.out.println("[PHI3-SMOKE] heapUsedMB="
+                    + ((Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) >> 20)
+                    + " out=[" + out + "]");
+            assertNotNull(out, "decode must return non-null text");
+            assertFalse(out.isBlank(), "decode should produce some text for a simple instruct prompt");
+        } finally {
+            weights.close();
+        }
+    }
 
     // ── helpers ──────────────────────────────────────────────────────────
 
@@ -177,6 +200,11 @@ class Phi3WdmlPackCompilerTest {
     @SuppressWarnings("unused")
     static boolean realModelCompileEnabled() {
         return Boolean.getBoolean("phi3.compile.realModel") && resolveRealModelDir() != null;
+    }
+
+    @SuppressWarnings("unused")
+    static boolean realModelSmokeEnabled() {
+        return Boolean.getBoolean("phi3.realModel") && resolveRealModelDir() != null;
     }
 
     static Path resolveRealModelDir() {

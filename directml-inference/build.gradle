@@ -19,8 +19,8 @@ tasks.withType(Test).configureEach {
      'directml.generation.output', 'directml.generation.streaming',
      // T5-CORRECTNESS-CERT-1: opt-in T5 WARP/AUTO-vs-reference correctness toggles.
      't5.correctness.cert', 't5.realModel', 't5.testModelDir',
-     // PHI3-WDMLPACK-COMPILER-1: opt-in real Phi-3 ONNX->wdmlpack compile test.
-     'phi3.compile.realModel', 'phi3.testModelDir'].each { key ->
+     // PHI3 real-model gated tests: ONNX->wdmlpack compile + heap-light decode smoke.
+     'phi3.compile.realModel', 'phi3.realModel', 'phi3.testModelDir'].each { key ->
         def value = System.getProperty(key)
         if (value != null) {
             systemProperty(key, value)

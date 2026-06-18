@@ -52,7 +52,8 @@ class WorkbenchModelStatusAuditTest {
                 "Salesforce/codet5-small",
                 "Salesforce/codet5-base-multi-sum",
                 "google-t5/t5-small",
-                "google/flan-t5-small"}) {
+                "google/flan-t5-small",
+                "microsoft/Phi-3-mini-4k-instruct-onnx"}) {
             Entry e = GenerationModelRegistry.findByModelId(id);
             assertNotNull(e, id + " must be registered");
             assertTrue(e.isRunnable(), id + " must be runnable (SHIPPED/EXPERIMENTAL), not blocked as planned");
@@ -111,7 +112,6 @@ class WorkbenchModelStatusAuditTest {
     void genuinelyNotExecutableModelsStayPlanned() {
         // Selectable but clearly not executable yet -> PLANNED (the Summarizer shows the honest guard message).
         for (String id : new String[]{
-                "microsoft/Phi-3-mini-4k-instruct-onnx",
                 "microsoft/Phi-3.5-mini-instruct-onnx",
                 "Qwen/Qwen2.5-Coder-1.5B-Instruct",
                 "Qwen/Qwen2.5-Coder-3B-Instruct",
@@ -123,24 +123,25 @@ class WorkbenchModelStatusAuditTest {
     }
 
     @Test
-    void phiModelsAreNotRunnableAndCarryHonestNotes() {
-        // PHI3-PRODUCT-AUDIT-1: both Phi-3 models are selectable + downloadable but NOT executable in the
-        // Workbench (the homogeneous artifact gate has no wdmlpack compiler for Phi-3). They must be PLANNED
-        // (so the Summarizer guard blocks them upfront) and must not claim ONNX-Runtime/GenAI execution.
-        for (String id : new String[]{
-                "microsoft/Phi-3-mini-4k-instruct-onnx",
-                "microsoft/Phi-3.5-mini-instruct-onnx"}) {
-            Entry e = GenerationModelRegistry.findByModelId(id);
-            assertNotNull(e, id + " must be registered");
-            assertEquals(Status.PLANNED, e.status(), id + " is not executable in the Workbench -> PLANNED");
-            assertFalse(e.isRunnable(), id + " must not be runnable by status");
+    void phiStatusIsHonest() {
+        // PHI3-RUNTIME-HEAPLIGHT-1: Phi-3-mini now runs from a compiled model_phi3.wdmlpack (heap-light load ->
+        // native Java/DirectML Phi3Runtime), so it is EXPERIMENTAL/runnable. Phi-3.5 stays PLANNED. Neither note
+        // may claim ONNX Runtime / GenAI execution (the engine is native Java/DirectML, no Python/ORT).
+        Entry mini = GenerationModelRegistry.findByModelId("microsoft/Phi-3-mini-4k-instruct-onnx");
+        assertNotNull(mini);
+        assertEquals(Status.EXPERIMENTAL, mini.status(), "Phi-3-mini is runnable -> EXPERIMENTAL");
+        assertTrue(mini.isRunnable());
+
+        Entry phi35 = GenerationModelRegistry.findByModelId("microsoft/Phi-3.5-mini-instruct-onnx");
+        assertNotNull(phi35);
+        assertEquals(Status.PLANNED, phi35.status(), "Phi-3.5 stays PLANNED");
+        assertFalse(phi35.isRunnable());
+
+        for (Entry e : new Entry[]{mini, phi35}) {
             String note = e.notes() == null ? "" : e.notes().toLowerCase();
-            // Ban the false positive claim (ONNX Runtime / GenAI execution); honest negations like
-            // "no Python/ONNX Runtime" are fine.
-            assertFalse(note.contains("uses onnx runtime"), id + " note must not claim ONNX Runtime execution: " + note);
-            assertFalse(note.contains("genai"), id + " note must not claim an ONNX Runtime GenAI path: " + note);
-            assertFalse(note.contains("first supported"),
-                    id + " note must not claim it is the first supported runnable backend: " + note);
+            assertFalse(note.contains("uses onnx runtime"),
+                    e.modelId() + " note must not claim ONNX Runtime execution: " + note);
+            assertFalse(note.contains("genai"), e.modelId() + " note must not claim an ONNX Runtime GenAI path: " + note);
         }
     }
 
@@ -157,7 +158,8 @@ class WorkbenchModelStatusAuditTest {
                 "Salesforce/codet5-small",
                 "Salesforce/codet5-base-multi-sum",
                 "google-t5/t5-small",
-                "google/flan-t5-small"));
+                "google/flan-t5-small",
+                "microsoft/Phi-3-mini-4k-instruct-onnx"));
         Set<String> actual = GenerationModelRegistry.entries().stream()
                 .filter(Entry::isRunnable)
                 .map(Entry::modelId)

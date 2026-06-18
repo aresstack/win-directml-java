@@ -48,58 +48,103 @@ public final class Phi3Weights implements AutoCloseable {
      * @param K         input features
      * @param blockSize quantization block size (128)
      */
-    public record QuantizedWeight(
-            byte[] qWeight,    // [N, K/blockSize, blockSize/2]
-            float[] scales,    // [N, K/blockSize] (fp32, converted from fp16)
-            byte[] zeroPoints, // packed uint4 zero points
-            int N, int K, int blockSize
-    ) {
-        /**
-         * Dequantize and compute y = x @ W^T where W is this quantized weight.
-         *
-         * @param x   input vector [K]
-         * @param y   output vector [N] (accumulated, not zeroed)
-         */
-        /**
-         * Thread-local dequantization buffer (max blockSize = 256).
-         */
+    public static final class QuantizedWeight {
+
+        // qWeight: [N, K/blockSize, blockSize/2]; zeroPoints: packed uint4. Both are absolute-indexed (base 0)
+        // read-only buffers. PHI3-RUNTIME-HEAPLIGHT-1: package-backed loads pass the mmap'd RuntimeTensor buffers
+        // here directly (off-heap, ~2 GB saved); the ONNX/in-memory path wraps its byte[] via the byte[] constructor.
+        private final ByteBuffer qWeight;
+        private final float[] scales;   // [N, K/blockSize] (fp32, converted from fp16)
+        private final ByteBuffer zeroPoints;
+        private final int N;
+        private final int K;
+        private final int blockSize;
+
+        /** Thread-local dequantization buffer (max blockSize = 256). */
         private static final ThreadLocal<float[]> BLOCK_BUF =
                 ThreadLocal.withInitial(() -> new float[256]);
+        /** Thread-local raw-block buffer for the absolute bulk read (max blockSize/2 = 128). */
+        private static final ThreadLocal<byte[]> QBLOCK_BUF =
+                ThreadLocal.withInitial(() -> new byte[256]);
+
+        /** Heap-backed constructor (ONNX import, compiler in-memory path, tests). */
+        public QuantizedWeight(byte[] qWeight, float[] scales, byte[] zeroPoints, int N, int K, int blockSize) {
+            this(ByteBuffer.wrap(qWeight), scales, ByteBuffer.wrap(zeroPoints), N, K, blockSize);
+        }
+
+        /** Buffer-backed constructor (package-backed heap-light load: qWeight/zeroPoints are mmap'd slices). */
+        public QuantizedWeight(ByteBuffer qWeight, float[] scales, ByteBuffer zeroPoints, int N, int K, int blockSize) {
+            this.qWeight = qWeight.asReadOnlyBuffer();
+            this.scales = scales;
+            this.zeroPoints = zeroPoints.asReadOnlyBuffer();
+            this.N = N;
+            this.K = K;
+            this.blockSize = blockSize;
+        }
+
+        public int N() {
+            return N;
+        }
+
+        public int K() {
+            return K;
+        }
+
+        public int blockSize() {
+            return blockSize;
+        }
+
+        public float[] scales() {
+            return scales;
+        }
+
+        /** Materialize qWeight as a heap {@code byte[]} (for GPU upload / serialization / tests). */
+        public byte[] qWeight() {
+            byte[] out = new byte[qWeight.capacity()];
+            qWeight.duplicate().get(0, out);
+            return out;
+        }
+
+        /** Materialize zeroPoints as a heap {@code byte[]} (for GPU upload / serialization / tests). */
+        public byte[] zeroPoints() {
+            byte[] out = new byte[zeroPoints.capacity()];
+            zeroPoints.duplicate().get(0, out);
+            return out;
+        }
 
         /**
          * Dequantize and compute y += x @ W^T — parallel over output rows.
          *
-         * <p><b>Prio-2 SIMD path:</b> dequantizes each quantisation block into a
-         * thread-local {@code float[]} buffer, then delegates the inner dot product
-         * to {@link SimdOps#dot} (Java Vector API — AVX2 = 8 lanes, AVX-512 = 16 lanes).
-         * Separating the scalar nibble-extraction from the SIMD FMA step yields
-         * ≈2–4× speedup over the all-scalar implementation on the hot decode path.
+         * <p>Each quantisation block is bulk-read (absolute {@link ByteBuffer#get(int, byte[], int, int)}, thread-safe)
+         * into a thread-local {@code byte[]}, dequantized into a thread-local {@code float[]}, and the inner dot
+         * product is delegated to {@link SimdOps#dot}. The bulk read keeps the SIMD dequant fast whether qWeight is
+         * heap- or mmap-backed.</p>
          */
         public void matvec(float[] x, float[] y) {
             final int blocksPerRow = K / blockSize;
-            final byte[] qw = qWeight;
+            final ByteBuffer qw = qWeight;
+            final ByteBuffer zpArr = zeroPoints;
             final float[] sc = scales;
-            final byte[] zpArr = zeroPoints;
             final int bs = blockSize;
             IntStream.range(0, N).parallel().forEach(n -> {
                 float sum = 0f;
                 int qOffset = n * blocksPerRow * (bs / 2);
                 int scaleOffset = n * blocksPerRow;
-                float[] wBuf = BLOCK_BUF.get();   // thread-local — zero GC pressure
+                float[] wBuf = BLOCK_BUF.get();
+                byte[] qBlock = QBLOCK_BUF.get();
                 for (int blk = 0; blk < blocksPerRow; blk++) {
                     float scale = sc[scaleOffset + blk];
                     int zpIdx = n * blocksPerRow + blk;
-                    int zpByte = zpArr[zpIdx / 2] & 0xFF;
+                    int zpByte = zpArr.get(zpIdx / 2) & 0xFF;
                     float zpVal = (float) ((zpIdx % 2 == 0) ? (zpByte & 0xF) : (zpByte >>> 4));
                     int kBase = blk * bs;
                     int qBase = qOffset + blk * (bs / 2);
-                    // Scalar dequant → wBuf: sequential byte reads, JIT-friendly
+                    qw.get(qBase, qBlock, 0, bs / 2);
                     for (int j = 0; j < bs / 2; j++) {
-                        int packed = qw[qBase + j] & 0xFF;
+                        int packed = qBlock[j] & 0xFF;
                         wBuf[2 * j] = ((packed & 0xF) - zpVal) * scale;
                         wBuf[2 * j + 1] = ((packed >>> 4) - zpVal) * scale;
                     }
-                    // SIMD dot product (AVX2/AVX-512 via Java Vector API)
                     sum += SimdOps.dot(wBuf, 0, x, kBase, bs);
                 }
                 y[n] += sum;
@@ -107,19 +152,15 @@ public final class Phi3Weights implements AutoCloseable {
         }
 
         /**
-         * Dequantize and compute Y = X @ W^T for a batch of vectors.
-         *
-         * @param x      input matrix [seqLen, K], row-major
-         * @param y      output matrix [seqLen, N], row-major (accumulated)
-         * @param seqLen number of rows
+         * Dequantize and compute Y = X @ W^T for a batch of vectors (accumulated).
          */
         public void matmul(float[] x, float[] y, int seqLen) {
             final int nLocal = N;
             final int kLocal = K;
             final int blocksPerRow = kLocal / blockSize;
-            final byte[] qw = qWeight;
+            final ByteBuffer qw = qWeight;
+            final ByteBuffer zpArr = zeroPoints;
             final float[] sc = scales;
-            final byte[] zpArr = zeroPoints;
             final int bs = blockSize;
             final int total = seqLen * nLocal;
             IntStream.range(0, total).parallel().forEach(idx -> {
@@ -129,20 +170,21 @@ public final class Phi3Weights implements AutoCloseable {
                 int xOff = s * kLocal;
                 int qOffset = n * blocksPerRow * (bs / 2);
                 int scaleOffset = n * blocksPerRow;
-                float[] wBuf = BLOCK_BUF.get();   // thread-local — zero GC pressure
+                float[] wBuf = BLOCK_BUF.get();
+                byte[] qBlock = QBLOCK_BUF.get();
                 for (int blk = 0; blk < blocksPerRow; blk++) {
                     float scale = sc[scaleOffset + blk];
                     int zpIdx = n * blocksPerRow + blk;
-                    int zpByte = zpArr[zpIdx / 2] & 0xFF;
+                    int zpByte = zpArr.get(zpIdx / 2) & 0xFF;
                     float zpVal = (float) ((zpIdx % 2 == 0) ? (zpByte & 0xF) : (zpByte >>> 4));
                     int kBase = blk * bs;
                     int qBase = qOffset + blk * (bs / 2);
+                    qw.get(qBase, qBlock, 0, bs / 2);
                     for (int j = 0; j < bs / 2; j++) {
-                        int packed = qw[qBase + j] & 0xFF;
+                        int packed = qBlock[j] & 0xFF;
                         wBuf[2 * j] = ((packed & 0xF) - zpVal) * scale;
                         wBuf[2 * j + 1] = ((packed >>> 4) - zpVal) * scale;
                     }
-                    // SIMD dot product (AVX2/AVX-512 via Java Vector API)
                     sum += SimdOps.dot(wBuf, 0, x, xOff + kBase, bs);
                 }
                 y[s * nLocal + n] += sum;

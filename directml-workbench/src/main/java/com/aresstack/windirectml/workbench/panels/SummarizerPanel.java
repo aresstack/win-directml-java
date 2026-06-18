@@ -8,10 +8,7 @@ import com.aresstack.windirectml.inference.GeneratedToken;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.InferenceRequest;
 import com.aresstack.windirectml.inference.InferenceResult;
-import com.aresstack.windirectml.inference.Phi3InferenceEngine;
 import com.aresstack.windirectml.inference.Phi3Summarizer;
-import com.aresstack.windirectml.inference.Summary;
-import com.aresstack.windirectml.inference.SummaryRequest;
 import com.aresstack.windirectml.inference.qwen.QwenInferenceEngine;
 import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
 import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
@@ -276,25 +273,39 @@ public final class SummarizerPanel extends JPanel {
     }
 
     private void runPhi3Summarizer(Path modelDir, String text, int maxTokens) throws Exception {
-        // Homogeneous lifecycle: Phi-3 runs only from a wdmlpack. No direct ONNX execution.
+        // Homogeneous lifecycle: Phi-3 runs only from the compiled model_phi3.wdmlpack -- no direct ONNX execution,
+        // no Python. PHI3-RUNTIME-HEAPLIGHT-1: the package loads heap-light (qweight/zeropoints reference the mmap'd
+        // buffers) and drives the native Java/DirectML Phi3Runtime (CPU path here).
         WorkbenchArtifactGate.requireExecutablePackage(ModelFamily.PHI3, modelDir);
-        validatePhi3ModelFiles(modelDir);
-        String backend = model.getBackend().name().toLowerCase();
+        java.nio.file.Path packagePath = new com.aresstack.windirectml.inference.artifact.Phi3PackageLifecycle()
+                .existingPackage(modelDir)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Missing model_phi3.wdmlpack. Use the Download tab -> Convert."));
+        appendResult("  NOTE: Phi-3 runs from the compiled model_phi3.wdmlpack via the native Java/DirectML runtime "
+                + "(CPU path); no Python, no ONNX Runtime.");
         long start = System.nanoTime();
-        try (var summarizer = new Phi3Summarizer(modelDir, maxTokens, backend)) {
-            appendResult("Initializing model...");
-            summarizer.initialize();
+        appendResult("Initializing Phi-3 runtime from " + packagePath.getFileName() + "...");
+        com.aresstack.windirectml.inference.phi3.Phi3RuntimePackage pkg =
+                com.aresstack.windirectml.inference.phi3.Phi3RuntimePackage.open(packagePath);
+        com.aresstack.windirectml.inference.phi3.Phi3Weights weights = pkg.weights();
+        try {
+            com.aresstack.windirectml.inference.phi3.Phi3Tokenizer tokenizer =
+                    com.aresstack.windirectml.inference.phi3.Phi3Tokenizer.load(modelDir.resolve("tokenizer.json"));
+            com.aresstack.windirectml.inference.phi3.Phi3Runtime runtime =
+                    new com.aresstack.windirectml.inference.phi3.Phi3Runtime(pkg.config(), weights, tokenizer, null, null);
             appendResult("Model loaded in " + elapsedMs(start) + " ms");
+            String prompt = com.aresstack.windirectml.inference.prompt.PromptStrategies
+                    .forModel("microsoft/Phi-3-mini-4k-instruct-onnx")
+                    .renderPrompt(new com.aresstack.windirectml.inference.prompt.PromptInput(
+                            PromptTask.SUMMARIZE, text, Phi3Summarizer.DEFAULT_SYSTEM_PROMPT));
             long genStart = System.nanoTime();
-            SummaryRequest request = SummaryRequest.of(text, maxTokens);
-            Summary summary = summarizer.summarize(request);
+            String summary = runtime.generate(prompt, maxTokens);
             appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
-            appendResult("  Prompt tokens: " + summary.promptTokens());
-            appendResult("  Output tokens: " + summary.outputTokens());
-            appendResult("  Finish reason: " + summary.finishReason());
             appendResult("");
             appendResult("SUMMARY:");
-            appendResult(summary.text());
+            appendResult(summary);
+        } finally {
+            weights.close();
         }
     }
 
@@ -643,13 +654,6 @@ public final class SummarizerPanel extends JPanel {
         }
         String dirName = modelId.contains("/") ? modelId.substring(modelId.lastIndexOf('/') + 1) : modelId;
         return model.getModelRoot().resolve(dirName);
-    }
-
-    private void validatePhi3ModelFiles(Path modelDir) {
-        String missing = Phi3InferenceEngine.describeMissingModelFile(modelDir);
-        if (missing != null) {
-            throw new IllegalStateException(missing + ". Download the model first from the Download tab.");
-        }
     }
 
     private void validateQwenModelFiles(Path modelDir, String modelFileName) {
