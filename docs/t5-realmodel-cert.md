@@ -100,6 +100,11 @@ executionMode `warp-encoder-boundary+warp-decoder-boundary+warp-lm-head`).
 a pretrained base checkpoint, so the output is span-corruption sentinels (low quality) but byte-identical across
 paths — the cert measures CPU-vs-WARP parity, not output quality.
 
-The cert asserts this parity for any present model. codet5-base-multi-sum remains uncertified (skip until
-downloaded). The `model/t5-small/`, `model/flan-t5-small/` and `model/codet5-small/` artifacts are git-ignored. No
-Gemma/Qwen/SmolLM2/Phi change. See `workbench-model-status.md` for the full result.
+`Salesforce/codet5-base-multi-sum` is **real-certified (T5-REALMODEL-CERT-4, verdict A)** — the largest curated T5
+(base, ~990 MB, 260 tensors; Torch checkpoint + BPE). Prompt `"def add(a, b):\n    return a + b"` → token ids
+`[1:<s>, 3495:Sum, 21872:marize, 2795:Ġtwo, 6548:Ġterms, 263:Ġ.]` / text `Summarize two terms.` identical on CPU and
+WARP (this model is fine-tuned for summarization, so the output is coherent).
+
+**The entire curated T5 family is now real-certified.** The cert asserts parity for any present model. The
+`model/t5-small/`, `model/flan-t5-small/`, `model/codet5-small/` and `model/codet5-base-multi-sum/` artifacts are
+git-ignored. No Gemma/Qwen/SmolLM2/Phi change. See `workbench-model-status.md` for the full result.
