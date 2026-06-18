@@ -26,6 +26,11 @@ tasks.withType(Test).configureEach {
 }
 
 dependencies {
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    // java8Module: the root subprojects convention skips this module (build.gradle ~line 47), so the JUnit
+    // deps are declared here. Use the JUnit BOM (same 5.10.2 as every other module) so
+    // junit-platform-launcher resolves to a concrete, BOM-aligned version (1.10.2) instead of an unversioned
+    // coordinate that cannot resolve offline (BUILD-OFFLINE-TEST-1). No version bump — mirrors the root convention.
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

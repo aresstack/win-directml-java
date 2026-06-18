@@ -33,3 +33,12 @@ It performs these steps:
 8. Replace the old release asset on the fixed `gpt-compatible` release.
 
 The release asset is intentionally overwritten so external GPT sessions can always use the same download target.
+
+## Offline tests (JUnit launcher)
+
+All modules run their tests offline against the prepared `.chatgpt/gradle-home` cache, including
+`:directml-config`. The Java-21 modules inherit JUnit from the root `subprojects` convention (a
+`org.junit:junit-bom` platform that pins `junit-platform-launcher` to a cached, concrete version). The root
+convention skips `java8Module` projects, so any such module (e.g. `directml-config`) must declare the JUnit
+deps itself **via the same BOM** — never an unversioned `org.junit.platform:junit-platform-launcher`, which
+cannot resolve offline. Keep the BOM version aligned with the root (currently `5.10.2` → launcher `1.10.2`).
