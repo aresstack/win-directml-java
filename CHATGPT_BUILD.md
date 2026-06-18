@@ -42,3 +42,21 @@ All modules run their tests offline against the prepared `.chatgpt/gradle-home` 
 convention skips `java8Module` projects, so any such module (e.g. `directml-config`) must declare the JUnit
 deps itself **via the same BOM** — never an unversioned `org.junit.platform:junit-platform-launcher`, which
 cannot resolve offline. Keep the BOM version aligned with the root (currently `5.10.2` → launcher `1.10.2`).
+
+## Standard regression
+
+The standard per-change regression is the four module test tasks (all run offline against the prepared
+cache; no online refresh needed):
+
+```bash
+bash "$ROOT_DIR/gradlew" --no-daemon --offline :directml-config:test
+bash "$ROOT_DIR/gradlew" --no-daemon --offline :directml-inference:test
+bash "$ROOT_DIR/gradlew" --no-daemon --offline :directml-encoder:test
+bash "$ROOT_DIR/gradlew" --no-daemon --offline :directml-workbench:test
+```
+
+`:directml-config` joined this set in BUILD-REGRESSION-BASELINE-1 (after BUILD-OFFLINE-TEST-1 made it run
+offline) — it holds the central model/registry config (`GenerationModelRegistryTest` etc.). `bash
+chatgpt-build.sh` runs `clean build`, which already compiles and tests **all** modules including
+`:directml-config`, so the full build covers the standard regression too. Gated real-model tests stay opt-in
+(`-Dgemma.warp.realModel=true`, etc.).
