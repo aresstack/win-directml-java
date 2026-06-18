@@ -330,6 +330,126 @@ public final class Phi3Weights implements AutoCloseable {
                 embedTokens, cosCache, sinCache, layerWeights, finalNormWeight, lmHead);
     }
 
+    // ── Heap-light compile layout (PHI3-WDMLPACK-COMPILER-2) ─────────────
+
+    /**
+     * Plan the compile layout without materializing weights: parse the ONNX graph + external-data offsets and map
+     * each role to its source ref (external offset/length/dtype, or a small inline fp16 vector already converted to
+     * fp32). The streaming compiler copies/converts each tensor directly from the mmap'd {@code model.onnx.data},
+     * so the compile peak is bounded buffers rather than the full ~2.4 GB model.
+     */
+    public static Phi3WeightLayout planLayout(Path modelDir, Phi3Config config) throws IOException {
+        Path onnxPath = modelDir.resolve("model.onnx");
+        Path dataPath = modelDir.resolve("model.onnx.data");
+        OnnxGraph graph = OnnxModelReader.parse(onnxPath);
+        Map<String, OnnxTensor> inlineTensors = graph.initializers();
+        Map<String, ExternalTensorRef> externalRefs = parseExternalRefs(onnxPath);
+
+        Map<String, String[]> matmulWeightNames = new LinkedHashMap<>();
+        for (OnnxNode node : graph.nodes()) {
+            if ("MatMulNBits".equals(node.opType())) {
+                matmulWeightNames.put(node.outputs().get(0), new String[]{
+                        node.inputs().get(1), node.inputs().get(2), node.inputs().get(3)});
+            }
+        }
+
+        Phi3WeightLayout.ExtRef embed = extRef(externalRefs.get("model.embed_tokens.weight"), "model.embed_tokens.weight");
+        float[] cos = readFp16TensorInline(inlineTensors.get("cos_cache"));
+        float[] sin = readFp16TensorInline(inlineTensors.get("sin_cache"));
+        Phi3WeightLayout.ExtRef finalNorm = extRef(externalRefs.get("model.norm.weight"), "model.norm.weight");
+        Phi3WeightLayout.QuantRef lmHead = quantRef(matmulWeightNames.get("logits"), externalRefs);
+
+        Phi3WeightLayout.LayerRef[] layers = new Phi3WeightLayout.LayerRef[config.numHiddenLayers()];
+        for (int l = 0; l < layers.length; l++) {
+            layers[l] = planLayer(l, graph, inlineTensors, externalRefs, matmulWeightNames);
+        }
+        return new Phi3WeightLayout(config, dataPath.toAbsolutePath().normalize(),
+                embed, cos, sin, finalNorm, lmHead, layers);
+    }
+
+    private static Phi3WeightLayout.LayerRef planLayer(int layerIdx, OnnxGraph graph,
+                                                       Map<String, OnnxTensor> inlineTensors,
+                                                       Map<String, ExternalTensorRef> externalRefs,
+                                                       Map<String, String[]> matmulWeightNames) throws IOException {
+        String prefix = "model.layers." + layerIdx;
+        Phi3WeightLayout.ExtRef inputNorm = extRef(externalRefs.get(prefix + ".input_layernorm.weight"),
+                prefix + ".input_layernorm.weight");
+        Phi3WeightLayout.ExtRef postNorm = extRef(externalRefs.get(prefix + ".post_attention_layernorm.weight"),
+                prefix + ".post_attention_layernorm.weight");
+
+        String lnOut = "/model/layers." + layerIdx + "/input_layernorm/Mul_1_output_0";
+        String attnOut = "/model/layers." + layerIdx + "/self_attn/Reshape_3_output_0_weight_only_out";
+        String postLnOut = "/model/layers." + layerIdx + "/post_attention_layernorm/Mul_1_output_0";
+        String mlpOut = "/model/layers." + layerIdx + "/mlp/act/Mul_1_output_0_weight_only_out";
+
+        Phi3WeightLayout.QuantRef qProj = null, kProj = null, vProj = null, oProj = null, gateUp = null, down = null;
+        for (OnnxNode node : graph.nodes()) {
+            if (!"MatMulNBits".equals(node.opType())) {
+                continue;
+            }
+            String firstInput = node.inputs().get(0);
+            String output = node.outputs().get(0);
+            if (firstInput.equals(lnOut)) {
+                Phi3WeightLayout.QuantRef w = quantRef(matmulWeightNames.get(output), externalRefs);
+                if (output.contains("q_proj")) qProj = w;
+                else if (output.contains("k_proj")) kProj = w;
+                else if (output.contains("v_proj")) vProj = w;
+            } else if (firstInput.equals(attnOut)) {
+                oProj = quantRef(matmulWeightNames.get(output), externalRefs);
+            } else if (firstInput.equals(postLnOut)) {
+                gateUp = quantRef(matmulWeightNames.get(output), externalRefs);
+            } else if (firstInput.equals(mlpOut)) {
+                down = quantRef(matmulWeightNames.get(output), externalRefs);
+            }
+        }
+        Objects.requireNonNull(qProj, "q_proj layout missing for layer " + layerIdx);
+        Objects.requireNonNull(kProj, "k_proj layout missing for layer " + layerIdx);
+        Objects.requireNonNull(vProj, "v_proj layout missing for layer " + layerIdx);
+        Objects.requireNonNull(oProj, "o_proj layout missing for layer " + layerIdx);
+        Objects.requireNonNull(gateUp, "gate_up_proj layout missing for layer " + layerIdx);
+        Objects.requireNonNull(down, "down_proj layout missing for layer " + layerIdx);
+
+        float[] attnOutScale = readFp16TensorInline(inlineTensors.get(
+                "/model/layers." + layerIdx + "/self_attn/Reshape_3_output_0_weight_only_scale"));
+        float[] mlpOutScale = readFp16TensorInline(inlineTensors.get(
+                "/model/layers." + layerIdx + "/mlp/act/Mul_1_output_0_weight_only_scale"));
+        return new Phi3WeightLayout.LayerRef(inputNorm, qProj, kProj, vProj, attnOutScale,
+                oProj, postNorm, gateUp, mlpOutScale, down);
+    }
+
+    private static Phi3WeightLayout.ExtRef extRef(ExternalTensorRef ref, String name) throws IOException {
+        if (ref == null) {
+            throw new IOException("Phi-3 layout: missing external tensor " + name);
+        }
+        return new Phi3WeightLayout.ExtRef(ref.offset(), ref.length(), ref.dataType(), ref.dims());
+    }
+
+    private static Phi3WeightLayout.QuantRef quantRef(String[] names,
+                                                      Map<String, ExternalTensorRef> externalRefs) throws IOException {
+        if (names == null) {
+            throw new IOException("Phi-3 layout: MatMulNBits weight names missing");
+        }
+        ExternalTensorRef q = externalRefs.get(names[0]);
+        ExternalTensorRef s = externalRefs.get(names[1]);
+        ExternalTensorRef zp = names.length > 2 ? externalRefs.get(names[2]) : null;
+        if (q == null) {
+            throw new IOException("Phi-3 layout: quantized weight not found: " + names[0]);
+        }
+        if (s == null) {
+            throw new IOException("Phi-3 layout: scale not found: " + names[1]);
+        }
+        int N = (int) q.dims()[0];
+        int blocksPerRow = (int) q.dims()[1];
+        int blockSize = (int) q.dims()[2] * 2;
+        int K = blocksPerRow * blockSize;
+        Phi3WeightLayout.ExtRef zpRef = zp == null ? null
+                : new Phi3WeightLayout.ExtRef(zp.offset(), zp.length(), zp.dataType(), zp.dims());
+        return new Phi3WeightLayout.QuantRef(
+                new Phi3WeightLayout.ExtRef(q.offset(), q.length(), q.dataType(), q.dims()),
+                new Phi3WeightLayout.ExtRef(s.offset(), s.length(), s.dataType(), s.dims()),
+                zpRef, N, K, blockSize);
+    }
+
     // ── Per-layer loading ────────────────────────────────────────────────
 
     private static LayerWeights loadLayer(int layerIdx, Phi3Config config,

@@ -56,6 +56,14 @@ public final class Phi3RuntimePackage {
         return modelPackage.runtimeLoadMode();
     }
 
+    /**
+     * Mmap-backed tensor directory (near-zero heap until a tensor's bytes are actually read). Lets callers validate
+     * package structure (roles, dims, count) without the full {@link #weights()} reconstruction.
+     */
+    public RuntimeTensorCatalog runtimeTensorCatalog() throws IOException {
+        return modelPackage.runtimeTensorCatalog();
+    }
+
     /** Reconstruct the in-memory weights the Phi-3 runtime consumes. */
     public Phi3Weights weights() throws IOException {
         RuntimeTensorCatalog catalog = modelPackage.runtimeTensorCatalog();

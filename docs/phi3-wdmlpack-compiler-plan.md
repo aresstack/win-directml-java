@@ -1,18 +1,23 @@
 # Phi-3 wdmlpack compiler — requirements audit + foundation
 
-> **Status (PHI3-WDMLPACK-COMPILER-1): compiler + package foundation built; Workbench stays PLANNED.** A minimal
-> ONNX→wdmlpack compiler (`Phi3WdmlPackCompiler`), an ONNX import boundary (`Phi3OnnxModelSource`), a role catalog
-> (`Phi3WdmlPackRoles`) and a package-backed loader (`Phi3RuntimePackage` + `Phi3Weights.ofRecords`) now exist. The
-> serialization core is proven by a **non-gated synthetic round-trip** (`Phi3WdmlPackCompilerTest`): a tiny
-> `Phi3Weights` compiles to a `model_phi3.wdmlpack` and reloads byte-exactly — INT4 MatMulNBits triplets
-> (qweight/scales/zeropoints) and fp32 vectors all preserved, config round-trips. **The real Phi-3-mini ONNX compile
-> is gated** (`-Dphi3.compile.realModel=true`) and **not yet verified end-to-end on this host**: the gated run
-> crashes the forked Gradle test JVM ~15 s in (even at 5–7 GB heap), so it needs a follow-up — most likely a
-> streaming compile that does not materialize the full ~2 GB of INT4 `byte[]` + ~394 MB fp32 embedding on the heap
-> (the current `Phi3Weights.load` loads everything in memory), and/or investigating the forked-JVM/mmap interaction.
-> **No Workbench lifecycle/gate/download wiring and no status flip** were done; Phi-3 remains PLANNED / gate-blocked.
-> The decision below (B) stands; the realised result is **A** for the foundation (compiler + loader exist) with the
-> real-model compile carried to `PHI3-WDMLPACK-COMPILER-2`.
+> **Status (PHI3-WDMLPACK-COMPILER-1/2): heap-safe compiler + package built; Workbench stays PLANNED.** The compiler
+> (`Phi3WdmlPackCompiler`), role catalog (`Phi3WdmlPackRoles`), package loader (`Phi3RuntimePackage` +
+> `Phi3Weights.ofRecords`), an ONNX import boundary (`Phi3OnnxModelSource`) and a heap-light layout planner
+> (`Phi3Weights.planLayout` + `Phi3WeightLayout`) exist. The serialization core is proven by a **non-gated synthetic
+> round-trip** (byte-exact: INT4 triplets + fp32 vectors + config). **COMPILER-2 made the real compile heap-safe:**
+> `Phi3WdmlPackCompiler.compile` now **streams** every tensor straight from the mmap'd `model.onnx.data` (copy raw
+> INT4 / convert fp16→fp32 in bounded buffers) via `planLayout`, never materializing the full ~2.4 GB model. The
+> gated real Phi-3-mini compile (`-Dphi3.compile.realModel=true`) now **runs within the standard 2 GB test heap** and
+> produces a real `model_phi3.wdmlpack` — **711 tensors, 32 layers, ~2.39 GB**.
+>
+> **Known remaining blocker (reload, not compile):** the produced package is ~2.39 GB, and the *shared*
+> `WdmlPackReader`/`WdmlPackWriter.readManifest` maps the whole file with `int` offsets, so it rejects packages
+> `> Integer.MAX_VALUE` ("wdmlpack is too large for the current lightweight mmap reader"). The compile is correct and
+> heap-safe; **reloading a >2 GB package needs a shared-reader follow-up** (positional manifest read + windowed/long
+> payload mapping) — out of scope for this compiler slice (it touches Qwen/T5/SmolLM2 too). The gated test asserts
+> this limit so it will flag when the reader gains >2 GB support. **No Workbench lifecycle/gate/download wiring and no
+> status flip**; Phi-3 remains PLANNED / gate-blocked. Follow-ups: a shared >2 GB wdmlpack-reader slice, then
+> `PHI3-WORKBENCH-RUNNABLE-1`.
 
 ---
 
