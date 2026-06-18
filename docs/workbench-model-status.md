@@ -231,6 +231,9 @@ The Phi-3 family was advertised as runnable but is **not executable in the Workb
   compiler (a separate runtime slice, out of scope here). Locked by
   `WorkbenchModelStatusAuditTest.phiModelsAreNotRunnableAndCarryHonestNotes` and the config
   `GenerationModelRegistryTest`.
+- **Compiler requirements specced (PHI-WDMLPACK-COMPILER-AUDIT-1).** What a minimal `model_phi3.wdmlpack` compiler
+  needs (decision **B**: real new compiler, runtime largely reusable; Qwen's ONNX(INT4)→wdmlpack is the template) is
+  documented in `phi3-wdmlpack-compiler-plan.md`. The Workbench status stays PLANNED until that compiler exists.
 
 ## Closeout (WORKBENCH-MODEL-STATUS-CLOSEOUT-1)
 
