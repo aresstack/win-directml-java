@@ -10,6 +10,21 @@
 > gated real Phi-3-mini compile (`-Dphi3.compile.realModel=true`) now **runs within the standard 2 GB test heap** and
 > produces a real `model_phi3.wdmlpack` — **711 tensors, 32 layers, ~2.39 GB**.
 >
+> **Lifecycle/gate wired; runtime smoke deferred (PHI3-WORKBENCH-RUNNABLE-1 — decision C).** `Phi3PackageLifecycle`
+> (`hasCompiler()=true`) now replaces `CompilerMissingLifecycle(PHI3)` in `WorkbenchArtifactGate`,
+> `DefaultModelArtifactService` and the `DownloadPanel` Phi row: Phi-3 is downloadable **and** convertible to
+> `model_phi3.wdmlpack`, and a compiled package is detected READY via the **light** structural
+> `Phi3RuntimePackage.open` (no ~3 GB `weights()`). Lifecycle behaviour is locked by `Phi3PackageLifecycleTest`
+> (missing→not-ready, compiled→READY) and `WorkbenchArtifactGateTest` (no package → "Use Download → Convert", never
+> runs from raw ONNX). **However, the runtime decode smoke + the PLANNED→EXPERIMENTAL status flip are NOT done:** the
+> full `weights()` reconstruction (~3 GB heap) plus the 2.39 GB package mmap over-commits this host's free RAM
+> (~6 GB) inside the forked test JVM (the JVM is OS-killed, not a clean failure), so the smoke could not be validated
+> and would be unsafe to commit as a gated test. **Phi-3-mini stays PLANNED / not runnable in the Workbench**;
+> Phi-3.5 stays PLANNED. The named follow-up is a **heap-light Phi runtime-package loader** (have `Phi3Weights`/
+> `QuantizedWeight` reference the package's mmap'd tensor buffers instead of copying ~3 GB to heap `byte[]`/`float[]`),
+> after which the decode smoke can run within a sane heap and the status can flip. That is `PHI3-RUNTIME-HEAPLIGHT-1`
+> → then the status flip.
+>
 > **>2 GB reader fixed (WDMLPACK-LARGE-READER-1).** The shared reader now handles packages larger than 2 GB without a
 > format change: `WdmlPackWriter.readManifest` reads only the manifest region positionally (no whole-file mmap), and
 > `WdmlPackReader.mapPayloadTensors` maps each tensor's payload region individually with a long file offset (each

@@ -13,9 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The runtime-tab gate: encoder/reranker/Phi-3 have no wdmlpack compiler yet, so the gate must fail
- * fast (not-executable) and never let a tab fall through to a direct SafeTensors/ONNX load, and never
- * write anything.
+ * The runtime-tab gate: encoder/reranker have no wdmlpack compiler, so the gate must fail fast
+ * (not-executable) and never let a tab fall through to a direct SafeTensors/ONNX load, and never write
+ * anything. Phi-3 is now compiler-backed (PHI3-WORKBENCH-RUNNABLE-1) but, with no package present, still
+ * fails fast -- now with the "Missing ... runtime package -> Convert" hint rather than "compiler not implemented".
  */
 class WorkbenchArtifactGateTest {
 
@@ -38,10 +39,12 @@ class WorkbenchArtifactGateTest {
             assertFalse(WorkbenchArtifactGate.inspect(family, tempDir).ready(), family + " must not be ready");
         }
 
-        // Phi-3 still has no compiler -> homogeneous not-executable.
+        // Phi-3 is compiler-backed now, but with no model_phi3.wdmlpack present it still fails fast (not executable)
+        // and points at Convert -- it must never run from raw ONNX.
         IllegalStateException phi3 = assertThrows(IllegalStateException.class,
                 () -> WorkbenchArtifactGate.requireExecutablePackage(ModelFamily.PHI3, tempDir));
-        assertTrue(phi3.getMessage().contains("Package compiler not implemented"), phi3.getMessage());
+        assertTrue(phi3.getMessage().contains("Use Download tab -> Check, then Convert"), phi3.getMessage());
+        assertFalse(WorkbenchArtifactGate.inspect(ModelFamily.PHI3, tempDir).ready(), "Phi-3 must not be ready");
 
         try (var stream = Files.list(tempDir)) {
             assertFalse(stream.anyMatch(p -> p.getFileName().toString().endsWith(".wdmlpack")),

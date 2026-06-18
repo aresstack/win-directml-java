@@ -1,11 +1,11 @@
 package com.aresstack.windirectml.workbench.artifact;
 
-import com.aresstack.windirectml.inference.artifact.CompilerMissingLifecycle;
 import com.aresstack.windirectml.inference.artifact.DefaultModelArtifactService;
 import com.aresstack.windirectml.inference.artifact.ModelArtifactService;
 import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
 import com.aresstack.windirectml.inference.artifact.ModelFamily;
 import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
+import com.aresstack.windirectml.inference.artifact.Phi3PackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.QwenPackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.SmolLM2PackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.T5PackageLifecycle;
@@ -13,7 +13,6 @@ import com.aresstack.windirectml.encoder.pack.EncoderPackageLifecycle;
 
 import java.nio.file.Path;
 import java.util.EnumMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -31,7 +30,8 @@ public final class WorkbenchArtifactGate {
 
     /**
      * Service wired with the real encoder/reranker lifecycles (so embeddings/reranker are executable
-     * from a wdmlpack) plus the generation families. Phi-3 stays compiler-missing for now.
+     * from a wdmlpack) plus the generation families. Phi-3 is now compiler-backed (Convert ->
+     * model_phi3.wdmlpack); its Workbench runtime status stays PLANNED until a heap-light runtime loader lands.
      */
     private static ModelArtifactService buildService() {
         Map<ModelFamily, ModelPackageLifecycle> map = new EnumMap<>(ModelFamily.class);
@@ -40,8 +40,7 @@ public final class WorkbenchArtifactGate {
         map.put(ModelFamily.T5, new T5PackageLifecycle());
         map.put(ModelFamily.EMBEDDING, EncoderPackageLifecycle.embedding());
         map.put(ModelFamily.RERANKER, EncoderPackageLifecycle.reranker());
-        map.put(ModelFamily.PHI3, new CompilerMissingLifecycle(ModelFamily.PHI3,
-                List.of("config.json"), List.of(List.of("*.onnx", "model.safetensors"))));
+        map.put(ModelFamily.PHI3, new Phi3PackageLifecycle());
         return new DefaultModelArtifactService(map);
     }
 

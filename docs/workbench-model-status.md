@@ -241,9 +241,13 @@ The Phi-3 family was advertised as runnable but is **not executable in the Workb
   produces a real ~2.39 GB `model_phi3.wdmlpack` (711 tensors, 32 layers). The shared wdmlpack reader now handles
   >2 GB packages (WDMLPACK-LARGE-READER-1: positional manifest read + per-tensor windowed mapping), so the real
   package **reloads** (`Phi3RuntimePackage` config + 711-tensor catalog); small Qwen/T5/SmolLM2 packages unchanged.
-  **No Workbench wiring / no status flip** — Phi-3 stays PLANNED / gate-blocked. Remaining before runnable: the full
-  `weights()` reconstruction footprint + the Workbench lifecycle. See `phi3-wdmlpack-compiler-plan.md`. Then
-  `PHI3-WORKBENCH-RUNNABLE-1`.
+- **Lifecycle/gate wired (PHI3-WORKBENCH-RUNNABLE-1, decision C).** `Phi3PackageLifecycle` (compiler-backed) now
+  replaces `CompilerMissingLifecycle(PHI3)` in the gate / service / Download row — Phi-3 is downloadable **and**
+  convertible to `model_phi3.wdmlpack`, and a compiled package is READY (light structural open). **But the runtime
+  decode smoke + status flip were NOT done:** the ~3 GB `weights()` reconstruction over-commits this host's free RAM
+  in the forked test JVM (OS-killed). **Phi-3-mini stays PLANNED / not runnable; Phi-3.5 stays PLANNED.** Next: a
+  heap-light Phi runtime-package loader (`PHI3-RUNTIME-HEAPLIGHT-1`), then the PLANNED→EXPERIMENTAL flip. See
+  `phi3-wdmlpack-compiler-plan.md`.
 
 ## Closeout (WORKBENCH-MODEL-STATUS-CLOSEOUT-1)
 

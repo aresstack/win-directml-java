@@ -99,7 +99,7 @@ status / embedFamily` classification without duplicating metadata.
 | `openai/gpt-oss-120b`                     | decoder    | ⛔ unsupported   | – (not for embed) | Decoder-only LLM. Rejected by the `embed` endpoint.                                                                                    |
 | `casperhansen/llama-3.3-70b-instruct-awq` | decoder    | ⛔ unsupported   | – (not for embed) | Llama 3.3 70B AWQ-quantised decoder-only LLM. Rejected by the `embed` endpoint.                                                        |
 | `ellamind/summarizer-v6-llama-v2`         | summarizer | ⛔ unsupported   | – (not for embed) | Llama-v2 summarizer fine-tune. Belongs to a future text-generation/summarize ticket, not the embed endpoint.                           |
-| `microsoft/Phi-3-mini-4k-instruct-onnx`   | summarizer | 🚧 planned (Workbench) | CPU + DirectML (sidecar only) | Native Java/DirectML decoder (`Phi3InferenceEngine`, no Python/ONNX Runtime) over ONNX-format weights. Runs via the sidecar `summarize` path; **not executable in the Workbench** (no wdmlpack compiler — the artifact gate blocks it). See PHI3-PRODUCT-AUDIT-1. |
+| `microsoft/Phi-3-mini-4k-instruct-onnx`   | summarizer | 🚧 planned (Workbench) | CPU + DirectML (sidecar only) | Native Java/DirectML decoder (`Phi3InferenceEngine`, no Python/ONNX Runtime) over ONNX-format weights. Runs via the sidecar `summarize` path. Workbench: now downloadable + convertible to `model_phi3.wdmlpack` (`Phi3PackageLifecycle`), but the Summarizer runtime is **not yet enabled** (PLANNED) pending a heap-light runtime loader. See PHI3-PRODUCT-AUDIT-1 / PHI3-WORKBENCH-RUNNABLE-1. |
 | `microsoft/Phi-3.5-mini-instruct-onnx`    | summarizer | 🚧 planned      | – (planned)       | Phi-3 successor; same architecture. Not executable in the Workbench (no wdmlpack compiler).                                            |
 
 Passing a decoder / summarizer ID to `-Dembed.model` fails with the
@@ -353,7 +353,7 @@ for text generation. The summarizer model selector is populated from
 
 | `modelId`                               | `useCase`  | `status`        | Workbench support | Notes                                                                                                     |
 |-----------------------------------------|------------|-----------------|-------------------|-----------------------------------------------------------------------------------------------------------|
-| `microsoft/Phi-3-mini-4k-instruct-onnx` | summarizer | 🚧 planned (Workbench) | ⬇️ downloadable, ❌ not executable in Workbench | Native Java/DirectML decoder (no Python/ONNX Runtime), ~2.3 GB INT4 ONNX-format weights. Runs only via the sidecar `summarize` path; the Workbench gate blocks it (no wdmlpack compiler). See PHI3-PRODUCT-AUDIT-1. |
+| `microsoft/Phi-3-mini-4k-instruct-onnx` | summarizer | 🚧 planned (Workbench) | ⬇️ downloadable + convertible, runtime not yet enabled | Native Java/DirectML decoder (no Python/ONNX Runtime), ~2.3 GB INT4 ONNX-format weights. Sidecar `summarize` runs it; Workbench Convert produces `model_phi3.wdmlpack` (`Phi3PackageLifecycle`) but the Summarizer runtime is PLANNED pending a heap-light loader. See PHI3-PRODUCT-AUDIT-1 / PHI3-WORKBENCH-RUNNABLE-1. |
 | `microsoft/Phi-3.5-mini-instruct-onnx`  | summarizer | 🚧 planned      | ❌ not yet         | Successor; same architecture. Not executable in the Workbench (no wdmlpack compiler).                     |
 | `Qwen/Qwen2.5-Coder-0.5B-Instruct`      | causal-lm  | 🧪 experimental | ✅ runnable        | Qwen2.5-Coder 0.5B. Native DirectML INT4 runtime (`model_q4f16.wdmlpack`), no Python. ChatML template. See [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md). |
 | `Qwen/Qwen2.5-Coder-1.5B-Instruct`      | causal-lm  | 🚧 planned      | ❌ not yet         | Scale-up candidate (~1 GB INT4). Blocked on 0.5B runtime verification.                                    |
@@ -377,6 +377,11 @@ for text generation. The summarizer model selector is populated from
 
 ### 3.2 Workbench Summarizer smoke test (manual)
 
+> **Phi-3 is not yet runnable in the Workbench Summarizer (PHI3-PRODUCT-AUDIT-1 / PHI3-WORKBENCH-RUNNABLE-1).**
+> Download + Convert now produce a valid `model_phi3.wdmlpack` (`Phi3PackageLifecycle`), but the Summarizer runtime
+> is still PLANNED (a heap-light runtime loader is needed before it runs within a sane heap). The historical note
+> below still describes the original audit state.
+>
 > **Phi-3 is not executable in the Workbench (PHI3-PRODUCT-AUDIT-1).** The homogeneous artifact gate has no
 > wdmlpack compiler for Phi-3, so selecting `microsoft/Phi-3-mini-4k-instruct-onnx` in the Summarizer tab is blocked
 > with "selectable but not executable yet" (Phi-3 is `PLANNED`). The Phi-3 download remains available, and the

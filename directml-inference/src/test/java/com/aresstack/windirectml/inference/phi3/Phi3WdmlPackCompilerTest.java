@@ -109,6 +109,12 @@ class Phi3WdmlPackCompilerTest {
         assertEquals(7 + 22 * cfg.numHiddenLayers(), catalog.size(), "expected full Phi-3 role-tensor count");
     }
 
+    // PHI3-WORKBENCH-RUNNABLE-1: a full package->weights()->Phi3Runtime decode smoke is intentionally NOT committed
+    // here. The eager weights() reconstruction needs ~3 GB heap and, together with the 2.39 GB package mmap,
+    // over-commits the host's free RAM inside the forked test JVM (the JVM is OS-killed, not a clean failure). The
+    // runtime decode smoke + the PLANNED->EXPERIMENTAL status flip are deferred to a heap-light Phi runtime-package
+    // loader slice (decision C). See docs/phi3-wdmlpack-compiler-plan.md.
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private static Phi3Weights syntheticWeights(Phi3Config c) {

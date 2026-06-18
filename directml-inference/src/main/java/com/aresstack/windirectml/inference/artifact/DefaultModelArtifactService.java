@@ -36,9 +36,7 @@ public final class DefaultModelArtifactService implements ModelArtifactService {
         map.put(ModelFamily.RERANKER, new CompilerMissingLifecycle(ModelFamily.RERANKER,
                 List.of("config.json", "tokenizer.json"),
                 List.of(List.of("*.safetensors", "pytorch_model.bin"))));
-        map.put(ModelFamily.PHI3, new CompilerMissingLifecycle(ModelFamily.PHI3,
-                List.of("config.json"),
-                List.of(List.of("*.onnx", "model.safetensors"))));
+        map.put(ModelFamily.PHI3, new Phi3PackageLifecycle());
         return new DefaultModelArtifactService(map);
     }
 

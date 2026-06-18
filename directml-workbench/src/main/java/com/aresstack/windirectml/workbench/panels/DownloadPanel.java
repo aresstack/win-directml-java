@@ -171,8 +171,7 @@ public final class DownloadPanel extends JPanel {
                 createConfigButton(modelId),
                 new ModelArtifactRow(ModelFamily.PHI3,
                         () -> model.getModelRoot().resolve(manifest.localDirName()),
-                        () -> new CompilerMissingLifecycle(ModelFamily.PHI3, java.util.List.of("config.json"),
-                                java.util.List.of(java.util.List.of("*.onnx", "model.safetensors")))),
+                        com.aresstack.windirectml.inference.artifact.Phi3PackageLifecycle::new),
                 createOpenFolderButton(() -> model.getModelRoot().resolve(manifest.localDirName())),
                 registerProgressBar(manifest));
     }
