@@ -99,8 +99,8 @@ status / embedFamily` classification without duplicating metadata.
 | `openai/gpt-oss-120b`                     | decoder    | ⛔ unsupported   | – (not for embed) | Decoder-only LLM. Rejected by the `embed` endpoint.                                                                                    |
 | `casperhansen/llama-3.3-70b-instruct-awq` | decoder    | ⛔ unsupported   | – (not for embed) | Llama 3.3 70B AWQ-quantised decoder-only LLM. Rejected by the `embed` endpoint.                                                        |
 | `ellamind/summarizer-v6-llama-v2`         | summarizer | ⛔ unsupported   | – (not for embed) | Llama-v2 summarizer fine-tune. Belongs to a future text-generation/summarize ticket, not the embed endpoint.                           |
-| `microsoft/Phi-3-mini-4k-instruct-onnx`   | summarizer | 🧪 experimental | CPU + DirectML    | First supported decoder/summarizer backend. Workbench-selectable and downloadable.                                                     |
-| `microsoft/Phi-3.5-mini-instruct-onnx`    | summarizer | 🚧 planned      | – (planned)       | Phi-3 successor; runtime support pending ONNX graph availability.                                                                      |
+| `microsoft/Phi-3-mini-4k-instruct-onnx`   | summarizer | 🚧 planned (Workbench) | CPU + DirectML (sidecar only) | Native Java/DirectML decoder (`Phi3InferenceEngine`, no Python/ONNX Runtime) over ONNX-format weights. Runs via the sidecar `summarize` path; **not executable in the Workbench** (no wdmlpack compiler — the artifact gate blocks it). See PHI3-PRODUCT-AUDIT-1. |
+| `microsoft/Phi-3.5-mini-instruct-onnx`    | summarizer | 🚧 planned      | – (planned)       | Phi-3 successor; same architecture. Not executable in the Workbench (no wdmlpack compiler).                                            |
 
 Passing a decoder / summarizer ID to `-Dembed.model` fails with the
 following exact message (matched by both the registry test suite and any
@@ -353,8 +353,8 @@ for text generation. The summarizer model selector is populated from
 
 | `modelId`                               | `useCase`  | `status`        | Workbench support | Notes                                                                                                     |
 |-----------------------------------------|------------|-----------------|-------------------|-----------------------------------------------------------------------------------------------------------|
-| `microsoft/Phi-3-mini-4k-instruct-onnx` | summarizer | 🧪 experimental | ✅ downloadable    | First supported summarizer backend. CPU + DirectML. ~2.3 GB INT4 ONNX graph.                              |
-| `microsoft/Phi-3.5-mini-instruct-onnx`  | summarizer | 🚧 planned      | ❌ not yet         | Successor; expected same ONNX GenAI path once graph is published.                                         |
+| `microsoft/Phi-3-mini-4k-instruct-onnx` | summarizer | 🚧 planned (Workbench) | ⬇️ downloadable, ❌ not executable in Workbench | Native Java/DirectML decoder (no Python/ONNX Runtime), ~2.3 GB INT4 ONNX-format weights. Runs only via the sidecar `summarize` path; the Workbench gate blocks it (no wdmlpack compiler). See PHI3-PRODUCT-AUDIT-1. |
+| `microsoft/Phi-3.5-mini-instruct-onnx`  | summarizer | 🚧 planned      | ❌ not yet         | Successor; same architecture. Not executable in the Workbench (no wdmlpack compiler).                     |
 | `Qwen/Qwen2.5-Coder-0.5B-Instruct`      | causal-lm  | 🧪 experimental | ✅ runnable        | Qwen2.5-Coder 0.5B. Native DirectML INT4 runtime (`model_q4f16.wdmlpack`), no Python. ChatML template. See [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md). |
 | `Qwen/Qwen2.5-Coder-1.5B-Instruct`      | causal-lm  | 🚧 planned      | ❌ not yet         | Scale-up candidate (~1 GB INT4). Blocked on 0.5B runtime verification.                                    |
 | `Qwen/Qwen2.5-Coder-3B-Instruct`        | causal-lm  | 🚧 planned      | ❌ not yet         | Scale-up candidate (~2 GB INT4). Blocked on 0.5B runtime verification.                                    |
@@ -376,6 +376,13 @@ for text generation. The summarizer model selector is populated from
 > local fallback.
 
 ### 3.2 Workbench Summarizer smoke test (manual)
+
+> **Phi-3 is not executable in the Workbench (PHI3-PRODUCT-AUDIT-1).** The homogeneous artifact gate has no
+> wdmlpack compiler for Phi-3, so selecting `microsoft/Phi-3-mini-4k-instruct-onnx` in the Summarizer tab is blocked
+> with "selectable but not executable yet" (Phi-3 is `PLANNED`). The Phi-3 download remains available, and the
+> native Phi-3 engine still runs via the **sidecar `summarize` JSON-RPC path** (§3.1). The Workbench smoke test
+> below applies again once a Phi-3 wdmlpack compiler exists; for an executable Workbench summarizer today use a
+> certified T5 model (see `docs/t5-realmodel-cert.md`) or Gemma/Qwen.
 
 1. Download Phi-3 from the Workbench **Download** tab (button:
    "Download Phi-3 Mini 4K Instruct (Summarizer)").

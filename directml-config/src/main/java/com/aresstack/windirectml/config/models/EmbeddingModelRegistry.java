@@ -325,7 +325,7 @@ public final class EmbeddingModelRegistry {
                 "microsoft/Phi-3-mini-4k-instruct-onnx",
                 UseCase.SUMMARIZER,
                 "Microsoft",
-                "Phi-3 Mini 4K Instruct (decoder-only, ONNX Runtime GenAI)",
+                "Phi-3 Mini 4K Instruct (decoder-only, native Java/DirectML)",
                 "SentencePiece (Phi-3 tokenizer.json)",
                 "cpu, directml",
                 Status.EXPERIMENTAL,
@@ -334,16 +334,17 @@ public final class EmbeddingModelRegistry {
                         "model/microsoft/Phi-3-mini-4k-instruct-onnx"),
                 "Workbench download tab / scripts/download-phi3.ps1",
                 "manual smoke test (see WINDOWS-SMOKE-RUN.md)",
-                "First supported decoder/summarizer backend. Uses ONNX Runtime "
-                        + "GenAI for text generation. Requires ~2.3 GB disk for the "
-                        + "int4-quantised ONNX graph. CPU fallback supported; DirectML "
-                        + "acceleration available on compatible GPUs.",
+                "Sidecar summarizer backend. Runs the native Java/DirectML Phi-3 decoder "
+                        + "(no Python/ONNX Runtime) over the ONNX-format weights. Requires ~2.3 GB "
+                        + "disk for the int4-quantised weights. CPU fallback supported; DirectML "
+                        + "acceleration available on compatible GPUs. Not executable in the "
+                        + "Workbench (no wdmlpack compiler) – see PHI3-PRODUCT-AUDIT-1.",
                 null));
         entries.add(new Entry(
                 "microsoft/Phi-3.5-mini-instruct-onnx",
                 UseCase.SUMMARIZER,
                 "Microsoft",
-                "Phi-3.5 Mini Instruct (decoder-only, ONNX Runtime GenAI)",
+                "Phi-3.5 Mini Instruct (decoder-only, native Java/DirectML)",
                 "SentencePiece (Phi-3.5 tokenizer.json)",
                 "cpu, directml",
                 Status.PLANNED,
@@ -351,11 +352,11 @@ public final class EmbeddingModelRegistry {
                         "model/phi-3.5-mini-instruct-onnx",
                         "model/microsoft/Phi-3.5-mini-instruct-onnx"),
                 "planned (download support not yet added)",
-                "not yet tested \u2013 blocked on ONNX GenAI graph availability",
+                "not yet tested \u2013 blocked on Phi-3.5 ONNX-format weights availability",
                 "Successor to Phi-3 Mini with improved instruction following. "
                         + "Same architecture class as Phi-3 Mini 4K; expected to work "
-                        + "with the same ONNX Runtime GenAI path once the official "
-                        + "ONNX graph is published. Tracked as a follow-up to the "
+                        + "with the same native Java/DirectML decoder path once the official "
+                        + "weights are published. Tracked as a follow-up to the "
                         + "Phi-3 summarizer implementation.",
                 null));
         entries.add(new Entry(

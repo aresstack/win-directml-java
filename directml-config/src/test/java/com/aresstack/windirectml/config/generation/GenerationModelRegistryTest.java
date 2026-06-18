@@ -13,15 +13,18 @@ import static org.junit.jupiter.api.Assertions.*;
 class GenerationModelRegistryTest {
 
     @Test
-    void registryContainsPhi3Experimental() {
+    void registryContainsPhi3PlannedNotExecutableInWorkbench() {
+        // PHI3-PRODUCT-AUDIT-1: Phi-3-mini is selectable + downloadable but NOT executable in the Workbench
+        // (the homogeneous artifact gate has no wdmlpack compiler for Phi-3 and blocks raw-weight execution).
+        // It is therefore PLANNED, not EXPERIMENTAL -- the registry must not promise a runnable model.
         GenerationModelRegistry.Entry phi3 =
                 GenerationModelRegistry.findByModelId("microsoft/Phi-3-mini-4k-instruct-onnx");
         assertNotNull(phi3, "Phi-3 must be in the generation registry");
         assertEquals(GenerationModelRegistry.Architecture.CAUSAL_LM, phi3.architecture());
-        assertEquals(GenerationModelRegistry.Status.EXPERIMENTAL, phi3.status());
+        assertEquals(GenerationModelRegistry.Status.PLANNED, phi3.status());
         assertEquals(ChatTemplate.PHI3, phi3.chatTemplate());
         assertTrue(phi3.isCausalLM());
-        assertTrue(phi3.isRunnable());
+        assertFalse(phi3.isRunnable());
     }
 
     @Test
@@ -122,7 +125,7 @@ class GenerationModelRegistryTest {
     @Test
     void runnableEntriesOnlyContainsExperimentalOrShipped() {
         List<GenerationModelRegistry.Entry> runnable = GenerationModelRegistry.runnableEntries();
-        assertFalse(runnable.isEmpty(), "at least Phi-3 should be runnable");
+        assertFalse(runnable.isEmpty(), "at least Gemma/Qwen 0.5B/SmolLM2/T5 should be runnable");
         for (GenerationModelRegistry.Entry e : runnable) {
             assertTrue(e.status() == GenerationModelRegistry.Status.SHIPPED
                             || e.status() == GenerationModelRegistry.Status.EXPERIMENTAL,
@@ -164,7 +167,7 @@ class GenerationModelRegistryTest {
     void entriesByStatusFiltersCorrectly() {
         List<GenerationModelRegistry.Entry> planned =
                 GenerationModelRegistry.entriesByStatus(GenerationModelRegistry.Status.PLANNED);
-        assertTrue(planned.size() >= 3, "at least Phi-3.5 + Qwen 1.5B/3B + Gemma base should be planned");
+        assertTrue(planned.size() >= 3, "at least Phi-3-mini + Phi-3.5 + Qwen 1.5B/3B + Gemma base should be planned");
         for (GenerationModelRegistry.Entry e : planned) {
             assertEquals(GenerationModelRegistry.Status.PLANNED, e.status());
         }

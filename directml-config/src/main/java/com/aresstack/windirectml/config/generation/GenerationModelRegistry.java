@@ -175,19 +175,21 @@ public final class GenerationModelRegistry {
     static {
         List<Entry> entries = new ArrayList<Entry>();
 
-        // --- Phi-3: experimental decoder/summarizer implementation ---
+        // --- Phi-3: selectable + downloadable, but NOT executable in the Workbench (no wdmlpack compiler) ---
         entries.add(new Entry(
                 "microsoft/Phi-3-mini-4k-instruct-onnx",
                 Architecture.CAUSAL_LM,
                 "Microsoft",
                 "3.8B",
                 ChatTemplate.PHI3,
-                Status.EXPERIMENTAL,
+                Status.PLANNED,
                 Arrays.asList(
                         "model/phi-3-mini-4k-instruct-onnx",
                         "model/microsoft/Phi-3-mini-4k-instruct-onnx"),
-                "First supported decoder/summarizer backend. Uses ONNX Runtime "
-                        + "GenAI for text generation. INT4 quantized, ~2.3 GB disk."));
+                "Selectable and downloadable (INT4 ONNX weights, ~2.3 GB) but not executable in the Workbench: "
+                        + "the homogeneous lifecycle has no wdmlpack compiler for Phi-3, so the artifact gate blocks "
+                        + "raw-weight execution. A native Java/DirectML decoder (Phi3InferenceEngine, no Python/ONNX "
+                        + "Runtime) exists in the library/tests only."));
 
         entries.add(new Entry(
                 "microsoft/Phi-3.5-mini-instruct-onnx",
@@ -199,8 +201,8 @@ public final class GenerationModelRegistry {
                 Arrays.asList(
                         "model/phi-3.5-mini-instruct-onnx",
                         "model/microsoft/Phi-3.5-mini-instruct-onnx"),
-                "Successor to Phi-3 Mini with improved instruction following. "
-                        + "Same architecture; expected to work with ONNX GenAI path."));
+                "Successor to Phi-3 Mini with improved instruction following. Same architecture; selectable but not "
+                        + "executable in the Workbench (no wdmlpack compiler yet)."));
 
         // --- Qwen2.5-Coder 0.5B: runnable via the native DirectML INT4 runtime; 1.5B/3B still planned ---
         entries.add(new Entry(

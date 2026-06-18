@@ -19,8 +19,8 @@ user-visible residue, so this slice confirms it and locks it in with `WorkbenchM
 | Qwen2.5-Coder 1.5B / 3B | yes | — | — | — | PLANNED | no | "selectable but not executable yet" (honest guard message). |
 | **SmolLM2-135M / 360M** | yes | native DirectML/WARP (dense projections on the D3D12 software rasterizer), CPU reference-runtime fallback when no WARP device | hardware GPU when present, else CPU reference runtime | reference runtime | EXPERIMENTAL | **yes — from `.wdmlpack`** | No Python. Missing package → clear "Use Download tab → Convert". Audited honest in SMOLLM2-PRODUCT-AUDIT-1 (see below). |
 | **T5 / Flan-T5 / CodeT5** | yes | mixed: dense projections + LM-head on DirectML/WARP, rest on CPU reference | same on hardware adapter | validated Java reference seq2seq | EXPERIMENTAL | **yes — from `.wdmlpack`** | Seq2seq. No Python. `T5InferenceEngine`. CPU=certified path. WARP/AUTO mixed path: **all four curated models (t5-small, flan-t5-small, codet5-small, codet5-base-multi-sum) real-certified (CPU == WARP, greedy; T5-REALMODEL-CERT-1..4)**. Audited honest in T5-PRODUCT-AUDIT-1 (see below). |
-| **Phi-3 mini (onnx)** | yes | `Phi3Summarizer`/`Phi3InferenceEngine` (backend forwarded) | same | same | EXPERIMENTAL | yes (runtime present) | Runs via the Phi-3 engine; the panel notes "no direct ONNX execution / from a wdmlpack". Exact engine internals not re-verified in this Gemma-scoped audit. No Python. |
-| Phi-3.5 mini (onnx) | yes | — | — | — | PLANNED | no | "selectable but not executable yet". |
+| Phi-3 mini (onnx) | yes | blocked (gate) | blocked (gate) | blocked (gate) | PLANNED | **no — not executable in Workbench** | Selectable + downloadable, but the homogeneous artifact gate (`CompilerMissingLifecycle`) has no wdmlpack compiler for Phi-3, so `requireExecutablePackage(PHI3)` always fails. PLANNED so the Summarizer guard blocks it upfront. A native Java/DirectML decoder (`Phi3InferenceEngine`, no Python/ONNX Runtime) exists in the library/tests only. Corrected in PHI3-PRODUCT-AUDIT-1 (see below). |
+| Phi-3.5 mini (onnx) | yes | — | — | — | PLANNED | no | "selectable but not executable yet" (no wdmlpack compiler). |
 
 ## Findings
 
@@ -206,6 +206,31 @@ Final state of the curated T5/Flan-T5/CodeT5 family as a Workbench product path:
 - **Gating / artifacts:** the real-model and synthetic certs stay opt-in (`-Dt5.realModel=true`,
   `-Dt5.correctness.cert=true`); the standard regression stays light. Downloaded `model/...` artifacts are
   git-ignored and never committed.
+
+## Phi-3 audit (PHI3-PRODUCT-AUDIT-1)
+
+The Phi-3 family was advertised as runnable but is **not executable in the Workbench** — corrected to honest status
+(audit/labels/docs only, no runtime change):
+- **Root cause.** `SummarizerPanel.runPhi3Summarizer` calls `WorkbenchArtifactGate.requireExecutablePackage(PHI3, …)`
+  first. Phi-3's lifecycle is `CompilerMissingLifecycle` (no wdmlpack compiler): `inspect()` is always
+  `PACKAGE_COMPILER_MISSING` / `executable=false`, so `ready()` is false and the gate **always throws** "Package
+  compiler not implemented … downloadable but not executable until a wdmlpack compiler exists." The homogeneous
+  lifecycle deliberately does **not** run families from raw weights, so Phi-3 has no executable Workbench path today.
+- **False promise fixed.** Phi-3-mini was `EXPERIMENTAL` (runnable by status), so the Summarizer's PLANNED guard let
+  it through and the user hit the gate's deep error only after selecting + downloading. Downgraded **Phi-3-mini →
+  PLANNED** (Phi-3.5 was already PLANNED), so the guard now blocks both upfront with the honest "selectable but not
+  executable yet" message. No status now claims a runnable Phi-3.
+- **Misleading note fixed.** The registry note claimed "Uses ONNX Runtime GenAI for text generation" — wrong: there
+  is no ONNX Runtime / GenAI and no Python. The real `Phi3InferenceEngine` is a native Java/DirectML decoder that
+  memory-maps ONNX-format weights (`model.onnx` + `model.onnx.data`); it runs only via the library/tests, not the
+  Workbench product path. Notes reworded for both Phi entries.
+- **Routing.** All of WARP/AUTO/CPU are blocked by the gate in the Workbench (no executable path). The library engine
+  supports `cpu` / `directml` / `auto` (projections on GPU, attention/norms on CPU), but that is not the product
+  surface. **No Python on any Phi path.**
+- **Status:** PLANNED for both (selectable + downloadable, not executable). Making Phi-3 executable needs a wdmlpack
+  compiler (a separate runtime slice, out of scope here). Locked by
+  `WorkbenchModelStatusAuditTest.phiModelsAreNotRunnableAndCarryHonestNotes` and the config
+  `GenerationModelRegistryTest`.
 
 ## Gemma reference (unchanged)
 
