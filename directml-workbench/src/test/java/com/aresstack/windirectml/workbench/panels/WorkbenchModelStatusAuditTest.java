@@ -7,6 +7,10 @@ import com.aresstack.windirectml.inference.artifact.Gemma3PackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.ModelFamily;
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -138,6 +142,28 @@ class WorkbenchModelStatusAuditTest {
             assertFalse(note.contains("first supported"),
                     id + " note must not claim it is the first supported runnable backend: " + note);
         }
+    }
+
+    @Test
+    void runnableSetIsExactlyTheKnownProductModels() {
+        // WORKBENCH-MODEL-STATUS-CLOSEOUT-1: pin the complete runnable (SHIPPED/EXPERIMENTAL) set so a new model
+        // cannot silently become "runnable by status" without an explicit audit. Every id here has a verified
+        // executable Workbench path; Phi-3 is intentionally absent (gate-blocked -> PLANNED).
+        Set<String> expected = new TreeSet<>(Set.of(
+                "google/gemma-3-270m-it",
+                "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+                "HuggingFaceTB/SmolLM2-135M-Instruct",
+                "HuggingFaceTB/SmolLM2-360M-Instruct",
+                "Salesforce/codet5-small",
+                "Salesforce/codet5-base-multi-sum",
+                "google-t5/t5-small",
+                "google/flan-t5-small"));
+        Set<String> actual = GenerationModelRegistry.entries().stream()
+                .filter(Entry::isRunnable)
+                .map(Entry::modelId)
+                .collect(Collectors.toCollection(TreeSet::new));
+        assertEquals(expected, actual,
+                "Runnable-by-status set changed; audit the new/removed model before updating this lock-in");
     }
 
     @Test

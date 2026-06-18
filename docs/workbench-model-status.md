@@ -232,6 +232,37 @@ The Phi-3 family was advertised as runnable but is **not executable in the Workb
   `WorkbenchModelStatusAuditTest.phiModelsAreNotRunnableAndCarryHonestNotes` and the config
   `GenerationModelRegistryTest`.
 
+## Closeout (WORKBENCH-MODEL-STATUS-CLOSEOUT-1)
+
+Final state of the whole generation-model status strand. Audit/docs/lock-in only — no runtime, kernel, format,
+downloader or UI change in this slice.
+
+**Runnable by status (SHIPPED/EXPERIMENTAL — verified executable Workbench path):**
+- `google/gemma-3-270m-it` — native Java/DirectML (WARP/AUTO); CPU = legacy external Python.
+- `Qwen/Qwen2.5-Coder-0.5B-Instruct` — native DirectML INT4 (`model_q4f16.wdmlpack`); no Python.
+- `HuggingFaceTB/SmolLM2-135M-Instruct`, `HuggingFaceTB/SmolLM2-360M-Instruct` — native DirectML/WARP dense
+  projections + CPU reference-runtime fallback; no Python.
+- `google-t5/t5-small`, `google/flan-t5-small`, `Salesforce/codet5-small`, `Salesforce/codet5-base-multi-sum` —
+  mixed DirectML/WARP path, all four real-certified CPU == WARP (T5-REALMODEL-CERT-1..4); no Python.
+
+**PLANNED / not executable (selectable + clearly blocked by the Summarizer guard):**
+- `Qwen/Qwen2.5-Coder-1.5B-Instruct`, `Qwen/Qwen2.5-Coder-3B-Instruct` — no runtime/artifacts yet.
+- `google/gemma-3-270m` (base checkpoint) — routes to the Gemma handler for a clear missing-package message.
+- `microsoft/Phi-3-mini-4k-instruct-onnx`, `microsoft/Phi-3.5-mini-instruct-onnx` — no wdmlpack compiler; the
+  artifact gate blocks raw-weight execution (the native engine runs only via the sidecar `summarize` path).
+
+**Stale-wording sweep (no false product promises remain):** searched the tree for `Runtime integration is planned`,
+`not executable yet`, `not implemented yet`, `probe`, `download only`, `uses ONNX Runtime`, false Python/native-WARP
+claims, and wrong EXPERIMENTAL/runnable status. Remaining hits are all legitimate: the honest PLANNED guard message
+("selectable but not executable yet"), historical chronicle entries, the opt-in SmolLM2 `probe` diagnostic's own
+accurate message, and the negation "no Python/ONNX Runtime". No visible status note contradicts the actual runtime
+path.
+
+**Invariants locked by tests:** `WorkbenchModelStatusAuditTest` pins the exact runnable set
+(`runnableSetIsExactlyTheKnownProductModels`), the no-stale-wording rule, the executable-vs-PLANNED split, the
+SmolLM2/T5/Phi honest-note rules; the config `GenerationModelRegistryTest` pins the per-model statuses. Real-model
+certs stay opt-in (`-Dt5.realModel`/`-Dt5.correctness.cert`); downloaded `model/...` artifacts are git-ignored.
+
 ## Gemma reference (unchanged)
 
 Gemma stays the reference product path and is untouched by this slice: `Backend = WARP` → native
