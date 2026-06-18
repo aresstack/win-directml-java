@@ -259,8 +259,11 @@ class T5MixedRuntimeCorrectnessCertTest {
         return false;
     }
 
+    /** The primary cert model (T5-REALMODEL-CERT-PREP-1): smallest, plain T5, fewest tokenizer special cases. */
+    static final String PRIMARY_MODEL_ID = "google-t5/t5-small";
+
     private static final RealModel[] REAL_MODELS = {
-            new RealModel("google-t5/t5-small", PromptTask.SUMMARIZE,
+            new RealModel(PRIMARY_MODEL_ID, PromptTask.SUMMARIZE,
                     "translate English to German: The house is wonderful.",
                     "t5-small", "google-t5/t5-small"),
             new RealModel("google/flan-t5-small", PromptTask.NONE,
@@ -288,10 +291,20 @@ class T5MixedRuntimeCorrectnessCertTest {
         }
 
         Path resolveDir() {
-            String override = System.getProperty("t5.testModelDir." + modelId);
-            if (override != null && !override.isBlank() && Files.isRegularFile(Path.of(override, "config.json"))) {
-                return Path.of(override);
+            // 1. Per-model override: -Dt5.testModelDir.<modelId> (verbatim id, e.g. t5.testModelDir.google-t5/t5-small).
+            Path perModel = validDir(System.getProperty("t5.testModelDir." + modelId));
+            if (perModel != null) {
+                return perModel;
             }
+            // 2. Generic override -Dt5.testModelDir applies to the primary cert model only (so a single dir cannot be
+            //    mis-applied to a different model id). Mirrors T5RealModelReferenceTest's convention.
+            if (PRIMARY_MODEL_ID.equals(modelId)) {
+                Path generic = validDir(System.getProperty("t5.testModelDir"));
+                if (generic != null) {
+                    return generic;
+                }
+            }
+            // 3. Auto-resolution at the standard download location (<modelRoot>/<localDir>, default <repo>/model/...).
             for (String relative : relativeDirs) {
                 for (Path base : new Path[]{Path.of("model", relative), Path.of("../model", relative)}) {
                     if (Files.isRegularFile(base.resolve("config.json"))) {
@@ -300,6 +313,14 @@ class T5MixedRuntimeCorrectnessCertTest {
                 }
             }
             return null;
+        }
+
+        private static Path validDir(String value) {
+            if (value == null || value.isBlank()) {
+                return null;
+            }
+            Path dir = Path.of(value);
+            return Files.isRegularFile(dir.resolve("config.json")) ? dir : null;
         }
     }
 }
