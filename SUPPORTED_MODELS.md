@@ -100,7 +100,7 @@ status / embedFamily` classification without duplicating metadata.
 | `casperhansen/llama-3.3-70b-instruct-awq` | decoder    | ⛔ unsupported   | – (not for embed) | Llama 3.3 70B AWQ-quantised decoder-only LLM. Rejected by the `embed` endpoint.                                                        |
 | `ellamind/summarizer-v6-llama-v2`         | summarizer | ⛔ unsupported   | – (not for embed) | Llama-v2 summarizer fine-tune. Belongs to a future text-generation/summarize ticket, not the embed endpoint.                           |
 | `microsoft/Phi-3-mini-4k-instruct-onnx`   | summarizer | 🧪 experimental | CPU (Workbench, from wdmlpack) + DirectML (sidecar) | Native Java/DirectML decoder (no Python/ONNX Runtime). Workbench: Download → Convert → `model_phi3.wdmlpack`, then the Summarizer runs it heap-light via `Phi3RuntimePackage` → `Phi3Runtime` (CPU). Also runs via the sidecar `summarize` path. Runnable since PHI3-RUNTIME-HEAPLIGHT-1. |
-| `microsoft/Phi-3.5-mini-instruct-onnx`    | summarizer | 🚧 planned      | – (planned)       | Phi-3 successor; same architecture. Not executable in the Workbench (no wdmlpack compiler).                                            |
+| `microsoft/Phi-3.5-mini-instruct-onnx`    | summarizer | 🚧 planned      | – (planned)       | Phi-3 successor; same architecture, so it would use the same Phi-3 wdmlpack compiler/runtime once its weights + download are wired. PLANNED for now.   |
 
 Passing a decoder / summarizer ID to `-Dembed.model` fails with the
 following exact message (matched by both the registry test suite and any
@@ -354,7 +354,7 @@ for text generation. The summarizer model selector is populated from
 | `modelId`                               | `useCase`  | `status`        | Workbench support | Notes                                                                                                     |
 |-----------------------------------------|------------|-----------------|-------------------|-----------------------------------------------------------------------------------------------------------|
 | `microsoft/Phi-3-mini-4k-instruct-onnx` | summarizer | 🧪 experimental | ✅ runnable (Download → Convert → run) | Native Java/DirectML decoder (no Python/ONNX Runtime), ~2.3 GB INT4. Workbench Convert produces `model_phi3.wdmlpack` (`Phi3PackageLifecycle`) and the Summarizer runs it heap-light (`Phi3RuntimePackage` → `Phi3Runtime`, CPU). Runnable since PHI3-RUNTIME-HEAPLIGHT-1. |
-| `microsoft/Phi-3.5-mini-instruct-onnx`  | summarizer | 🚧 planned      | ❌ not yet         | Successor; same architecture. Not executable in the Workbench (no wdmlpack compiler).                     |
+| `microsoft/Phi-3.5-mini-instruct-onnx`  | summarizer | 🚧 planned      | ❌ not yet         | Successor; same architecture -> same Phi-3 compiler/runtime once its weights + download are wired. PLANNED. |
 | `Qwen/Qwen2.5-Coder-0.5B-Instruct`      | causal-lm  | 🧪 experimental | ✅ runnable        | Qwen2.5-Coder 0.5B. Native DirectML INT4 runtime (`model_q4f16.wdmlpack`), no Python. ChatML template. See [`docs/qwen-smoke-test.md`](docs/qwen-smoke-test.md). |
 | `Qwen/Qwen2.5-Coder-1.5B-Instruct`      | causal-lm  | 🚧 planned      | ❌ not yet         | Scale-up candidate (~1 GB INT4). Blocked on 0.5B runtime verification.                                    |
 | `Qwen/Qwen2.5-Coder-3B-Instruct`        | causal-lm  | 🚧 planned      | ❌ not yet         | Scale-up candidate (~2 GB INT4). Blocked on 0.5B runtime verification.                                    |

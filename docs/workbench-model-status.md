@@ -207,10 +207,15 @@ Final state of the curated T5/Flan-T5/CodeT5 family as a Workbench product path:
   `-Dt5.correctness.cert=true`); the standard regression stays light. Downloaded `model/...` artifacts are
   git-ignored and never committed.
 
-## Phi-3 audit (PHI3-PRODUCT-AUDIT-1)
+## Phi-3 audit (PHI3-PRODUCT-AUDIT-1) — historical, superseded
 
-The Phi-3 family was advertised as runnable but is **not executable in the Workbench** — corrected to honest status
-(audit/labels/docs only, no runtime change):
+> **Superseded:** this section records the original audit when Phi-3 had no wdmlpack compiler. Phi-3-mini is now
+> runnable in the Workbench (see the Phi-3 status row + the closeout below): PHI3-WDMLPACK-COMPILER-1/2 added the
+> compiler, PHI3-RUNTIME-HEAPLIGHT-1 made the package load heap-light, and Phi-3-mini is EXPERIMENTAL/runnable from
+> `model_phi3.wdmlpack`. The text below is kept for history.
+
+At audit time, the Phi-3 family was advertised as runnable but was **not executable in the Workbench** — corrected
+to honest status then (audit/labels/docs only, no runtime change):
 - **Root cause.** `SummarizerPanel.runPhi3Summarizer` calls `WorkbenchArtifactGate.requireExecutablePackage(PHI3, …)`
   first. Phi-3's lifecycle is `CompilerMissingLifecycle` (no wdmlpack compiler): `inspect()` is always
   `PACKAGE_COMPILER_MISSING` / `executable=false`, so `ready()` is false and the gate **always throws** "Package
@@ -279,6 +284,24 @@ path.
 (`runnableSetIsExactlyTheKnownProductModels`), the no-stale-wording rule, the executable-vs-PLANNED split, the
 SmolLM2/T5/Phi honest-note rules; the config `GenerationModelRegistryTest` pins the per-model statuses. Real-model
 certs stay opt-in (`-Dt5.realModel`/`-Dt5.correctness.cert`); downloaded `model/...` artifacts are git-ignored.
+
+## Phi-3 product status (PHI3-PRODUCT-CLOSEOUT)
+
+Final state of the Phi-3 family as a Workbench product path (docs/lock-in only):
+- **Phi-3-mini (`microsoft/Phi-3-mini-4k-instruct-onnx`) is runnable.** Status EXPERIMENTAL → runnable by status (not
+  caught by the Summarizer PLANNED guard). Download tab: `Phi3PackageLifecycle` (compiler-backed) → Convert produces
+  `model_phi3.wdmlpack` and the gate reports READY (light structural `Phi3RuntimePackage.open`).
+- **Runtime path:** `SummarizerPanel.runPhi3Summarizer` runs it from `model_phi3.wdmlpack` via
+  `Phi3RuntimePackage` (heap-light: qweight/zeropoints reference the mmap'd buffers, ~783 MB) → the native Java/DirectML
+  `Phi3Runtime` (CPU). **No Python, no ONNX Runtime; no raw-ONNX execution in the Workbench start path.** A missing
+  package fails fast with the Download → Convert message.
+- **Phi-3.5 (`microsoft/Phi-3.5-mini-instruct-onnx`) stays PLANNED** — same architecture, would reuse the same Phi-3
+  compiler/runtime once its weights + download are wired; not executable yet.
+- **Gating / artifacts:** the real-model compile + decode smoke stay opt-in (`-Dphi3.compile.realModel`,
+  `-Dphi3.realModel`, forwarded by `directml-inference/build.gradle`); the standard run stays light. Downloaded
+  `model/phi-3-mini-4k-instruct-onnx` is git-ignored. Invariants locked by `GenerationModelRegistryTest`,
+  `WorkbenchModelStatusAuditTest` (Phi-3-mini in the exact runnable set; `phiStatusIsHonest`), `Phi3PackageLifecycleTest`
+  and the gated `Phi3WdmlPackCompilerTest`. The sidecar `summarize` path (EmbeddingModelRegistry) is unchanged.
 
 ## Gemma reference (unchanged)
 

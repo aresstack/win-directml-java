@@ -175,7 +175,7 @@ public final class GenerationModelRegistry {
     static {
         List<Entry> entries = new ArrayList<Entry>();
 
-        // --- Phi-3: selectable + downloadable, but NOT executable in the Workbench (no wdmlpack compiler) ---
+        // --- Phi-3: mini runs in the Workbench from model_phi3.wdmlpack (EXPERIMENTAL); 3.5 PLANNED (no weights yet) ---
         entries.add(new Entry(
                 "microsoft/Phi-3-mini-4k-instruct-onnx",
                 Architecture.CAUSAL_LM,
