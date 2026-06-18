@@ -18,7 +18,7 @@ user-visible residue, so this slice confirms it and locks it in with `WorkbenchM
 | **Qwen2.5-Coder-0.5B-it** | yes | native DirectML INT4 (`model_q4f16.wdmlpack`) | native DirectML INT4 | engine backend | EXPERIMENTAL | **yes** | Runnable by status (WORKBENCH-MODEL-STATUS-2) — the PLANNED-guard `qwenTestModel` exemption was removed; `isQwenTestModel` now only routes to `QwenInferenceEngine` (like the other families' routing). No Python. |
 | Qwen2.5-Coder 1.5B / 3B | yes | — | — | — | PLANNED | no | "selectable but not executable yet" (honest guard message). |
 | **SmolLM2-135M / 360M** | yes | native DirectML/WARP (dense projections on the D3D12 software rasterizer), CPU reference-runtime fallback when no WARP device | hardware GPU when present, else CPU reference runtime | reference runtime | EXPERIMENTAL | **yes — from `.wdmlpack`** | No Python. Missing package → clear "Use Download tab → Convert". Audited honest in SMOLLM2-PRODUCT-AUDIT-1 (see below). |
-| **T5 / Flan-T5 / CodeT5** | yes | mixed: dense projections + LM-head on DirectML/WARP, rest on CPU reference | same on hardware adapter | validated Java reference seq2seq | EXPERIMENTAL | **yes — from `.wdmlpack`** | Seq2seq. No Python. `T5InferenceEngine`. CPU=certified path. WARP/AUTO mixed path: **google-t5/t5-small real-certified (CPU == WARP, greedy; T5-REALMODEL-CERT-1)**; Flan-T5/CodeT5 still experimental/uncertified. Audited honest in T5-PRODUCT-AUDIT-1 (see below). |
+| **T5 / Flan-T5 / CodeT5** | yes | mixed: dense projections + LM-head on DirectML/WARP, rest on CPU reference | same on hardware adapter | validated Java reference seq2seq | EXPERIMENTAL | **yes — from `.wdmlpack`** | Seq2seq. No Python. `T5InferenceEngine`. CPU=certified path. WARP/AUTO mixed path: **google-t5/t5-small + google/flan-t5-small real-certified (CPU == WARP, greedy; T5-REALMODEL-CERT-1/2)**; CodeT5 still experimental/uncertified. Audited honest in T5-PRODUCT-AUDIT-1 (see below). |
 | **Phi-3 mini (onnx)** | yes | `Phi3Summarizer`/`Phi3InferenceEngine` (backend forwarded) | same | same | EXPERIMENTAL | yes (runtime present) | Runs via the Phi-3 engine; the panel notes "no direct ONNX execution / from a wdmlpack". Exact engine internals not re-verified in this Gemma-scoped audit. No Python. |
 | Phi-3.5 mini (onnx) | yes | — | — | — | PLANNED | no | "selectable but not executable yet". |
 
@@ -114,7 +114,7 @@ Measured the WARP/AUTO mixed path against the CPU reference (reference = ground 
 boundary arithmetic is faithful (bit-exact FP32 dense projections), but no real-model package was present to measure
 end-to-end text parity. This was resolved in T5-REALMODEL-CERT-1 (below).
 
-### T5 real-model certification — google-t5/t5-small (T5-REALMODEL-CERT-1)
+### T5 real-model certification — google-t5/t5-small + google/flan-t5-small (T5-REALMODEL-CERT-1/2)
 
 Downloaded `google-t5/t5-small` (public repo, the existing Download/Convert path) into `model/t5-small`, compiled
 `model_t5.wdmlpack` (132 tensors, reference generation verified end-to-end), and ran the gated real-model cert:
@@ -137,12 +137,25 @@ wonderful."`, maxTokens 20, greedy (temperature 0), executionMode
 `tokensMatch=true`, `textMatch=true`. Backed by the synthetic LM-head cert (`maxAbsLogitDiff=0.0`, top-1 identical).
 The cert now **asserts** parity for any present model (it fails if WARP diverges), so this is a locked guard, not
 just a report. AUTO was not measured separately (it uses the same `loadWarp` mixed logic on the hardware adapter;
-WARP already certified the arithmetic). Flan-T5/CodeT5 stay **SKIPPED** (no artifact) and are not upgraded.
+WARP already certified the arithmetic).
 
-**Verdict: A — google-t5/t5-small WARP mixed is end-to-end correctness-equal to the CPU reference.** Note refined
-accordingly (the panel now states t5-small is certified while other T5 models remain experimental/uncertified). The
-artifacts under `model/t5-small/` are git-ignored (downloaded model, not committed). Tests:
-`T5MixedRuntimeCorrectnessCertTest` (`directml-inference`). See `t5-realmodel-cert.md` for the prep recipe.
+**google/flan-t5-small (T5-REALMODEL-CERT-2)** — downloaded via the same path into `model/flan-t5-small`, compiled
+`model_t5.wdmlpack` (190 tensors, reference-verified), same cert run. Prompt `"Answer the question: what is the
+capital of France?"`, maxTokens 20, greedy, same executionMode:
+
+| | CPU reference | WARP mixed |
+|---|---|---|
+| token ids | `[1410:▁France]` | identical |
+| text | `France` | identical |
+| first divergent token | — (none) | — |
+
+`tokensMatch=true`, `textMatch=true`. CodeT5 stays **SKIPPED** (no artifact) and is not upgraded.
+
+**Verdict: A — google-t5/t5-small and google/flan-t5-small WARP mixed are end-to-end correctness-equal to the CPU
+reference.** Note refined accordingly (the panel now states both are certified while CodeT5 remains
+experimental/uncertified). The artifacts under `model/t5-small/` and `model/flan-t5-small/` are git-ignored
+(downloaded models, not committed). Tests: `T5MixedRuntimeCorrectnessCertTest` (`directml-inference`). See
+`t5-realmodel-cert.md` for the prep recipe.
 
 ## Gemma reference (unchanged)
 

@@ -240,8 +240,9 @@ public final class SummarizerPanel extends JPanel {
             appendResult("  NOTE: Backend = CPU runs the validated Java reference seq2seq runtime. Backend = WARP/AUTO routes the "
                     + "dense projections (attention/feed-forward + LM-head matmuls) through DirectML on the WARP software / "
                     + "hardware adapter, while layer norms, attention softmax, and relative-position bias stay on the CPU "
-                    + "reference path. For google-t5/t5-small this mixed path is correctness-certified (CPU == WARP, greedy; "
-                    + "T5-REALMODEL-CERT-1); other T5 models remain experimental/uncertified until certified. No Python on any T5 path.");
+                    + "reference path. For google-t5/t5-small and google/flan-t5-small this mixed path is correctness-certified "
+                    + "(CPU == WARP, greedy; T5-REALMODEL-CERT-1/2); CodeT5 remains experimental/uncertified until certified. "
+                    + "No Python on any T5 path.");
             appendResult("  NOTE: The exact stage routing is printed below as the execution mode (e.g. 'reference' or "
                     + "'warp-encoder-boundary+warp-decoder-boundary+warp-lm-head').");
         }
