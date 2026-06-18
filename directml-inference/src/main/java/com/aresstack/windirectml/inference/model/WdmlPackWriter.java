@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -115,15 +114,30 @@ public final class WdmlPackWriter {
     public static Map<String, Object> readManifest(Path pack) throws IOException {
         Header header = readHeader(pack);
         long fileSize = Files.size(pack);
-        if (fileSize > Integer.MAX_VALUE) {
-            throw new IOException("wdmlpack is too large for the current lightweight mmap reader: " + pack
-                    + " (" + fileSize + " bytes)");
+        // Read only the (small) manifest region positionally -- never map the whole file. This keeps the reader
+        // working for >2 GB packages (the payload, not the manifest, is what makes a package large). The manifest
+        // length is bounded by Integer.MAX_VALUE because it is buffered into a byte[] for JSON parsing.
+        if (header.manifestOffset() < HEADER_SIZE || header.manifestLength() < 0
+                || header.manifestOffset() + header.manifestLength() > fileSize) {
+            throw new IOException("Invalid wdmlpack manifest range: offset=" + header.manifestOffset()
+                    + ", length=" + header.manifestLength() + ", fileSize=" + fileSize);
         }
+        if (header.manifestLength() > Integer.MAX_VALUE) {
+            throw new IOException("wdmlpack manifest is too large to parse: " + header.manifestLength() + " bytes");
+        }
+        int manifestLength = Math.toIntExact(header.manifestLength());
+        ByteBuffer buffer = ByteBuffer.allocate(manifestLength);
         try (FileChannel channel = FileChannel.open(pack, StandardOpenOption.READ)) {
-            MappedByteBuffer mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
-            mapped.order(ByteOrder.LITTLE_ENDIAN);
-            return readManifest(mapped, header, fileSize);
+            long position = header.manifestOffset();
+            while (buffer.hasRemaining()) {
+                int read = channel.read(buffer, position + buffer.position());
+                if (read < 0) {
+                    throw new IOException("Truncated wdmlpack manifest in " + pack);
+                }
+            }
         }
+        return MAPPER.readValue(buffer.array(), new TypeReference<>() {
+        });
     }
 
     public static Header readHeader(Path pack) throws IOException {
@@ -235,21 +249,6 @@ public final class WdmlPackWriter {
             // Best effort only. Some platforms, especially Windows, do not allow
             // opening directories as FileChannels. The data file itself was forced.
         }
-    }
-
-    private static Map<String, Object> readManifest(MappedByteBuffer mapped, Header header, long fileSize) throws IOException {
-        if (header.manifestOffset() < HEADER_SIZE || header.manifestLength() < 0
-                || header.manifestOffset() + header.manifestLength() > fileSize) {
-            throw new IOException("Invalid wdmlpack manifest range: offset=" + header.manifestOffset()
-                    + ", length=" + header.manifestLength() + ", fileSize=" + fileSize);
-        }
-        ByteBuffer manifestBuffer = mapped.asReadOnlyBuffer();
-        manifestBuffer.position(Math.toIntExact(header.manifestOffset()));
-        manifestBuffer.limit(Math.toIntExact(header.manifestOffset() + header.manifestLength()));
-        byte[] json = new byte[Math.toIntExact(header.manifestLength())];
-        manifestBuffer.get(json);
-        return MAPPER.readValue(json, new TypeReference<>() {
-        });
     }
 
     private static void validateRange(String label, long offset, long length, long fileSize, long minOffset) throws IOException {

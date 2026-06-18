@@ -7,14 +7,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -96,24 +94,19 @@ class Phi3WdmlPackCompilerTest {
         assertEquals(7 + 22 * cfg.numHiddenLayers(), result.tensorCount(), "expected full Phi-3 role-tensor count");
         assertTrue(result.payloadBytes() > 0);
 
-        long packageBytes = Files.size(output);
-        if (packageBytes <= Integer.MAX_VALUE) {
-            // Small enough for the current lightweight mmap reader -> structural reload must work.
-            RuntimeTensorCatalog catalog = Phi3RuntimePackage.open(output).runtimeTensorCatalog();
-            assertArrayEquals(new long[]{cfg.vocabSize(), cfg.hiddenSize()},
-                    catalog.get(Phi3WdmlPackRoles.EMBED_TOKENS).dims(), "embed_tokens dims");
-            assertEquals(7 + 22 * cfg.numHiddenLayers(), catalog.size());
-        } else {
-            // KNOWN BLOCKER (PHI3-WDMLPACK-COMPILER-2): the real Phi-3-mini package is ~2.4 GB, and the shared
-            // WdmlPackReader maps the whole file with int offsets, so it rejects packages > Integer.MAX_VALUE. The
-            // compile is heap-safe and correct; reloading a >2 GB package needs a follow-up reader change (positional
-            // manifest read + windowed payload mapping) -- tracked separately. This assertion documents the limit and
-            // will start failing (prompting an update) once the reader supports >2 GB files.
-            IOException tooLarge = assertThrows(IOException.class, () -> Phi3RuntimePackage.open(output),
-                    "expected the shared >2GB mmap-reader limit for a ~2.4 GB Phi-3 package");
-            assertTrue(tooLarge.getMessage().toLowerCase().contains("too large"),
-                    "unexpected reload failure: " + tooLarge.getMessage());
-        }
+        // WDMLPACK-LARGE-READER-1: the shared reader now handles >2 GB packages (positional manifest read +
+        // per-tensor windowed mapping), so the real ~2.39 GB Phi-3-mini package reloads. Structural check only via the
+        // mmap-backed catalog (full weights() reconstruction is a separate runtime-memory concern).
+        assertTrue(Files.size(output) > Integer.MAX_VALUE, "real Phi-3-mini package is expected to exceed 2 GB");
+        Phi3RuntimePackage pkg = Phi3RuntimePackage.open(output);
+        assertEquals(cfg, pkg.config(), "config must round-trip from the >2GB package manifest");
+        RuntimeTensorCatalog catalog = pkg.runtimeTensorCatalog();
+        assertArrayEquals(new long[]{cfg.vocabSize(), cfg.hiddenSize()},
+                catalog.get(Phi3WdmlPackRoles.EMBED_TOKENS).dims(), "embed_tokens dims");
+        assertTrue(catalog.contains(Phi3WdmlPackRoles.qweight(
+                        Phi3WdmlPackRoles.layer(0, Phi3WdmlPackRoles.Q_PROJ))),
+                "package must contain layer 0 q_proj qweight");
+        assertEquals(7 + 22 * cfg.numHiddenLayers(), catalog.size(), "expected full Phi-3 role-tensor count");
     }
 
     // ── helpers ──────────────────────────────────────────────────────────

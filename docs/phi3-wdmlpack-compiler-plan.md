@@ -10,13 +10,14 @@
 > gated real Phi-3-mini compile (`-Dphi3.compile.realModel=true`) now **runs within the standard 2 GB test heap** and
 > produces a real `model_phi3.wdmlpack` — **711 tensors, 32 layers, ~2.39 GB**.
 >
-> **Known remaining blocker (reload, not compile):** the produced package is ~2.39 GB, and the *shared*
-> `WdmlPackReader`/`WdmlPackWriter.readManifest` maps the whole file with `int` offsets, so it rejects packages
-> `> Integer.MAX_VALUE` ("wdmlpack is too large for the current lightweight mmap reader"). The compile is correct and
-> heap-safe; **reloading a >2 GB package needs a shared-reader follow-up** (positional manifest read + windowed/long
-> payload mapping) — out of scope for this compiler slice (it touches Qwen/T5/SmolLM2 too). The gated test asserts
-> this limit so it will flag when the reader gains >2 GB support. **No Workbench lifecycle/gate/download wiring and no
-> status flip**; Phi-3 remains PLANNED / gate-blocked. Follow-ups: a shared >2 GB wdmlpack-reader slice, then
+> **>2 GB reader fixed (WDMLPACK-LARGE-READER-1).** The shared reader now handles packages larger than 2 GB without a
+> format change: `WdmlPackWriter.readManifest` reads only the manifest region positionally (no whole-file mmap), and
+> `WdmlPackReader.mapPayloadTensors` maps each tensor's payload region individually with a long file offset (each
+> tensor is < 2 GB). The real ~2.39 GB Phi-3-mini package now **reloads** — `Phi3RuntimePackage.open` +
+> `runtimeTensorCatalog()` validate config + all 711 role tensors (gated test). Small Qwen/T5/SmolLM2 packages are
+> unchanged (regression green). The remaining step before runnable is the full in-memory `weights()` reconstruction
+> footprint (~3 GB) — a runtime-memory concern for the Workbench wiring, not the reader. **No Workbench
+> lifecycle/gate/download wiring and no status flip**; Phi-3 remains PLANNED / gate-blocked. Next:
 > `PHI3-WORKBENCH-RUNNABLE-1`.
 
 ---

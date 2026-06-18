@@ -39,41 +39,34 @@ public final class WdmlPackReader {
         if (!modelPackage.payloadIncluded()) {
             return RuntimeTensorCatalog.empty();
         }
-        if (modelPackage.fileSize() > Integer.MAX_VALUE) {
-            throw new IOException("wdmlpack package is too large for the current mmap reader: "
-                    + modelPackage.packagePath() + " (" + modelPackage.fileSize() + " bytes)");
-        }
+        // Map each tensor's payload region individually with a long file offset, rather than mmap'ing the whole
+        // container. This supports packages > 2 GB (e.g. the real Phi-3-mini ~2.39 GB package); each tensor region is
+        // still < Integer.MAX_VALUE. The mapped regions remain valid after the channel is closed (the JVM keeps the
+        // mapping alive until GC), matching how callers consume RuntimeTensor buffers after this method returns.
         try (FileChannel channel = FileChannel.open(modelPackage.packagePath(), StandardOpenOption.READ)) {
-            MappedByteBuffer mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0, modelPackage.fileSize());
-            mapped.order(ByteOrder.LITTLE_ENDIAN);
-            return mapPayloadTensors(modelPackage, mapped);
+            List<RuntimeTensor> tensors = new ArrayList<>();
+            for (java.util.Map<String, Object> tensor : modelPackage.manifestMetadata().requireListOfMaps("tensors")) {
+                String name = WdmlPackManifest.stringValue(tensor.get("name"));
+                int dataType = WdmlPackManifest.intValue(tensor.get("dataType"), 0);
+                long[] dims = WdmlPackManifest.dimsValue(tensor.get("dims"));
+                long byteLength = WdmlPackManifest.longValue(tensor.get("byteLength"), 0L);
+                long payloadOffset = WdmlPackManifest.longValue(tensor.get("payloadOffset"), -1L);
+                long payloadLength = WdmlPackManifest.longValue(tensor.get("payloadLength"), byteLength);
+                if (name.isBlank()) {
+                    continue;
+                }
+                if (payloadOffset >= 0 && payloadLength > 0) {
+                    tensors.add(mapTensorPayload(channel, modelPackage, name, dims, dataType, payloadOffset, payloadLength));
+                } else {
+                    tensors.add(new RuntimeTensor(name, dims, dataType, ByteBuffer.allocate(0), 0));
+                }
+            }
+            return new RuntimeTensorCatalog(tensors);
         }
     }
 
-    private static RuntimeTensorCatalog mapPayloadTensors(RuntimeModelPackage modelPackage,
-                                                          MappedByteBuffer mapped) throws IOException {
-        List<RuntimeTensor> tensors = new ArrayList<>();
-        for (java.util.Map<String, Object> tensor : modelPackage.manifestMetadata().requireListOfMaps("tensors")) {
-            String name = WdmlPackManifest.stringValue(tensor.get("name"));
-            int dataType = WdmlPackManifest.intValue(tensor.get("dataType"), 0);
-            long[] dims = WdmlPackManifest.dimsValue(tensor.get("dims"));
-            long byteLength = WdmlPackManifest.longValue(tensor.get("byteLength"), 0L);
-            long payloadOffset = WdmlPackManifest.longValue(tensor.get("payloadOffset"), -1L);
-            long payloadLength = WdmlPackManifest.longValue(tensor.get("payloadLength"), byteLength);
-            if (name.isBlank()) {
-                continue;
-            }
-            if (payloadOffset >= 0 && payloadLength > 0) {
-                tensors.add(mapTensorPayload(modelPackage, mapped, name, dims, dataType, payloadOffset, payloadLength));
-            } else {
-                tensors.add(new RuntimeTensor(name, dims, dataType, ByteBuffer.allocate(0), 0));
-            }
-        }
-        return new RuntimeTensorCatalog(tensors);
-    }
-
-    private static RuntimeTensor mapTensorPayload(RuntimeModelPackage modelPackage,
-                                                  MappedByteBuffer mapped,
+    private static RuntimeTensor mapTensorPayload(FileChannel channel,
+                                                  RuntimeModelPackage modelPackage,
                                                   String name,
                                                   long[] dims,
                                                   int dataType,
@@ -88,10 +81,9 @@ public final class WdmlPackReader {
             throw new IOException("Invalid wdmlpack tensor payload range for " + name
                     + ": offset=" + payloadOffset + ", length=" + payloadLength);
         }
-        ByteBuffer slice = mapped.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
-        slice.position(Math.toIntExact(absoluteStart));
-        slice.limit(Math.toIntExact(absoluteEnd));
-        ByteBuffer raw = slice.slice().order(ByteOrder.LITTLE_ENDIAN);
-        return new RuntimeTensor(name, dims, dataType, raw, (int) payloadLength);
+        // Long offset into the file; per-tensor length fits an int (validated above).
+        MappedByteBuffer region = channel.map(FileChannel.MapMode.READ_ONLY, absoluteStart, payloadLength);
+        region.order(ByteOrder.LITTLE_ENDIAN);
+        return new RuntimeTensor(name, dims, dataType, region, (int) payloadLength);
     }
 }
