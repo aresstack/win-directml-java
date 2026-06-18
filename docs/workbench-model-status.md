@@ -93,6 +93,32 @@ T5/Flan-T5/CodeT5 are honest, executable Workbench paths — audit/labels only, 
   retained only as a javadoc anchor for the package-level certification scope). Registry notes already used
   internal "Experimental …" wording with no `planned`/`probe`/`not implemented`/`runtime integration` residue.
 
+### T5 mixed-path correctness certification (T5-CORRECTNESS-CERT-1)
+
+Measured the WARP/AUTO mixed path against the CPU reference (reference = ground truth). Opt-in only:
+- **Synthetic device cert** (`-Dt5.correctness.cert=true`, needs a D3D12/DirectML device — runs on this host): a tiny
+  T5 `.wdmlpack` is driven through the **same** package on `T5Runtime.load` (reference) vs `T5Runtime.loadWarp`
+  (WARP mixed), comparing greedy token ids and LM-head logits. Result on this host (RTX 5080, WARP software
+  adapter): **token ids identical** (`[5,5,5,5,5,5]` reference == WARP, `firstDivergent=none`) for both the
+  relu and gated-gelu configs, and **LM-head `maxAbsLogitDiff = 0.0`, top-1 identical**. → The WARP dense-projection
+  arithmetic (the part that actually moves to DirectML) is **bit-exact** vs the reference for the FP32 weight path.
+  Caveat: the tiny synthetic weights make greedy collapse to a constant token, so the token-id parity is a
+  low-entropy signal; the meaningful number is the `0.0` logit delta.
+- **Real-model cert** (`-Dt5.realModel=true` + a local model dir): drives `google-t5/t5-small`,
+  `google/flan-t5-small`, `Salesforce/codet5-small`, `Salesforce/codet5-base-multi-sum` through the engine on
+  `reference` vs `warp` and compares token preview + text. **Skipped — no T5 artifact is present** locally (no
+  `config.json`/safetensors and no compiled `model_t5.wdmlpack` under `model/`); the test disables cleanly via
+  `@EnabledIf`.
+
+**Verdict: D (data not yet sufficient — a real-model test package is missing).** The synthetic cert shows the WARP
+boundary arithmetic is faithful (bit-exact FP32 dense projections), which is strong evidence the mixed path is
+correct in principle; but real `.wdmlpack` weights are typically FP16 and no end-to-end real-model text parity could
+be measured. So the product stance is unchanged and stays honest: **CPU reference is the certified/recommended
+path; WARP/AUTO remain experimental and not yet correctness-certified end-to-end** until a real T5 package is
+available to run the gated real-model cert. No guard/label change was required (the existing panel NOTE already
+warns WARP/AUTO is the experimental, uncertified path). Tests:
+`T5MixedRuntimeCorrectnessCertTest` (`directml-inference`).
+
 ## Gemma reference (unchanged)
 
 Gemma stays the reference product path and is untouched by this slice: `Backend = WARP` → native
