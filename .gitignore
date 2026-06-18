@@ -28,6 +28,11 @@ model/intfloat-*/
 model/e5-*/
 model/cross-encoder*/
 model/ms-marco-*/
+# Downloaded T5/CodeT5 sources + compiled packages (T5-REALMODEL-CERT-1)
+model/t5-small/
+model/flan-t5-small/
+model/codet5-small/
+model/codet5-base-multi-sum/
 
 .commitmsg.tmp
 

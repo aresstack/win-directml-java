@@ -87,6 +87,9 @@ includes them (each skips cleanly until downloaded):
 
 ## Status
 
-`google-t5/t5-small` is **prepared to be real-certified**: the Download/Convert path and the gated cert invocation
-are confirmed and documented; performing the actual download (a network step) is all that remains before the
-real-model cert can produce the end-to-end CPU-vs-WARP verdict. No Gemma/Qwen/SmolLM2/Phi change.
+`google-t5/t5-small` is **real-certified (T5-REALMODEL-CERT-1, verdict A)**: it was downloaded, compiled
+(`model_t5.wdmlpack`), and the gated real-model cert showed CPU reference == WARP mixed exactly — token ids
+`[644:▁Das, 4598:▁Haus, 229:▁ist, 19250:▁wunderbar, 5:.]` and text `Das Haus ist wunderbar.` are identical on both
+paths (greedy; executionMode `warp-encoder-boundary+warp-decoder-boundary+warp-lm-head`). The cert now asserts this
+parity for any present model. Flan-T5/CodeT5 remain uncertified (skip until downloaded). The `model/t5-small/`
+artifacts are git-ignored. No Gemma/Qwen/SmolLM2/Phi change. See `workbench-model-status.md` for the full result.

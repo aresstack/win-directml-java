@@ -141,6 +141,7 @@ class T5MixedRuntimeCorrectnessCertTest {
     @EnabledIf("anyRealModelPresent")
     void realT5ModelsMatchReferenceOnWarp() {
         List<String> report = new ArrayList<>();
+        List<String> divergences = new ArrayList<>();
         boolean warpUsable = WindowsBindings.isSupported();
         for (RealModel model : REAL_MODELS) {
             Path dir = model.resolveDir();
@@ -153,6 +154,7 @@ class T5MixedRuntimeCorrectnessCertTest {
                 reference = runEngine(dir, model, "reference");
             } catch (Exception e) {
                 report.add(model.modelId + ": reference FAILED (" + e.getMessage() + ")");
+                divergences.add(model.modelId + ": reference engine failed: " + e.getMessage());
                 continue;
             }
             if (!warpUsable) {
@@ -168,14 +170,24 @@ class T5MixedRuntimeCorrectnessCertTest {
                         + " tokensMatch=" + tokensMatch + " textMatch=" + textMatch
                         + "\n      referenceTokens=" + reference.tokenPreview
                         + "\n      warpTokens     =" + warp.tokenPreview);
+                // Greedy (temperature=0) -> the WARP mixed path must reproduce the CPU reference exactly.
+                if (!tokensMatch || !textMatch) {
+                    divergences.add(model.modelId + ": tokensMatch=" + tokensMatch + " textMatch=" + textMatch
+                            + " (reference=" + reference.tokenPreview + " / warp=" + warp.tokenPreview + ")");
+                }
             } catch (Exception e) {
                 report.add(model.modelId + ": WARP FAILED (" + e.getMessage() + ")");
+                divergences.add(model.modelId + ": WARP engine failed: " + e.getMessage());
             }
         }
         System.out.println("[T5-CERT real-model]\n  " + String.join("\n  ", report));
         assertTrue(report.stream().anyMatch(line -> !line.contains("SKIPPED")),
                 "Expected at least one real T5 model present when the real-model cert is enabled:\n  "
                         + String.join("\n  ", report));
+        // Lock the certification: any present model that diverges from the CPU reference fails the cert.
+        if (!divergences.isEmpty()) {
+            fail("T5 WARP mixed path diverged from the CPU reference for:\n  " + String.join("\n  ", divergences));
+        }
     }
 
     private static EngineRun runEngine(Path dir, RealModel model, String backend) throws Exception {
