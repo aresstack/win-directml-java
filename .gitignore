@@ -33,6 +33,8 @@ model/t5-small/
 model/flan-t5-small/
 model/codet5-small/
 model/codet5-base-multi-sum/
+# Downloaded Phi-3 ONNX source + compiled package (PHI3-WDMLPACK-COMPILER-1)
+model/phi-3-mini-4k-instruct-onnx/
 
 .commitmsg.tmp
 

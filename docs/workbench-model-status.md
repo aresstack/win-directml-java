@@ -234,6 +234,11 @@ The Phi-3 family was advertised as runnable but is **not executable in the Workb
 - **Compiler requirements specced (PHI-WDMLPACK-COMPILER-AUDIT-1).** What a minimal `model_phi3.wdmlpack` compiler
   needs (decision **B**: real new compiler, runtime largely reusable; Qwen's ONNX(INT4)→wdmlpack is the template) is
   documented in `phi3-wdmlpack-compiler-plan.md`. The Workbench status stays PLANNED until that compiler exists.
+- **Compiler foundation built (PHI3-WDMLPACK-COMPILER-1).** `Phi3WdmlPackCompiler` + `Phi3OnnxModelSource` +
+  `Phi3WdmlPackRoles` + `Phi3RuntimePackage` (+ `Phi3Weights.ofRecords`) now exist, proven by a synthetic
+  byte-exact round-trip test (INT4 triplets + fp32 vectors). **No Workbench wiring / no status flip** — Phi-3 stays
+  PLANNED / gate-blocked. The real Phi-3-mini ONNX compile is gated and not yet verified end-to-end on this host
+  (see `phi3-wdmlpack-compiler-plan.md`); follow-ups: `PHI3-WDMLPACK-COMPILER-2` then `PHI3-WORKBENCH-RUNNABLE-1`.
 
 ## Closeout (WORKBENCH-MODEL-STATUS-CLOSEOUT-1)
 

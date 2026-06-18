@@ -233,6 +233,24 @@ public final class Phi3Weights implements AutoCloseable {
     }
 
     /**
+     * Package-backed factory (PHI3-WDMLPACK-COMPILER-1). Builds {@code Phi3Weights} directly from already-extracted
+     * records (e.g. reconstructed from a {@code .wdmlpack}), with no ONNX file handles. This is the minimal runtime
+     * seam that lets {@link Phi3Runtime} consume wdmlpack-loaded weights unchanged; {@link #close()} is a no-op for
+     * this path because there is nothing to unmap.
+     */
+    public static Phi3Weights ofRecords(Phi3Config config,
+                                        float[] embedTokens, float[] cosCache, float[] sinCache,
+                                        LayerWeights[] layers, float[] finalNormWeight, QuantizedWeight lmHead) {
+        return new Phi3Weights(Objects.requireNonNull(config, "config"), null, null, null,
+                Objects.requireNonNull(embedTokens, "embedTokens"),
+                Objects.requireNonNull(cosCache, "cosCache"),
+                Objects.requireNonNull(sinCache, "sinCache"),
+                Objects.requireNonNull(layers, "layers"),
+                Objects.requireNonNull(finalNormWeight, "finalNormWeight"),
+                Objects.requireNonNull(lmHead, "lmHead"));
+    }
+
+    /**
      * Load weights from the ONNX model directory.
      *
      * @param modelDir directory containing model.onnx and model.onnx.data
@@ -697,13 +715,18 @@ public final class Phi3Weights implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        try {
-            channel.close();
-        } catch (Exception ignored) {
+        // Package-backed instances (ofRecords) hold no file handles -> nothing to unmap.
+        if (channel != null) {
+            try {
+                channel.close();
+            } catch (Exception ignored) {
+            }
         }
-        try {
-            raf.close();
-        } catch (Exception ignored) {
+        if (raf != null) {
+            try {
+                raf.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 }

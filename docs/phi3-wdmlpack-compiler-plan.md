@@ -1,3 +1,21 @@
+# Phi-3 wdmlpack compiler — requirements audit + foundation
+
+> **Status (PHI3-WDMLPACK-COMPILER-1): compiler + package foundation built; Workbench stays PLANNED.** A minimal
+> ONNX→wdmlpack compiler (`Phi3WdmlPackCompiler`), an ONNX import boundary (`Phi3OnnxModelSource`), a role catalog
+> (`Phi3WdmlPackRoles`) and a package-backed loader (`Phi3RuntimePackage` + `Phi3Weights.ofRecords`) now exist. The
+> serialization core is proven by a **non-gated synthetic round-trip** (`Phi3WdmlPackCompilerTest`): a tiny
+> `Phi3Weights` compiles to a `model_phi3.wdmlpack` and reloads byte-exactly — INT4 MatMulNBits triplets
+> (qweight/scales/zeropoints) and fp32 vectors all preserved, config round-trips. **The real Phi-3-mini ONNX compile
+> is gated** (`-Dphi3.compile.realModel=true`) and **not yet verified end-to-end on this host**: the gated run
+> crashes the forked Gradle test JVM ~15 s in (even at 5–7 GB heap), so it needs a follow-up — most likely a
+> streaming compile that does not materialize the full ~2 GB of INT4 `byte[]` + ~394 MB fp32 embedding on the heap
+> (the current `Phi3Weights.load` loads everything in memory), and/or investigating the forked-JVM/mmap interaction.
+> **No Workbench lifecycle/gate/download wiring and no status flip** were done; Phi-3 remains PLANNED / gate-blocked.
+> The decision below (B) stands; the realised result is **A** for the foundation (compiler + loader exist) with the
+> real-model compile carried to `PHI3-WDMLPACK-COMPILER-2`.
+
+---
+
 # Phi-3 wdmlpack compiler — requirements audit (PHI-WDMLPACK-COMPILER-AUDIT-1)
 
 Spec-only. No compiler, no runtime change, no kernels, no product unlock. This documents what a minimal
