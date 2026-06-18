@@ -29,9 +29,13 @@ Use this when you want:
   library. A sidecar/container/process wrapper is optional and belongs to the
   consuming application architecture.
 
-Decoder LLMs, ACP/MCP/A2A orchestration and manager-agent logic are intentionally
-not part of this repository. Those belong in a separate ACP sidecar / manager
-project that consumes this library as a local ML capability.
+ACP/MCP/A2A orchestration and manager-agent logic are intentionally not part of
+this repository. Those belong in a separate ACP sidecar / manager project that
+consumes this library as a local ML capability. Decoder/seq2seq **text generation**
+is not part of the published embeddings/reranking library either, but the bundled
+**Workbench** app includes an experimental, native Java/DirectML generation path
+(Gemma, Qwen, SmolLM2, T5/CodeT5, Phi-3-mini) — see
+[Text generation in the Workbench](#text-generation-in-the-workbench-experimental).
 
 ## Recommended model choices
 
@@ -148,12 +152,17 @@ directml-windows-bindings           Java 21 FFM bindings for DXGI, D3D12, Direct
 directml-encoder                    MiniLM, E5 and reranker encoder/runtime code
 directml-runtime                    Public Java 21 API for direct in-process use
 
+Experimental Workbench (app feature, not published in new Maven releases):
+directml-inference                  Native Java/DirectML generation runtime + wdmlpack compilers/loaders
+                                    (Gemma, Qwen, SmolLM2, T5/CodeT5, Phi-3); no Python, no ONNX Runtime
+directml-workbench                  Java 21 Swing Workbench (Download/Convert + Summarizer generation tabs)
+directml-workbench-launcher         Launcher for the Java 21 Workbench
+
 Legacy / beta-era modules kept in source, not published in new releases:
-directml-inference                  Experimental Phi-3 summarizer path
 directml-sidecar-protocol-java8     Shared protocol/validation types for old sidecar bridge
 directml-sidecar                    JSON-RPC 2.0 sidecar adapter over directml-runtime
 directml-sidecar-client-java8       Java 8 client for the old JSON-RPC sidecar
-directml-sidecar-workbench          Java 8 Swing workbench / diagnostics UI
+directml-sidecar-workbench          Java 8 Swing workbench / diagnostics UI (legacy)
 ```
 
 ## Requirements
@@ -221,6 +230,51 @@ reranking a vector-search candidate set, not for indexing the entire corpus.
 The default model location in examples is
 `model/cross-encoder-ms-marco-MiniLM-L-6-v2/`.
 
+## Text generation in the Workbench (experimental)
+
+Separate from the published embeddings/reranking library, the repository ships a Windows
+**Workbench** app (`directml-workbench`, launched via `directml-workbench-launcher`) with an
+experimental text-generation tab. Generation runs as a **native Java / DirectML** path
+(`directml-inference`) — **no Python and no ONNX Runtime** in the Workbench runtime path. Models load
+from an internal `.wdmlpack` package compiled on the **Download → Convert** step; inference never
+compiles.
+
+Backend semantics for generation:
+
+- **WARP** — the D3D12 software rasterizer. The dense projections / matmuls run on DirectML (WARP
+  adapter); norms, attention softmax, RoPE and KV-cache stay on the CPU. This is the CPU-only-friendly
+  main path.
+- **AUTO** — the same runtime on the first hardware adapter when one is present, otherwise the CPU
+  reference path. Hardware acceleration is opportunistic; it is not uniformly faster/stable everywhere.
+- **CPU** — the validated reference runtime (Gemma's `Backend=CPU` is the one legacy external
+  Python/Transformers path and is clearly labelled as such).
+
+Runnable generation models (status is internal/experimental, surfaced honestly in the Workbench):
+
+| Model | Status | Notes |
+|-------|--------|-------|
+| `google/gemma-3-270m-it` | runnable | Native Java/DirectML (WARP/AUTO); `Backend=CPU` = legacy external Python. |
+| `Qwen/Qwen2.5-Coder-0.5B-Instruct` | runnable | Native DirectML INT4 (`model_q4f16.wdmlpack`). 1.5B/3B planned. |
+| `HuggingFaceTB/SmolLM2-135M/360M-Instruct` | runnable | Native DirectML/WARP dense projections + CPU reference fallback. |
+| `google-t5/t5-small`, `google/flan-t5-small`, `Salesforce/codet5-small`, `Salesforce/codet5-base-multi-sum` | runnable + real-certified | Mixed DirectML/WARP path; all four real-certified CPU == WARP (greedy). |
+| `microsoft/Phi-3-mini-4k-instruct-onnx` | runnable | From `model_phi3.wdmlpack` via a heap-light package load (CPU path). |
+| `microsoft/Phi-3.5-mini-instruct-onnx` | planned | Same architecture; would reuse the Phi-3 compiler/runtime once weights are wired. |
+
+Workbench generation quickstart:
+
+1. Build the repo (see [Build](#build)).
+2. Launch the Workbench (`directml-workbench-launcher`, e.g. `./gradlew :directml-workbench-launcher:run`).
+3. **Download** tab: download a model (e.g. Phi-3-mini or a T5 model).
+4. **Convert** the download to its `.wdmlpack` from the Download tab's package action.
+5. **Summarizer** tab: select the model, choose a Backend (WARP / AUTO / CPU), enter text, run.
+
+Known limits: text generation is experimental and not a published Maven artifact. Phi-3.5 stays
+planned; larger Qwen (1.5B/3B) stay planned. The T5 certification covers exactly the four curated
+models above — other T5/CodeT5 checkpoints are not blanket-certified. Real-model tests are opt-in;
+large models can need several GB of RAM; downloaded `model/...` artifacts are git-ignored and never
+committed. See [`SUPPORTED_MODELS.md`](SUPPORTED_MODELS.md), [`docs/workbench-model-status.md`](docs/workbench-model-status.md)
+and [`docs/release-notes-next.md`](docs/release-notes-next.md).
+
 ## Status summary
 
 | Area                                    | Status                                                       |
@@ -232,8 +286,8 @@ The default model location in examples is
 | CPU-only usage                          | Supported; not a failure mode.                               |
 | DirectML usage                          | Supported Windows acceleration path.                         |
 | Legacy JSON-RPC sidecar / Java 8 bridge | Source kept, no longer published in new releases.            |
-| Phi-3 summarizer                        | Legacy/experimental; not part of the core release path.      |
-| Decoder LLMs / ACP / MCP / A2A          | Out of scope for this repository.                            |
+| Workbench text generation               | Experimental Workbench app feature (not a published artifact): Gemma-it, Qwen 0.5B, SmolLM2, T5/CodeT5 (4 curated, real-certified), Phi-3-mini runnable; Phi-3.5 + larger Qwen planned. Native Java/DirectML, no Python/ONNX Runtime. |
+| ACP / MCP / A2A orchestration           | Out of scope for this repository.                            |
 
 ## Build
 
@@ -294,10 +348,11 @@ Published artifacts under `com.aresstack:`:
 | `com.aresstack:directml-encoder`          | 21 preview  | MiniLM, E5 and cross-encoder reranker pipelines with CPU + DirectML parity. |
 | `com.aresstack:directml-runtime`          | 21 preview  | Public direct Java 21 ML API for embeddings and reranking.                  |
 
-Legacy beta artifacts such as `directml-sidecar`, `directml-sidecar-client-java8`,
-`directml-sidecar-protocol-java8`, `directml-sidecar-workbench` and
-`directml-inference` are kept in the repository but are not published in new
-releases.
+The experimental Workbench modules (`directml-inference`, `directml-workbench`,
+`directml-workbench-launcher`) and the legacy beta artifacts (`directml-sidecar`,
+`directml-sidecar-client-java8`, `directml-sidecar-protocol-java8`,
+`directml-sidecar-workbench`) are kept in the repository but are **not** published in new
+releases. Text generation is a Workbench app feature, not a Maven artifact.
 
 Full artifact overview: [`docs/artifact-structure.md`](docs/artifact-structure.md).
 
