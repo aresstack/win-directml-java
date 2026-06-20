@@ -97,7 +97,7 @@ public final class ModelDownloadUrls {
         addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "config.json", true);
         addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "tokenizer.json", true);
         addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "tokenizer_config.json", true);
-        addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "special_tokens_map.json", true);
+        addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "special_tokens_map.json", false);
         addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "generation_config.json", false);
         addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "merges.txt", false);
         addRootDescriptor(descriptors, QWEN_SAFETENSORS_REPO, "vocab.json", false);

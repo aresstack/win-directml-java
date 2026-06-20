@@ -498,16 +498,36 @@ public final class DownloadPanel extends JPanel {
      * .qwen05b()}) use. The BF16 SafeTensors path is never the default executable Qwen-0.5B download.
      */
     private void startQwenRuntimeDownload() {
+        QwenDownloadSource source = selectedQwenSource();
         QwenOnnxModelVariant variant = selectedQwenVariant(); // defaults to q4f16
-        QwenModelDownloadConfig config = QwenModelDownloadConfig.forVariant(variant);
-        ModelDownloadManifest manifest = overrideStore.applyOverrides(ModelDownloadUrls.manifestForQwen(config));
+        boolean allVariants = source == QwenDownloadSource.ONNX && downloadAllQwenVariants;
+        ModelDownloadManifest manifest = overrideStore.applyOverrides(createQwenManifest(source, variant, allVariants));
         manifests.put(manifest.modelId(), manifest);
         if (qwenDownloadProgressBar != null) {
             downloadProgressBars.put(manifest.modelId(), qwenDownloadProgressBar);
         }
-        appendLog("Selected Qwen runtime source (q4f16/ONNX): " + ModelDownloadUrls.selectedQwenModelUrl(config));
-        appendLog("Runtime package target after Convert: " + runtimeRegistry.qwen05b().runtimePackagePath());
-        startDownload(manifest, manifest.modelId() + " (" + variant.modelFileName() + ")");
+        if (source == QwenDownloadSource.ONNX) {
+            appendLog("Selected Qwen runtime source (ONNX): "
+                    + effectiveUrlFor(manifest, variant.modelFileName()));
+            appendLog("Runtime package target after Convert: " + runtimeRegistry.qwen05b().runtimePackagePath());
+            startDownload(manifest, manifest.modelId()
+                    + (allVariants ? " (all ONNX variants)" : " (" + variant.modelFileName() + ")"));
+        } else {
+            appendLog("Selected Qwen source (SafeTensors): " + manifest.modelId());
+            startDownload(manifest, manifest.modelId() + " (SafeTensors)");
+        }
+    }
+
+    private String effectiveUrlFor(ModelDownloadManifest manifest, String localFilename) {
+        if (manifest == null || localFilename == null) {
+            return "";
+        }
+        for (ModelFileDescriptor descriptor : manifest.files()) {
+            if (localFilename.equals(descriptor.localFilename())) {
+                return descriptor.currentUrl();
+            }
+        }
+        return "";
     }
 
     private ModelDownloadManifest createQwenManifest(QwenDownloadSource source,

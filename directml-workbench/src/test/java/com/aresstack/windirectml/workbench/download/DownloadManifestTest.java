@@ -59,6 +59,35 @@ class DownloadManifestTest {
 
 
     @Test
+    void qwenDefaultQuantizedUrlsMatchHistoricalDownloaderDefaults() {
+        var manifest = ModelDownloadUrls.manifestForQwen(QwenModelDownloadConfig.DEFAULT_QUANTIZED);
+        String base = "https://huggingface.co/onnx-community/Qwen2.5-Coder-0.5B-Instruct/resolve/main/";
+        assertEquals("qwen2.5-coder-0.5b-directml-int4", manifest.modelId());
+        assertDescriptor(manifest, "model_q4f16.onnx", true, base + "onnx/model_q4f16.onnx");
+        assertDescriptor(manifest, "tokenizer.json", true, base + "tokenizer.json");
+        assertDescriptor(manifest, "config.json", true, base + "config.json");
+        assertDescriptor(manifest, "tokenizer_config.json", true, base + "tokenizer_config.json");
+        assertDescriptor(manifest, "special_tokens_map.json", false, base + "special_tokens_map.json");
+        assertDescriptor(manifest, "added_tokens.json", false, base + "added_tokens.json");
+        assertDescriptor(manifest, "generation_config.json", false, base + "generation_config.json");
+    }
+
+    @Test
+    void qwenDenseDefaultKeepsExternalDataUrl() {
+        var manifest = ModelDownloadUrls.manifestForQwen(QwenModelDownloadConfig.DEFAULT);
+        String base = "https://huggingface.co/onnx-community/Qwen2.5-Coder-0.5B-Instruct/resolve/main/onnx/";
+        assertDescriptor(manifest, "model.onnx", true, base + "model.onnx");
+        assertDescriptor(manifest, "model.onnx_data", true, base + "model.onnx_data");
+    }
+
+    @Test
+    void qwenSafeTensorsSpecialTokensMapIsOptionalOverrideFile() {
+        var manifest = ModelDownloadUrls.manifestForQwenSafeTensors();
+        String base = "https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct/resolve/main/";
+        assertDescriptor(manifest, "special_tokens_map.json", false, base + "special_tokens_map.json");
+    }
+
+    @Test
     void manifestForGemma3InstructContainsGatedModelFiles() {
         var manifest = ModelDownloadUrls.manifestForGemma3_270MInstruct();
         assertEquals("google/gemma-3-270m-it", manifest.modelId());
@@ -69,6 +98,22 @@ class DownloadManifestTest {
                 f.localFilename().equals("tokenizer.model") && f.required()));
         assertTrue(manifest.files().stream().anyMatch(f ->
                 f.localFilename().equals("chat_template.jinja") && !f.required()));
+    }
+
+    @Test
+    void qwenOverridesApplyToSelectedModelFileUrl(@TempDir Path tempDir) throws IOException {
+        Path storeFile = tempDir.resolve("download-overrides.json");
+        var store = new DownloadOverrideStore(storeFile);
+        var manifest = ModelDownloadUrls.manifestForQwen(QwenModelDownloadConfig.DEFAULT_QUANTIZED);
+        String customUrl = "https://example.invalid/qwen/model_q4f16.onnx";
+
+        store.storeOverrides(manifest.withFileUrl(0, customUrl));
+
+        var reloadedStore = new DownloadOverrideStore(storeFile);
+        reloadedStore.load();
+        var reloadedManifest = reloadedStore.applyOverrides(manifest);
+        assertEquals(customUrl, reloadedManifest.files().get(0).currentUrl());
+        assertEquals(manifest.files().get(0).defaultUrl(), reloadedManifest.files().get(0).defaultUrl());
     }
 
     @Test
@@ -240,5 +285,20 @@ class DownloadManifestTest {
                 "Expected .directml in path: " + root);
         assertTrue(root.endsWith(Path.of(".directml", "model")),
                 "Expected path to end with .directml/model: " + root);
+    }
+
+    private static String hf(String repo, String file) {
+        return "https://huggingface.co/" + repo + "/resolve/main/" + file;
+    }
+
+    private static void assertDescriptor(ModelDownloadManifest manifest, String localFilename,
+                                         boolean required, String expectedUrl) {
+        ModelFileDescriptor descriptor = manifest.files().stream()
+                .filter(file -> file.localFilename().equals(localFilename))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Missing descriptor: " + localFilename));
+        assertEquals(required, descriptor.required(), localFilename + " required flag");
+        assertEquals(expectedUrl, descriptor.defaultUrl(), localFilename + " default URL");
+        assertEquals(expectedUrl, descriptor.currentUrl(), localFilename + " current URL");
     }
 }
