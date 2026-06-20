@@ -5,7 +5,7 @@
  * <h2>Prerequisites</h2>
  * <ul>
  *   <li>Model weights at {@code model/all-MiniLM-L6-v2/} (run
- *       {@code scripts/download-minilm.ps1} first).</li>
+ *       download the model from the Workbench Download tab first).</li>
  *   <li>Java 21+.</li>
  * </ul>
  *

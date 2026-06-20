@@ -22,7 +22,7 @@ Thumbs.db
 # Local configuration (use agent.example.yaml as template)
 application.yml
 
-# Downloaded models (use scripts/download-*.ps1 to fetch)
+# Downloaded models (use the Workbench Download tab to fetch)
 model/all-MiniLM-L6-v2/
 model/intfloat-*/
 model/e5-*/

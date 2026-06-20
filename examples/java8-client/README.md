@@ -63,7 +63,7 @@ repository development:
 
 ```powershell
 ./gradlew.bat :directml-sidecar:jar
-pwsh scripts/download-minilm.ps1
+Use the Workbench Download tab to fetch MiniLM.
 ```
 
 Then run the installed example:
@@ -86,7 +86,7 @@ The third argument selects the backend:
 A fourth optional argument points to a reranker model directory:
 
 ```powershell
-pwsh scripts/download-reranker.ps1
+Use the Workbench Download tab to fetch the reranker.
 examples/java8-client/build/install/java8-client/bin/java8-client.bat `
     directml-sidecar/build/libs/directml-sidecar-0.1.0-SNAPSHOT.jar `
     model/all-MiniLM-L6-v2 `

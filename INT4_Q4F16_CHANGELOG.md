@@ -3,7 +3,7 @@
 Ausgangsarchiv: `win-directml-java-main(42)(2).zip`
 Projektwurzel: `win-directml-java-main`
 
-- `scripts/download-qwen.ps1` lädt jetzt `onnx/model_q4f16.onnx` als lokales `model.onnx` und entfernt alte
+- der Workbench Download-Tab lädt jetzt `onnx/model_q4f16.onnx` als lokales `model.onnx` und entfernt alte
   `model.onnx_data`/`model.onnx.data` Dateien.
 - Weitere Download-/Workbench-/Doku-Referenzen wurden auf `model_q4f16.onnx` umgestellt:
   `directml-workbench/src/test/java/com/aresstack/windirectml/workbench/download/DownloadManifestTest.java`,

@@ -4,7 +4,7 @@ This ZIP replaces the previous broken patch and is based again on the original u
 
 ## What changed
 
-- `scripts/download-qwen.ps1` now downloads `onnx/model_q4f16.onnx` from `onnx-community/Qwen2.5-Coder-0.5B-Instruct`
+- the Workbench Download tab now downloads `onnx/model_q4f16.onnx` from `onnx-community/Qwen2.5-Coder-0.5B-Instruct`
   and stores it locally as `model.onnx`.
 - The downloader no longer requires `model.onnx_data` for the default Qwen artifact.
 - Stale dense sidecars (`model.onnx_data`, `model.onnx.data`) are removed when the q4f16 single-file artifact is
@@ -29,7 +29,7 @@ which is blocked in this environment.
 Run:
 
 ```powershell
-.\scripts\download-qwen.ps1 -Force -Validate
+Use the Workbench Download tab with Force re-download and validation.
 ```
 
 Then start your Workbench/DirectML flow and look for:

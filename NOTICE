@@ -46,7 +46,7 @@ system property. Their license terms are governed by Microsoft.
 Bundled and downloadable model checkpoints
 ================================================================================
 
-Model weights downloaded by the `scripts/download-*.ps1` helpers and any
+Model weights downloaded via the Workbench Download tab and any
 weights bundled under `model/` are licensed by their respective upstream
 projects. See `MODEL_LICENSES.md` for the per-model attribution and
 license terms (sentence-transformers MiniLM, intfloat E5, cross-encoder

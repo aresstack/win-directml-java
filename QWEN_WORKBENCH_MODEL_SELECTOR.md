@@ -23,9 +23,7 @@ The selected file is saved locally with the same file name.
 ## PowerShell downloader
 
 ```powershell
-.\scripts\download-qwen.ps1 -OnnxFile model_q4f16.onnx -Force -Validate
-.\scripts\download-qwen.ps1 -OnnxFile model_int8.onnx -Force -Validate
-.\scripts\download-qwen.ps1 -AllOnnxVariants
+Use the Workbench Download tab to select and download the Qwen ONNX variant. Enable Force re-download and validation when refreshing an existing local model.
 ```
 
 `model.onnx` is the only variant that also downloads `model.onnx_data`.

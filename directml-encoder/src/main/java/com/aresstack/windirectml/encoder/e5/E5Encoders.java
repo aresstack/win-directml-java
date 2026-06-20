@@ -191,14 +191,12 @@ public final class E5Encoders {
             List.of("model.safetensors", "tokenizer.json");
 
     private static final String REPAIR_HINT_GENERIC =
-            "Repair: re-download via the workbench Download tab (\"Download E5 <variant>\") with "
-                    + "\"Force re-download\" enabled, run scripts/download-e5.ps1 -Variant <variant> -Force, "
-                    + "or delete the folder and download again.";
+            "Repair: re-download via the Workbench Download tab (\"Download E5 <variant>\") with "
+                    + "\"Force re-download\" enabled, or delete the folder and download again.";
 
     private static String e5RepairHint(E5Variant variant) {
-        return "Repair: re-download via the workbench Download tab (\"Download E5 " + variant.token()
-                + "\") with \"Force re-download\" enabled, run scripts/download-e5.ps1 -Variant "
-                + variant.token() + " -Force, or delete the folder and download again.";
+        return "Repair: re-download via the Workbench Download tab (\"Download E5 " + variant.token()
+                + "\") with \"Force re-download\" enabled, or delete the folder and download again.";
     }
 
     private static void verifyDir(Path modelDir) throws EmbeddingException {

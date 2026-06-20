@@ -106,7 +106,7 @@ model/qwen2.5-coder-0.5b-directml-int4/
 ```
 
 This is the layout expected by `QwenModelDirValidator`, the Workbench download
-button, `scripts/download-qwen.ps1`, and the manual smoke-test docs.
+button, Workbench Download tab wiring, and the manual smoke-test docs.
 
 ## Scale-up candidates
 

@@ -76,9 +76,9 @@ runtime / workbench selection:
 
 | Model | Folder | Required files | Script |
 |-------|--------|----------------|--------|
-| E5 small-v2 | `model/e5-small-v2` | `model.safetensors`, `tokenizer.json`, `config.json` | `scripts/download-e5.ps1 -Variant small-v2` |
-| E5 base-v2 / large-v2 | `model/e5-base-v2` / `model/e5-large-v2` | same | `scripts/download-e5.ps1 -Variant base-v2 \| large-v2` |
-| Reranker MiniLM-L-6-v2 | `model/cross-encoder-ms-marco-MiniLM-L-6-v2` | `model.safetensors`, `tokenizer.json`, `config.json` | `scripts/download-reranker.ps1` |
+| E5 small-v2 | `model/e5-small-v2` | `model.safetensors`, `tokenizer.json`, `config.json` | Workbench Download tab |
+| E5 base-v2 / large-v2 | `model/e5-base-v2` / `model/e5-large-v2` | same | Workbench Download tab |
+| Reranker MiniLM-L-6-v2 | `model/cross-encoder-ms-marco-MiniLM-L-6-v2` | `model.safetensors`, `tokenizer.json`, `config.json` | Workbench Download tab |
 
 `config.json` is **required** for E5 so the directory can be matched against `-De5.model=<variant>` (a shape mismatch is
 reported as *wrong variant*, not a silent re-shape). After a Download-tab download the workbench logs either
@@ -99,8 +99,7 @@ To repair a broken cache, do any one of:
 
 1. In the **Download** tab, tick **Force re-download (overwrite existing)** and click the model's download button, or
 2. delete the model folder (e.g. `model/e5-small-v2`) and download it again, or
-3. re-run the script with `-Force`, e.g. `scripts/download-e5.ps1 -Variant small-v2 -Force` /
-   `scripts/download-reranker.ps1 -Force`.
+3. re-run the Workbench Download tab action with **Force re-download** enabled.
 
 ## Example output
 

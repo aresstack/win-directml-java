@@ -204,7 +204,7 @@ public final class EmbeddingModelRegistry {
                 Arrays.asList(
                         "model/all-MiniLM-L6-v2",
                         "model/sentence-transformers/all-MiniLM-L6-v2"),
-                "scripts/download-minilm.ps1",
+                "Workbench download tab",
                 "real-model tested (CPU + DirectML parity)",
                 "default fast embedding model",
                 "minilm"));
@@ -219,7 +219,7 @@ public final class EmbeddingModelRegistry {
                 Arrays.asList(
                         "model/e5-base-sts-en-de",
                         "model/danielheinz/e5-base-sts-en-de"),
-                "scripts/download-e5.ps1",
+                "Workbench download tab",
                 "config mismatch with current WordPiece E5 runtime; XLM-R support pending",
                 "Requires SentencePiece + XLM-R encoder path; belongs with "
                         + "multilingual-E5 analysis. Upstream checkpoint at "
@@ -254,7 +254,7 @@ public final class EmbeddingModelRegistry {
                 Arrays.asList(
                         "model/jina-embeddings-v2-base-de",
                         "model/jinaai/jina-embeddings-v2-base-de"),
-                "not added yet \u2013 no download-jina.ps1 until at least a "
+                "not added yet \u2013 no Workbench download entry until at least a "
                         + "CPU real-model path exists (see SUPPORTED_MODELS.md \u00a71.1.2)",
                 "not tested \u2013 no runtime path; no real-model test claimed",
                 "Analysis (see SUPPORTED_MODELS.md \u00a71.1.2): mean pooling "
@@ -290,7 +290,7 @@ public final class EmbeddingModelRegistry {
                 Arrays.asList(
                         "model/multilingual-e5-large-instruct",
                         "model/intfloat/multilingual-e5-large-instruct"),
-                "planned (current download-e5.ps1 only covers WordPiece variants)",
+                "planned (current Workbench download support only covers WordPiece variants)",
                 "not yet tested \u2013 blocked on SentencePiece/XLM-R support",
                 "NOT compatible with the current WordPiece-only E5 path. "
                         + "Architecture is XLM-RoBERTa-large (config "
@@ -332,7 +332,7 @@ public final class EmbeddingModelRegistry {
                 Arrays.asList(
                         "model/phi-3-mini-4k-instruct-onnx",
                         "model/microsoft/Phi-3-mini-4k-instruct-onnx"),
-                "Workbench download tab / scripts/download-phi3.ps1",
+                "Workbench download tab",
                 "manual smoke test (see WINDOWS-SMOKE-RUN.md)",
                 "Sidecar summarizer backend. Runs the native Java/DirectML Phi-3 decoder "
                         + "(no Python/ONNX Runtime) over the ONNX-format weights. Requires ~2.3 GB "
@@ -370,7 +370,7 @@ public final class EmbeddingModelRegistry {
                 Status.PLANNED,
                 Arrays.asList(
                         "model/qwen2.5-coder-0.5b-directml-int4"),
-                "Workbench download tab (disabled) / scripts/download-qwen.ps1",
+                "Workbench download tab (disabled pending source verification)",
                 "not yet tested \u2013 ONNX source TBD/research",
                 "Qwen2.5-Coder 0.5B Instruct. ONNX source is TBD/research; "
                         + "the download button is disabled until source verification "

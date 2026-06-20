@@ -9,7 +9,7 @@ dependencies {
 
 // Throughput benchmark for the cross-encoder reranker. Requires a
 // real model under `model/cross-encoder-ms-marco-MiniLM-L-6-v2/` (use
-// scripts/download-reranker.ps1).
+// Workbench Download tab).
 //
 //   gradle :directml-encoder:runRerankerBenchmark
 //   gradle :directml-encoder:runRerankerBenchmark --args="model/cross-encoder-ms-marco-MiniLM-L-6-v2 2 10,50,100"
@@ -27,7 +27,7 @@ tasks.register('runRerankerBenchmark', JavaExec) {
 // Throughput benchmark for the bucket-batched embedBatch() path of the
 // MiniLM and E5 encoders. Requires the matching real models under
 // `model/all-MiniLM-L6-v2/` and/or one of the E5 directories
-// (see scripts/download-minilm.ps1, scripts/download-e5.ps1).
+// (see the Workbench Download tab).
 //
 //   gradle :directml-encoder:runEmbedBatchBenchmark
 //   gradle :directml-encoder:runEmbedBatchBenchmark --args="model minilm both 1 10,50,100,500"

@@ -32,9 +32,9 @@ are **not** benchmarked here.
 
 | Model                                    | Embed family | Backends benchmarked | Status    | Source / download             |
 |------------------------------------------|--------------|----------------------|-----------|-------------------------------|
-| `sentence-transformers/all-MiniLM-L6-v2` | `minilm`     | CPU + DirectML       | ✅ shipped | `scripts/download-minilm.ps1` |
-| `intfloat/e5-small-v2`                   | `e5`         | CPU + DirectML       | ✅ shipped | `scripts/download-e5.ps1`     |
-| `intfloat/e5-base-v2`                    | `e5`         | CPU + DirectML       | ✅ shipped | `scripts/download-e5.ps1`     |
+| `sentence-transformers/all-MiniLM-L6-v2` | `minilm`     | CPU + DirectML       | ✅ shipped | Workbench Download tab |
+| `intfloat/e5-small-v2`                   | `e5`         | CPU + DirectML       | ✅ shipped | Workbench Download tab |
+| `intfloat/e5-base-v2`                    | `e5`         | CPU + DirectML       | ✅ shipped | Workbench Download tab |
 
 For each `(backend, model)` pair the benchmark sweeps:
 
@@ -61,7 +61,7 @@ provenance contract for every measured row.
 | Java (sidecar)    | Java 21 with `--enable-preview` (FFM API). Java 8 modules build with `-release 8`.                                                                                                             |
 | DirectML          | Windows-in-box `DirectML.dll` (FL 2.0 / 5.0 fast path where available). Side-by-side `DirectML.dll` is also supported via `-Dwindirectml.directml.dll=…`.                                      |
 | Model directory   | `model/all-MiniLM-L6-v2/` (MiniLM), `model/e5-small-v2/` / `model/e5-base-v2/` (E5).                                                                                                           |
-| Download script   | `scripts/download-minilm.ps1`, `scripts/download-e5.ps1`.                                                                                                                                      |
+| Download path     | Workbench Download tab.                                                                                                                                                                      |
 | Warmup            | 1 × `embedBatch(maxN)` so every pad-bucket entry is hot before the first measured `N`.                                                                                                         |
 | Repetitions       | 1 timed run per `N` per `(method × backend × model)`. The harness is intentionally simple — no JMH, no statistical smoothing — it has to make order-of-magnitude differences visible, not 5 %. |
 | Measurement       | `loopMs` = wall time of `N` × `embed(r)`; `batchMs` = wall time of one `embedBatch(reqs)`; per-text cost in `ms/text` is `loopMs/N` and `batchMs/N`.                                           |
@@ -78,9 +78,7 @@ root.
 
 ```powershell
 # 1. Download supported embedding model weights into ./model/...
-powershell -ExecutionPolicy Bypass -File scripts/download-minilm.ps1
-powershell -ExecutionPolicy Bypass -File scripts/download-e5.ps1 -Variant small-v2
-powershell -ExecutionPolicy Bypass -File scripts/download-e5.ps1 -Variant base-v2
+Use the Workbench Download tab to fetch MiniLM and E5 variants before running the benchmark.
 ```
 
 ```bash

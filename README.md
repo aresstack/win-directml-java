@@ -180,29 +180,11 @@ FFM is still a preview feature, so Java 21 runtime execution uses:
 
 ## Download local models
 
-Fetch model files once. The scripts keep the files under `model/` by default
-and run `scripts/model-doctor.ps1` after download.
+Fetch model files once via the **Workbench Download** tab. The Workbench keeps the files under `model/` by default and offers the supported MiniLM, E5 and reranker variants through the UI.
 
-```powershell
-pwsh scripts/download-minilm.ps1                 # MiniLM default, 384 dimensions
-pwsh scripts/download-e5.ps1                     # E5 base-v2 default, 768 dimensions
-pwsh scripts/download-e5.ps1 -Variant small-v2   # E5 small, 384 dimensions
-pwsh scripts/download-e5.ps1 -Variant base-v2    # E5 base, 768 dimensions
-pwsh scripts/download-e5.ps1 -Variant large-v2   # E5 large, 1024 dimensions, experimental
-pwsh scripts/download-reranker.ps1               # Reranker default ms-marco MiniLM L-6
-pwsh scripts/download-reranker.ps1 -Variant ms-marco-MiniLM-L-12-v2
-```
+Use **Force re-download** in the Download tab when a local model folder is incomplete or should be refreshed.
 
-Common script options:
-
-| Parameter    | Meaning                                                  |
-|--------------|----------------------------------------------------------|
-| `-ModelRoot` | Parent directory for model folders, default `model/`.    |
-| `-Variant`   | Model variant to download.                               |
-| `-Force`     | Re-download even if files already exist.                 |
-| `-Validate`  | Display SHA-256 checksums and file sizes after download. |
-
-`download-e5.ps1` intentionally does **not** offer
+The Workbench E5 download support intentionally does **not** offer
 `danielheinz/e5-base-sts-en-de`; the current upstream checkpoint is
 XLM-R/SentencePiece and is tracked as planned until the SentencePiece/XLM-R
 runtime path exists.

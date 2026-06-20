@@ -3,7 +3,7 @@
 The win-directml-java **code** is MIT-licensed. Model **weights** that
 this project loads at runtime are licensed by their upstream authors
 and are **not redistributed** in any Maven Central artifact. The
-`scripts/download-*.ps1` helpers fetch them from Hugging Face on demand.
+the Workbench Download tab fetches them from Hugging Face on demand.
 
 | Model                                                         | Architecture                                     | Source                                                        | License                                                                         | Use in this repo                                                     |
 |---------------------------------------------------------------|--------------------------------------------------|---------------------------------------------------------------|---------------------------------------------------------------------------------|----------------------------------------------------------------------|

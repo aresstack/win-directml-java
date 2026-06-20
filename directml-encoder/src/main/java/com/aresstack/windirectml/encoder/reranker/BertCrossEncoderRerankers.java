@@ -116,9 +116,9 @@ public final class BertCrossEncoderRerankers {
             List.of("model.safetensors", "tokenizer.json", "config.json");
 
     private static final String REPAIR_HINT =
-            "Repair: re-download via the workbench Download tab (\"Download Reranker "
-                    + "(ms-marco-MiniLM-L-6-v2)\") with \"Force re-download\" enabled, run "
-                    + "scripts/download-reranker.ps1 -Force, or delete the folder and download again.";
+            "Repair: re-download via the Workbench Download tab (\"Download Reranker "
+                    + "(ms-marco-MiniLM-L-6-v2)\") with \"Force re-download\" enabled, "
+                    + "or delete the folder and download again.";
 
     private static void verifyDir(Path modelDir) throws EmbeddingException {
         ModelAssetValidation.requireModelFiles(modelDir, "Reranker", REQUIRED_FILES, REPAIR_HINT);

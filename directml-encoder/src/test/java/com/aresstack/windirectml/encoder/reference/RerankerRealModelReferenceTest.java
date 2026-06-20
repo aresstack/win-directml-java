@@ -51,7 +51,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *   <li>{@code model/cross-encoder/ms-marco-MiniLM-L-6-v2/},</li>
  *   <li>{@code model/ms-marco-MiniLM-L-6-v2/}.</li>
  * </ol>
- * Use {@code scripts/download-reranker.ps1} to fetch the default
+ * Use the Workbench Download tab to fetch the default
  * {@code cross-encoder/ms-marco-MiniLM-L-6-v2} checkpoint.
  * <p>
  * Additional runtime gates:

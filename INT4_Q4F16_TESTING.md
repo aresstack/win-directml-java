@@ -36,6 +36,6 @@ Compare against the dequantized fallback with:
 
 Notes:
 
-* Run `scripts/download-qwen.ps1 -Force` once to replace an existing dense model file.
+* Run the Workbench Download tab with Force re-download once to replace an existing dense model file.
 * Verify the log contains `INT4 quantized (MatMulNBits)`.
 * Verify the log does not contain dense `Uploaded weight ... MB` lines for all large Qwen projection matrices.

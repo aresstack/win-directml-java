@@ -4,7 +4,7 @@ This file is the authoritative list of model checkpoints that
 win-directml-java ships **runtime support for** in the published
 artifacts. The model **weights** themselves are not redistributed
 (see [`MODEL_LICENSES.md`](MODEL_LICENSES.md)); use the
-`scripts/download-*.ps1` helpers to fetch them.
+the Workbench Download tab to fetch them.
 
 Status legend:
 
@@ -61,7 +61,7 @@ and the derived backend / model recommendations, see
       this build (status=planned).` message until SentencePiece + XLM-R
       support lands (tracked with multilingual-E5).
     - The variant constant `E5Encoders.BASE_STS_EN_DE` and the
-      `download-e5.ps1 -Variant base-sts-en-de` helper are kept in the
+      planned E5 download entry is kept out of the Workbench until the
       tree but are not exercised end-to-end against the current upstream
       checkpoint.
 - **Workbench**
@@ -282,18 +282,17 @@ a partial-result success.
 
 **Download script**
 
-`scripts/download-jina.ps1` is intentionally **not added in this PR**.
-The download helpers (`download-minilm.ps1`, `download-e5.ps1`,
-`download-reranker.ps1`) exist to auto-enable real-model reference
+A Jina Workbench download entry is intentionally **not added in this PR**.
+The Workbench download entries for MiniLM, E5 and reranker exist to auto-enable real-model reference
 tests once weights are present locally; there is no Jina v2 runtime
-yet, so a download script would only fetch weights for code that
-cannot consume them. The script will be introduced together with the
+yet, so a Jina download entry would only fetch weights for code that
+cannot consume them. The entry will be introduced together with the
 first CPU runtime path (the directory hints
 `model/jina-embeddings-v2-base-de` and
 `model/jinaai/jina-embeddings-v2-base-de` are reserved in the registry
 so the future script and runtime agree on the layout).
 
-**Required artefacts (for a future `download-jina.ps1`)**
+**Required artefacts (for a future Jina Workbench download entry)**
 
 For reference, a future download script will need at least the
 following files from the HuggingFace repo (paths relative to the

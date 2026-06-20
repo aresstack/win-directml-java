@@ -23,15 +23,10 @@ werden muss.
 | DirectML        | in-box `DirectML.dll` (1.8.0 / FL 5.0 reicht; kein Sidecar-DLL nötig)               |
 | Java            | JDK 21 mit `--enable-preview` (FFM API)                                             |
 | Gradle          | Wrapper im Repo (`./gradlew`)                                                       |
-| Modell MiniLM   | `model/all-MiniLM-L6-v2/` (via `scripts/download-minilm.ps1`)                       |
-| Modell Reranker | `model/cross-encoder-ms-marco-MiniLM-L-6-v2/` (via `scripts/download-reranker.ps1`) |
+| Modell MiniLM   | `model/all-MiniLM-L6-v2/` (via Workbench Download tab)                       |
+| Modell Reranker | `model/cross-encoder-ms-marco-MiniLM-L-6-v2/` (via Workbench Download tab) |
 
-Modelle laden (PowerShell, einmalig):
-
-```powershell
-.\scripts\download-minilm.ps1
-.\scripts\download-reranker.ps1
-```
+Modelle einmalig über den **Workbench Download**-Tab laden.
 
 ---
 

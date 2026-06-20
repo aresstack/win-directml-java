@@ -118,7 +118,7 @@ beides außerhalb des aktuellen Phi-3/MiniLM-Aufwand.
 | `JinaBertV2Architecture`-Deskriptor + Weight-Mapping      | 1 PT         | mittel |
 | ALiBi-Bias in `DirectMlBertEncoderLayerBlock` (CPU + DML) | 2–3 PT       | mittel |
 | GeGLU-FFN-Variante (CPU + DML, Parity-Test)               | 2 PT         | mittel |
-| ONNX-Export-Pipeline + `download-jina.ps1`                | 1 PT         | gering |
+| ONNX-Export-Pipeline + Workbench download entry           | 1 PT         | gering |
 | Smoke- und Parity-Tests (CPU vs. DML, MiniLM-Stil)        | 1 PT         | gering |
 | **Summe**                                                 | **≈ 7–9 PT** |        |
 

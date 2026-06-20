@@ -31,6 +31,5 @@ downloaded. Check "Download all ONNX files" to prefetch every known Hugging Face
 The PowerShell downloader supports the same layout:
 
 ```powershell
-.\scripts\download-qwen.ps1 -Variant model_q4f16.onnx -Validate
-.\scripts\download-qwen.ps1 -AllVariants -Variant model_q4f16.onnx
+Use the Workbench Download tab to select `model_q4f16.onnx`. Use the all-variants option in the Workbench when all known Qwen ONNX files should be fetched.
 ```
