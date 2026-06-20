@@ -72,8 +72,7 @@ public final class ModelValidator {
         String v = variant == null ? "0.5b" : variant.trim().toLowerCase(Locale.ROOT);
         String label = "Qwen2.5-Coder-" + v.toUpperCase(Locale.ROOT) + "-Instruct";
         ModelExpectation.Builder builder = ModelExpectation.builder(label)
-                .require("config.json", "tokenizer.json", "tokenizer_config.json",
-                        "special_tokens_map.json", "model.onnx")
+                .require("config.json", "tokenizer.json", "tokenizer_config.json", "model.onnx")
                 .eitherOf("model.onnx_data", "model.onnx.data")
                 .tokenizerType("BPE")
                 .notReady("planned: ONNX source TBD/research; runtime not yet implemented");
@@ -176,5 +175,37 @@ public final class ModelValidator {
         String actual = type.asText();
         if (actual.equalsIgnoreCase(expected)) findings.add(ValidationFinding.ok("tokenizer type = " + actual));
         else findings.add(ValidationFinding.error("tokenizer type = " + actual + ", expected " + expected));
+        if ("BPE".equalsIgnoreCase(expected)) {
+            checkBpeSpecialTokens(root, findings);
+        }
+    }
+
+    private static void checkBpeSpecialTokens(JsonNode tokenizerRoot, List<ValidationFinding> findings) {
+        JsonNode added = tokenizerRoot.get("added_tokens");
+        if (added == null || !added.isArray()) {
+            findings.add(ValidationFinding.error("tokenizer.json missing added_tokens special-token metadata"));
+            return;
+        }
+        boolean hasSpecial = false;
+        boolean hasKnownStop = false;
+        for (JsonNode token : added) {
+            JsonNode content = token.get("content");
+            JsonNode special = token.get("special");
+            if (content == null || !content.isTextual() || special == null || !special.asBoolean(false)) {
+                continue;
+            }
+            hasSpecial = true;
+            String value = content.asText();
+            if ("<|im_end|>".equals(value) || "<|endoftext|>".equals(value)) {
+                hasKnownStop = true;
+            }
+        }
+        if (hasSpecial && hasKnownStop) {
+            findings.add(ValidationFinding.ok("tokenizer.json contains BPE special-token metadata"));
+        } else if (hasSpecial) {
+            findings.add(ValidationFinding.warn("tokenizer.json contains special tokens but no known Qwen stop token"));
+        } else {
+            findings.add(ValidationFinding.error("tokenizer.json contains no tokens marked special=true"));
+        }
     }
 }
