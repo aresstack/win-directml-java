@@ -1,6 +1,13 @@
 package com.aresstack.windirectml.inference.artifact;
 
-import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.ModelConversionResult;
+import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
+import com.aresstack.windirectml.modelpack.PackageState;
+import com.aresstack.windirectml.modelpack.RawAssetInspection;
+
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
 import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
 import com.aresstack.windirectml.inference.qwen.QwenWdmlPackCompileTool;
 

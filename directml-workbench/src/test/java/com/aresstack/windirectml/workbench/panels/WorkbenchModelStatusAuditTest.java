@@ -4,7 +4,7 @@ import com.aresstack.windirectml.config.generation.GenerationModelRegistry;
 import com.aresstack.windirectml.config.generation.GenerationModelRegistry.Entry;
 import com.aresstack.windirectml.config.generation.GenerationModelRegistry.Status;
 import com.aresstack.windirectml.inference.artifact.Gemma3PackageLifecycle;
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelFamily;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;

@@ -1,7 +1,7 @@
 package com.aresstack.windirectml.inference.qwen;
 
-import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
-import com.aresstack.windirectml.inference.artifact.PackageState;
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.PackageState;
 import com.aresstack.windirectml.inference.artifact.QwenPackageLifecycle;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

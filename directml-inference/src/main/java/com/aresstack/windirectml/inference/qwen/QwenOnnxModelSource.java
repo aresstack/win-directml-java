@@ -1,10 +1,10 @@
 package com.aresstack.windirectml.inference.qwen;
 
 import com.aresstack.windirectml.inference.model.ModelSource;
-import com.aresstack.windirectml.inference.model.SourceTensor;
-import com.aresstack.windirectml.inference.model.SourceTensorCatalog;
-import com.aresstack.windirectml.inference.model.SourceTensorDataType;
-import com.aresstack.windirectml.inference.model.TensorStorageKind;
+import com.aresstack.windirectml.modelpack.SourceTensor;
+import com.aresstack.windirectml.modelpack.SourceTensorCatalog;
+import com.aresstack.windirectml.modelpack.SourceTensorDataType;
+import com.aresstack.windirectml.modelpack.TensorStorageKind;
 import com.aresstack.windirectml.windows.OnnxModelReader;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;

@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.inference.artifact;
+package com.aresstack.windirectml.modelpack;
 
 /**
  * State of the compiled runtime package ({@code .wdmlpack}) for a model.

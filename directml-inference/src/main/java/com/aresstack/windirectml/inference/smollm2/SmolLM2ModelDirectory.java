@@ -1,10 +1,10 @@
 package com.aresstack.windirectml.inference.smollm2;
 
 import com.aresstack.windirectml.inference.model.SafeTensorsReader;
-import com.aresstack.windirectml.inference.model.SourceFingerprint;
-import com.aresstack.windirectml.inference.model.SourceTensor;
-import com.aresstack.windirectml.inference.model.SourceTensorCatalog;
-import com.aresstack.windirectml.inference.model.SourceTensorDataType;
+import com.aresstack.windirectml.modelpack.SourceFingerprint;
+import com.aresstack.windirectml.modelpack.SourceTensor;
+import com.aresstack.windirectml.modelpack.SourceTensorCatalog;
+import com.aresstack.windirectml.modelpack.SourceTensorDataType;
 
 import java.io.IOException;
 import java.nio.file.Files;

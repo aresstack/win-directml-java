@@ -1,5 +1,7 @@
 package com.aresstack.windirectml.inference.model;
 
+import com.aresstack.windirectml.modelpack.SourceTensorDataType;
+
 import java.util.Arrays;
 import java.util.Objects;
 

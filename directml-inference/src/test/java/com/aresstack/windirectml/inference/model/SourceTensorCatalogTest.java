@@ -1,5 +1,9 @@
 package com.aresstack.windirectml.inference.model;
 
+import com.aresstack.windirectml.modelpack.SourceTensor;
+import com.aresstack.windirectml.modelpack.SourceTensorCatalog;
+import com.aresstack.windirectml.modelpack.SourceTensorDataType;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;

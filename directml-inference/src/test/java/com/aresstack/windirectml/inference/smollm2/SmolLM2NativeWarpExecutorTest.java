@@ -2,8 +2,8 @@ package com.aresstack.windirectml.inference.smollm2;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyMath;
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyWarpKvCache;
-import com.aresstack.windirectml.inference.model.RuntimeTensor;
-import com.aresstack.windirectml.inference.model.SourceTensorDataType;
+import com.aresstack.windirectml.modelpack.RuntimeTensor;
+import com.aresstack.windirectml.modelpack.SourceTensorDataType;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import org.junit.jupiter.api.Test;
 

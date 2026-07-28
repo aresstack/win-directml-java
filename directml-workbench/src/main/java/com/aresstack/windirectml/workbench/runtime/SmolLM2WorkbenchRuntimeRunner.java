@@ -1,8 +1,8 @@
 package com.aresstack.windirectml.workbench.runtime;
 
 import com.aresstack.windirectml.inference.GenerationTokenSink;
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
-import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
+import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.SmolLM2PackageLifecycle;
 import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationOptions;

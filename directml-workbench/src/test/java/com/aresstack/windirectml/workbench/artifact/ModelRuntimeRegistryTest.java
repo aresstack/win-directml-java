@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.workbench.artifact;
 
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelFamily;
 import com.aresstack.windirectml.inference.qwen.QwenWdmlPackCompileTool;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import org.junit.jupiter.api.Test;

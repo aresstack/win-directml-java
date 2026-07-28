@@ -73,8 +73,8 @@ class T5WarpLinearProjectionTest {
             raw.putFloat(w);
         }
         raw.flip();
-        com.aresstack.windirectml.inference.model.RuntimeTensor tensor =
-                new com.aresstack.windirectml.inference.model.RuntimeTensor("w", new long[]{outputSize, inputSize},
+        com.aresstack.windirectml.modelpack.RuntimeTensor tensor =
+                new com.aresstack.windirectml.modelpack.RuntimeTensor("w", new long[]{outputSize, inputSize},
                         com.aresstack.windirectml.windows.OnnxModelReader.ONNX_FLOAT, raw, weights.length * Float.BYTES);
         T5TensorData byteBufferWeight = T5TensorData.from(tensor);
         assertNotNull(byteBufferWeight.fp32LittleEndianSource(), "FP32 tensor must take the ByteBuffer path");

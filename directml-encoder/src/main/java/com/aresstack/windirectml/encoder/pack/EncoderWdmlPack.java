@@ -2,9 +2,9 @@ package com.aresstack.windirectml.encoder.pack;
 
 import com.aresstack.windirectml.encoder.safetensors.SafetensorsException;
 import com.aresstack.windirectml.encoder.safetensors.SafetensorsReader;
-import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
-import com.aresstack.windirectml.inference.model.SourceFingerprint;
-import com.aresstack.windirectml.inference.model.WdmlPackWriter;
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.SourceFingerprint;
+import com.aresstack.windirectml.modelpack.WdmlPackWriter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

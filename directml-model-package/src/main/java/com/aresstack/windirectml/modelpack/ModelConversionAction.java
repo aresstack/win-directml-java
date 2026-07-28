@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.inference.artifact;
+package com.aresstack.windirectml.modelpack;
 
 /**
  * The state-dependent action offered by the unified "Convert / Status" button.

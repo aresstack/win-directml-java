@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.inference.model;
+package com.aresstack.windirectml.modelpack;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;

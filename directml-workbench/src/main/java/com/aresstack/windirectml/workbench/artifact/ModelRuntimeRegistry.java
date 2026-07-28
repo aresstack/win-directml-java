@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.workbench.artifact;
 
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelFamily;
 import com.aresstack.windirectml.inference.artifact.QwenPackageLifecycle;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.download.QwenModelDownloadConfig;

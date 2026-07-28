@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.inference.artifact;
+package com.aresstack.windirectml.modelpack;
 
 import java.nio.file.Path;
 

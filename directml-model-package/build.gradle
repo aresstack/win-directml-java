@@ -1,0 +1,7 @@
+// Shared wdmlpack container + model-artifact lifecycle contract: the package format
+// (reader/writer/manifest/tensor catalogs) and the download->convert->run-only-from-package
+// lifecycle types. Extracted from the legacy (unpublished) directml-inference module so the
+// PUBLISHED core (encoder/runtime) is self-contained on Maven Central.
+dependencies {
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
+}

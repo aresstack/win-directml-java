@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.smollm2;
 
-import com.aresstack.windirectml.inference.model.SourceTensorCatalog;
+import com.aresstack.windirectml.modelpack.SourceTensorCatalog;
 
 import java.io.IOException;
 import java.nio.file.Files;

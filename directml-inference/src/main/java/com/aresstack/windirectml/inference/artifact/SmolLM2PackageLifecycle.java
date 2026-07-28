@@ -1,5 +1,13 @@
 package com.aresstack.windirectml.inference.artifact;
 
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.ModelConversionResult;
+import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
+import com.aresstack.windirectml.modelpack.PackageState;
+import com.aresstack.windirectml.modelpack.RawAssetInspection;
+import com.aresstack.windirectml.modelpack.RawAssetState;
+
 import com.aresstack.windirectml.inference.smollm2.SmolLM2CompileOptions;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2CompileReport;
 import com.aresstack.windirectml.inference.smollm2.SmolLM2ModelDirectory;

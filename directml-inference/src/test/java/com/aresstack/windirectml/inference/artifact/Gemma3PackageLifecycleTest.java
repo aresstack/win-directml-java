@@ -1,5 +1,12 @@
 package com.aresstack.windirectml.inference.artifact;
 
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.ModelConversionAction;
+import com.aresstack.windirectml.modelpack.ModelConversionPlan;
+import com.aresstack.windirectml.modelpack.ModelConversionResult;
+import com.aresstack.windirectml.modelpack.PackageState;
+import com.aresstack.windirectml.modelpack.RawAssetState;
+
 import com.aresstack.windirectml.inference.gemma.Gemma3NativeWarpRuntime;
 import com.aresstack.windirectml.inference.gemma.Gemma3RuntimePackage;
 import org.junit.jupiter.api.Test;

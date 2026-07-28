@@ -1,11 +1,11 @@
 package com.aresstack.windirectml.workbench.runtime;
 
-import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
-import com.aresstack.windirectml.inference.artifact.ModelConversionResult;
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
-import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
-import com.aresstack.windirectml.inference.artifact.PackageState;
-import com.aresstack.windirectml.inference.artifact.RawAssetState;
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.ModelConversionResult;
+import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
+import com.aresstack.windirectml.modelpack.PackageState;
+import com.aresstack.windirectml.modelpack.RawAssetState;
 import com.aresstack.windirectml.inference.prompt.PromptInput;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

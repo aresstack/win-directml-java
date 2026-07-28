@@ -6,7 +6,7 @@ import com.aresstack.windirectml.inference.InferenceEngine;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.InferenceRequest;
 import com.aresstack.windirectml.inference.InferenceResult;
-import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.QwenPackageLifecycle;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import org.slf4j.Logger;

@@ -1,7 +1,7 @@
 package com.aresstack.windirectml.inference.smollm2;
 
 import com.aresstack.windirectml.inference.decoderonly.DecoderOnlyReferenceDenseOps;
-import com.aresstack.windirectml.inference.model.SourceTensorDataType;
+import com.aresstack.windirectml.modelpack.SourceTensorDataType;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;

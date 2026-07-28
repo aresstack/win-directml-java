@@ -22,6 +22,7 @@ allprojects {
 // directly instead of depending on this repository's legacy JSON-RPC sidecar.
 ext.publishableModules = [
         'directml-config',
+        'directml-model-package',
         'directml-windows-bindings',
         'directml-encoder',
         'directml-runtime',

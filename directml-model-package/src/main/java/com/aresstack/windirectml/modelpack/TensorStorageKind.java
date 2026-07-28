@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.inference.model;
+package com.aresstack.windirectml.modelpack;
 
 /**
  * Describes where a tensor payload lives before runtime upload.

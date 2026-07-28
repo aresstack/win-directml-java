@@ -1,9 +1,9 @@
 package com.aresstack.windirectml.inference.qwen;
 
 import com.aresstack.windirectml.inference.model.ModelSource;
-import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
-import com.aresstack.windirectml.inference.model.RuntimeTensor;
-import com.aresstack.windirectml.inference.model.RuntimeTensorCatalog;
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.RuntimeTensor;
+import com.aresstack.windirectml.modelpack.RuntimeTensorCatalog;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxGraph;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;

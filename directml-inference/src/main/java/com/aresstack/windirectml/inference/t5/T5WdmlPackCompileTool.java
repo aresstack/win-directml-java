@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.t5;
 
-import com.aresstack.windirectml.inference.model.WdmlPackWriter;
+import com.aresstack.windirectml.modelpack.WdmlPackWriter;
 
 import java.io.IOException;
 import java.io.PrintStream;

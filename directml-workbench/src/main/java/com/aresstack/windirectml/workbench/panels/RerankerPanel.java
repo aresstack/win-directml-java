@@ -2,7 +2,7 @@ package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.runtime.facade.*;
 import com.aresstack.windirectml.encoder.reranker.RerankResult;
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelFamily;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.artifact.WorkbenchArtifactGate;
 

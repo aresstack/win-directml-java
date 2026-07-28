@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.phi3;
 
-import com.aresstack.windirectml.inference.model.RuntimeTensorCatalog;
+import com.aresstack.windirectml.modelpack.RuntimeTensorCatalog;
 import com.aresstack.windirectml.inference.phi3.Phi3Weights.LayerWeights;
 import com.aresstack.windirectml.inference.phi3.Phi3Weights.QuantizedWeight;
 import org.junit.jupiter.api.Test;

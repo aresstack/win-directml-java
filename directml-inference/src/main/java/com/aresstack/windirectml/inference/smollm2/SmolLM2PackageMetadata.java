@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.smollm2;
 
-import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
 
 import java.util.LinkedHashMap;
 import java.util.List;
