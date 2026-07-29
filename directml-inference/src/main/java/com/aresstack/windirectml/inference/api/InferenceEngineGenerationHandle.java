@@ -47,7 +47,10 @@ final class InferenceEngineGenerationHandle implements GenerationModelHandle {
                     "handle for " + runtimeModelId() + " is closed");
         }
         InferenceRequest inferenceRequest = InferenceRequest.builder()
-                .modelId(descriptor.runtimeModelId())
+                // PromptStrategies.forModel keys the chat-template/task strategy off the model id by
+                // substring (e.g. "codet5-base-multi-sum", "qwen2.5-coder", "t5-small"), which the HF
+                // repository id matches exactly — the underscore-cased runtimeModelId would not.
+                .modelId(descriptor.huggingFaceRepositoryId())
                 .userPrompt(request.userPrompt())
                 .systemPrompt(request.systemPrompt() == null ? "" : request.systemPrompt())
                 .maxTokens(request.maxNewTokens())

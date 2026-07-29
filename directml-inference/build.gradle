@@ -38,4 +38,11 @@ tasks.withType(Test).configureEach {
             systemProperty(k.toString(), v.toString())
         }
     }
+    // Public-API real-model certification smoke (PublicApiGenerationSmokeIT): forward smoke.* toggles
+    // (smoke.repo, smoke.rawDir, smoke.backend, smoke.maxTokens). Unset -> the opt-in test skips.
+    System.getProperties().each { k, v ->
+        if (k.toString().startsWith('smoke.')) {
+            systemProperty(k.toString(), v.toString())
+        }
+    }
 }
