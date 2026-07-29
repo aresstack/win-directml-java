@@ -78,6 +78,38 @@ class LocalModelCatalogTest {
                 repos(LocalModelCatalog.runnableByCapability(ModelCapability.SEQ2SEQ)));
     }
 
+    private static Set<CatalogBackend> backends(String repo) {
+        LocalRuntimeModelDescriptor d = LocalModelCatalog.findByRepositoryId(repo);
+        assertNotNull(d, repo);
+        return d.supportedBackends();
+    }
+
+    @Test
+    void backendMatrixMirrorsTheVerifiedRuntimeCode() {
+        // Code-verified per family (QwenInferenceEngine / SmolLM2WorkbenchRuntimeRunner /
+        // Phi3InferenceEngine / T5InferenceEngine / SummarizerPanel gemma path). WARP = software adapter,
+        // AUTO = hardware adapter of the same DirectML path; Phi-3 deliberately has NO WARP path.
+        Set<CatalogBackend> warpAutoCpu = new HashSet<CatalogBackend>(Arrays.asList(
+                CatalogBackend.WARP, CatalogBackend.AUTO, CatalogBackend.CPU));
+        assertEquals(warpAutoCpu, backends("Qwen/Qwen2.5-Coder-0.5B-Instruct"));
+        assertEquals(warpAutoCpu, backends("HuggingFaceTB/SmolLM2-135M-Instruct"));
+        assertEquals(warpAutoCpu, backends("HuggingFaceTB/SmolLM2-360M-Instruct"));
+        assertEquals(warpAutoCpu, backends("google-t5/t5-small"));
+        assertEquals(warpAutoCpu, backends("google/flan-t5-small"));
+        assertEquals(warpAutoCpu, backends("Salesforce/codet5-small"));
+        assertEquals(warpAutoCpu, backends("Salesforce/codet5-base-multi-sum"));
+
+        assertEquals(new HashSet<CatalogBackend>(Arrays.asList(CatalogBackend.WARP, CatalogBackend.AUTO)),
+                backends("google/gemma-3-270m-it"));
+
+        // Phi-3: cpu/directml/auto — NO WARP (runtime engine has no WARP path).
+        assertEquals(new HashSet<CatalogBackend>(Arrays.asList(
+                        CatalogBackend.CPU, CatalogBackend.DIRECTML, CatalogBackend.AUTO)),
+                backends("microsoft/Phi-3-mini-4k-instruct-onnx"));
+        assertFalse(backends("microsoft/Phi-3-mini-4k-instruct-onnx").contains(CatalogBackend.WARP),
+                "Phi-3 has no WARP path");
+    }
+
     @Test
     void gemmaOffersOnlyWarpAndAutoNeverCpu() {
         LocalRuntimeModelDescriptor gemma = LocalModelCatalog.findByRepositoryId("google/gemma-3-270m-it");
@@ -103,17 +135,53 @@ class LocalModelCatalogTest {
         }
     }
 
-    @Test
-    void qwenAndPhi3CarryTheirRepositorySubdirectoryAndOnnxSource() {
-        LocalRuntimeModelDescriptor qwen =
-                LocalModelCatalog.findByRepositoryId("Qwen/Qwen2.5-Coder-0.5B-Instruct");
-        assertEquals("onnx", qwen.repositorySubdirectory());
-        assertEquals(SourceFormat.ONNX_INT4, qwen.sourceFormat());
-        assertEquals("onnx-community/Qwen2.5-Coder-0.5B-Instruct", qwen.downloadManifest().repositoryId());
+    /** A naive downloader resolves exactly {@code <repositoryId>/<remotePath>} — nothing more. */
+    private static String resolve(DownloadManifest m, DownloadFile f) {
+        return m.repositoryId() + "/" + f.remotePath();
+    }
 
-        LocalRuntimeModelDescriptor phi3 =
-                LocalModelCatalog.findByRepositoryId("microsoft/Phi-3-mini-4k-instruct-onnx");
-        assertEquals("directml/directml-int4-awq-block-128", phi3.repositorySubdirectory());
-        assertEquals(SourceFormat.ONNX_INT4, phi3.sourceFormat());
+    private static DownloadFile fileByLocalName(DownloadManifest m, String localName) {
+        for (DownloadFile f : m.files()) {
+            if (f.localName().equals(localName)) {
+                return f;
+            }
+        }
+        throw new AssertionError("no file " + localName + " in " + m.repositoryId());
+    }
+
+    @Test
+    void onnxSubdirectoriesResolveExactlyOnceAndNeverDoublePrefix() {
+        DownloadManifest qwen =
+                LocalModelCatalog.findByRepositoryId("Qwen/Qwen2.5-Coder-0.5B-Instruct").downloadManifest();
+        assertEquals("onnx-community/Qwen2.5-Coder-0.5B-Instruct", qwen.repositoryId());
+        DownloadFile qwenGraph = fileByLocalName(qwen, "model_q4f16.onnx");
+        assertEquals("onnx/model_q4f16.onnx", qwenGraph.remotePath());
+        assertEquals("onnx-community/Qwen2.5-Coder-0.5B-Instruct/onnx/model_q4f16.onnx",
+                resolve(qwen, qwenGraph));
+
+        // Qwen keeps config/tokenizer at the repo root (only the graph is under onnx/).
+        assertEquals("config.json", fileByLocalName(qwen, "config.json").remotePath());
+
+        DownloadManifest phi3 = LocalModelCatalog
+                .findByRepositoryId("microsoft/Phi-3-mini-4k-instruct-onnx").downloadManifest();
+        DownloadFile phiGraph = fileByLocalName(phi3, "model.onnx");
+        assertEquals("directml/directml-int4-awq-block-128/model.onnx", phiGraph.remotePath());
+        assertEquals("microsoft/Phi-3-mini-4k-instruct-onnx/"
+                + "directml/directml-int4-awq-block-128/model.onnx", resolve(phi3, phiGraph));
+        // Phi-3 ships config/tokenizer inside the SAME INT4 subdir — verified against ModelDownloader.
+        assertEquals("directml/directml-int4-awq-block-128/config.json",
+                fileByLocalName(phi3, "config.json").remotePath());
+
+        // No file's resolved path ever contains a doubled subdirectory segment, and every local name is flat.
+        for (LocalRuntimeModelDescriptor d : LocalModelCatalog.runnable()) {
+            DownloadManifest m = d.downloadManifest();
+            for (DownloadFile f : m.files()) {
+                String resolved = resolve(m, f);
+                assertFalse(resolved.contains("/onnx/onnx/"), resolved);
+                assertFalse(resolved.contains("directml-int4-awq-block-128/directml-int4-awq-block-128"),
+                        resolved);
+                assertFalse(f.localName().contains("/"), "local name must be flat: " + f.localName());
+            }
+        }
     }
 }

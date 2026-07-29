@@ -2,8 +2,14 @@ package com.aresstack.windirectml.catalog;
 
 /**
  * One file an install strategy must fetch from the source repository, expressed neutrally (no URL, no I/O).
- * {@link #remotePath()} is relative to the repository root (it may include a subdirectory, e.g. the Phi-3
- * ONNX INT4 folder); {@link #localName()} is the name it is stored under in the model directory.
+ *
+ * <p>{@link #remotePath()} is ALWAYS complete and relative to the repository ROOT — it already includes any
+ * source subdirectory (e.g. {@code onnx/model_q4f16.onnx}, {@code directml/directml-int4-awq-block-128/model.onnx}).
+ * A downloader must resolve exactly {@code <repositoryId>/<remotePath>} and must NEVER prepend any further
+ * subdirectory, otherwise it would produce a doubled prefix like {@code onnx/onnx/model_q4f16.onnx}.</p>
+ *
+ * <p>{@link #localName()} is the flat name the file is stored under in the local model directory (the source
+ * subdirectory is intentionally dropped so the runtime sees one flat directory).</p>
  *
  * <p>Java-8 compatible.</p>
  */

@@ -14,11 +14,15 @@ public enum CatalogBackend {
 
     /** Native Java CPU reference runtime. */
     CPU,
-    /** DirectML on a DirectX-12 GPU. */
+    /**
+     * The DirectML code path bound to a specific DirectX-12 GPU (Phi-3's {@code -Dphi3.backend=directml}).
+     * For the WARP/AUTO families, {@link #WARP} and {@link #AUTO} are the two adapter selections of this
+     * same DirectML path, so they list those instead of a bare {@code DIRECTML}.
+     */
     DIRECTML,
-    /** The D3D12 WARP software rasterizer adapter (native, no Python). */
+    /** The same DirectML code path bound to the D3D12 WARP <em>software</em> adapter (native, no Python). */
     WARP,
-    /** Automatic hardware-GPU selection (native, no Python). */
+    /** The same DirectML code path bound to an automatic <em>hardware</em> GPU adapter (native, no Python). */
     AUTO;
 
     public String token() {

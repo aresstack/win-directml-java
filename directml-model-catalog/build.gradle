@@ -27,7 +27,9 @@ tasks.withType(Test).configureEach {
 }
 
 dependencies {
-    api project(':directml-config')
+    // The neutral catalog is the DEPENDENCY ROOT: it declares every model itself and depends on NO other
+    // project, so directml-config's legacy registries can delegate to (or be parity-tested against) it
+    // without creating a cycle. Direction is therefore directml-config -> directml-model-catalog.
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'

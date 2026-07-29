@@ -25,7 +25,6 @@ public final class LocalRuntimeModelDescriptor {
     private final Set<ModelCapability> capabilities;
     private final SourceFormat sourceFormat;
     private final DownloadManifest downloadManifest;
-    private final String repositorySubdirectory;
     private final String runtimeDirectoryName;
     private final String runtimePackageFileName;
     private final String packageLifecycleId;
@@ -63,7 +62,6 @@ public final class LocalRuntimeModelDescriptor {
         this.architecture = b.architecture == null ? "" : b.architecture;
         this.capabilities = Collections.unmodifiableSet(EnumSet.copyOf(b.capabilities));
         this.downloadManifest = b.downloadManifest;
-        this.repositorySubdirectory = b.repositorySubdirectory == null ? "" : b.repositorySubdirectory;
         this.runtimeDirectoryName = b.runtimeDirectoryName == null
                 ? defaultRuntimeDirectoryName(this.huggingFaceRepositoryId) : b.runtimeDirectoryName;
         this.runtimePackageFileName = b.runtimePackageFileName == null
@@ -125,11 +123,6 @@ public final class LocalRuntimeModelDescriptor {
     /** The download plan, or {@code null} for a non-RUNNABLE entry that carries no manifest yet. */
     public DownloadManifest downloadManifest() {
         return downloadManifest;
-    }
-
-    /** The repository subdirectory the weights live in (e.g. Phi-3 ONNX INT4), or "" when at the root. */
-    public String repositorySubdirectory() {
-        return repositorySubdirectory;
     }
 
     public String runtimeDirectoryName() {
@@ -197,7 +190,6 @@ public final class LocalRuntimeModelDescriptor {
         private final Set<ModelCapability> capabilities = new LinkedHashSet<ModelCapability>();
         private SourceFormat sourceFormat;
         private DownloadManifest downloadManifest;
-        private String repositorySubdirectory;
         private String runtimeDirectoryName;
         private String runtimePackageFileName;
         private String packageLifecycleId;
@@ -242,11 +234,6 @@ public final class LocalRuntimeModelDescriptor {
 
         public Builder downloadManifest(DownloadManifest value) {
             this.downloadManifest = value;
-            return this;
-        }
-
-        public Builder repositorySubdirectory(String value) {
-            this.repositorySubdirectory = value;
             return this;
         }
 

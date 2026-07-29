@@ -66,9 +66,10 @@ public final class LocalModelCatalog {
                 .sourceFormat(SourceFormat.ONNX_INT4)
                 .tokenizerFamily("bpe")
                 .chatTemplate("chatml")
-                .backends(CatalogBackend.DIRECTML, CatalogBackend.AUTO)
+                // QwenInferenceEngine accepts warp/auto/cpu (+directml/hybrid); the workbench offers WARP
+                // (software adapter) and AUTO (hardware adapter), with a real CPU reference decode path.
+                .backends(CatalogBackend.WARP, CatalogBackend.AUTO, CatalogBackend.CPU)
                 .runtimeDirectoryName("qwen2.5-coder-0.5b-directml-int4")
-                .repositorySubdirectory("onnx")
                 .downloadManifest(new DownloadManifest("onnx-community/Qwen2.5-Coder-0.5B-Instruct",
                         Arrays.asList(
                                 new DownloadFile("onnx/model_q4f16.onnx", "model_q4f16.onnx", true),
@@ -121,9 +122,10 @@ public final class LocalModelCatalog {
                 .sourceFormat(SourceFormat.ONNX_INT4)
                 .tokenizerFamily("sentencepiece")
                 .chatTemplate("phi3")
-                .backends(CatalogBackend.CPU, CatalogBackend.DIRECTML)
+                // Phi3InferenceEngine accepts cpu/directml/auto — there is NO WARP path for Phi-3 (verified
+                // against the runtime code; the sidecar's -Dphi3.backend offers exactly auto/directml/cpu).
+                .backends(CatalogBackend.CPU, CatalogBackend.DIRECTML, CatalogBackend.AUTO)
                 .runtimeDirectoryName("phi-3-mini-4k-instruct-onnx")
-                .repositorySubdirectory("directml/directml-int4-awq-block-128")
                 .downloadManifest(new DownloadManifest("microsoft/Phi-3-mini-4k-instruct-onnx", Arrays.asList(
                         new DownloadFile("directml/directml-int4-awq-block-128/model.onnx", "model.onnx", true),
                         new DownloadFile("directml/directml-int4-awq-block-128/model.onnx.data", "model.onnx.data", true),
@@ -196,7 +198,9 @@ public final class LocalModelCatalog {
                 .sourceFormat(SourceFormat.SAFETENSORS)
                 .tokenizerFamily("bpe")
                 .chatTemplate("raw")
-                .backends(CatalogBackend.WARP, CatalogBackend.CPU)
+                // SmolLM2WorkbenchRuntimeRunner: WARP (software rasterizer) and AUTO (hardware) both degrade
+                // to the CPU reference runtime when no device is present; CPU reference is a real path too.
+                .backends(CatalogBackend.WARP, CatalogBackend.AUTO, CatalogBackend.CPU)
                 .runtimeDirectoryName(dirName)
                 .downloadManifest(new DownloadManifest(repo, LocalRuntimeModelDescriptor.filesAtRoot(
                         new String[]{"model.safetensors", "tokenizer.json", "config.json",
