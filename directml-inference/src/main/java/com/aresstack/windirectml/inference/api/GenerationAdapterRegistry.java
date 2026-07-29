@@ -47,8 +47,7 @@ final class GenerationAdapterRegistry {
         // Bespoke package-backed families.
         adapters.add(new Phi3GenerationAdapter());
         adapters.add(new SmolLm2GenerationAdapter());
-        // GEMMA3 adapter follows (native WARP/AUTO only; CPU excluded by the matrix). Until then
-        // GenerationRuntime reports UNSUPPORTED_FAMILY for GEMMA3 rather than guessing a path.
+        adapters.add(new Gemma3GenerationAdapter());
         return new GenerationAdapterRegistry(adapters);
     }
 }

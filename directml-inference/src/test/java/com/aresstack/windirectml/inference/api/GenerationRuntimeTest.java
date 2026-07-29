@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.aresstack.windirectml.catalog.CatalogBackend;
+import com.aresstack.windirectml.catalog.CatalogModelFamily;
 import com.aresstack.windirectml.catalog.LocalModelCatalog;
 import com.aresstack.windirectml.catalog.LocalRuntimeModelDescriptor;
 import java.io.IOException;
@@ -102,6 +103,22 @@ class GenerationRuntimeTest {
         GenerationException ex = assertThrows(GenerationException.class,
                 () -> GenerationRuntime.load(qwen, dir, CatalogBackend.CPU, LoadPolicy.PACKAGE_ONLY));
         assertEquals(GenerationErrorCode.INITIALIZATION_FAILED, ex.errorCode());
+    }
+
+    @Test
+    void gemmaWarpDispatchesToAdapterWithoutPython(@TempDir Path dir) throws IOException {
+        // Gemma is gated (real run needs an HF token); this contract test needs no model. With a
+        // present package + tokenizer, a WARP load must dispatch to the native Gemma adapter and
+        // return a handle (family GEMMA3, backend WARP) — proving it is wired and never routes to a
+        // Python/CPU path. The native device is only touched on generate(), not on open().
+        LocalRuntimeModelDescriptor gemma = descriptor("google/gemma-3-270m-it");
+        Files.createFile(dir.resolve(gemma.runtimePackageFileName()));
+        Files.createFile(dir.resolve("tokenizer.json"));
+        try (GenerationModelHandle handle =
+                GenerationRuntime.load(gemma, dir, CatalogBackend.WARP, LoadPolicy.PACKAGE_ONLY)) {
+            assertEquals(CatalogModelFamily.GEMMA3, handle.family());
+            assertEquals(CatalogBackend.WARP, handle.backend());
+        }
     }
 
     @Test

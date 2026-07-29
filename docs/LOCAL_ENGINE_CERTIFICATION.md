@@ -43,7 +43,7 @@ T5 family beyond keying the prompt strategy off the HF repository id.
 | HuggingFaceTB/SmolLM2-135M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | ❌ empty‡ | CPU+AUTO certified |
 | HuggingFaceTB/SmolLM2-360M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | — | CPU+AUTO certified |
 | microsoft/Phi-3-mini-4k-instruct-onnx | PHI3 | ○ | ○ | n/a | package-backed CPU/AUTO wired; DirectML named remainder; real run pending (no weights) |
-| google/gemma-3-270m-it | GEMMA3 | n/a | — | — | pending (gated; needs HF token) |
+| google/gemma-3-270m-it | GEMMA3 | n/a | ⛔ | ⛔ | adapter + contract test built; real run externally blocked (no HF token)† |
 
 \* **Qwen — certified by workbench reuse (per instruction).** `QwenGenerationAdapter` wraps the same
 `QwenInferenceEngine` the shipping workbench (`SummarizerPanel.runQwenGeneration`) uses, on the
@@ -66,6 +66,17 @@ AUTO cover GPU and GPU-less hosts via AUTO's reference fallback). Open item: eit
 software-WARP generation path or narrow the SmolLM2 catalog matrix to {AUTO, CPU}. The catalog was
 **not** changed unilaterally. Reproduce:
 `-Dsmoke.repo=HuggingFaceTB/SmolLM2-135M-Instruct -Dsmoke.backend=warp`.
+
+† **Gemma 3 externally blocked.** `google/gemma-3-270m-it` is a gated Hugging Face repo and no HF
+token is present in this environment, so the model cannot be downloaded/certified here. The Gemma
+adapter (`Gemma3GenerationAdapter` → `Gemma3NativeWarpRuntime`, WARP/AUTO only, no Python) is built
+and covered by a contract test that proves dispatch. Reproduce once a token is available:
+
+```
+setx HF_TOKEN <token>   &&  huggingface-cli download google/gemma-3-270m-it --local-dir <dir>
+gradlew :directml-inference:test --tests '*PublicApiGenerationSmokeIT' ^
+  -Dsmoke.repo=google/gemma-3-270m-it -Dsmoke.rawDir=<dir> -Dsmoke.backend=auto
+```
 
 ## Reranker (W6)
 
