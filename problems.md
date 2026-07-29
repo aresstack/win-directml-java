@@ -71,6 +71,25 @@ FAILED               real run attempted and failed
   in the process (the adapter now derives `model_q4f16.onnx` from the catalog package name so the
   engine resolves `model_q4f16.wdmlpack`). Reproduce command in the certification log.
 
+## P7 — Neutral API has no PromptTask; workbench task selector degraded on the shared path
+
+- The public `GenerationRequest` models `systemPrompt` + `userPrompt` only (AskAI maps its own
+  chat/generate). The workbench's `PromptTask` selector (summarize/translate/explain) is therefore
+  not applied when routing through `WorkbenchGenerationService`; the family chat template still wraps
+  the user text. Acceptable for AskAI; a minor workbench UX regression.
+- **Fix path:** either map each `PromptTask` to a short instruction the panel prepends as the system
+  prompt, or add a neutral task/instruction concept to the API. Tracked as a manual-GUI remainder.
+
+## P8 — Dormant per-family methods + Python Gemma runner remain in the workbench
+
+- The workbench's active generation dispatch now goes through the shared runtime (W4), but the old
+  per-family methods (`runQwenGeneration`/`runT5Generation`/`runSmolLm2Generation`/`runGemma3*`/
+  `runPhi3Summarizer`) and `Gemma3ExternalRuntimeRunner` (+ `gemma3_generate.py`) are left in place,
+  dormant, to avoid a blind mass deletion in a GUI file that cannot be run headlessly here.
+- **Fix path:** delete the dormant methods and the Python runner under interactive GUI verification
+  (they are no longer invoked). The published runtime (`directml-inference`) is already Python-free
+  (enforced by `RuntimeArchitectureTest`); this is workbench-only cleanup.
+
 ## P6 — Phi-3 real run pending (no local weights)
 
 - The package-backed CPU Phi-3 path is wired and compiles, but no Phi-3 weights are present locally

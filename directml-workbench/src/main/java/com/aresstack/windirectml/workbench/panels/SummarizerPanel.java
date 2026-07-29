@@ -20,6 +20,10 @@ import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.prompt.PromptStrategies;
 import com.aresstack.windirectml.inference.prompt.PromptTask;
 import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.catalog.CatalogBackend;
+import com.aresstack.windirectml.inference.api.GenerationException;
+import com.aresstack.windirectml.inference.api.GenerationResult;
+import com.aresstack.windirectml.inference.api.GenerationTokenListener;
 import com.aresstack.windirectml.runtime.facade.Backend;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
@@ -27,6 +31,7 @@ import com.aresstack.windirectml.workbench.artifact.ModelRuntimeRegistry;
 import com.aresstack.windirectml.workbench.artifact.WorkbenchArtifactGate;
 import com.aresstack.windirectml.workbench.runtime.Gemma3ExternalRuntimeRunner;
 import com.aresstack.windirectml.workbench.runtime.SmolLM2WorkbenchRuntimeRunner;
+import com.aresstack.windirectml.workbench.runtime.WorkbenchGenerationService;
 import com.aresstack.windirectml.workbench.prompt.PromptTaskLabels;
 
 import javax.swing.*;
@@ -59,6 +64,9 @@ public final class SummarizerPanel extends JPanel {
 
     private final WorkbenchModel model;
     private final ModelRuntimeRegistry runtimeRegistry;
+    // The shared, neutral generation runtime (same one AskAI uses). The panel routes generation
+    // through this service instead of its own per-family orchestration (W4).
+    private final WorkbenchGenerationService generationService = new WorkbenchGenerationService();
     private final JTextArea inputArea;
     private final JTextArea resultArea;
     private final JComboBox<String> modelSelector;
@@ -247,23 +255,29 @@ public final class SummarizerPanel extends JPanel {
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
+                // W4: single dispatch through the shared neutral GenerationRuntime — no per-family
+                // orchestration, no Python. Model resolution is catalog-driven; the runtime enforces
+                // the backend matrix and loads package-only. (Qwen keeps the shared descriptor's
+                // runtime dir so the status line and the load path agree.)
                 try {
-                    Path modelDir = resolveSummarizerModelDir(selectedModel);
-                    if (qwenTestModel) {
-                        // Qwen 0.5B: use the shared descriptor's runtime dir so the panel status and the
-                        // actual load path agree (directml-int4 / model_q4f16.wdmlpack).
-                        runQwenGeneration(runtimeRegistry.qwen05bRuntimeDir(), promptTask, text, maxTokens, selectedModel, streaming);
-                    } else if (gemma3Model) {
-                        runGemma3Generation(modelDir, promptTask, text, maxTokens, selectedModel, streaming, showProfile);
-                    } else if (smolLm2Model) {
-                        runSmolLm2Generation(modelDir, promptTask, text, maxTokens, streaming);
-                    } else if (isT5Model(selectedModel)) {
-                        runT5Generation(modelDir, promptTask, text, maxTokens, selectedModel, streaming);
+                    Path modelDir = qwenTestModel
+                            ? runtimeRegistry.qwen05bRuntimeDir()
+                            : resolveSummarizerModelDir(selectedModel);
+                    CatalogBackend backend = WorkbenchGenerationService.toCatalogBackend(model.getBackend());
+                    GenerationTokenListener listener = streaming ? token -> appendInline(token.text()) : null;
+                    GenerationResult result = generationService.generate(
+                            selectedModel, modelDir, backend, null, text, maxTokens, listener);
+                    if (streaming) {
+                        appendResult(""); // newline after streamed text
                     } else {
-                        runPhi3Summarizer(modelDir, text, maxTokens);
+                        appendResult(result.text());
                     }
-                } catch (InferenceException ex) {
-                    appendResult("INFERENCE ERROR: " + ex.getMessage());
+                    appendResult("");
+                    appendResult("Backend: " + result.backend() + " | finish: " + result.finishReason()
+                            + " | prompt tokens: " + result.promptTokenCount()
+                            + " | output tokens: " + result.generatedTokenCount());
+                } catch (GenerationException ex) {
+                    appendResult("GENERATION ERROR [" + ex.errorCode() + "]: " + ex.getMessage());
                 } catch (Exception ex) {
                     appendResult("ERROR: " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
                 }
