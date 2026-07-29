@@ -40,9 +40,9 @@ T5 family beyond keying the prompt strategy off the HF repository id.
 | Model | Family | CPU | AUTO | WARP | Status |
 |---|---|---|---|---|---|
 | Qwen/Qwen2.5-Coder-0.5B-Instruct | QWEN | ⟳ | ⟳ | ⟳ | certified-by-reuse* |
-| HuggingFaceTB/SmolLM2-135M-Instruct | SMOLLM2 | — | — | — | pending (adapter W3.2) |
-| HuggingFaceTB/SmolLM2-360M-Instruct | SMOLLM2 | — | — | — | pending (adapter W3.2) |
-| microsoft/Phi-3-mini-4k-instruct-onnx | PHI3 | — | — | n/a | pending |
+| HuggingFaceTB/SmolLM2-135M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | ❌ empty‡ | CPU+AUTO certified |
+| HuggingFaceTB/SmolLM2-360M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | — | CPU+AUTO certified |
+| microsoft/Phi-3-mini-4k-instruct-onnx | PHI3 | ○ | ○ | n/a | package-backed CPU/AUTO wired; DirectML named remainder; real run pending (no weights) |
 | google/gemma-3-270m-it | GEMMA3 | n/a | — | — | pending (gated; needs HF token) |
 
 \* **Qwen — certified by workbench reuse (per instruction).** `QwenGenerationAdapter` wraps the same
@@ -57,6 +57,15 @@ gradlew :directml-inference:test --tests '*PublicApiGenerationSmokeIT' ^
   -Dsmoke.repo=Qwen/Qwen2.5-Coder-0.5B-Instruct -Dsmoke.rawDir=<dir-with-model_q4f16.onnx+config+tokenizer> ^
   -Dsmoke.backend=cpu
 ```
+
+‡ **SmolLM2 software-WARP finding.** With the real 135M model, the D3D12 WARP *software* rasterizer
+path produced empty output through the public API (CPU and AUTO/hardware are fine). The low-level
+SmolLM2 WARP unit tests (17, fixture-based) all pass, so this is a real-weights end-to-end gap not
+covered by fixtures — surfaced exactly by running real models. It does not block the runtime (CPU +
+AUTO cover GPU and GPU-less hosts via AUTO's reference fallback). Open item: either fix the SmolLM2
+software-WARP generation path or narrow the SmolLM2 catalog matrix to {AUTO, CPU}. The catalog was
+**not** changed unilaterally. Reproduce:
+`-Dsmoke.repo=HuggingFaceTB/SmolLM2-135M-Instruct -Dsmoke.backend=warp`.
 
 ## Reranker (W6)
 

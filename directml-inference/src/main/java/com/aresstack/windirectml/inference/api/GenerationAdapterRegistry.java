@@ -44,11 +44,11 @@ final class GenerationAdapterRegistry {
         // InferenceEngine-based families (uniform CatalogBackend.name().toLowerCase() mapping).
         adapters.add(new QwenGenerationAdapter());
         adapters.add(new T5GenerationAdapter());
+        // Bespoke package-backed families.
         adapters.add(new Phi3GenerationAdapter());
-        // SMOLLM2 and GEMMA3 have bespoke runtimes (not InferenceEngine) whose orchestration still
-        // lives in the workbench runners (SmolLM2WorkbenchRuntimeRunner, Gemma3 native-warp routing).
-        // Their adapters are added once that logic is relocated into this neutral module (W3/W4);
-        // until then GenerationRuntime reports UNSUPPORTED_FAMILY for them rather than guessing.
+        adapters.add(new SmolLm2GenerationAdapter());
+        // GEMMA3 adapter follows (native WARP/AUTO only; CPU excluded by the matrix). Until then
+        // GenerationRuntime reports UNSUPPORTED_FAMILY for GEMMA3 rather than guessing a path.
         return new GenerationAdapterRegistry(adapters);
     }
 }

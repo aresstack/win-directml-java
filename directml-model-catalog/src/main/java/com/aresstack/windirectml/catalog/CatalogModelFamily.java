@@ -16,7 +16,9 @@ public enum CatalogModelFamily {
     E5("E5 embedding", "encoder", "encoder.wdmlpack"),
     CROSS_ENCODER("Cross-encoder reranker", "reranker", "reranker.wdmlpack"),
     QWEN("Qwen2.5-Coder", "qwen", "model_q4f16.wdmlpack"),
-    SMOLLM2("SmolLM2", "smollm2", "model_smollm2.wdmlpack"),
+    // The SmolLM2 compiler + lifecycle write a generic "model.wdmlpack" (per-directory), so the
+    // catalog package name matches that runtime reality rather than a family-specific alias.
+    SMOLLM2("SmolLM2", "smollm2", "model.wdmlpack"),
     GEMMA3("Gemma 3", "gemma3", "model_gemma3.wdmlpack"),
     PHI3("Phi-3", "phi3", "model_phi3.wdmlpack"),
     T5("T5/CodeT5", "t5", "model_t5.wdmlpack");
