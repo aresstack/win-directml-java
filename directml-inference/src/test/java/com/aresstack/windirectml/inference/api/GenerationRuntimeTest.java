@@ -70,25 +70,38 @@ class GenerationRuntimeTest {
     }
 
     @Test
-    void presentPackageButNoAdapterYetIsUnsupportedFamily(@TempDir Path dir) throws IOException {
-        LocalRuntimeModelDescriptor qwen = descriptor("Qwen/Qwen2.5-Coder-0.5B-Instruct");
-        // Lay down a stub package so the package-only presence check passes; family dispatch is next.
-        Files.createFile(dir.resolve(qwen.runtimePackageFileName()));
+    void nonGenerationFamilyWithPresentPackageIsUnsupportedFamily(@TempDir Path dir) throws IOException {
+        // Encoder families are not generation families and have no generation adapter. Lay down a
+        // stub package so the package-only presence check passes; family dispatch is next.
+        LocalRuntimeModelDescriptor encoder = descriptor("sentence-transformers/all-MiniLM-L6-v2");
+        Files.createFile(dir.resolve(encoder.runtimePackageFileName()));
         GenerationException ex = assertThrows(GenerationException.class,
-                () -> GenerationRuntime.load(qwen, dir, CatalogBackend.CPU, LoadPolicy.PACKAGE_ONLY));
-        // W2 registers no adapters yet (W3 wires them); this proves ordering: backend + dir + package
-        // all pass, then family lookup fails cleanly rather than NPE-ing.
+                () -> GenerationRuntime.load(encoder, dir, CatalogBackend.CPU, LoadPolicy.PACKAGE_ONLY));
+        // Proves ordering: backend + dir + package all pass, then family lookup fails cleanly.
         assertEquals(GenerationErrorCode.UNSUPPORTED_FAMILY, ex.errorCode());
     }
 
     @Test
     void allowCompilePolicySkipsPackagePresenceCheck(@TempDir Path dir) {
-        LocalRuntimeModelDescriptor qwen = descriptor("Qwen/Qwen2.5-Coder-0.5B-Instruct");
+        LocalRuntimeModelDescriptor encoder = descriptor("sentence-transformers/all-MiniLM-L6-v2");
         // No package on disk, but ALLOW_COMPILE must not raise PACKAGE_MISSING; it proceeds to
-        // family lookup (which is empty in W2) -> UNSUPPORTED_FAMILY.
+        // family lookup (encoder has no generation adapter) -> UNSUPPORTED_FAMILY.
         GenerationException ex = assertThrows(GenerationException.class,
-                () -> GenerationRuntime.load(qwen, dir, CatalogBackend.CPU, LoadPolicy.ALLOW_COMPILE));
+                () -> GenerationRuntime.load(encoder, dir, CatalogBackend.CPU, LoadPolicy.ALLOW_COMPILE));
         assertEquals(GenerationErrorCode.UNSUPPORTED_FAMILY, ex.errorCode());
+    }
+
+    @Test
+    void registeredGenerationFamilyDispatchesToAdapterAndFailsAtInit(@TempDir Path dir)
+            throws IOException {
+        // Qwen IS a registered generation family. With a present-but-empty package and no model
+        // assets, dispatch reaches the adapter and the engine fails to initialize — proving the
+        // adapter is wired (INITIALIZATION_FAILED), not an UNSUPPORTED_FAMILY short-circuit.
+        LocalRuntimeModelDescriptor qwen = descriptor("Qwen/Qwen2.5-Coder-0.5B-Instruct");
+        Files.createFile(dir.resolve(qwen.runtimePackageFileName()));
+        GenerationException ex = assertThrows(GenerationException.class,
+                () -> GenerationRuntime.load(qwen, dir, CatalogBackend.CPU, LoadPolicy.PACKAGE_ONLY));
+        assertEquals(GenerationErrorCode.INITIALIZATION_FAILED, ex.errorCode());
     }
 
     @Test
