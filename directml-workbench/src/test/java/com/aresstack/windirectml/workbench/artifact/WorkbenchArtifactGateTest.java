@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.workbench.artifact;
 
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelFamily;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

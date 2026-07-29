@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.qwen;
 
-import com.aresstack.windirectml.inference.model.TensorStorageKind;
+import com.aresstack.windirectml.modelpack.TensorStorageKind;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -81,7 +81,7 @@ class QwenSafeTensorsModelSourceTest {
         Map<String, Long> offsets = new LinkedHashMap<>();
         long cursor = 0;
         var entries = new ArrayList<>(imported.tensorCatalog().entries().values());
-        entries.sort(Comparator.comparing(com.aresstack.windirectml.inference.model.TensorEntry::name));
+        entries.sort(Comparator.comparing(com.aresstack.windirectml.modelpack.TensorEntry::name));
         for (var entry : entries) {
             offsets.put(entry.name(), cursor);
             cursor += entry.byteLength();

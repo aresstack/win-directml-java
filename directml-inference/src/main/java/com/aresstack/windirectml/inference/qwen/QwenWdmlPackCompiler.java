@@ -1,8 +1,8 @@
 package com.aresstack.windirectml.inference.qwen;
 
-import com.aresstack.windirectml.inference.model.SourceFingerprint;
-import com.aresstack.windirectml.inference.model.SourceTensor;
-import com.aresstack.windirectml.inference.model.WdmlPackWriter;
+import com.aresstack.windirectml.modelpack.SourceFingerprint;
+import com.aresstack.windirectml.modelpack.SourceTensor;
+import com.aresstack.windirectml.modelpack.WdmlPackWriter;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxNode;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
 import org.slf4j.Logger;

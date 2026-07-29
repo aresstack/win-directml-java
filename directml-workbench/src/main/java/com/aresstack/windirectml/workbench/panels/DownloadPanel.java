@@ -2,9 +2,9 @@ package com.aresstack.windirectml.workbench.panels;
 
 import com.aresstack.windirectml.inference.artifact.CompilerMissingLifecycle;
 import com.aresstack.windirectml.inference.artifact.Gemma3PackageLifecycle;
-import com.aresstack.windirectml.inference.artifact.ModelConversionResult;
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
-import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
+import com.aresstack.windirectml.modelpack.ModelConversionResult;
+import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.QwenPackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.SmolLM2PackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.T5PackageLifecycle;

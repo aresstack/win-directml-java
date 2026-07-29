@@ -1,5 +1,12 @@
 package com.aresstack.windirectml.inference.artifact;
 
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.ModelConversionResult;
+import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
+import com.aresstack.windirectml.modelpack.PackageState;
+import com.aresstack.windirectml.modelpack.RawAssetInspection;
+
 import com.aresstack.windirectml.inference.t5.T5CompileOptions;
 import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
 import com.aresstack.windirectml.inference.t5.T5RuntimePackage;

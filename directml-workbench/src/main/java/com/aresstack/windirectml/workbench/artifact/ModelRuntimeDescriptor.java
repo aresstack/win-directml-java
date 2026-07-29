@@ -1,8 +1,8 @@
 package com.aresstack.windirectml.workbench.artifact;
 
-import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
-import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
 
 import java.nio.file.Path;
 import java.util.Objects;

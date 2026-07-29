@@ -1,8 +1,8 @@
 package com.aresstack.windirectml.inference.smollm2;
 
-import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
-import com.aresstack.windirectml.inference.artifact.PackageState;
-import com.aresstack.windirectml.inference.artifact.RawAssetState;
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.PackageState;
+import com.aresstack.windirectml.modelpack.RawAssetState;
 import com.aresstack.windirectml.inference.artifact.SmolLM2PackageLifecycle;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

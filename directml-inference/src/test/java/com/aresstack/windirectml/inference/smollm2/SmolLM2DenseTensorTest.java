@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.smollm2;
 
-import com.aresstack.windirectml.inference.model.RuntimeTensor;
+import com.aresstack.windirectml.modelpack.RuntimeTensor;
 import com.aresstack.windirectml.windows.OnnxModelReader;
 import org.junit.jupiter.api.Test;
 

@@ -2,9 +2,9 @@ package com.aresstack.windirectml.workbench.artifact;
 
 import com.aresstack.windirectml.inference.artifact.DefaultModelArtifactService;
 import com.aresstack.windirectml.inference.artifact.ModelArtifactService;
-import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
-import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.Phi3PackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.QwenPackageLifecycle;
 import com.aresstack.windirectml.inference.artifact.SmolLM2PackageLifecycle;

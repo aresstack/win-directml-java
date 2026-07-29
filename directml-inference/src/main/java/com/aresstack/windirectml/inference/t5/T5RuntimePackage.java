@@ -1,10 +1,10 @@
 package com.aresstack.windirectml.inference.t5;
 
 import com.aresstack.windirectml.inference.model.RuntimeLoadability;
-import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
-import com.aresstack.windirectml.inference.model.RuntimeTensor;
-import com.aresstack.windirectml.inference.model.RuntimeTensorCatalog;
-import com.aresstack.windirectml.inference.model.WdmlPackWriter;
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.RuntimeTensor;
+import com.aresstack.windirectml.modelpack.RuntimeTensorCatalog;
+import com.aresstack.windirectml.modelpack.WdmlPackWriter;
 
 import java.io.IOException;
 import java.nio.file.Path;

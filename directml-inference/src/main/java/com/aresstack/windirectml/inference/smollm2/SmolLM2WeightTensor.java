@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.smollm2;
 
-import com.aresstack.windirectml.inference.model.RuntimeTensor;
+import com.aresstack.windirectml.modelpack.RuntimeTensor;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;

@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.t5;
 
-import com.aresstack.windirectml.inference.model.RuntimeTensor;
+import com.aresstack.windirectml.modelpack.RuntimeTensor;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;

@@ -1,9 +1,9 @@
 package com.aresstack.windirectml.encoder.pack;
 
 import com.aresstack.windirectml.encoder.safetensors.SafetensorsReader;
-import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
-import com.aresstack.windirectml.inference.artifact.PackageState;
-import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.PackageState;
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

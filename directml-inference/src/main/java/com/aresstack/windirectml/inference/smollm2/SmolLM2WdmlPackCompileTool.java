@@ -1,7 +1,7 @@
 package com.aresstack.windirectml.inference.smollm2;
 
-import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
-import com.aresstack.windirectml.inference.model.WdmlPackManifest;
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.WdmlPackManifest;
 
 import java.io.IOException;
 import java.io.PrintStream;

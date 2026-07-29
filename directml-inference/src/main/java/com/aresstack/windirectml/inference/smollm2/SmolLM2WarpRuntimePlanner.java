@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.smollm2;
 
-import com.aresstack.windirectml.inference.model.SourceTensorDataType;
+import com.aresstack.windirectml.modelpack.SourceTensorDataType;
 
 import java.util.ArrayList;
 import java.util.Comparator;

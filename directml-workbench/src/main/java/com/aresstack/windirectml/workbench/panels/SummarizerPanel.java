@@ -19,7 +19,7 @@ import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationProfile;
 import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.prompt.PromptStrategies;
 import com.aresstack.windirectml.inference.prompt.PromptTask;
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelFamily;
 import com.aresstack.windirectml.runtime.facade.Backend;
 import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.workbench.WorkbenchModel;

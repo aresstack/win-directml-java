@@ -1,12 +1,12 @@
 package com.aresstack.windirectml.encoder.pack;
 
-import com.aresstack.windirectml.inference.artifact.ModelArtifactStatus;
-import com.aresstack.windirectml.inference.artifact.ModelConversionResult;
-import com.aresstack.windirectml.inference.artifact.ModelFamily;
-import com.aresstack.windirectml.inference.artifact.ModelPackageLifecycle;
-import com.aresstack.windirectml.inference.artifact.PackageState;
-import com.aresstack.windirectml.inference.artifact.RawAssetInspection;
-import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.ModelConversionResult;
+import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
+import com.aresstack.windirectml.modelpack.PackageState;
+import com.aresstack.windirectml.modelpack.RawAssetInspection;
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
 
 import java.io.IOException;
 import java.nio.file.Files;

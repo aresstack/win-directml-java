@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.qwen;
 
-import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
 
 import java.io.IOException;
 import java.io.PrintStream;

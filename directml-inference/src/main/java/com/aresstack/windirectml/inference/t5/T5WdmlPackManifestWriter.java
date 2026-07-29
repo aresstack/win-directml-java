@@ -1,7 +1,7 @@
 package com.aresstack.windirectml.inference.t5;
 
-import com.aresstack.windirectml.inference.model.SourceFingerprint;
-import com.aresstack.windirectml.inference.model.WdmlPackWriter;
+import com.aresstack.windirectml.modelpack.SourceFingerprint;
+import com.aresstack.windirectml.modelpack.WdmlPackWriter;
 import com.aresstack.windirectml.windows.OnnxModelReader.OnnxTensor;
 
 import java.io.IOException;

@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.qwen;
 
-import com.aresstack.windirectml.inference.model.WdmlPackWriter;
+import com.aresstack.windirectml.modelpack.WdmlPackWriter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.inference.artifact;
+package com.aresstack.windirectml.modelpack;
 
 /**
  * State of the raw, downloaded model source files (SafeTensors / ONNX / checkpoint),

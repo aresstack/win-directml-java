@@ -23,6 +23,7 @@ allprojects {
 ext.publishableModules = [
         'directml-config',
         'directml-model-catalog',
+        'directml-model-package',
         'directml-windows-bindings',
         'directml-encoder',
         'directml-runtime',

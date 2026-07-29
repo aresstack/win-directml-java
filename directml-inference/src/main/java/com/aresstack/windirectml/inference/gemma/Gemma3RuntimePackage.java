@@ -1,8 +1,8 @@
 package com.aresstack.windirectml.inference.gemma;
 
-import com.aresstack.windirectml.inference.model.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
 import com.aresstack.windirectml.inference.model.SafeTensorsReader;
-import com.aresstack.windirectml.inference.model.WdmlPackWriter;
+import com.aresstack.windirectml.modelpack.WdmlPackWriter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

@@ -1,5 +1,8 @@
 package com.aresstack.windirectml.inference.model;
 
+import com.aresstack.windirectml.modelpack.SourceTensor;
+import com.aresstack.windirectml.modelpack.SourceTensorCatalog;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;

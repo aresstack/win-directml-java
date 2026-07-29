@@ -1,7 +1,7 @@
 package com.aresstack.windirectml.inference.smollm2;
 
-import com.aresstack.windirectml.inference.model.RuntimeTensor;
-import com.aresstack.windirectml.inference.model.RuntimeTensorCatalog;
+import com.aresstack.windirectml.modelpack.RuntimeTensor;
+import com.aresstack.windirectml.modelpack.RuntimeTensorCatalog;
 
 import java.io.IOException;
 import java.util.ArrayList;

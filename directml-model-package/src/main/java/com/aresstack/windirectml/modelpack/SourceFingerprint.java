@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.inference.model;
+package com.aresstack.windirectml.modelpack;
 
 import java.io.IOException;
 import java.nio.file.Files;

@@ -1,8 +1,8 @@
 package com.aresstack.windirectml.inference.smollm2;
 
-import com.aresstack.windirectml.inference.model.SourceTensor;
-import com.aresstack.windirectml.inference.model.SourceTensorCatalog;
-import com.aresstack.windirectml.inference.model.WdmlPackWriter;
+import com.aresstack.windirectml.modelpack.SourceTensor;
+import com.aresstack.windirectml.modelpack.SourceTensorCatalog;
+import com.aresstack.windirectml.modelpack.WdmlPackWriter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

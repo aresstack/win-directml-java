@@ -1,6 +1,6 @@
 package com.aresstack.windirectml.inference.qwen;
 
-import com.aresstack.windirectml.inference.model.SourceTensor;
+import com.aresstack.windirectml.modelpack.SourceTensor;
 import com.aresstack.windirectml.windows.OnnxModelReader;
 
 import java.util.ArrayList;

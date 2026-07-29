@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.inference.artifact;
+package com.aresstack.windirectml.modelpack;
 
 /**
  * Model families known to the unified artifact lifecycle.

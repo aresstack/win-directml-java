@@ -1,5 +1,11 @@
 package com.aresstack.windirectml.inference.artifact;
 
+import com.aresstack.windirectml.modelpack.ModelArtifactStatus;
+import com.aresstack.windirectml.modelpack.ModelConversionPlan;
+import com.aresstack.windirectml.modelpack.ModelConversionResult;
+import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.modelpack.ModelPackageLifecycle;
+
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.EnumMap;

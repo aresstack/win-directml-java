@@ -1,5 +1,10 @@
 package com.aresstack.windirectml.inference.model;
 
+import com.aresstack.windirectml.modelpack.RuntimeModelPackage;
+import com.aresstack.windirectml.modelpack.RuntimeTensorCatalog;
+import com.aresstack.windirectml.modelpack.WdmlPackReader;
+import com.aresstack.windirectml.modelpack.WdmlPackWriter;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

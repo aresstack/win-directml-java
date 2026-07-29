@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.inference.model;
+package com.aresstack.windirectml.modelpack;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
