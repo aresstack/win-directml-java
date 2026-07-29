@@ -9,7 +9,6 @@ import com.aresstack.windirectml.inference.InferenceEngine;
 import com.aresstack.windirectml.inference.InferenceException;
 import com.aresstack.windirectml.inference.InferenceRequest;
 import com.aresstack.windirectml.inference.InferenceResult;
-import com.aresstack.windirectml.inference.generation.GenerationFinishReason;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -107,10 +106,10 @@ final class InferenceEngineGenerationHandle implements GenerationModelHandle {
             return GenerationFinishReason.LENGTH;
         }
         if ("error".equals(engineReason)) {
-            return GenerationFinishReason.UNSUPPORTED;
+            return GenerationFinishReason.ERROR;
         }
-        // "end_turn" and any natural stop map to STOP_TOKEN.
-        return GenerationFinishReason.STOP_TOKEN;
+        // "end_turn" and any natural stop map to STOP.
+        return GenerationFinishReason.STOP;
     }
 
     @Override

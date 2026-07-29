@@ -86,25 +86,31 @@ class LocalModelCatalogTest {
 
     @Test
     void backendMatrixMirrorsTheVerifiedRuntimeCode() {
-        // Code-verified per family (QwenInferenceEngine / SmolLM2WorkbenchRuntimeRunner /
-        // Phi3InferenceEngine / T5InferenceEngine / SummarizerPanel gemma path). WARP = software adapter,
-        // AUTO = hardware adapter of the same DirectML path; Phi-3 deliberately has NO WARP path.
+        // Matrix reflects real-model certification through the public generation runtime. WARP =
+        // software adapter, AUTO = hardware adapter of the same DirectML path.
         Set<CatalogBackend> warpAutoCpu = new HashSet<CatalogBackend>(Arrays.asList(
                 CatalogBackend.WARP, CatalogBackend.AUTO, CatalogBackend.CPU));
+        // Qwen + T5/CodeT5: WARP/AUTO/CPU (Qwen via workbench reuse; T5 real-certified on t5-small).
         assertEquals(warpAutoCpu, backends("Qwen/Qwen2.5-Coder-0.5B-Instruct"));
-        assertEquals(warpAutoCpu, backends("HuggingFaceTB/SmolLM2-135M-Instruct"));
-        assertEquals(warpAutoCpu, backends("HuggingFaceTB/SmolLM2-360M-Instruct"));
         assertEquals(warpAutoCpu, backends("google-t5/t5-small"));
         assertEquals(warpAutoCpu, backends("google/flan-t5-small"));
         assertEquals(warpAutoCpu, backends("Salesforce/codet5-small"));
         assertEquals(warpAutoCpu, backends("Salesforce/codet5-base-multi-sum"));
 
+        // SmolLM2: AUTO + CPU. The software-WARP path yields empty output with real weights, so WARP
+        // is withheld from the matrix rather than offered while broken (see problems.md).
+        Set<CatalogBackend> autoCpu = new HashSet<CatalogBackend>(Arrays.asList(
+                CatalogBackend.AUTO, CatalogBackend.CPU));
+        assertEquals(autoCpu, backends("HuggingFaceTB/SmolLM2-135M-Instruct"));
+        assertEquals(autoCpu, backends("HuggingFaceTB/SmolLM2-360M-Instruct"));
+
         assertEquals(new HashSet<CatalogBackend>(Arrays.asList(CatalogBackend.WARP, CatalogBackend.AUTO)),
                 backends("google/gemma-3-270m-it"));
 
-        // Phi-3: cpu/directml/auto — NO WARP (runtime engine has no WARP path).
-        assertEquals(new HashSet<CatalogBackend>(Arrays.asList(
-                        CatalogBackend.CPU, CatalogBackend.DIRECTML, CatalogBackend.AUTO)),
+        // Phi-3: CPU only. The package-backed Phi-3 runtime has only a CPU compute path today; the
+        // DirectML kernels are the raw-ONNX (non-package) path and are not wired to the package
+        // weights yet, so DIRECTML/AUTO stay out of the matrix (see problems.md).
+        assertEquals(new HashSet<CatalogBackend>(Arrays.asList(CatalogBackend.CPU)),
                 backends("microsoft/Phi-3-mini-4k-instruct-onnx"));
         assertFalse(backends("microsoft/Phi-3-mini-4k-instruct-onnx").contains(CatalogBackend.WARP),
                 "Phi-3 has no WARP path");

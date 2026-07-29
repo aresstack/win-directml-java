@@ -1,7 +1,6 @@
 package com.aresstack.windirectml.inference.api;
 
 import com.aresstack.windirectml.catalog.CatalogBackend;
-import com.aresstack.windirectml.inference.generation.GenerationFinishReason;
 
 /**
  * The outcome of a completed generation call.

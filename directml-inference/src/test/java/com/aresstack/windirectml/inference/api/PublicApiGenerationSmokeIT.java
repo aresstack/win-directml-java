@@ -1,5 +1,6 @@
 package com.aresstack.windirectml.inference.api;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -91,13 +92,13 @@ class PublicApiGenerationSmokeIT {
         AtomicInteger streamed = new AtomicInteger();
         try (GenerationModelHandle handle =
                 GenerationRuntime.load(descriptor, pkgDir, backend, LoadPolicy.PACKAGE_ONLY)) {
-            assertTrue(handle.backend() == backend, "handle backend mismatch");
+            assertBackendHonoured(handle.backend(), backend, descriptor, "handle");
             first = handle.generate(GenerationRequest.builder(prompt).maxNewTokens(maxNewTokens).build(),
                     token -> {
                         assertNotNull(token);
                         streamed.incrementAndGet();
                     });
-            assertGenerationSane(first, repo, backend);
+            assertGenerationSane(first, repo, backend, descriptor);
             assertTrue(streamed.get() > 0, "no tokens were streamed for " + repo);
         }
 
@@ -106,7 +107,7 @@ class PublicApiGenerationSmokeIT {
                 GenerationRuntime.load(descriptor, pkgDir, backend, LoadPolicy.PACKAGE_ONLY)) {
             GenerationResult second = reopened.generate(
                     GenerationRequest.builder(prompt).maxNewTokens(maxNewTokens).build());
-            assertGenerationSane(second, repo, backend);
+            assertGenerationSane(second, repo, backend, descriptor);
         }
 
         // 5) Proof of fail-closed package-only: a directory with the assets but NO package must not load.
@@ -119,16 +120,34 @@ class PublicApiGenerationSmokeIT {
                 "expected PACKAGE_MISSING, got " + missing.errorCode());
     }
 
-    private static void assertGenerationSane(GenerationResult r, String repo, CatalogBackend backend) {
+    private static void assertGenerationSane(
+            GenerationResult r, String repo, CatalogBackend requested, LocalRuntimeModelDescriptor d) {
         assertNotNull(r, "null result for " + repo);
         assertNotNull(r.finishReason(), "null finishReason for " + repo);
-        assertTrue(r.backend() == backend, "result backend mismatch for " + repo);
+        assertBackendHonoured(r.backend(), requested, d, "result");
         assertTrue(r.text() != null && !r.text().trim().isEmpty(),
-                "empty generated text for " + repo + " on " + backend);
+                "empty generated text for " + repo + " on " + requested);
         assertTrue(r.generatedTokenCount() > 0,
-                "no generated tokens for " + repo + " on " + backend);
+                "no generated tokens for " + repo + " on " + requested);
         assertFalse(r.text().contains("NaN") || r.text().contains("Infinity"),
                 "output contains NaN/Infinity marker for " + repo);
+    }
+
+    /**
+     * An explicit backend (CPU/WARP/DIRECTML) must be honoured exactly — no silent switch. AUTO may
+     * resolve to any backend in the model's matrix (e.g. hardware or CPU fallback).
+     */
+    private static void assertBackendHonoured(
+            CatalogBackend actual, CatalogBackend requested, LocalRuntimeModelDescriptor d, String where) {
+        assertNotNull(actual, where + " backend is null");
+        if (requested == CatalogBackend.AUTO) {
+            assertTrue(d.supportedBackends().contains(actual) || actual == CatalogBackend.CPU,
+                    where + " AUTO resolved to " + actual + " which is outside the matrix "
+                            + d.supportedBackends());
+        } else {
+            assertEquals(requested, actual,
+                    where + " explicit backend " + requested + " must not silently switch to " + actual);
+        }
     }
 
     private static CatalogBackend resolveBackend(LocalRuntimeModelDescriptor descriptor) {

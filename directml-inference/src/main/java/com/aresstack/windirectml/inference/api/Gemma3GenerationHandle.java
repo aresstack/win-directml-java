@@ -4,7 +4,6 @@ import com.aresstack.windirectml.catalog.CatalogBackend;
 import com.aresstack.windirectml.catalog.CatalogModelFamily;
 import com.aresstack.windirectml.catalog.LocalRuntimeModelDescriptor;
 import com.aresstack.windirectml.inference.gemma.Gemma3NativeWarpRuntime;
-import com.aresstack.windirectml.inference.generation.GenerationFinishReason;
 import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.prompt.PromptStrategies;
 import com.aresstack.windirectml.inference.prompt.PromptTask;
@@ -83,7 +82,7 @@ final class Gemma3GenerationHandle implements GenerationModelHandle {
         if (r.contains("length") || r.contains("max")) {
             return GenerationFinishReason.LENGTH;
         }
-        return GenerationFinishReason.STOP_TOKEN;
+        return GenerationFinishReason.STOP;
     }
 
     @Override

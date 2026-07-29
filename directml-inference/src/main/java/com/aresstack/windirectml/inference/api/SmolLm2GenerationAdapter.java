@@ -44,29 +44,51 @@ final class SmolLm2GenerationAdapter implements FamilyGenerationAdapter {
             SmolLM2Tokenizer tokenizer = SmolLM2Tokenizer.load(tokenizerFile,
                     Files.isRegularFile(tokenizerConfig) ? tokenizerConfig : null);
             int maxPos = pkg.config().maxPositionEmbeddings();
-            SmolLM2Runtime runtime = loadRuntime(context.backend(), pkg, tokenizer, maxPos);
-            return new SmolLm2GenerationHandle(context.descriptor(), context.backend(), runtime);
+            Loaded loaded = loadRuntime(context.backend(), pkg, tokenizer, maxPos);
+            // Report the ACTUAL backend the runtime resolved to, not the requested one — AUTO may
+            // legitimately resolve to CPU, and that must be visible to the caller.
+            return new SmolLm2GenerationHandle(context.descriptor(), loaded.actualBackend, loaded.runtime);
         } catch (IOException e) {
             throw new GenerationException(GenerationErrorCode.PACKAGE_NOT_LOADABLE,
                     "could not open SmolLM2 package " + context.runtimePackageFile() + ": " + e.getMessage(), e);
         }
     }
 
-    private static SmolLM2Runtime loadRuntime(CatalogBackend backend, SmolLM2RuntimePackage pkg,
+    private static Loaded loadRuntime(CatalogBackend backend, SmolLM2RuntimePackage pkg,
             SmolLM2Tokenizer tokenizer, int maxPos) {
         if (backend == CatalogBackend.CPU) {
-            return SmolLM2Runtime.loadReference(pkg, tokenizer);
+            return new Loaded(SmolLM2Runtime.loadReference(pkg, tokenizer), CatalogBackend.CPU);
         }
-        boolean warpReady = warpReady(pkg, maxPos);
         if (backend == CatalogBackend.AUTO) {
-            return warpReady
-                    ? SmolLM2Runtime.loadAuto(pkg, tokenizer, maxPos, "auto")
-                    : SmolLM2Runtime.loadReference(pkg, tokenizer);
+            // AUTO: use a device when ready, otherwise fall back to the CPU reference — and report the
+            // backend actually chosen. This is the documented AUTO contract, not a silent switch.
+            if (warpReady(pkg, maxPos)) {
+                return new Loaded(SmolLM2Runtime.loadAuto(pkg, tokenizer, maxPos, "auto"), CatalogBackend.AUTO);
+            }
+            return new Loaded(SmolLM2Runtime.loadReference(pkg, tokenizer), CatalogBackend.CPU);
         }
-        // WARP
-        return warpReady
-                ? SmolLM2Runtime.loadWarp(pkg, tokenizer, maxPos, "warp")
-                : SmolLM2Runtime.loadReference(pkg, tokenizer);
+        if (backend == CatalogBackend.WARP) {
+            // Explicit WARP must run WARP or fail — never silently fall back to CPU. (WARP is currently
+            // withheld from the SmolLM2 catalog matrix; this remains as a fail-closed guard.)
+            if (!warpReady(pkg, maxPos)) {
+                throw new GenerationException(GenerationErrorCode.UNSUPPORTED_BACKEND,
+                        "SmolLM2 WARP requested but the D3D12 WARP adapter is not ready; no silent CPU "
+                                + "fallback for an explicit backend");
+            }
+            return new Loaded(SmolLM2Runtime.loadWarp(pkg, tokenizer, maxPos, "warp"), CatalogBackend.WARP);
+        }
+        throw new GenerationException(GenerationErrorCode.UNSUPPORTED_BACKEND,
+                "SmolLM2 does not support backend " + backend);
+    }
+
+    private static final class Loaded {
+        final SmolLM2Runtime runtime;
+        final CatalogBackend actualBackend;
+
+        Loaded(SmolLM2Runtime runtime, CatalogBackend actualBackend) {
+            this.runtime = runtime;
+            this.actualBackend = actualBackend;
+        }
     }
 
     private static boolean warpReady(SmolLM2RuntimePackage pkg, int maxPos) {

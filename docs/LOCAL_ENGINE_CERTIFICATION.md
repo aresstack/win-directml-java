@@ -14,6 +14,11 @@ Driven by the opt-in `PublicApiGenerationSmokeIT` (structural invariants: non-em
 generated-token count > 0, streamed tokens, finish reason, no NaN/Infinity). Host: Windows 11,
 RTX 5080 (16 GB), Zulu 25, Gradle 9.0.
 
+**Status vocabulary** — `REAL_CERTIFIED` (full package-only chain green on a real model via the
+public API) · `PROVEN_RUNTIME_REUSED` (wired to the exact shipping engine path; public-API run not
+executed here) · `CONTRACT_TESTED` (code + dispatch tests green; real run not possible here) ·
+`EXTERNALLY_BLOCKED` (gated/credential) · `FAILED`. Open findings: see `problems.md`.
+
 Reproduce one model:
 
 ```
@@ -30,8 +35,9 @@ gradlew :directml-inference:test --tests '*PublicApiGenerationSmokeIT' ^
 | Salesforce/codet5-small | torch checkpoint (pytorch_model.bin) | ✅ | — | — | BPE tokenizer (vocab.json+merges.txt) |
 | Salesforce/codet5-base-multi-sum | torch checkpoint (892 MB) | ✅ | — | — | BPE tokenizer |
 
-The WARP/AUTO DirectML path is engine-level (identical across all T5 checkpoints) and is fully
-proven on t5-small across CPU/AUTO/WARP. Per-variant CPU certification exercises each model's own
+All four T5 models are **REAL_CERTIFIED**. The WARP/AUTO DirectML path is engine-level (identical
+across all T5 checkpoints) and is fully proven on t5-small across CPU/AUTO/WARP. Per-variant CPU
+certification exercises each model's own
 weight-import (safetensors vs. torch checkpoint) and tokenizer. No code fixes were required for the
 T5 family beyond keying the prompt strategy off the HF repository id.
 
@@ -39,11 +45,14 @@ T5 family beyond keying the prompt strategy off the HF repository id.
 
 | Model | Family | CPU | AUTO | WARP | Status |
 |---|---|---|---|---|---|
-| Qwen/Qwen2.5-Coder-0.5B-Instruct | QWEN | ⟳ | ⟳ | ⟳ | certified-by-reuse* |
-| HuggingFaceTB/SmolLM2-135M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | ❌ empty‡ | CPU+AUTO certified |
-| HuggingFaceTB/SmolLM2-360M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | — | CPU+AUTO certified |
-| microsoft/Phi-3-mini-4k-instruct-onnx | PHI3 | ○ | ○ | n/a | package-backed CPU/AUTO wired; DirectML named remainder; real run pending (no weights) |
-| google/gemma-3-270m-it | GEMMA3 | n/a | ⛔ | ⛔ | adapter + contract test built; real run externally blocked (no HF token)† |
+| Qwen/Qwen2.5-Coder-0.5B-Instruct | QWEN | ⟳ | ⟳ | ⟳ | **PROVEN_RUNTIME_REUSED*** |
+| HuggingFaceTB/SmolLM2-135M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | removed‡ | **REAL_CERTIFIED** (CPU+AUTO) |
+| HuggingFaceTB/SmolLM2-360M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | removed‡ | **REAL_CERTIFIED** (CPU+AUTO) |
+| microsoft/Phi-3-mini-4k-instruct-onnx | PHI3 | wired | n/a | n/a | **CONTRACT_TESTED** — matrix limited to CPU (P2); real run pending, no weights (P6) |
+| google/gemma-3-270m-it | GEMMA3 | n/a | ⛔ | ⛔ | **EXTERNALLY_BLOCKED** — adapter + contract test built (P4)† |
+
+Matrix note: SmolLM2 catalog backends narrowed to `{AUTO, CPU}` (WARP withheld, P1); Phi-3 narrowed
+to `{CPU}` (package-backed GPU not wired, P2).
 
 \* **Qwen — certified by workbench reuse (per instruction).** `QwenGenerationAdapter` wraps the same
 `QwenInferenceEngine` the shipping workbench (`SummarizerPanel.runQwenGeneration`) uses, on the
@@ -58,13 +67,11 @@ gradlew :directml-inference:test --tests '*PublicApiGenerationSmokeIT' ^
   -Dsmoke.backend=cpu
 ```
 
-‡ **SmolLM2 software-WARP finding.** With the real 135M model, the D3D12 WARP *software* rasterizer
-path produced empty output through the public API (CPU and AUTO/hardware are fine). The low-level
-SmolLM2 WARP unit tests (17, fixture-based) all pass, so this is a real-weights end-to-end gap not
-covered by fixtures — surfaced exactly by running real models. It does not block the runtime (CPU +
-AUTO cover GPU and GPU-less hosts via AUTO's reference fallback). Open item: either fix the SmolLM2
-software-WARP generation path or narrow the SmolLM2 catalog matrix to {AUTO, CPU}. The catalog was
-**not** changed unilaterally. Reproduce:
+‡ **SmolLM2 software-WARP finding (P1).** With the real 135M model, the D3D12 WARP *software*
+rasterizer produced empty output through the public API (CPU and AUTO/hardware are fine); the
+fixture-based WARP unit tests pass, so this is a real-weights end-to-end gap. **Decision:** WARP is
+removed from the SmolLM2 catalog matrix (now `{AUTO, CPU}`) rather than offered while broken, and the
+adapter fails closed on an explicit WARP request instead of silently using CPU. Reproduce/fix:
 `-Dsmoke.repo=HuggingFaceTB/SmolLM2-135M-Instruct -Dsmoke.backend=warp`.
 
 † **Gemma 3 externally blocked.** `google/gemma-3-270m-it` is a gated Hugging Face repo and no HF
@@ -80,6 +87,12 @@ gradlew :directml-inference:test --tests '*PublicApiGenerationSmokeIT' ^
 
 ## Reranker (W6)
 
-| Model | CPU | DirectML/WARP | Ranking (A>B) | Catalog status |
-|---|---|---|---|---|
-| cross-encoder/ms-marco-MiniLM-L12-v2 | — | — | — | UNVERIFIED (pending W6) |
+| Model | Compile | Ranking A>B (CPU) | Ranking A>B (WARP) | Package-only load | Catalog status |
+|---|---|---|---|---|---|
+| cross-encoder/ms-marco-MiniLM-L12-v2 | ✅ | ✅ | ✅ | ❌ (P3) | **UNVERIFIED** |
+
+L12 ranking is correct on CPU and WARP through the public `LocalMlRuntime` facade (`PF4J plugin
+framework` → the PF4J doc outranks the off-topic doc). It stays **UNVERIFIED** because the mandatory
+package-only load is not satisfiable: the reranker load path requires `model.safetensors` present
+even though weights come from `reranker.wdmlpack` (P3 in problems.md). Promote to RUNNABLE only after
+the completeness check is relaxed and the package-only test passes. No catalog change was made to L12.

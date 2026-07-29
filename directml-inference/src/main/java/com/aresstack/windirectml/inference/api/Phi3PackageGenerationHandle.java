@@ -3,7 +3,6 @@ package com.aresstack.windirectml.inference.api;
 import com.aresstack.windirectml.catalog.CatalogBackend;
 import com.aresstack.windirectml.catalog.CatalogModelFamily;
 import com.aresstack.windirectml.catalog.LocalRuntimeModelDescriptor;
-import com.aresstack.windirectml.inference.generation.GenerationFinishReason;
 import com.aresstack.windirectml.inference.phi3.Phi3Runtime;
 import com.aresstack.windirectml.inference.phi3.Phi3Tokenizer;
 import com.aresstack.windirectml.inference.phi3.Phi3Weights;
@@ -64,7 +63,7 @@ final class Phi3PackageGenerationHandle implements GenerationModelHandle {
                     });
             int generated = index[0];
             GenerationFinishReason finishReason = generated >= request.maxNewTokens()
-                    ? GenerationFinishReason.LENGTH : GenerationFinishReason.STOP_TOKEN;
+                    ? GenerationFinishReason.LENGTH : GenerationFinishReason.STOP;
             GenerationResult result = new GenerationResult(
                     text == null ? "" : text.strip(), finishReason, promptTokenCount, generated,
                     backend, descriptor.runtimeModelId());

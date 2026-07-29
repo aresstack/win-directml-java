@@ -18,7 +18,7 @@ import java.util.Objects;
  * @param backend            the validated requested backend
  * @param loadPolicy         package-only vs. allow-compile
  */
-public record GenerationModelContext(
+record GenerationModelContext(
         LocalRuntimeModelDescriptor descriptor,
         Path modelDirectory,
         Path runtimePackageFile,

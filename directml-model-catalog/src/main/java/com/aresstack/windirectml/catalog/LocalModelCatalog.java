@@ -122,9 +122,12 @@ public final class LocalModelCatalog {
                 .sourceFormat(SourceFormat.ONNX_INT4)
                 .tokenizerFamily("sentencepiece")
                 .chatTemplate("phi3")
-                // Phi3InferenceEngine accepts cpu/directml/auto — there is NO WARP path for Phi-3 (verified
-                // against the runtime code; the sidecar's -Dphi3.backend offers exactly auto/directml/cpu).
-                .backends(CatalogBackend.CPU, CatalogBackend.DIRECTML, CatalogBackend.AUTO)
+                // The neutral runtime loads Phi-3 package-backed (model_phi3.wdmlpack via Phi3Runtime),
+                // which currently has only a CPU compute path — the DirectML kernels in
+                // Phi3InferenceEngine are the raw-ONNX (non-package) path and are not wired to the
+                // package weights yet (see problems.md). The matrix is limited to the truly working
+                // package-backed backend; DIRECTML/AUTO return to the matrix once wired + real-tested.
+                .backends(CatalogBackend.CPU)
                 .runtimeDirectoryName("phi-3-mini-4k-instruct-onnx")
                 .downloadManifest(new DownloadManifest("microsoft/Phi-3-mini-4k-instruct-onnx", Arrays.asList(
                         new DownloadFile("directml/directml-int4-awq-block-128/model.onnx", "model.onnx", true),
@@ -198,9 +201,11 @@ public final class LocalModelCatalog {
                 .sourceFormat(SourceFormat.SAFETENSORS)
                 .tokenizerFamily("bpe")
                 .chatTemplate("raw")
-                // SmolLM2WorkbenchRuntimeRunner: WARP (software rasterizer) and AUTO (hardware) both degrade
-                // to the CPU reference runtime when no device is present; CPU reference is a real path too.
-                .backends(CatalogBackend.WARP, CatalogBackend.AUTO, CatalogBackend.CPU)
+                // Real-model certification: CPU (reference) and AUTO (native DirectML on a hardware
+                // adapter, else reference) are green. The D3D12 WARP *software* rasterizer produced
+                // empty output with the real weights (see problems.md / LOCAL_ENGINE_CERTIFICATION.md),
+                // so WARP is withheld from the matrix rather than offered while broken.
+                .backends(CatalogBackend.AUTO, CatalogBackend.CPU)
                 .runtimeDirectoryName(dirName)
                 .downloadManifest(new DownloadManifest(repo, LocalRuntimeModelDescriptor.filesAtRoot(
                         new String[]{"model.safetensors", "tokenizer.json", "config.json",

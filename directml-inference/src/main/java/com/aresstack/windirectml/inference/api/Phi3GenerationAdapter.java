@@ -16,12 +16,11 @@ import java.nio.file.Path;
  * exactly like the workbench's package-backed Phi-3 path — never raw ONNX, never ONNX Runtime, never
  * Python.
  *
- * <p>Backends: the certified package-backed compute path is CPU (also used for AUTO, whose contract
- * permits a CPU outcome). Phi-3 has no WARP mode ({@link GenerationRuntime} rejects WARP via the
- * matrix). Explicit {@code DIRECTML} for the package-backed runtime is a named remainder: the only
- * GPU Phi-3 path in the tree today is the raw-ONNX {@code Phi3InferenceEngine}, which is not
- * package-only, so it is intentionally not wired here until the package-backed GPU path is verified
- * on the real model (see docs/LOCAL_ENGINE_CERTIFICATION.md).
+ * <p>Backend: the package-backed Phi-3 runtime ({@code Phi3Runtime}) currently has only a CPU compute
+ * path, so the catalog matrix is limited to {@code CPU}. The DirectML kernels in
+ * {@code Phi3InferenceEngine} are the raw-ONNX (non-package) path and are not wired to the package
+ * weights yet; until they are, DIRECTML/AUTO are not in the matrix and are rejected as
+ * {@code UNSUPPORTED_BACKEND} rather than failing at init (see problems.md).
  */
 final class Phi3GenerationAdapter implements FamilyGenerationAdapter {
 
@@ -32,11 +31,11 @@ final class Phi3GenerationAdapter implements FamilyGenerationAdapter {
 
     @Override
     public GenerationModelHandle open(GenerationModelContext context) {
-        if (context.backend() == CatalogBackend.DIRECTML) {
-            throw new GenerationException(GenerationErrorCode.INITIALIZATION_FAILED,
-                    "Phi-3 package-backed DirectML is not yet wired in the neutral runtime; the "
-                            + "certified package-only path is CPU (AUTO also runs CPU). Named remainder "
-                            + "pending real-model GPU verification.");
+        if (context.backend() != CatalogBackend.CPU) {
+            // Defensive: the catalog matrix (CPU only) plus GenerationRuntime's check should already
+            // have rejected this. A non-implemented combination is UNSUPPORTED_BACKEND, not a failure.
+            throw new GenerationException(GenerationErrorCode.UNSUPPORTED_BACKEND,
+                    "Phi-3 package-backed runtime supports only CPU today; got " + context.backend());
         }
         Path tokenizerFile = context.modelDirectory().resolve("tokenizer.json");
         if (!Files.isRegularFile(tokenizerFile)) {

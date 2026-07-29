@@ -13,10 +13,11 @@ import com.aresstack.windirectml.catalog.CatalogModelFamily;
  * tokenizer/chat-template, and producing a neutral {@link GenerationResult}. Backend admissibility
  * is already enforced by {@link GenerationRuntime} before {@link #open} is called.
  *
- * <p>This is an SPI internal to the module; it is public only so per-family adapters in sibling
- * packages can implement it. It is not part of the AskAI-facing contract.
+ * <p>This is an SPI internal to the module (package-private): it is not part of the stable
+ * AskAI-facing contract and AskAI is not expected to implement it. Family adapters live in this
+ * same package.
  */
-public interface FamilyGenerationAdapter {
+interface FamilyGenerationAdapter {
 
     /** The catalog family this adapter serves. */
     CatalogModelFamily family();

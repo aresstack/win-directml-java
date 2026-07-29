@@ -41,15 +41,19 @@ class GenerationRuntimeTest {
     }
 
     @Test
-    void phi3WithWarpIsUnsupportedBackend(@TempDir Path dir) {
+    void phi3NonCpuBackendsAreUnsupported(@TempDir Path dir) {
         LocalRuntimeModelDescriptor phi3 = descriptor("microsoft/Phi-3-mini-4k-instruct-onnx");
-        GenerationException ex = assertThrows(GenerationException.class,
-                () -> GenerationRuntime.load(phi3, dir, CatalogBackend.WARP));
-        assertEquals(GenerationErrorCode.UNSUPPORTED_BACKEND, ex.errorCode());
-        // Phi-3 has no WARP mode in the code — the matrix must not fake one.
-        assertTrue(!phi3.supportedBackends().contains(CatalogBackend.WARP));
+        // The package-backed Phi-3 runtime is CPU-only today, so the matrix is CPU only; WARP and
+        // DIRECTML are rejected as UNSUPPORTED_BACKEND (a non-implemented combo, not an init failure).
+        for (CatalogBackend b : new CatalogBackend[] {CatalogBackend.WARP, CatalogBackend.DIRECTML,
+                CatalogBackend.AUTO}) {
+            GenerationException ex = assertThrows(GenerationException.class,
+                    () -> GenerationRuntime.load(phi3, dir, b));
+            assertEquals(GenerationErrorCode.UNSUPPORTED_BACKEND, ex.errorCode(), "for backend " + b);
+        }
         assertTrue(phi3.supportedBackends().contains(CatalogBackend.CPU));
-        assertTrue(phi3.supportedBackends().contains(CatalogBackend.DIRECTML));
+        assertTrue(!phi3.supportedBackends().contains(CatalogBackend.DIRECTML));
+        assertTrue(!phi3.supportedBackends().contains(CatalogBackend.WARP));
     }
 
     @Test
