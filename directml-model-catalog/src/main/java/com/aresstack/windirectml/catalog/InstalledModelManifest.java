@@ -24,6 +24,12 @@ public final class InstalledModelManifest {
     public static final int CURRENT_SCHEMA_VERSION = 2;
     /** The historical reranker-only schema version. */
     public static final int LEGACY_RERANKER_SCHEMA_VERSION = 1;
+    /**
+     * A sentinel a codec passes for a {@code schemaVersion} field that is PRESENT but not an integer
+     * (a string, a fractional number, …). It is distinct from an ABSENT field (which is historical v1):
+     * a present-but-invalid version is {@link ManifestValidation#INVALID_MANIFEST}, never a silent fallback.
+     */
+    public static final int SCHEMA_VERSION_MALFORMED = Integer.MIN_VALUE;
 
     private final int schemaVersion;
     private final String virtualName;
@@ -95,26 +101,45 @@ public final class InstalledModelManifest {
      * {@link #getSchemaVersion()} when it was parsed into this object.
      */
     public ManifestValidation validate(int declaredSchemaVersion) {
+        if (declaredSchemaVersion == SCHEMA_VERSION_MALFORMED) {
+            // schemaVersion present but not an integer — never a silent fallback to v1.
+            return ManifestValidation.INVALID_MANIFEST;
+        }
         if (virtualName.isEmpty() || huggingFaceRepository.isEmpty()) {
             return ManifestValidation.INVALID_MANIFEST;
         }
         if (declaredSchemaVersion == LEGACY_RERANKER_SCHEMA_VERSION) {
-            // v1: the exact historical reranker format only — capability rerank, plausible ids, and a
-            // missing state is historical RUNNABLE. A present state, if any, must be RUNNABLE.
-            if (!capabilities.contains(ModelCapability.RERANK.token())) {
-                return ManifestValidation.INVALID_MANIFEST;
-            }
+            // v1: the EXACT historical reranker format, validated against the real RUNNABLE catalog entry.
+            // A missing state is historical RUNNABLE; a present state, if any, must be RUNNABLE.
             if (!state.isEmpty() && !"RUNNABLE".equalsIgnoreCase(state)) {
                 return ManifestValidation.INVALID_MANIFEST;
+            }
+            LocalRuntimeModelDescriptor descriptor =
+                    LocalModelCatalog.findByRepositoryId(huggingFaceRepository);
+            if (descriptor == null) {
+                return ManifestValidation.CATALOG_ENTRY_MISSING;
+            }
+            // Only a runnable reranker entry, with EXACTLY {rerank}, the exact virtual id + runtime id, and
+            // (when the old manifest carried them) the exact expected backends.
+            if (!descriptor.isRunnable()
+                    || !descriptor.hasCapability(ModelCapability.RERANK)
+                    || !descriptor.virtualModelName().equals(virtualName)
+                    || !descriptor.runtimeModelId().equals(runtimeModelId)
+                    || !sameSet(capabilities, expectedCapabilityTokens(descriptor))
+                    || (!supportedBackends.isEmpty()
+                            && !sameSet(supportedBackends, expectedBackendTokens(descriptor)))) {
+                return ManifestValidation.CATALOG_MISMATCH;
             }
             return ManifestValidation.VALID;
         }
         if (declaredSchemaVersion == CURRENT_SCHEMA_VERSION) {
-            // v2: state must be explicitly RUNNABLE; all runtime facts must be present; then they must
-            // match the catalog. No implicit RUNNABLE, no invented capabilities.
+            // v2: state must be explicitly RUNNABLE; all runtime facts AND provenance must be present; then
+            // they must match the catalog. No implicit RUNNABLE, no invented capabilities, no blank
+            // provenance (v2 is written only by the new installer, so blank values are never legitimate).
             if (!"RUNNABLE".equalsIgnoreCase(state)
                     || runtimeFamily.isEmpty() || runtimePackage.isEmpty() || sourceFormat.isEmpty()
-                    || capabilities.isEmpty() || runtimeModelId.isEmpty()) {
+                    || capabilities.isEmpty() || runtimeModelId.isEmpty()
+                    || resolvedRevision.isEmpty() || installedAt <= 0L) {
                 return ManifestValidation.INVALID_MANIFEST;
             }
             LocalRuntimeModelDescriptor descriptor =
