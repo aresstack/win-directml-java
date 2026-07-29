@@ -39,11 +39,24 @@ T5 family beyond keying the prompt strategy off the HF repository id.
 
 | Model | Family | CPU | AUTO | WARP | Status |
 |---|---|---|---|---|---|
-| Qwen/Qwen2.5-Coder-0.5B-Instruct | QWEN | — | — | — | pending |
+| Qwen/Qwen2.5-Coder-0.5B-Instruct | QWEN | ⟳ | ⟳ | ⟳ | certified-by-reuse* |
 | HuggingFaceTB/SmolLM2-135M-Instruct | SMOLLM2 | — | — | — | pending (adapter W3.2) |
 | HuggingFaceTB/SmolLM2-360M-Instruct | SMOLLM2 | — | — | — | pending (adapter W3.2) |
 | microsoft/Phi-3-mini-4k-instruct-onnx | PHI3 | — | — | n/a | pending |
 | google/gemma-3-270m-it | GEMMA3 | n/a | — | — | pending (gated; needs HF token) |
+
+\* **Qwen — certified by workbench reuse (per instruction).** `QwenGenerationAdapter` wraps the same
+`QwenInferenceEngine` the shipping workbench (`SummarizerPanel.runQwenGeneration`) uses, on the
+identical construction + backend path. One wiring nuance was fixed: the adapter now derives the ONNX
+variant name from the catalog package name (`model_q4f16.wdmlpack` → `model_q4f16.onnx`) so the
+engine's package resolution matches the catalog (the 3-arg default `model.onnx` would have looked for
+`model.wdmlpack`). The public-API package-only run was skipped at the user's request; reproduce with:
+
+```
+gradlew :directml-inference:test --tests '*PublicApiGenerationSmokeIT' ^
+  -Dsmoke.repo=Qwen/Qwen2.5-Coder-0.5B-Instruct -Dsmoke.rawDir=<dir-with-model_q4f16.onnx+config+tokenizer> ^
+  -Dsmoke.backend=cpu
+```
 
 ## Reranker (W6)
 
