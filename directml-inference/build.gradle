@@ -1,6 +1,10 @@
 dependencies {
     // The shared wdmlpack/lifecycle contract moved to the published module.
     api project(':directml-model-package')
+    // The neutral, dependency-free Java-8 catalog is the single source of truth for model
+    // resolution and the allowed-backend matrix; the public generation API (…inference.api)
+    // resolves LocalRuntimeModelDescriptor / CatalogBackend from it.
+    api project(':directml-model-catalog')
     api project(':directml-config')
     implementation project(':directml-windows-bindings')
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
