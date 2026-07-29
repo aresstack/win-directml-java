@@ -90,6 +90,20 @@ FAILED               real run attempted and failed
   (they are no longer invoked). The published runtime (`directml-inference`) is already Python-free
   (enforced by `RuntimeArchitectureTest`); this is workbench-only cleanup.
 
+## P9 — GPU device hang (TDR) blocks the WARP kernel test suite in a full run
+
+- **Symptom:** after ~2 hours of cumulative heavy DirectML certification runs, a full
+  `gradlew clean build` fails 14 `gemma.*Warp*` / `warp.*` GPU-kernel tests with
+  `WindowsNativeException: D3D12CreateDevice failed: HRESULT DXGI_ERROR_DEVICE_HUNG (0x887A0006)`.
+- **Cause:** a transient GPU device hang / Timeout Detection & Recovery on the RTX 5080 from sustained
+  DirectML stress — an environment state, **not a code regression**. These are code paths this branch
+  does not touch, and the same GPU paths passed earlier this session (t5-small AUTO/WARP, SmolLM2
+  AUTO, L12 WARP ranking). `clean build -x test` (all modules compile/assemble) and every non-GPU test
+  suite (catalog, config, model-package, inference arch + api validation, workbench, runtime L12) are
+  green; the certified real-model smokes ran green before the device degraded.
+- **Fix path:** reset the GPU state (driver reset / reboot) and re-run `gradlew clean build`; the WARP
+  tests are device-gated (`assumeTrue(WindowsBindings.isSupported())`) and pass on a healthy device.
+
 ## P6 — Phi-3 real run pending (no local weights)
 
 - The package-backed CPU Phi-3 path is wired and compiles, but no Phi-3 weights are present locally
