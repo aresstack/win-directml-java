@@ -96,24 +96,41 @@ FAILED               real run attempted and failed
   in the process (the adapter now derives `model_q4f16.onnx` from the catalog package name so the
   engine resolves `model_q4f16.wdmlpack`). Reproduce command in the certification log.
 
-## P7 — Neutral API has no PromptTask; workbench task selector degraded on the shared path
+## P7 — Workbench task selector degraded on the shared path — CODE_COMPLETE, MANUAL_GUI_VERIFICATION_PENDING
 
-- The public `GenerationRequest` models `systemPrompt` + `userPrompt` only (AskAI maps its own
-  chat/generate). The workbench's `PromptTask` selector (summarize/translate/explain) is therefore
-  not applied when routing through `WorkbenchGenerationService`; the family chat template still wraps
-  the user text. Acceptable for AskAI; a minor workbench UX regression.
-- **Fix path:** either map each `PromptTask` to a short instruction the panel prepends as the system
-  prompt, or add a neutral task/instruction concept to the API. Tracked as a manual-GUI remainder.
+- **Was:** the public `GenerationRequest` models `systemPrompt` + `userPrompt` only, so the workbench's
+  `PromptTask` selector (summarize/translate/explain) was dropped when routing through
+  `WorkbenchGenerationService` — the family chat template wrapped the raw user text with no task.
+- **Fix (done, no neutral-API change):** `WorkbenchGenerationService.generate(...)` now takes the
+  selected `PromptTask` and renders the family-correct prompt via the shared `PromptStrategies`
+  pipeline (T5 prefix, ChatML/Gemma user-turn, Phi-3 system-turn), passing the result as `userPrompt`
+  with a null system prompt. This is not workbench prompt logic — it delegates to the same strategy the
+  runtime uses. The runtime renders once more with `PromptTask.NONE`, but every strategy is idempotent
+  (detects its own markers / task prefix and passes through), so the template applies **exactly once**.
+  `SummarizerPanel.runSummarizer()` now hands the captured `promptTask` to the service.
+- **Tests:** `WorkbenchPromptRenderingTest` — T5+SUMMARIZE (one prefix), ChatML+TRANSLATE_TO_GERMAN
+  (one template, instruction once in the user turn), Gemma+SUMMARIZE (one turn template),
+  Phi-3+TRANSLATE_TO_ENGLISH (one template, instruction in the system turn), NONE (no instruction,
+  family template still once), all verified idempotent under the runtime's second render.
+- **Remaining:** manual GUI check (task selection works for chat + T5, output stays readable,
+  streaming + buffered both work).
 
-## P8 — Dormant per-family methods + Python Gemma runner remain in the workbench
+## P8 — Dormant per-family methods + Python Gemma runner removed — CODE_COMPLETE, MANUAL_GUI_VERIFICATION_PENDING
 
-- The workbench's active generation dispatch now goes through the shared runtime (W4), but the old
-  per-family methods (`runQwenGeneration`/`runT5Generation`/`runSmolLm2Generation`/`runGemma3*`/
-  `runPhi3Summarizer`) and `Gemma3ExternalRuntimeRunner` (+ `gemma3_generate.py`) are left in place,
-  dormant, to avoid a blind mass deletion in a GUI file that cannot be run headlessly here.
-- **Fix path:** delete the dormant methods and the Python runner under interactive GUI verification
-  (they are no longer invoked). The published runtime (`directml-inference`) is already Python-free
-  (enforced by `RuntimeArchitectureTest`); this is workbench-only cleanup.
+- **Was:** the active dispatch went through the shared runtime (W4), but the old per-family methods
+  (`runQwenGeneration`/`runT5Generation`/`runSmolLm2Generation`/`runGemma3*`/`runPhi3Summarizer`) and
+  `Gemma3ExternalRuntimeRunner` (+ `gemma3_generate.py`) were left in place, dormant.
+- **Fix (done):** deleted the dormant per-family methods and their helpers (`validateQwen/T5ModelFiles`,
+  `appendSmolLm2*`, the `UiTokenSink`, `gemmaUsesNativeDirectMl`/`gemmaAdapterMode`), the
+  `Gemma3ExternalRuntimeRunner` class and the `gemma3_generate.py` resource. Removed the stale active
+  UI hints that contradicted the product contract: the Gemma "legacy external Python/Transformers path"
+  note and the "WARP runs SmolLM2 …" note (Gemma = no Python; SmolLM2 = AUTO/CPU only, WARP
+  unsupported). `SmolLM2WorkbenchRuntimeRunner` is kept (a separate, independently tested class).
+- **Guard:** `WorkbenchPythonFreeArchitectureTest` asserts the `.py` resource is gone, the
+  `Gemma3ExternalRuntimeRunner` class does not exist, and `SummarizerPanel` declares none of the
+  removed methods. `RuntimeArchitectureTest` already keeps the published runtime Python-free; the
+  Gemma path now lives entirely in the neutral runtime.
+- **Remaining:** manual GUI check (no Python/legacy messages appear in the panel).
 
 ## P9 — GPU device hang (TDR) blocks the WARP kernel test suite in a full run
 
