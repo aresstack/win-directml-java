@@ -21,8 +21,18 @@ import java.util.List;
  * because the reranker landscape is more heterogeneous than the E5
  * embedding family, and the on-disk config is the single source of
  * truth anyway. We do <b>require</b> a present {@code config.json},
- * {@code tokenizer.json} and {@code model.safetensors} so wrong model
+ * {@code tokenizer.json} and {@code reranker.wdmlpack} so wrong model
  * directories fail loudly instead of silently producing bogus scores.
+ * <p>
+ * The completeness check requires the runtime package
+ * ({@code reranker.wdmlpack}), <b>not</b> the raw {@code model.safetensors}:
+ * {@link RerankerCpuWeights#load} reads weights exclusively from the
+ * package, so a package-only install directory (no raw weights) is a
+ * first-class, fully supported layout. Requiring the artefact that is
+ * actually consumed keeps the check fail-closed — an un-converted
+ * directory that still has only {@code model.safetensors} fails with a
+ * clear "run Convert" message instead of passing the check and then
+ * failing deep in the loader.
  * <p>
  * Tokenisation re-uses the existing {@link WordPieceTokenizer}; once
  * SentencePiece-based rerankers (e.g. bge-reranker-v2-m3) are added
@@ -111,14 +121,22 @@ public final class BertCrossEncoderRerankers {
                 PoolingStrategy.MEAN, /* normalize */ false);
     }
 
-    /** Required artefacts for a BERT-WordPiece cross-encoder reranker directory. */
+    /**
+     * Required artefacts for a BERT-WordPiece cross-encoder reranker directory.
+     * <p>
+     * The weights entry is the runtime package ({@code reranker.wdmlpack}) — the
+     * exact artefact {@link RerankerCpuWeights#load} consumes — so a package-only
+     * directory (no raw {@code model.safetensors}) loads cleanly, and an
+     * un-converted directory fails closed with the repair hint below.
+     */
     private static final List<String> REQUIRED_FILES =
-            List.of("model.safetensors", "tokenizer.json", "config.json");
+            List.of(com.aresstack.windirectml.encoder.pack.EncoderWdmlPack.RERANKER_PACKAGE_FILE,
+                    "tokenizer.json", "config.json");
 
     private static final String REPAIR_HINT =
-            "Repair: re-download via the Workbench Download tab (\"Download Reranker "
-                    + "(ms-marco-MiniLM-L-6-v2)\") with \"Force re-download\" enabled, "
-                    + "or delete the folder and download again.";
+            "Repair: in the Workbench Download tab, \"Check\" the reranker "
+                    + "(ms-marco-MiniLM-L-6-v2) and then \"Convert\" to (re)build "
+                    + "reranker.wdmlpack; or force a re-download and convert again.";
 
     private static void verifyDir(Path modelDir) throws EmbeddingException {
         ModelAssetValidation.requireModelFiles(modelDir, "Reranker", REQUIRED_FILES, REPAIR_HINT);

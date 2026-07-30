@@ -46,13 +46,15 @@ public final class LocalModelCatalog {
         e.add(reranker("cross-encoder/ms-marco-MiniLM-L6-v2", "MS_MARCO_MINILM_L6",
                 "cross-encoder-ms-marco-MiniLM-L-6-v2", ModelStatus.RUNNABLE,
                 "Shipped ms-marco cross-encoder (RAW_LOGIT scores)."));
-        // L-12 has only an enum directory-name placeholder in directml-runtime: no manifest, no test, no
-        // registry entry. It stays UNVERIFIED (NOT a local recommendation) until a real compile + CPU +
-        // DirectML/WARP + ranking smoke proves it; only then may it be promoted to RUNNABLE.
+        // L-12 stays UNVERIFIED (NOT a local recommendation) until a real compile + CPU + DirectML/WARP +
+        // ranking smoke proves it; only then may it be promoted to RUNNABLE. The former package-only load
+        // blocker (P3 — the loader demanded model.safetensors) is fixed: package-only loading now works on
+        // CPU (proven with the L6 package) and the L12 package-only investigation (RerankerL12CertificationIT)
+        // asserts the success path. Promotion is gated only on running that opt-in real CPU + WARP smoke green.
         e.add(reranker("cross-encoder/ms-marco-MiniLM-L12-v2", "MS_MARCO_MINILM_L12",
                 "cross-encoder-ms-marco-MiniLM-L-12-v2", ModelStatus.UNVERIFIED,
-                "Placeholder only: needs real compile + CPU + DirectML/WARP + ranking verification "
-                        + "before it may become a RUNNABLE local recommendation."));
+                "Needs the real CPU + DirectML/WARP package-only ranking smoke to run green before it may "
+                        + "become a RUNNABLE local recommendation (package-only load blocker P3 is fixed)."));
 
         // ---- Causal LM ----
         // Qwen2.5-Coder-0.5B: the runnable path is the ONNX INT4 (Q4F16) build from onnx-community, compiled

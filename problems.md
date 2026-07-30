@@ -42,18 +42,30 @@ FAILED               real run attempted and failed
 - **Fix path:** feed `Phi3RuntimePackage.weights()` into `Phi3GpuKernels`/`Phi3GpuPipeline`, add a
   package-backed DIRECTML/AUTO path, real-test it, then restore DIRECTML/AUTO to the matrix.
 
-## P3 — Reranker load is not strictly package-only
+## P3 — Reranker load is not strictly package-only — FIXED (L12 promotion pending real smoke)
 
-- **Cause:** `BertCrossEncoderRerankers.REQUIRED_FILES` = `{model.safetensors, tokenizer.json,
-  config.json}` — the reranker load validates that `model.safetensors` is **present** even though the
+- **Cause (was):** `BertCrossEncoderRerankers.REQUIRED_FILES` = `{model.safetensors, tokenizer.json,
+  config.json}` — the reranker load validated that `model.safetensors` is **present** even though the
   weights are read from `reranker.wdmlpack`. A package-only directory (no raw weights) therefore
-  fails with "Reranker model directory is incomplete".
-- **Impact:** cross-encoder/ms-marco-MiniLM-L12-v2 **ranking is correct** (compile + load + score
-  A>B green on CPU and WARP), but the mandatory package-only load is not satisfied, so **L12 stays
-  UNVERIFIED**. The same limitation affects the already-RUNNABLE L6 under a strict package-only bar.
-- **Fix path:** relax the reranker completeness check to accept `reranker.wdmlpack` in lieu of
-  `model.safetensors`, and confirm `DirectMlReranker` reads weights from the package (not the loose
-  safetensors); then re-run the L12 package-only test and promote L12 to RUNNABLE.
+  failed with "Reranker model directory is incomplete".
+- **Root fact:** `RerankerCpuWeights.load` already reads weights **exclusively** from
+  `reranker.wdmlpack` (`EncoderWdmlPack.openWeightsReader`); `model.safetensors` was never read on the
+  load path. The only blocker was the completeness check.
+- **Fix (done):** the completeness check now requires the artefact that is actually consumed —
+  `REQUIRED_FILES` = `{reranker.wdmlpack, tokenizer.json, config.json}` — instead of the raw
+  `model.safetensors`. This is **fail-closed, not a relaxation**: a package-only directory loads, and
+  an un-converted directory that still has only `model.safetensors` fails with a clear "run Convert"
+  repair hint. Both L6 and L12 now honour the package-only contract.
+- **Proof:**
+  - `RerankerPackageOnlyLoadTest` (directml-encoder, device-free): a package-only dir clears the
+    completeness check; a raw-weights-only dir fails "incomplete" naming `reranker.wdmlpack`.
+  - Real L6 package-only rank on **CPU** (copy of the shipped L6 dir minus `model.safetensors`):
+    PF4J > Tomatensuppe green.
+  - `RerankerL12CertificationIT.packageOnlyLoadIsSupported` now asserts the success path (opt-in
+    `-Dwindirectml.rerank.l12.dir=<dir>`).
+- **Remaining before L12 → RUNNABLE:** run the opt-in real L6/L12 package-only ranking smoke green on
+  **CPU and WARP** (needs the L12 download + a healthy GPU; WARP not run here — see P9), then flip the
+  L12 catalog entry from UNVERIFIED to RUNNABLE.
 
 ## P4 — Gemma 3 real run externally blocked
 

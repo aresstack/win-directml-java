@@ -2,11 +2,9 @@ package com.aresstack.windirectml.runtime.facade;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.aresstack.windirectml.encoder.EmbeddingException;
 import com.aresstack.windirectml.encoder.pack.EncoderPackageLifecycle;
 import com.aresstack.windirectml.encoder.reranker.RerankResult;
 import com.aresstack.windirectml.windows.WindowsBindings;
@@ -26,11 +24,11 @@ import org.junit.jupiter.api.Test;
  * <ol>
  *   <li><b>Ranking works</b>: compile {@code reranker.wdmlpack}, load, and score
  *       {@code score(relevant) &gt; score(off-topic)} on CPU (and WARP when a device is present).</li>
- *   <li><b>Package-only is NOT yet satisfied</b>: loading from a directory that has the package +
- *       tokenizer/config but no {@code model.safetensors} fails, because the reranker load path
- *       ({@code BertCrossEncoderRerankers.REQUIRED_FILES}) still requires the raw weights to be
- *       present. Per the certification rule (package-only load is mandatory) L12 therefore stays
- *       UNVERIFIED in the catalog — see problems.md for the precise cause and fix.</li>
+ *   <li><b>Package-only load works</b> (P3 fixed): loading from a directory that has the package +
+ *       tokenizer/config but <b>no</b> {@code model.safetensors} succeeds and ranks correctly,
+ *       because the reranker load path consumes {@code reranker.wdmlpack} and the completeness check
+ *       now requires exactly that package. When both facts run green on CPU and WARP, L12 may be
+ *       promoted from UNVERIFIED to RUNNABLE in the catalog — see problems.md P3.</li>
  * </ol>
  *
  * Opt-in: {@code -Dwindirectml.rerank.l12.dir=<downloaded-dir>} (forwarded by the root build).
@@ -70,9 +68,10 @@ class RerankerL12CertificationIT {
     }
 
     @Test
-    void packageOnlyLoadIsNotYetSupported() throws Exception {
-        // Documents the reason L12 stays UNVERIFIED: the reranker requires model.safetensors present
-        // even though weights load from reranker.wdmlpack, so a package-only directory cannot load.
+    void packageOnlyLoadIsSupported() throws Exception {
+        // P3 fixed: a package-only directory (reranker.wdmlpack + tokenizer/config, no raw weights)
+        // loads and ranks correctly, because the load path consumes reranker.wdmlpack and the
+        // completeness check now requires exactly that package.
         Path rawDir = rawDir();
         EncoderPackageLifecycle.reranker().convert(rawDir, true);
         Path pkgDir = Files.createTempDirectory("wdml-reranker-l12-pkgonly-");
@@ -80,9 +79,15 @@ class RerankerL12CertificationIT {
         assertTrue(Files.isRegularFile(pkgDir.resolve("reranker.wdmlpack")));
         assertNoRawWeights(pkgDir);
 
-        EmbeddingException ex = assertThrows(EmbeddingException.class, () -> rankOnce(Backend.CPU, pkgDir));
-        assertTrue(ex.getMessage() != null && ex.getMessage().toLowerCase(Locale.ROOT).contains("incomplete"),
-                "expected an incomplete-model-dir error, got: " + ex.getMessage());
+        RankOutcome cpu = rankOnce(Backend.CPU, pkgDir);
+        assertRankingSane(cpu, "CPU (package-only)");
+
+        if (WindowsBindings.isSupported()) {
+            RankOutcome warp = rankOnce(Backend.WARP, pkgDir);
+            assertRankingSane(warp, "WARP (package-only)");
+            assertEquals(cpu.topOriginalIndex, warp.topOriginalIndex,
+                    "CPU and WARP disagree on the top-ranked document in the package-only directory");
+        }
     }
 
     private static void assertRankingSane(RankOutcome outcome, String backend) {
