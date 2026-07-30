@@ -96,7 +96,7 @@ FAILED               real run attempted and failed
   in the process (the adapter now derives `model_q4f16.onnx` from the catalog package name so the
   engine resolves `model_q4f16.wdmlpack`). Reproduce command in the certification log.
 
-## P7 — Workbench task selector degraded on the shared path — CODE_COMPLETE, MANUAL_GUI_VERIFICATION_PENDING
+## P7 — Workbench task selector degraded on the shared path — DONE
 
 - **Was:** the public `GenerationRequest` models `systemPrompt` + `userPrompt` only, so the workbench's
   `PromptTask` selector (summarize/translate/explain) was dropped when routing through
@@ -112,10 +112,15 @@ FAILED               real run attempted and failed
   (one template, instruction once in the user turn), Gemma+SUMMARIZE (one turn template),
   Phi-3+TRANSLATE_TO_ENGLISH (one template, instruction in the system turn), NONE (no instruction,
   family template still once), all verified idempotent under the runtime's second render.
-- **Remaining:** manual GUI check (task selection works for chat + T5, output stays readable,
-  streaming + buffered both work).
+- **Manual GUI verification:** accepted by user (2026-07-30). Code commit 0e50c42. Observed in the
+  running workbench (T5 t5-small; SmolLM2-135M for chat, AUTO): the task prefix/template is applied
+  exactly once (no `summarize: summarize:`, no leaked prompt markers such as `<|im_start|>`/`<|end|>`),
+  `PromptTask.NONE` injects no task directive, and streaming + buffered each render the output once.
+  Output *quality* was not assessed — only sub-0.5B models are available locally, which cannot produce
+  judgeable translations/summaries; that is model capability, out of scope for this change. The
+  deterministic exactly-once proof is `WorkbenchPromptRenderingTest` (model-independent).
 
-## P8 — Dormant per-family methods + Python Gemma runner removed — CODE_COMPLETE, MANUAL_GUI_VERIFICATION_PENDING
+## P8 — Dormant per-family methods + Python Gemma runner removed — DONE
 
 - **Was:** the active dispatch went through the shared runtime (W4), but the old per-family methods
   (`runQwenGeneration`/`runT5Generation`/`runSmolLm2Generation`/`runGemma3*`/`runPhi3Summarizer`) and
@@ -130,7 +135,10 @@ FAILED               real run attempted and failed
   `Gemma3ExternalRuntimeRunner` class does not exist, and `SummarizerPanel` declares none of the
   removed methods. `RuntimeArchitectureTest` already keeps the published runtime Python-free; the
   Gemma path now lives entirely in the neutral runtime.
-- **Remaining:** manual GUI check (no Python/legacy messages appear in the panel).
+- **Manual GUI verification:** accepted by user (2026-07-30). No Python/Transformers/external-runtime/
+  legacy messages appeared in the panel across the runs; the SmolLM2 note shows only AUTO/CPU (WARP
+  marked unsupported). Dormant per-family paths and the Python Gemma runner are removed and guarded by
+  `WorkbenchPythonFreeArchitectureTest`.
 
 ## P9 — GPU device hang (TDR) blocks the WARP kernel test suite in a full run
 
