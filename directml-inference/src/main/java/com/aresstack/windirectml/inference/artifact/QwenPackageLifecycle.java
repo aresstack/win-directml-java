@@ -25,8 +25,18 @@ import java.util.List;
  * <p>The package file name is variant-specific (e.g. {@code model_q4f16.wdmlpack}); it is resolved
  * the same way the loader resolves it ({@link QwenWdmlPackCompileTool#resolvePackagePath}) so the
  * lifecycle checks exactly the package the runtime would load.</p>
+ *
+ * <p>The ONNX source file name is resolved against the directory rather than fixed: the onnx-community
+ * export ships a self-contained {@code model_q4f16.onnx} (INT4, the catalog's runnable Qwen build, no
+ * external data), while the base fp32 build is {@code model.onnx} + {@code model.onnx_data}. The lifecycle
+ * prefers the configured name, then {@code model_q4f16.onnx}, then {@code model.onnx}, so the compiled
+ * package name (e.g. {@code model_q4f16.wdmlpack}) and the external-data requirement always match the
+ * actual weights present.</p>
  */
 public final class QwenPackageLifecycle implements ModelPackageLifecycle {
+
+    /** onnx-community's self-contained INT4 export; preferred when present (no external data file). */
+    private static final String Q4F16_MODEL_FILE = "model_q4f16.onnx";
 
     private final String modelFileName;
 
@@ -51,16 +61,36 @@ public final class QwenPackageLifecycle implements ModelPackageLifecycle {
 
     @Override
     public Path defaultPackagePath(Path modelDir) {
-        return QwenWdmlPackCompileTool.resolvePackagePath(modelDir, modelFileName);
+        return QwenWdmlPackCompileTool.resolvePackagePath(modelDir, resolveModelFileName(modelDir));
+    }
+
+    /**
+     * Resolve the ONNX source file actually present in {@code dir}. For a SafeTensors-configured lifecycle
+     * the configured name is returned unchanged; for the ONNX path the first existing of the configured
+     * name, {@code model_q4f16.onnx} and {@code model.onnx} wins, falling back to the configured name so
+     * error messages still name a concrete expected file.
+     */
+    private String resolveModelFileName(Path modelDir) {
+        if (!isOnnxSource(modelFileName)) {
+            return modelFileName;
+        }
+        for (String candidate : new String[]{modelFileName, Q4F16_MODEL_FILE,
+                QwenModelDirValidator.DEFAULT_MODEL_FILE}) {
+            if (Files.isRegularFile(modelDir.resolve(candidate))) {
+                return candidate;
+            }
+        }
+        return modelFileName;
     }
 
     @Override
     public ModelArtifactStatus inspect(Path modelDir) {
         Path dir = modelDir.toAbsolutePath().normalize();
+        String sourceFile = resolveModelFileName(dir);
         // Raw = the convertible source. For the q4f16/ONNX runtime path (model_q4f16.onnx) require the
         // ONNX file; for the SafeTensors path require any *.safetensors.
-        RawAssetInspection.Result raw = isOnnxSource()
-                ? RawAssetInspection.inspect(dir, List.of("config.json", modelFileName), List.of())
+        RawAssetInspection.Result raw = isOnnxSource(sourceFile)
+                ? RawAssetInspection.inspect(dir, List.of("config.json", sourceFile), List.of())
                 : RawAssetInspection.inspect(dir, List.of("config.json"), List.of(List.of("*.safetensors")));
         Path pkg = defaultPackagePath(dir);
         PackageState packageState;
@@ -96,19 +126,21 @@ public final class QwenPackageLifecycle implements ModelPackageLifecycle {
     @Override
     public ModelConversionResult convert(Path modelDir, boolean force) throws IOException {
         Path dir = modelDir.toAbsolutePath().normalize();
-        Path output = defaultPackagePath(dir);
+        String sourceFile = resolveModelFileName(dir);
+        boolean onnx = isOnnxSource(sourceFile);
+        Path output = QwenWdmlPackCompileTool.resolvePackagePath(dir, sourceFile);
         // Pick the convert path that matches the runtime source: q4f16/ONNX or SafeTensors.
-        QwenWdmlPackCompileTool.CompileResult result = isOnnxSource()
-                ? QwenWdmlPackCompileTool.compileOnnxDirectory(dir, modelFileName, output, force)
+        QwenWdmlPackCompileTool.CompileResult result = onnx
+                ? QwenWdmlPackCompileTool.compileOnnxDirectory(dir, sourceFile, output, force)
                 : QwenWdmlPackCompileTool.compileSafeTensorsDirectory(
                         new QwenWdmlPackCompileTool.CompileOptions(dir, output, true, false, false, force));
         return new ModelConversionResult(result.runtimeLoadable(), result.output(),
-                "Qwen compile (" + (isOnnxSource() ? "q4f16/onnx" : "safetensors") + "): runtimeLoadable="
+                "Qwen compile (" + (onnx ? "q4f16/onnx" : "safetensors") + "): runtimeLoadable="
                         + result.runtimeLoadable() + ", mode=" + result.runtimeLoadMode()
                         + ", tensors=" + result.tensorCount());
     }
 
-    private boolean isOnnxSource() {
-        return modelFileName.endsWith(".onnx");
+    private static boolean isOnnxSource(String fileName) {
+        return fileName.endsWith(".onnx");
     }
 }
