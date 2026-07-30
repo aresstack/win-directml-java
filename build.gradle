@@ -22,12 +22,16 @@ allprojects {
 // directly instead of depending on this repository's legacy JSON-RPC sidecar.
 ext.publishableModules = [
         'directml-config',
+        'directml-model-catalog',
         'directml-model-package',
         'directml-windows-bindings',
         'directml-encoder',
         'directml-runtime',
-        // Legacy beta modules kept in source but intentionally not published:
-        // 'directml-inference',
+        // Published from 0.2.0: the neutral, swing-free generation runtime consumed by AskAI's
+        // Java-21 sidecar. Public API is com.aresstack.windirectml.inference.api; the rest of the
+        // module ships as implementation detail with no compatibility guarantee.
+        'directml-inference',
+        // Sidecar / Java-8 bridge modules remain unpublished:
         // 'directml-sidecar-protocol-java8',
         // 'directml-sidecar-client-java8',
         // 'directml-sidecar',
@@ -182,6 +186,9 @@ configure(subprojects.findAll { it.name in publishableModules }) {
             if (project.findProperty('java8Module') != true) {
                 options.addBooleanOption('-enable-preview', true)
                 options.addStringOption('-source', '21')
+                // directml-inference uses the incubator Vector API; javadoc needs the module on the
+                // path too (the compiler flag does not propagate to the javadoc tool).
+                options.addStringOption('-add-modules', 'jdk.incubator.vector')
             }
         }
     }

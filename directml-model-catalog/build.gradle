@@ -1,0 +1,37 @@
+// Neutral, Java-8-compatible model catalog: the single machine-readable source of truth for every
+// win-directml-java model family (id, status, capabilities, source format, download manifest, runtime
+// family, wdmlpack package name, backends). Consumed by the Java-8 host applications (AskAI, the
+// workbench) AND by the Java-21 sidecar/runtime so nobody re-declares model metadata. Depends only on
+// directml-config (the existing Java-8 classification registries) — never on Swing, inference or runtime
+// code. Must stay strictly Java-8-compatible: no records, no `var`, no switch-expressions, no `List.of`.
+ext.java8Module = true
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+compileTestJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+dependencies {
+    // The neutral catalog is the DEPENDENCY ROOT: it declares every model itself and depends on NO other
+    // project, so directml-config's legacy registries can delegate to (or be parity-tested against) it
+    // without creating a cycle. Direction is therefore directml-config -> directml-model-catalog.
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}

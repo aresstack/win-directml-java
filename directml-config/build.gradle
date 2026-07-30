@@ -26,6 +26,11 @@ tasks.withType(Test).configureEach {
 }
 
 dependencies {
+    // The neutral catalog is the dependency root; directml-config binds to it in TEST scope so a strict
+    // parity test keeps the legacy GenerationModelRegistry from drifting away from LocalModelCatalog.
+    // (No main dependency yet — the registries stay independent adapters until they are rewired to derive.)
+    testImplementation project(':directml-model-catalog')
+
     // java8Module: the root subprojects convention skips this module (build.gradle ~line 47), so the JUnit
     // deps are declared here. Use the JUnit BOM (same 5.10.2 as every other module) so
     // junit-platform-launcher resolves to a concrete, BOM-aligned version (1.10.2) instead of an unversioned

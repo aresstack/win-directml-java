@@ -3,30 +3,16 @@ package com.aresstack.windirectml.workbench.panels;
 import com.aresstack.windirectml.config.generation.GenerationModelRegistry;
 import com.aresstack.windirectml.config.generation.GenerationModelRegistry.Entry;
 import com.aresstack.windirectml.config.generation.GenerationOutputMode;
-import com.aresstack.windirectml.inference.GenerationTokenSink;
-import com.aresstack.windirectml.inference.GeneratedToken;
-import com.aresstack.windirectml.inference.InferenceException;
-import com.aresstack.windirectml.inference.InferenceRequest;
-import com.aresstack.windirectml.inference.InferenceResult;
-import com.aresstack.windirectml.inference.Phi3Summarizer;
-import com.aresstack.windirectml.inference.qwen.QwenInferenceEngine;
-import com.aresstack.windirectml.inference.qwen.QwenModelDirValidator;
-import com.aresstack.windirectml.inference.t5.T5InferenceEngine;
-import com.aresstack.windirectml.inference.gemma.Gemma3NativeWarpProfileReport;
-import com.aresstack.windirectml.inference.gemma.Gemma3NativeWarpRuntime;
-import com.aresstack.windirectml.inference.gemma.Gemma3RuntimeMode;
-import com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationProfile;
-import com.aresstack.windirectml.inference.prompt.PromptInput;
 import com.aresstack.windirectml.inference.prompt.PromptStrategies;
 import com.aresstack.windirectml.inference.prompt.PromptTask;
-import com.aresstack.windirectml.modelpack.ModelFamily;
+import com.aresstack.windirectml.catalog.CatalogBackend;
+import com.aresstack.windirectml.inference.api.GenerationException;
+import com.aresstack.windirectml.inference.api.GenerationResult;
+import com.aresstack.windirectml.inference.api.GenerationTokenListener;
 import com.aresstack.windirectml.runtime.facade.Backend;
-import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
 import com.aresstack.windirectml.workbench.artifact.ModelRuntimeRegistry;
-import com.aresstack.windirectml.workbench.artifact.WorkbenchArtifactGate;
-import com.aresstack.windirectml.workbench.runtime.Gemma3ExternalRuntimeRunner;
-import com.aresstack.windirectml.workbench.runtime.SmolLM2WorkbenchRuntimeRunner;
+import com.aresstack.windirectml.workbench.runtime.WorkbenchGenerationService;
 import com.aresstack.windirectml.workbench.prompt.PromptTaskLabels;
 
 import javax.swing.*;
@@ -39,9 +25,11 @@ import java.util.List;
 /**
  * Decoder-backed text generation panel for the DirectML Workbench.
  * <p>
- * The Workbench is the manual test surface for decoder runtimes. Phi-3 uses
- * the summarizer adapter, while Qwen can be selected to exercise the local
- * CPU generation path directly.
+ * The Workbench is the manual test surface for decoder runtimes. All generation is dispatched through
+ * the shared, neutral {@link WorkbenchGenerationService} → {@code GenerationRuntime} (the exact runtime
+ * AskAI uses). The panel keeps no per-family orchestration and no Python bridge: it resolves the selected
+ * model against the neutral catalog, applies the chosen {@link PromptTask} via the shared
+ * {@link PromptStrategies} pipeline, and lets the runtime enforce the backend matrix and package-only load.
  */
 public final class SummarizerPanel extends JPanel {
 
@@ -49,16 +37,11 @@ public final class SummarizerPanel extends JPanel {
     private static final String GEMMA3_MODEL_ID_PREFIX = "google/gemma-3-";
     private static final String SMOLLM2_MODEL_ID_PREFIX = "HuggingFaceTB/SmolLM2-";
 
-    /** Diagnostic toggle ({@code -Dsmollm2.debug.prompt=true}): show the rendered prompt and
-     *  effective model config in the output panel. Off by default to keep normal output lean. */
-    private static final boolean DEBUG_PROMPT = Boolean.getBoolean("smollm2.debug.prompt");
-
-    /** Developer/debug toggle ({@code -Ddirectml.generation.profile=true}, default false): emit the detailed
-     *  phase/WARP-counter runtime profile to the output panel. Diagnostic property only — no UI control. */
-    private static final boolean SHOW_PROFILE = Boolean.getBoolean("directml.generation.profile");
-
     private final WorkbenchModel model;
     private final ModelRuntimeRegistry runtimeRegistry;
+    // The shared, neutral generation runtime (same one AskAI uses). The panel routes generation
+    // through this service instead of its own per-family orchestration (W4).
+    private final WorkbenchGenerationService generationService = new WorkbenchGenerationService();
     private final JTextArea inputArea;
     private final JTextArea resultArea;
     private final JComboBox<String> modelSelector;
@@ -213,24 +196,19 @@ public final class SummarizerPanel extends JPanel {
 
         int maxTokens = (Integer) maxTokensSpinner.getValue();
         boolean streaming = streamingCheckbox.isSelected();
-        boolean showProfile = SHOW_PROFILE;
         appendResult("Loading generation model: " + selectedModel
                 + " (backend: " + model.getBackend() + ", maxTokens: " + maxTokens
                 + ", output: " + (streaming ? "streaming" : "buffered") + ")...");
         if (qwenTestModel) {
             appendResult("  NOTE: Qwen acceleration depends on WARP/AUTO and the selected package source (see Config/Download tabs).");
         } else if (gemma3Model) {
-            if (gemmaUsesNativeDirectMl(model.getBackend())) {
-                appendResult("  NOTE: Gemma 3 runs the native Java/DirectML runtime on the "
-                        + (model.getBackend() == Backend.WARP ? "WARP software" : "hardware (AUTO)") + " adapter; no Python.");
-                appendResult("  NOTE: Weights load from the compiled model_gemma3.wdmlpack.");
-            } else {
-                appendResult("  NOTE: Gemma 3 uses the legacy external local Python/Transformers path (Backend = CPU).");
-            }
+            appendResult("  NOTE: Gemma 3 runs the native Java/DirectML runtime on WARP/AUTO; weights load from the "
+                    + "compiled model_gemma3.wdmlpack. No Python. CPU is not offered for Gemma — the runtime rejects "
+                    + "it as UNSUPPORTED_BACKEND.");
         } else if (smolLm2Model) {
-            appendResult("  NOTE: WARP runs SmolLM2's dense projections on the D3D12 software rasterizer (CPU); "
-                    + "AUTO uses a hardware GPU when one exists and otherwise falls back to the Java reference "
-                    + "runtime. Either way norms/RoPE/attention/KV-cache stay on CPU.");
+            appendResult("  NOTE: SmolLM2 runs on AUTO or CPU. AUTO uses hardware DirectML when available and may "
+                    + "resolve to the CPU reference runtime; explicit CPU uses the reference runtime. Software WARP "
+                    + "is currently unsupported (problems.md P1).");
             appendResult("  NOTE: Requires a prebuilt model.wdmlpack. Use the Download tab -> Convert; inference never compiles.");
         } else if (isT5Model(selectedModel)) {
             appendResult("  NOTE: T5-family models run only from a prebuilt .wdmlpack. Use the Download tab -> Convert; inference never compiles.");
@@ -240,30 +218,35 @@ public final class SummarizerPanel extends JPanel {
                     + "reference path. All curated T5 models (google-t5/t5-small, google/flan-t5-small, "
                     + "Salesforce/codet5-small, Salesforce/codet5-base-multi-sum) are correctness-certified (CPU == WARP, "
                     + "greedy; T5-REALMODEL-CERT-1..4). No Python on any T5 path.");
-            appendResult("  NOTE: The exact stage routing is printed below as the execution mode (e.g. 'reference' or "
-                    + "'warp-encoder-boundary+warp-decoder-boundary+warp-lm-head').");
         }
 
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
+                // W4: single dispatch through the shared neutral GenerationRuntime — no per-family
+                // orchestration, no Python. Model resolution is catalog-driven; the runtime enforces
+                // the backend matrix and loads package-only. The selected PromptTask is applied by the
+                // service via the shared family-aware PromptStrategies (P7). (Qwen keeps the shared
+                // descriptor's runtime dir so the status line and the load path agree.)
                 try {
-                    Path modelDir = resolveSummarizerModelDir(selectedModel);
-                    if (qwenTestModel) {
-                        // Qwen 0.5B: use the shared descriptor's runtime dir so the panel status and the
-                        // actual load path agree (directml-int4 / model_q4f16.wdmlpack).
-                        runQwenGeneration(runtimeRegistry.qwen05bRuntimeDir(), promptTask, text, maxTokens, selectedModel, streaming);
-                    } else if (gemma3Model) {
-                        runGemma3Generation(modelDir, promptTask, text, maxTokens, selectedModel, streaming, showProfile);
-                    } else if (smolLm2Model) {
-                        runSmolLm2Generation(modelDir, promptTask, text, maxTokens, streaming);
-                    } else if (isT5Model(selectedModel)) {
-                        runT5Generation(modelDir, promptTask, text, maxTokens, selectedModel, streaming);
+                    Path modelDir = qwenTestModel
+                            ? runtimeRegistry.qwen05bRuntimeDir()
+                            : resolveSummarizerModelDir(selectedModel);
+                    CatalogBackend backend = WorkbenchGenerationService.toCatalogBackend(model.getBackend());
+                    GenerationTokenListener listener = streaming ? token -> appendInline(token.text()) : null;
+                    GenerationResult result = generationService.generate(
+                            selectedModel, modelDir, backend, promptTask, text, maxTokens, listener);
+                    if (streaming) {
+                        appendResult(""); // newline after streamed text
                     } else {
-                        runPhi3Summarizer(modelDir, text, maxTokens);
+                        appendResult(result.text());
                     }
-                } catch (InferenceException ex) {
-                    appendResult("INFERENCE ERROR: " + ex.getMessage());
+                    appendResult("");
+                    appendResult("Backend: " + result.backend() + " | finish: " + result.finishReason()
+                            + " | prompt tokens: " + result.promptTokenCount()
+                            + " | output tokens: " + result.generatedTokenCount());
+                } catch (GenerationException ex) {
+                    appendResult("GENERATION ERROR [" + ex.errorCode() + "]: " + ex.getMessage());
                 } catch (Exception ex) {
                     appendResult("ERROR: " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
                 }
@@ -272,360 +255,6 @@ public final class SummarizerPanel extends JPanel {
         }.execute();
     }
 
-    private void runPhi3Summarizer(Path modelDir, String text, int maxTokens) throws Exception {
-        // Homogeneous lifecycle: Phi-3 runs only from the compiled model_phi3.wdmlpack -- no direct ONNX execution,
-        // no Python. PHI3-RUNTIME-HEAPLIGHT-1: the package loads heap-light (qweight/zeropoints reference the mmap'd
-        // buffers) and drives the native Java/DirectML Phi3Runtime (CPU path here).
-        WorkbenchArtifactGate.requireExecutablePackage(ModelFamily.PHI3, modelDir);
-        java.nio.file.Path packagePath = new com.aresstack.windirectml.inference.artifact.Phi3PackageLifecycle()
-                .existingPackage(modelDir)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Missing model_phi3.wdmlpack. Use the Download tab -> Convert."));
-        appendResult("  NOTE: Phi-3 runs from the compiled model_phi3.wdmlpack via the native Java/DirectML runtime "
-                + "(CPU path); no Python, no ONNX Runtime.");
-        long start = System.nanoTime();
-        appendResult("Initializing Phi-3 runtime from " + packagePath.getFileName() + "...");
-        com.aresstack.windirectml.inference.phi3.Phi3RuntimePackage pkg =
-                com.aresstack.windirectml.inference.phi3.Phi3RuntimePackage.open(packagePath);
-        com.aresstack.windirectml.inference.phi3.Phi3Weights weights = pkg.weights();
-        try {
-            com.aresstack.windirectml.inference.phi3.Phi3Tokenizer tokenizer =
-                    com.aresstack.windirectml.inference.phi3.Phi3Tokenizer.load(modelDir.resolve("tokenizer.json"));
-            com.aresstack.windirectml.inference.phi3.Phi3Runtime runtime =
-                    new com.aresstack.windirectml.inference.phi3.Phi3Runtime(pkg.config(), weights, tokenizer, null, null);
-            appendResult("Model loaded in " + elapsedMs(start) + " ms");
-            String prompt = com.aresstack.windirectml.inference.prompt.PromptStrategies
-                    .forModel("microsoft/Phi-3-mini-4k-instruct-onnx")
-                    .renderPrompt(new com.aresstack.windirectml.inference.prompt.PromptInput(
-                            PromptTask.SUMMARIZE, text, Phi3Summarizer.DEFAULT_SYSTEM_PROMPT));
-            long genStart = System.nanoTime();
-            String summary = runtime.generate(prompt, maxTokens);
-            appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
-            appendResult("");
-            appendResult("SUMMARY:");
-            appendResult(summary);
-        } finally {
-            weights.close();
-        }
-    }
-
-    private void runGemma3Generation(Path modelDir, PromptTask task, String text, int maxTokens,
-                                     String selectedModel, boolean streaming, boolean showProfile) throws Exception {
-        // Decision comes from the general Backend selector, not a Gemma-specific control (GEMMA-AUTO-GPU-1):
-        // Backend=WARP -> native DirectML on the WARP adapter; Backend=AUTO -> native DirectML on a hardware
-        // adapter; anything else (CPU) -> the external Python/Transformers probe.
-        if (gemmaUsesNativeDirectMl(model.getBackend())) {
-            runGemma3NativeWarp(modelDir, task, text, maxTokens, selectedModel, streaming, showProfile,
-                    gemmaAdapterMode(model.getBackend()));
-            return;
-        }
-        long start = System.nanoTime();
-        Gemma3ExternalRuntimeRunner runner = new Gemma3ExternalRuntimeRunner(modelDir);
-        appendResult("Initializing Gemma 3 legacy external Python runtime from " + modelDir + "...");
-        appendResult("Python command: " + System.getProperty("gemma3.python",
-                System.getenv("GEMMA3_PYTHON") == null ? "python" : System.getenv("GEMMA3_PYTHON")));
-        appendResult("");
-        appendResult("OUTPUT:");
-        Gemma3ExternalRuntimeRunner.Result result = runner.generate(PromptInput.of(task, text), maxTokens);
-        if (result.text().isBlank()) {
-            appendResult("  NOTE: generated text is empty after detokenization.");
-        } else {
-            appendResult(result.text());
-        }
-        appendResult("");
-        appendResult("Model loaded and generated in " + elapsedMs(start) + " ms");
-        appendResult("Runtime mode: external-python-transformers");
-        appendResult("Model id: " + selectedModel);
-        appendResult("Model directory: " + result.modelDir());
-        appendResult("Python command: " + result.pythonCommand());
-        appendResult("Generation completed in " + result.metrics().generateMillis() + " ms");
-        appendResult("  Model load: " + result.metrics().modelLoadMillis() + " ms");
-        appendResult("  Prompt tokens: " + result.metrics().promptTokens());
-        appendResult("  Output tokens: " + result.metrics().outputTokens());
-        appendResult("  Finish reason: external_process_completed");
-    }
-
-    /**
-     * Native Java/DirectML Gemma 3 product path (chosen by the general Backend: WARP/AUTO -> native).
-     * Loads weights from the compiled {@code model_gemma3.wdmlpack}; on a missing package it fails clearly
-     * rather than falling back to Python. With {@code showProfile} it prints the detailed phase/WARP-counter
-     * profile (GEMMA-WORKBENCH-PROFILING-1).
-     */
-    private void runGemma3NativeWarp(Path modelDir, PromptTask task, String text, int maxTokens,
-                                     String selectedModel, boolean streaming, boolean showProfile,
-                                     WindowsBindings.AdapterMode adapterMode) {
-        long start = System.nanoTime();
-        Path pkg = Gemma3NativeWarpRuntime.defaultPackagePath(modelDir);
-        appendResult("Runtime mode: " + Gemma3RuntimeMode.NATIVE_WARP.displayLabel());
-        appendResult("Model id: " + selectedModel);
-        appendResult("Model directory: " + modelDir);
-        appendResult("Backend: " + model.getBackend() + " (adapter: " + adapterMode + ")");
-        appendResult("Output: " + (streaming ? "streaming" : "buffered"));
-        appendResult("Package: " + pkg.getFileName());
-        String missing = Gemma3NativeWarpRuntime.describeMissingPackage(pkg);
-        if (missing != null) {
-            appendResult("ERROR: " + missing);
-            return;
-        }
-        Path tokenizerJson = modelDir.resolve("tokenizer.json");
-        // Route the workbench prompt through the Gemma chat template (Gemma3PromptStrategy emits the same
-        // <start_of_turn>user ... model turn markers); the user's text + selected task instruction are
-        // included. applyChatTemplate=false because the rendered prompt already carries the turn markers.
-        long templateStart = System.nanoTime();
-        String prompt = PromptStrategies.forModel("google/gemma-3-270m-it").renderPrompt(PromptInput.of(task, text));
-        long promptTemplateMs = elapsedMs(templateStart);
-        appendResult("");
-        appendResult("OUTPUT:");
-        try {
-            Gemma3NativeWarpRuntime runtime = new Gemma3NativeWarpRuntime(pkg, tokenizerJson, adapterMode);
-            Gemma3NativeWarpRuntime.Result result;
-            if (streaming) {
-                // Stream each visible token's decoded text live (stop token is not streamed).
-                result = runtime.generateStreaming(prompt, false, maxTokens, this::appendInline);
-                appendResult(""); // newline after the streamed text
-            } else {
-                result = runtime.generate(prompt, false, maxTokens);
-                appendResult(result.text().isBlank()
-                        ? "  NOTE: generated text is empty after detokenization." : result.text());
-                appendResult("");
-            }
-            long grandTotalMs = elapsedMs(start);
-            if (showProfile) {
-                for (String line : Gemma3NativeWarpProfileReport.detailed(
-                        result.profile(), Gemma3RuntimeMode.NATIVE_WARP.displayLabel(), result.backend(),
-                        streaming ? "streaming" : "buffered", pkg.getFileName().toString(),
-                        tokenizerJson.getFileName().toString(), String.valueOf(task), prompt.length(),
-                        promptTemplateMs, grandTotalMs)) {
-                    appendResult(line);
-                }
-            } else {
-                for (String line : Gemma3NativeWarpProfileReport.summary(
-                        Gemma3RuntimeMode.NATIVE_WARP.displayLabel(), result.promptTokens(),
-                        result.outputTokens(), String.valueOf(result.finishReason()), grandTotalMs)) {
-                    appendResult(line);
-                }
-            }
-        } catch (Exception e) {
-            String msg = e.getMessage();
-            Throwable cause = e.getCause();
-            if (cause != null && cause.getMessage() != null) {
-                msg = msg + " — " + cause.getMessage(); // surface e.g. "No hardware DirectML adapter found ..."
-            }
-            appendResult("ERROR: " + msg);
-        }
-    }
-
-    private void runSmolLm2Generation(Path modelDir, PromptTask task, String text, int maxTokens,
-                                      boolean streaming) throws Exception {
-        long start = System.nanoTime();
-        SmolLM2WorkbenchRuntimeRunner runner = new SmolLM2WorkbenchRuntimeRunner(modelDir);
-        appendResult("Initializing SmolLM2 runtime from " + modelDir
-                + " (requested backend=" + model.getBackend().name().toLowerCase() + ")...");
-        appendResult("");
-        if (DEBUG_PROMPT) {
-            String renderedPrompt = PromptStrategies.forModel("smollm2").renderPrompt(PromptInput.of(task, text));
-            appendResult("[debug] PROMPT (task=" + task + ", " + renderedPrompt.length() + " chars):");
-            appendResult(renderedPrompt);
-            appendResult("");
-        }
-        appendResult("OUTPUT:");
-        SmolLM2WorkbenchRuntimeRunner.Result result = runner.generate(PromptInput.of(task, text), maxTokens,
-                model.getBackend(), new UiTokenSink(streaming));
-        if (!streaming) {
-            appendResult(result.text());
-        }
-        appendResult("");
-        appendResult("Model loaded and generated in " + elapsedMs(start) + " ms");
-        appendResult("Requested backend: " + result.requestedBackend());
-        appendResult("Runtime mode: " + result.runtimeMode());
-        if (!result.fallbackReason().isBlank()) {
-            appendResult("Runtime fallback: " + result.fallbackReason());
-        }
-        for (String warning : result.runtimeWarnings()) {
-            appendResult("Runtime warning: " + warning);
-        }
-        result.warpReadinessReport().ifPresent(this::appendSmolLm2WarpReadiness);
-        appendResult("Runtime package: " + result.packagePath().getFileName());
-        appendResult("Generation config: greedyChat, repetitionPenalty="
-                + com.aresstack.windirectml.inference.smollm2.SmolLM2GenerationOptions.CHAT_REPETITION_PENALTY
-                + ", maxTokens=" + maxTokens);
-        if (DEBUG_PROMPT) {
-            appendResult("  [debug] prompt task: " + task);
-            appendResult("  [debug] effective model config: " + result.effectiveConfig());
-        }
-        if (result.text().isBlank()) {
-            appendResult("  NOTE: generated text is empty after detokenization.");
-        }
-        appendResult("");
-        SmolLM2GenerationProfile profile = result.diagnostics().profile();
-        appendResult("Generation completed in " + profile.runtimeMillis() + " ms");
-        appendResult("  Prompt tokens: " + result.diagnostics().inputTokenCount());
-        appendResult("  Output tokens: " + result.outputTokens());
-        appendResult("  Full tokens: " + result.diagnostics().fullTokenCount());
-        appendResult("  Finish reason: " + result.finishReason());
-        appendResult("  SmolLM2 profile runtime: " + profile.runtimeMillis() + " ms");
-        appendResult("    tokenize: " + profile.tokenizeMillis() + " ms");
-        appendResult("    prefill: " + profile.prefillMillis() + " ms");
-        appendResult("    decoder steps: " + profile.decoderStepMillis() + " ms");
-        appendResult("    lm head: " + profile.lmHeadMillis() + " ms");
-        appendResult("    token select: " + profile.tokenSelectMillis() + " ms");
-        appendResult("    detokenize: " + profile.detokenizeMillis() + " ms");
-        appendResult("    avg/token runtime: " + profile.averageTokenRuntimeMillis(result.outputTokens()) + " ms");
-        appendSmolLm2ReferenceHotspots(profile);
-        List<String> decodeMicroProfile = profile.decodeMicroProfile();
-        if (!decodeMicroProfile.isEmpty()) {
-            appendResult("  [debug] WARP decode micro-profile (-Dsmollm2.profile.decode):");
-            for (String line : decodeMicroProfile) {
-                appendResult("  " + line);
-            }
-        }
-        appendResult("  Generated token IDs: " + result.diagnostics().generatedTokenIdsPreview(32));
-        List<String> stepTopK = result.diagnostics().profile().stepTopK();
-        if (!stepTopK.isEmpty()) {
-            appendResult("  [debug] Top-K raw logits (numerical comparison vs Transformers):");
-            for (String line : stepTopK) {
-                appendResult("    " + line);
-            }
-        }
-        if (result.diagnostics().immediateEos()) {
-            appendResult("  Warning: generation stopped after an immediate EOS token.");
-        }
-        if (result.diagnostics().emptyDecodedOutput() && result.outputTokens() > 0) {
-            appendResult("  Warning: generated tokens decoded to an empty visible string.");
-        }
-    }
-
-
-    private void appendSmolLm2ReferenceHotspots(SmolLM2GenerationProfile profile) {
-        var hotspots = profile.referenceHotspots();
-        if (hotspots.measuredMillis() == 0L) {
-            return;
-        }
-        appendResult("    reference hotspots:");
-        appendResult("      layer norms: " + hotspots.layerNormMillis() + " ms");
-        appendResult("      attention q/k/v projections: " + hotspots.attentionProjectionMillis() + " ms");
-        appendResult("      attention scores/context: " + hotspots.attentionScoreMillis() + " ms");
-        appendResult("      attention output projection: " + hotspots.attentionOutputProjectionMillis() + " ms");
-        appendResult("      mlp: " + hotspots.mlpMillis() + " ms");
-        appendResult("      final norm: " + hotspots.finalNormMillis() + " ms");
-        appendResult("      lm head: " + hotspots.lmHeadMillis() + " ms");
-    }
-
-    private void appendSmolLm2WarpReadiness(com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport report) {
-        appendResult("WARP readiness: " + (report.executable() ? "executable" : "prepared, not executable"));
-        appendResult("  Weight tensors: " + report.weightTensorCount()
-                + ", upload: " + com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport.formatBytes(report.totalUploadBytes()));
-        appendResult("  KV cache: " + com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport.formatBytes(report.totalKvCacheBytes())
-                + ", scratch: " + com.aresstack.windirectml.inference.smollm2.SmolLM2WarpReadinessReport.formatBytes(report.totalScratchBytes()));
-        appendResult("  Kernel steps: " + report.kernelStepCount() + ", alignment: " + report.alignmentBytes() + " bytes");
-        if (report.preparedButNotExecutable()) {
-            // SMOLLM2-PRODUCT-AUDIT-1: the native WARP executor exists; this state means it is not executable
-            // for this package/host, so the runtime uses the CPU reference runtime. Surface the precise reason
-            // instead of implying WARP is unimplemented; the "Runtime fallback" line above carries the same.
-            appendResult("  WARP path prepared but not executable here; using the CPU reference runtime"
-                    + (report.reason().isBlank() ? "." : " (" + report.reason() + ")."));
-        }
-    }
-
-    private void runT5Generation(Path modelDir, PromptTask task, String text, int maxTokens,
-                                 String selectedModel, boolean streaming) throws InferenceException {
-        validateT5ModelFiles(modelDir);
-        long start = System.nanoTime();
-        String backend = model.getBackend().name().toLowerCase();
-        T5InferenceEngine engine = new T5InferenceEngine(modelDir, maxTokens, backend);
-        try {
-            appendResult("Initializing T5 runtime package from " + modelDir + " (backend=" + backend + ")...");
-            engine.initialize();
-            appendResult("Model loaded in " + elapsedMs(start) + " ms");
-            appendResult("Seq2Seq generation running with " + engine.executionMode() + ".");
-            appendResult("");
-            appendResult("OUTPUT:");
-            long genStart = System.nanoTime();
-            InferenceRequest request = InferenceRequest.builder()
-                    .modelId(selectedModel)
-                    .task(task)
-                    .userPrompt(text)
-                    .maxTokens(maxTokens)
-                    .temperature(0.0f)
-                    .build();
-            InferenceResult result = engine.generate(request, new UiTokenSink(streaming));
-            if (result.getText() == null || result.getText().isBlank()) {
-                appendResult("  NOTE: generated text is empty after detokenization.");
-                appendResult("  Raw output tokens: " + engine.lastOutputTokenPreview());
-            } else if (!streaming) {
-                appendResult(result.getText());
-            }
-            appendResult("");
-            appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
-            if (result.getUsage() != null) {
-                appendResult("  Prompt tokens: " + result.getUsage().promptTokens());
-                appendResult("  Output tokens: " + result.getUsage().completionTokens());
-            }
-            appendResult("  Finish reason: " + result.getFinishReason());
-            for (String line : engine.lastGenerationMetrics().diagnosticLines()) {
-                appendResult(line);
-            }
-        } finally {
-            engine.shutdown();
-        }
-    }
-
-    private void runQwenGeneration(Path modelDir, PromptTask task, String text, int maxTokens,
-                                   String selectedModel, boolean streaming) throws InferenceException {
-        String qwenModelFile = model.getQwenModelFile();
-        validateQwenModelFiles(modelDir, qwenModelFile);
-        long start = System.nanoTime();
-        String backend = model.getBackend().name().toLowerCase();
-        QwenInferenceEngine engine = new QwenInferenceEngine(modelDir, maxTokens, backend, qwenModelFile);
-        try {
-            appendResult("Initializing Qwen runtime (backend=" + backend + ", onnx=" + qwenModelFile + ")...");
-            engine.initialize();
-            appendResult("Model loaded in " + elapsedMs(start) + " ms");
-            appendResult("Prefill running... first token may take a while for long prompts.");
-            appendResult("");
-            appendResult("OUTPUT:");
-            long genStart = System.nanoTime();
-            InferenceRequest request = InferenceRequest.builder()
-                    .modelId(selectedModel)
-                    .task(task)
-                    .userPrompt(text)
-                    .maxTokens(maxTokens)
-                    .temperature(0.0f)
-                    .build();
-            InferenceResult result = engine.generate(request, new UiTokenSink(streaming));
-            if (!streaming && result.getText() != null && !result.getText().isBlank()) {
-                appendResult(result.getText());
-            }
-            appendResult("");
-            appendResult("Generation completed in " + elapsedMs(genStart) + " ms");
-            if (result.getUsage() != null) {
-                appendResult("  Prompt tokens: " + result.getUsage().promptTokens());
-                appendResult("  Output tokens: " + result.getUsage().completionTokens());
-            }
-            appendResult("  Finish reason: " + result.getFinishReason());
-        } finally {
-            engine.shutdown();
-        }
-    }
-
-    /**
-     * UI token sink. In streaming mode each token's delta is appended live; in buffered mode the deltas
-     * are suppressed and the caller appends the full result text at the end.
-     */
-    private final class UiTokenSink implements GenerationTokenSink {
-        private final boolean streaming;
-
-        UiTokenSink(boolean streaming) {
-            this.streaming = streaming;
-        }
-
-        @Override
-        public void onToken(GeneratedToken token) {
-            if (streaming && token != null) {
-                appendInline(token.delta());
-            }
-        }
-    }
     private void appendInline(String s) {
         if (s == null || s.isEmpty()) return;
         SwingUtilities.invokeLater(() -> {
@@ -656,40 +285,12 @@ public final class SummarizerPanel extends JPanel {
         return model.getModelRoot().resolve(dirName);
     }
 
-    private void validateQwenModelFiles(Path modelDir, String modelFileName) {
-        String missing = QwenModelDirValidator.describeMissingRequiredFiles(modelDir, modelFileName);
-        if (missing != null) {
-            throw new IllegalStateException(missing + ". Download the selected Qwen model first from the Download tab.");
-        }
-    }
-
-    private void validateT5ModelFiles(Path modelDir) {
-        String missing = T5InferenceEngine.describeMissingModelFile(modelDir);
-        if (missing != null) {
-            throw new IllegalStateException(missing + ". Download or compile the selected T5 model first from the Download/Tools flow.");
-        }
-    }
-
     private static boolean isQwenTestModel(String modelId) {
         return QWEN05_MODEL_ID.equals(modelId);
     }
 
     private static boolean isGemma3Model(String modelId) {
         return modelId != null && modelId.startsWith(GEMMA3_MODEL_ID_PREFIX);
-    }
-
-    /**
-     * Gemma uses the native Java/DirectML runtime for Backend=WARP (WARP adapter) and Backend=AUTO
-     * (hardware adapter) (GEMMA-AUTO-GPU-1); Backend=CPU uses the external Python/Transformers probe. No
-     * Gemma-specific runtime control; {@code -Dgemma.runtime} does not participate.
-     */
-    static boolean gemmaUsesNativeDirectMl(Backend backend) {
-        return backend == Backend.WARP || backend == Backend.AUTO;
-    }
-
-    /** Adapter for the native Gemma path: WARP→software rasterizer, AUTO→first hardware GPU. */
-    static WindowsBindings.AdapterMode gemmaAdapterMode(Backend backend) {
-        return backend == Backend.AUTO ? WindowsBindings.AdapterMode.HARDWARE : WindowsBindings.AdapterMode.WARP;
     }
 
     private static boolean isSmolLm2Model(String modelId) {
@@ -699,10 +300,6 @@ public final class SummarizerPanel extends JPanel {
     private static boolean isT5Model(String modelId) {
         Entry entry = GenerationModelRegistry.findByModelId(modelId);
         return entry != null && entry.architecture() == GenerationModelRegistry.Architecture.SEQ2SEQ;
-    }
-
-    private static long elapsedMs(long startNanos) {
-        return (System.nanoTime() - startNanos) / 1_000_000;
     }
 
     private void appendResult(String message) {

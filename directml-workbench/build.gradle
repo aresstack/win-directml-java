@@ -13,6 +13,8 @@ dependencies {
     implementation project(':directml-runtime')
     implementation project(':directml-config')
     implementation project(':directml-inference')
+    // Neutral catalog: the workbench resolves models via the same source of truth as AskAI.
+    implementation project(':directml-model-catalog')
     implementation 'com.aresstack:win-proxy-java:0.1.0-beta.4'
     runtimeOnly 'ch.qos.logback:logback-classic:1.5.6'
 

@@ -3,9 +3,9 @@ package com.aresstack.windirectml.workbench.panels;
 import com.aresstack.windirectml.config.generation.GenerationModelRegistry;
 import com.aresstack.windirectml.config.generation.GenerationOutputMode;
 import com.aresstack.windirectml.inference.gemma.Gemma3RuntimeMode;
-import com.aresstack.windirectml.runtime.facade.Backend;
-import com.aresstack.windirectml.windows.WindowsBindings;
 import com.aresstack.windirectml.workbench.WorkbenchModel;
+// Backend/native-vs-Python routing was removed with the per-family Gemma dispatch (P8): the workbench
+// now routes Gemma through the shared neutral runtime, which enforces the backend matrix.
 import org.junit.jupiter.api.Test;
 
 import javax.swing.JCheckBox;
@@ -43,35 +43,6 @@ class GemmaRuntimeSelectionTest {
                 () -> WorkbenchModel.class.getMethod("getGemmaRuntimeMode"));
         assertThrows(NoSuchMethodException.class,
                 () -> WorkbenchModel.class.getMethod("setGemmaRuntimeMode", Gemma3RuntimeMode.class));
-    }
-
-    @Test
-    void gemmaUsesNativeDirectMlForWarpAndAuto() {
-        // GEMMA-AUTO-GPU-1: WARP and AUTO both run the native DirectML runtime (WARP vs hardware adapter);
-        // only CPU falls back to external Python.
-        assertTrue(SummarizerPanel.gemmaUsesNativeDirectMl(Backend.WARP), "Backend=WARP -> native");
-        assertTrue(SummarizerPanel.gemmaUsesNativeDirectMl(Backend.AUTO), "Backend=AUTO -> native (hardware)");
-        assertFalse(SummarizerPanel.gemmaUsesNativeDirectMl(Backend.CPU), "Backend=CPU -> external");
-        assertEquals(WindowsBindings.AdapterMode.WARP, SummarizerPanel.gemmaAdapterMode(Backend.WARP));
-        assertEquals(WindowsBindings.AdapterMode.HARDWARE, SummarizerPanel.gemmaAdapterMode(Backend.AUTO));
-    }
-
-    @Test
-    void gemmaRuntimePropertyDoesNotDriveTheDecision() {
-        String prev = System.getProperty(Gemma3RuntimeMode.PROPERTY);
-        System.setProperty(Gemma3RuntimeMode.PROPERTY, "native-warp"); // legacy flag set...
-        try {
-            // ...but the decision is purely backend-based and ignores it.
-            assertFalse(SummarizerPanel.gemmaUsesNativeDirectMl(Backend.CPU),
-                    "legacy -Dgemma.runtime must not force the native path for Backend=CPU");
-            assertTrue(SummarizerPanel.gemmaUsesNativeDirectMl(Backend.WARP));
-        } finally {
-            if (prev == null) {
-                System.clearProperty(Gemma3RuntimeMode.PROPERTY);
-            } else {
-                System.setProperty(Gemma3RuntimeMode.PROPERTY, prev);
-            }
-        }
     }
 
     @Test
