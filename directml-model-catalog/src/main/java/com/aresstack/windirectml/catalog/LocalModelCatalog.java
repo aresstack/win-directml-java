@@ -91,8 +91,14 @@ public final class LocalModelCatalog {
         // Gemma 3 270M-it: native WARP (software) + AUTO (hardware) only. The CPU path in the workbench is an
         // external Python/Transformers bridge and is deliberately EXCLUDED here, so a strict host never
         // silently falls back to Python. Gated repository → requires an authenticated HuggingFace token.
+        //
+        // Status UNVERIFIED (NOT a local recommendation): the full public-API package-only chain has not
+        // been run green on a real model — the gated repo could not be downloaded here (certification-log
+        // state EXTERNALLY_BLOCKED, see problems.md P4). The descriptor, manifest and backend matrix are
+        // kept intact so a host can still resolve + download it once a token is present; promote to RUNNABLE
+        // only after a real WARP/AUTO public-API smoke passes.
         e.add(LocalRuntimeModelDescriptor.builder("google/gemma-3-270m-it",
-                        CatalogModelFamily.GEMMA3, ModelStatus.RUNNABLE)
+                        CatalogModelFamily.GEMMA3, ModelStatus.UNVERIFIED)
                 .runtimeModelId("GEMMA3_270M_IT")
                 .architecture("causal-lm")
                 .capabilities(ModelCapability.COMPLETION, ModelCapability.CHAT)
@@ -116,8 +122,14 @@ public final class LocalModelCatalog {
                 .build());
 
         // Phi-3 mini 4k INT4 ONNX (DirectML), compiled to model_phi3.wdmlpack; heap-light CPU load + DirectML.
+        //
+        // Status UNVERIFIED (NOT a local recommendation): the package-backed path compiles and is
+        // contract-tested, but the full public-API package-only chain has not been run green on a real
+        // model — no Phi-3 weights are present locally (certification-log state CONTRACT_TESTED, see
+        // problems.md P2/P6). The descriptor, manifest and (CPU-only) backend matrix are kept intact;
+        // promote to RUNNABLE only after a real CPU public-API smoke passes.
         e.add(LocalRuntimeModelDescriptor.builder("microsoft/Phi-3-mini-4k-instruct-onnx",
-                        CatalogModelFamily.PHI3, ModelStatus.RUNNABLE)
+                        CatalogModelFamily.PHI3, ModelStatus.UNVERIFIED)
                 .runtimeModelId("PHI3_MINI_4K_INSTRUCT")
                 .architecture("causal-lm")
                 .capabilities(ModelCapability.COMPLETION, ModelCapability.CHAT)
@@ -213,8 +225,9 @@ public final class LocalModelCatalog {
                         new String[]{"model.safetensors", "tokenizer.json", "config.json",
                                 "tokenizer_config.json", "special_tokens_map.json"},
                         new String[]{"generation_config.json", "merges.txt", "vocab.json"})))
-                .notes("Native DirectML/WARP SmolLM2 (dense projections on the D3D12 software rasterizer; "
-                        + "CPU reference fallback); no Python.")
+                .notes("SmolLM2 (no Python). AUTO uses hardware DirectML when available and may resolve to "
+                        + "CPU; explicit CPU uses the reference runtime. Software WARP is currently "
+                        + "unsupported (empty output with real weights — see problems.md P1).")
                 .build();
     }
 

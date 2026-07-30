@@ -43,18 +43,29 @@ T5 family beyond keying the prompt strategy off the HF repository id.
 
 ## Causal / Chat
 
-| Model | Family | CPU | AUTO | WARP | Status |
-|---|---|---|---|---|---|
-| Qwen/Qwen2.5-Coder-0.5B-Instruct | QWEN | ⟳ | ⟳ | ⟳ | **PROVEN_RUNTIME_REUSED*** |
-| HuggingFaceTB/SmolLM2-135M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | removed‡ | **REAL_CERTIFIED** (CPU+AUTO) |
-| HuggingFaceTB/SmolLM2-360M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | removed‡ | **REAL_CERTIFIED** (CPU+AUTO) |
-| microsoft/Phi-3-mini-4k-instruct-onnx | PHI3 | wired | n/a | n/a | **CONTRACT_TESTED** — matrix limited to CPU (P2); real run pending, no weights (P6) |
-| google/gemma-3-270m-it | GEMMA3 | n/a | ⛔ | ⛔ | **EXTERNALLY_BLOCKED** — adapter + contract test built (P4)† |
+The **test-run state** (what a real run proved here) is kept separate from the **catalog status** (the
+release gate — whether a host may offer the model as a local recommendation). Only a model with a real
+green run is `RUNNABLE`; the one accepted exception is Qwen (see below).
+
+| Model | Family | CPU | AUTO | WARP | Test-run state | Catalog |
+|---|---|---|---|---|---|---|
+| Qwen/Qwen2.5-Coder-0.5B-Instruct | QWEN | ⟳ | ⟳ | ⟳ | **PROVEN_RUNTIME_REUSED*** | **RUNNABLE** (accepted exception*) |
+| HuggingFaceTB/SmolLM2-135M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | removed‡ | **REAL_CERTIFIED** (CPU+AUTO) | **RUNNABLE** |
+| HuggingFaceTB/SmolLM2-360M-Instruct | SMOLLM2 | ✅ | ✅ (HW) | removed‡ | **REAL_CERTIFIED** (CPU+AUTO) | **RUNNABLE** |
+| microsoft/Phi-3-mini-4k-instruct-onnx | PHI3 | wired | n/a | n/a | **CONTRACT_TESTED** — matrix limited to CPU (P2); real run pending, no weights (P6) | **UNVERIFIED** |
+| google/gemma-3-270m-it | GEMMA3 | n/a | ⛔ | ⛔ | **EXTERNALLY_BLOCKED** — adapter + contract test built (P4)† | **UNVERIFIED** |
 
 Matrix note: SmolLM2 catalog backends narrowed to `{AUTO, CPU}` (WARP withheld, P1); Phi-3 narrowed
-to `{CPU}` (package-backed GPU not wired, P2).
+to `{CPU}` (package-backed GPU not wired, P2). Phi-3 and Gemma keep full descriptors/manifests/backends
+but their catalog status is **UNVERIFIED** — they are absent from `LocalModelCatalog.runnable()` and are
+not offered as local recommendations until a real green public-API package-only run promotes them.
+`EXTERNALLY_BLOCKED`/`CONTRACT_TESTED` describe the test run; the catalog release status is `UNVERIFIED`.
 
-\* **Qwen — certified by workbench reuse (per instruction).** `QwenGenerationAdapter` wraps the same
+\* **Qwen — RUNNABLE as an explicitly accepted release exception (per instruction).** Qwen is
+`PROVEN_RUNTIME_REUSED`, not `REAL_CERTIFIED`: the public-API package-only run was skipped by user
+decision. It is nonetheless kept `RUNNABLE` in the catalog as a documented exception (see the release
+gate in `RELEASE_0.2.0.md`), because the adapter reuses the exact shipping engine path.
+`QwenGenerationAdapter` wraps the same
 `QwenInferenceEngine` the shipping workbench (`SummarizerPanel.runQwenGeneration`) uses, on the
 identical construction + backend path. One wiring nuance was fixed: the adapter now derives the ONNX
 variant name from the catalog package name (`model_q4f16.wdmlpack` → `model_q4f16.onnx`) so the
@@ -89,10 +100,14 @@ gradlew :directml-inference:test --tests '*PublicApiGenerationSmokeIT' ^
 
 | Model | Compile | Ranking A>B (CPU) | Ranking A>B (WARP) | Package-only load | Catalog status |
 |---|---|---|---|---|---|
-| cross-encoder/ms-marco-MiniLM-L12-v2 | ✅ | ✅ | ✅ | ❌ (P3) | **UNVERIFIED** |
+| cross-encoder/ms-marco-MiniLM-L12-v2 | ✅ | ✅ | ✅ | ✅ code + CPU (WARP pending) | **UNVERIFIED** |
 
-L12 ranking is correct on CPU and WARP through the public `LocalMlRuntime` facade (`PF4J plugin
-framework` → the PF4J doc outranks the off-topic doc). It stays **UNVERIFIED** because the mandatory
-package-only load is not satisfiable: the reranker load path requires `model.safetensors` present
-even though weights come from `reranker.wdmlpack` (P3 in problems.md). Promote to RUNNABLE only after
-the completeness check is relaxed and the package-only test passes. No catalog change was made to L12.
+**P3 is code-fixed** (`CODE_FIXED, REAL_WARP_CERTIFICATION_PENDING`). The reranker load path already read
+weights exclusively from `reranker.wdmlpack`; the completeness check now requires that package instead of
+the raw `model.safetensors`, so a package-only directory loads (proven device-free by
+`RerankerPackageOnlyLoadTest` and with a real CPU rank on the shipped L6 package). L12 ranking is correct
+on CPU and WARP through the public `LocalMlRuntime` facade (`PF4J plugin framework` → the PF4J doc
+outranks the off-topic doc). L12 stays **UNVERIFIED** in the catalog until the opt-in real package-only
+ranking smoke runs green on **CPU and WARP** (still outstanding: L6 package-only WARP, L12 package-only
+CPU + WARP — needs the L12 download + a healthy GPU, see P9). Promote L12 to RUNNABLE only then. No
+catalog status change was made to L12 in this slice.

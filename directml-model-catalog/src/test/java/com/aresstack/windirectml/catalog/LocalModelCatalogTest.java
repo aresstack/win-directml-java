@@ -38,8 +38,6 @@ class LocalModelCatalogTest {
                 "Qwen/Qwen2.5-Coder-0.5B-Instruct",
                 "HuggingFaceTB/SmolLM2-135M-Instruct",
                 "HuggingFaceTB/SmolLM2-360M-Instruct",
-                "google/gemma-3-270m-it",
-                "microsoft/Phi-3-mini-4k-instruct-onnx",
                 "google-t5/t5-small",
                 "google/flan-t5-small",
                 "Salesforce/codet5-small",
@@ -58,6 +56,27 @@ class LocalModelCatalogTest {
     }
 
     @Test
+    void gemmaAndPhi3ArePresentButUnverifiedAndNeverRunnable() {
+        // Neither has a real green public-API package-only run yet (Gemma EXTERNALLY_BLOCKED, Phi-3
+        // CONTRACT_TESTED). They keep full descriptors/manifests/backends but must not be offered as a
+        // local recommendation until certified.
+        for (String repo : Arrays.asList("google/gemma-3-270m-it",
+                "microsoft/Phi-3-mini-4k-instruct-onnx")) {
+            LocalRuntimeModelDescriptor d = LocalModelCatalog.findByRepositoryId(repo);
+            assertNotNull(d, repo + " must remain findable via findByRepositoryId");
+            assertEquals(ModelStatus.UNVERIFIED, d.status(), repo + " must be UNVERIFIED");
+            assertFalse(d.isRunnable(), repo + " must not be runnable");
+            assertFalse(repos(LocalModelCatalog.runnable()).contains(repo),
+                    repo + " must not appear in runnable()");
+            assertTrue(repos(LocalModelCatalog.entries()).contains(repo),
+                    repo + " must still appear in entries()");
+            // Descriptor detail is preserved (manifest + backends intact) despite the status downgrade.
+            assertNotNull(d.downloadManifest(), repo + " must keep its download manifest");
+            assertFalse(d.supportedBackends().isEmpty(), repo + " must keep its backend matrix");
+        }
+    }
+
+    @Test
     void capabilityRoutingIsExact() {
         assertEquals(new HashSet<String>(Arrays.asList(
                         "sentence-transformers/all-MiniLM-L6-v2", "intfloat/e5-small-v2",
@@ -65,12 +84,16 @@ class LocalModelCatalogTest {
                 repos(LocalModelCatalog.runnableByCapability(ModelCapability.EMBEDDING)));
         assertEquals(new HashSet<String>(Arrays.asList("cross-encoder/ms-marco-MiniLM-L6-v2")),
                 repos(LocalModelCatalog.runnableByCapability(ModelCapability.RERANK)));
-        // Chat/completion excludes encoders and rerankers entirely.
+        // Chat/completion is exactly the certified causal-LM families: Qwen + SmolLM2. Gemma and Phi-3
+        // are UNVERIFIED and must not surface as runnable chat recommendations; encoders/rerankers never do.
+        assertEquals(new HashSet<String>(Arrays.asList(
+                        "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+                        "HuggingFaceTB/SmolLM2-135M-Instruct",
+                        "HuggingFaceTB/SmolLM2-360M-Instruct")),
+                repos(LocalModelCatalog.runnableByCapability(ModelCapability.CHAT)));
         Set<String> chat = repos(LocalModelCatalog.runnableByCapability(ModelCapability.CHAT));
-        assertTrue(chat.contains("Qwen/Qwen2.5-Coder-0.5B-Instruct"));
-        assertTrue(chat.contains("google/gemma-3-270m-it"));
-        assertFalse(chat.contains("sentence-transformers/all-MiniLM-L6-v2"));
-        assertFalse(chat.contains("cross-encoder/ms-marco-MiniLM-L6-v2"));
+        assertFalse(chat.contains("google/gemma-3-270m-it"));
+        assertFalse(chat.contains("microsoft/Phi-3-mini-4k-instruct-onnx"));
         // Seq2seq is exactly the T5 family.
         assertEquals(new HashSet<String>(Arrays.asList(
                         "google-t5/t5-small", "google/flan-t5-small",

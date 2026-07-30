@@ -39,10 +39,13 @@ FAILED               real run attempted and failed
 - **Handling:** Phi-3 catalog matrix limited to `{CPU}`. Non-implemented backends return
   `UNSUPPORTED_BACKEND` (not an init failure). Phi-3 real run is also pending — no Phi-3 weights are
   present locally (the repo scaffold has only a `model.onnx.data.url` stub).
+- **Catalog status:** downgraded to `UNVERIFIED` (absent from `LocalModelCatalog.runnable()`, not a
+  local recommendation) until a real CPU public-API package-only run passes. Descriptor, manifest and
+  the CPU backend matrix are retained; test-run state stays `CONTRACT_TESTED`.
 - **Fix path:** feed `Phi3RuntimePackage.weights()` into `Phi3GpuKernels`/`Phi3GpuPipeline`, add a
   package-backed DIRECTML/AUTO path, real-test it, then restore DIRECTML/AUTO to the matrix.
 
-## P3 — Reranker load is not strictly package-only — FIXED (L12 promotion pending real smoke)
+## P3 — Reranker load is not strictly package-only — CODE_FIXED, REAL_WARP_CERTIFICATION_PENDING
 
 - **Cause (was):** `BertCrossEncoderRerankers.REQUIRED_FILES` = `{model.safetensors, tokenizer.json,
   config.json}` — the reranker load validated that `model.safetensors` is **present** even though the
@@ -63,8 +66,13 @@ FAILED               real run attempted and failed
     PF4J > Tomatensuppe green.
   - `RerankerL12CertificationIT.packageOnlyLoadIsSupported` now asserts the success path (opt-in
     `-Dwindirectml.rerank.l12.dir=<dir>`).
-- **Remaining before L12 → RUNNABLE:** run the opt-in real L6/L12 package-only ranking smoke green on
-  **CPU and WARP** (needs the L12 download + a healthy GPU; WARP not run here — see P9), then flip the
+- **Status:** `CODE_FIXED, REAL_WARP_CERTIFICATION_PENDING`. The code and the completeness contract are
+  fixed and the CPU package-only path is real-proven (L6); full certification is **not** yet complete.
+  Still outstanding real runs:
+  - L6 package-only **WARP**
+  - L12 package-only **CPU + WARP**
+- **L12 stays UNVERIFIED** in the catalog until that opt-in real CPU + WARP package-only ranking smoke
+  runs green (needs the L12 download + a healthy GPU; WARP not run here — see P9). Only then flip the
   L12 catalog entry from UNVERIFIED to RUNNABLE.
 
 ## P4 — Gemma 3 real run externally blocked
@@ -72,7 +80,12 @@ FAILED               real run attempted and failed
 - **Cause:** `google/gemma-3-270m-it` is a gated HF repo and no HF token is present in this
   environment.
 - **Handling:** the Gemma adapter (`Gemma3GenerationAdapter` → `Gemma3NativeWarpRuntime`, WARP/AUTO
-  only, no Python) is built and covered by a dispatch contract test. Status: `EXTERNALLY_BLOCKED`.
+  only, no Python) is built and covered by a dispatch contract test. Test-run state:
+  `EXTERNALLY_BLOCKED`.
+- **Catalog status:** downgraded to `UNVERIFIED` (absent from `LocalModelCatalog.runnable()`, not a
+  local recommendation) until a real WARP/AUTO public-API package-only run passes. Descriptor,
+  manifest and the WARP/AUTO backend matrix are retained. (`EXTERNALLY_BLOCKED` describes the test
+  run; the catalog release status is `UNVERIFIED`.)
 - **Retry:** set `HF_TOKEN`, download the model, then
   `-Dsmoke.repo=google/gemma-3-270m-it -Dsmoke.rawDir=<dir> -Dsmoke.backend=auto`.
 

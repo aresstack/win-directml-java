@@ -87,12 +87,19 @@ release native/runtime resources. Not thread-safe: one handle per thread, or ser
 
 ## 8. Backends per family (catalog matrix — 0.2.0)
 
+Offer only `descriptor.isRunnable()` models (§ above). The currently RUNNABLE families and their
+backends:
+
 | Family | Allowed backends |
 |---|---|
 | Qwen, T5/CodeT5 | WARP, AUTO, CPU |
-| SmolLM2 | AUTO, CPU (software-WARP withheld, problems.md P1) |
-| Gemma 3 | WARP, AUTO (no CPU — no Python bridge) |
-| Phi-3 | CPU (DirectML/AUTO pending, problems.md P2) |
+| SmolLM2 | AUTO, CPU. AUTO uses hardware DirectML when available and may resolve to CPU; explicit CPU uses the reference runtime; software WARP is currently unsupported (problems.md P1) |
+
+**Not currently offered (catalog status UNVERIFIED — absent from `runnable()`):** Gemma 3
+(`EXTERNALLY_BLOCKED`, gated HF token, P4) and Phi-3 (`CONTRACT_TESTED`, no real run yet, P2/P6). Their
+descriptors, manifests and backend matrices are retained (Gemma: WARP, AUTO — no CPU/Python bridge;
+Phi-3: CPU only, DirectML/AUTO pending P2) and they return to `runnable()` once real-certified — do not
+recommend them until then.
 
 An explicit backend outside a family's matrix → `UNSUPPORTED_BACKEND`. Explicit CPU/WARP/DIRECTML are
 honoured exactly (no silent switch); AUTO may resolve to CPU and reports the actual backend in the

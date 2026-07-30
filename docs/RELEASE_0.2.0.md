@@ -34,13 +34,39 @@ gradlew -Pversion=0.2.0 clean build
 gradlew -Pversion=0.2.0 publishToMavenLocal
 ```
 
+## RUNNABLE-model certification gate
+
+Every catalog entry that is `RUNNABLE` must have **either** a real green public-API package-only proof
+(`REAL_CERTIFIED`) **or** an explicitly documented, accepted release exception. The current RUNNABLE set
+and its evidence:
+
+| Model | Evidence | Gate |
+|---|---|---|
+| all-MiniLM / E5 (embeddings), ms-marco-MiniLM-L6 (rerank) | shipped + real-tested | ✅ certified |
+| T5 / Flan-T5 / CodeT5 | REAL_CERTIFIED | ✅ certified |
+| SmolLM2 135M / 360M | REAL_CERTIFIED (CPU + AUTO) | ✅ certified |
+| Qwen/Qwen2.5-Coder-0.5B-Instruct | PROVEN_RUNTIME_REUSED | ⚠️ **accepted exception** (see below) |
+
+**Accepted release exception — Qwen.** `Qwen/Qwen2.5-Coder-0.5B-Instruct` ships as `RUNNABLE` with
+test-run state `PROVEN_RUNTIME_REUSED`, **not** `REAL_CERTIFIED`: the public-API package-only run was
+skipped by user decision. It is accepted for release because the adapter reuses the exact shipping
+`QwenInferenceEngine` path. This exception is explicit and bounded to Qwen; no other `RUNNABLE` entry
+may ship without a real green proof.
+
+**Not RUNNABLE (no release obligation).** Phi-3 (`CONTRACT_TESTED`, no local weights, P2/P6) and Gemma 3
+(`EXTERNALLY_BLOCKED`, gated HF token, P4) are catalog status **UNVERIFIED** — absent from
+`LocalModelCatalog.runnable()`, so they are neither offered as local recommendations nor a release
+blocker. They keep full descriptors/manifests/backends and return to `RUNNABLE` only after a real green
+public-API package-only run. The L12 reranker stays UNVERIFIED pending its real CPU + WARP package-only
+smoke (P3 is code-fixed; see problems.md and LOCAL_ENGINE_CERTIFICATION.md).
+
 ## Gate before a real Central publish
 
 Actual `publishAllPublicationsToCentralPortal` (via the tag-driven CI, `release.ps1 0.2.0`) must wait
 until:
 
-1. every model intended as RUNNABLE has a real green proof (Phi-3 real run pending — no local
-   weights; Gemma real run pending — gated HF token; see problems.md P4/P6),
+1. the RUNNABLE-model certification gate above holds (every RUNNABLE entry is REAL_CERTIFIED or the
+   documented Qwen exception),
 2. `ORG_GRADLE_PROJECT_signingInMemoryKey` / `signingInMemoryKeyPassword` and
    `centralUsername` / `centralPassword` are present,
 3. the version `0.2.0` is approved and tagged.
