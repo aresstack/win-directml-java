@@ -1,1 +1,15 @@
-@echo off`r`nsetlocal`r`nset "ROOT_DIR=%~dp0.."`r`nset "JAVA_HOME=C:\Program Files\Zulu\zulu-21"`r`nset "GRADLE_USER_HOME=%ROOT_DIR%\.chatgpt\gradle-home"`r`nset "PATH=%JAVA_HOME%\bin;%PATH%"`r`nif not exist "%JAVA_HOME%\bin\java.exe" (`r`n    echo Java 21 not found: "%JAVA_HOME%"`r`n    pause`r`n    exit /b 1`r`n)`r`necho Starting Whisper microphone demo, model in "%ROOT_DIR%\model\whisper-tiny"`r`n"C:\Program Files\Git\bin\bash.exe" "%ROOT_DIR%\gradlew" -p "%ROOT_DIR%" :directml-workbench:whisperMicrophoneDemo --no-daemon --max-workers=1 -Dorg.gradle.jvmargs=-Xmx256m`r`nif errorlevel 1 pause`r`n
+@echo off
+setlocal
+set "ROOT_DIR=%~dp0.."
+set "ROOT_BASH=%ROOT_DIR:\=/%"
+set "JAVA_HOME=C:\Program Files\Zulu\zulu-21"
+set "GRADLE_USER_HOME=%ROOT_DIR%\.chatgpt\gradle-home"
+set "PATH=%JAVA_HOME%\bin;%PATH%"
+if not exist "%JAVA_HOME%\bin\java.exe" (
+    echo Java 21 not found: "%JAVA_HOME%"
+    pause
+    exit /b 1
+)
+echo Starting Whisper microphone demo, model in "%ROOT_DIR%\model\whisper-tiny"
+"C:\Program Files\Git\bin\bash.exe" "%ROOT_BASH%/gradlew" -p "%ROOT_BASH%" :directml-workbench:whisperMicrophoneDemo --no-daemon --max-workers=1 -Dorg.gradle.jvmargs=-Xmx256m
+if errorlevel 1 pause
