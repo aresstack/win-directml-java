@@ -118,7 +118,7 @@ try (var reranker = runtime.loadRerankerModel(rerankCfg)) {
 Dependency (Gradle):
 
 ```groovy
-implementation 'com.aresstack:directml-runtime:0.2.0'
+implementation 'com.aresstack:directml-runtime:0.3.0'
 ```
 
 The API hides transport details and does not require JSON-RPC or a separate
@@ -213,11 +213,9 @@ metadata are not implemented. The short-recording path concatenates chunks
 without timestamp-aware segmentation. Accuracy outside the tested German
 sample is not yet established.
 
-Gradle already lists `directml-inference` as a publishable Maven module,
-but **these Whisper changes are not included in the existing v0.2.1 release tag**.
-The next Maven Central release can publish the API under
-`com.aresstack:directml-inference:<released-version>` after release
-validation. Do not use an older released artifact for Whisper transcription.
+Version **0.3.0** introduces the experimental Whisper API in the published
+`com.aresstack:directml-inference:0.3.0` artifact. Earlier versions, including
+0.2.1, do not contain the Whisper transcription API.
 
 ## Relationship to sidecars and ACP
 
@@ -365,7 +363,7 @@ and [`docs/release-notes-next.md`](docs/release-notes-next.md).
 | Reranker                                | Cross-encoder reranker available through the direct API.     |
 | CPU-only usage                          | Supported; not a failure mode.                               |
 | DirectML usage                          | Supported Windows acceleration path.                         |
-| Whisper-Tiny speech transcription         | Experimental Java 21 API in `directml-inference`; German real-model test passed, CPU only; not yet in released artifacts. |
+| Whisper-Tiny speech transcription         | Experimental Java 21 API in `directml-inference` since 0.3.0; German real-model test passed, CPU only. |
 | Legacy JSON-RPC sidecar / Java 8 bridge | Source kept, no longer published in new releases.            |
 | Workbench text generation               | Experimental Workbench app feature (not a published artifact): Gemma-it, Qwen 0.5B, SmolLM2, T5/CodeT5 (4 curated, real-certified), Phi-3-mini runnable; Phi-3.5 + larger Qwen planned. Native Java/DirectML, no Python/ONNX Runtime. |
 | ACP / MCP / A2A orchestration           | Out of scope for this repository.                            |
@@ -416,7 +414,7 @@ including `directml-inference`. The Swing Workbench and legacy sidecar remain un
 
 ```gradle
 dependencies {
-    implementation 'com.aresstack:directml-runtime:0.2.0'
+    implementation 'com.aresstack:directml-runtime:0.3.0'
 }
 ```
 
