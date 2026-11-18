@@ -59,6 +59,39 @@ public final class WhisperTranscriber {
     }
 
     /**
+     * Transcribe a short, already decoded 16-kHz mono microphone recording.
+     * Process six-second chunks to keep the pure Java reference backend responsive.
+     * Include a small silence tail for the last spoken syllable.
+     */
+    public String transcribeShortRecording(float[] samples, int maximumTokensPerChunk) throws IOException {
+        Objects.requireNonNull(samples, "samples");
+        if (maximumTokensPerChunk < 1 || maximumTokensPerChunk > config.textContext() - 4) {
+            throw new IllegalArgumentException("Invalid Whisper token limit");
+        }
+        int samplesPerPart = WhisperLogMelSpectrogram.SAMPLE_RATE * 6;
+        StringBuilder result = new StringBuilder();
+        for (int offset = 0; offset < samples.length; offset += samplesPerPart) {
+            int sampleCount = Math.min(samplesPerPart, samples.length - offset);
+            float[] chunk = java.util.Arrays.copyOfRange(samples, offset, offset + sampleCount);
+            float[][] fullMel = frontend.compute(chunk);
+            int frames = Math.min(WhisperLogMelSpectrogram.FRAMES_PER_CHUNK,
+                    Math.max(40, (sampleCount + WhisperLogMelSpectrogram.HOP_LENGTH - 1)
+                            / WhisperLogMelSpectrogram.HOP_LENGTH + 60));
+            float[][] shortMel = new float[config.melBands()][frames];
+            for (int band = 0; band < config.melBands(); band++) {
+                System.arraycopy(fullMel[band], 0, shortMel[band], 0, frames);
+            }
+            String text = transcribeMel(shortMel, maximumTokensPerChunk);
+            if (!text.isBlank()) {
+                if (result.length() > 0) {
+                    result.append(' ');
+                }
+                result.append(text.strip());
+            }
+        }
+        return result.toString();
+    }
+    /**
      * Transcribe a prepared mel spectrogram, using smaller frame counts for
      * focused integration tests and the full 3000 frames for normal audio.
      */

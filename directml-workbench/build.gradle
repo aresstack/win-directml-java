@@ -58,3 +58,12 @@ tasks.named('shadowJar') {
     // Exclude signature files from dependencies
     exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
 }
+
+tasks.register('whisperMicrophoneDemo', JavaExec) {
+    group = 'application'
+    description = 'Record microphone speech and display local Whisper transcription.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.aresstack.windirectml.workbench.whisper.WhisperMicrophoneDemo'
+    workingDir = rootProject.projectDir
+    maxHeapSize = '1250m'
+}
