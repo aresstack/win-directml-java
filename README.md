@@ -31,12 +31,15 @@ Use this when you want:
 
 ACP/MCP/A2A orchestration and manager-agent logic are intentionally not part of
 this repository. Those belong in a separate ACP sidecar / manager project that
-consumes this library as a local ML capability. Decoder/seq2seq **text generation**
-is not part of the published embeddings/reranking library either, but the bundled
-**Workbench** app includes an experimental, native Java/DirectML generation path
-(Gemma, Qwen, SmolLM2, T5/CodeT5, Phi-3-mini) — see
-[Text generation in the Workbench](#text-generation-in-the-workbench-experimental).
+consumes this library as a local ML capability.
 
+Decoder/seq2seq **text generation** and **Whisper speech transcription**
+are implemented in the separate `directml-inference` module. Its APIs are
+experimental and this module is configured for Maven publication. The
+**Workbench** application is not a published artifact; it provides a UI
+for text generation and a separate Whisper microphone demo. See
+[Text generation in the Workbench](#text-generation-in-the-workbench-experimental)
+and [Speech transcription with Whisper](#speech-transcription-with-whisper-experimental).
 ## Recommended model choices
 
 | Need                                          | Recommended path                         | Notes                                                                                     |
@@ -123,6 +126,99 @@ process. Supported WordPiece E5 variants: `small-v2`, `base-v2`, `large-v2`.
 XLM-R/SentencePiece E5 models (e.g. `danielheinz/e5-base-sts-en-de`) remain
 planned but not ready; attempting to load them throws `UnsupportedModelException`.
 
+## Speech transcription with Whisper (experimental)
+
+`directml-inference` provides an **in-process Java 21 speech-to-text API** for
+the multilingual [`openai/whisper-tiny`](https://huggingface.co/openai/whisper-tiny)
+checkpoint. Whisper uses Java audio processing and a **CPU reference**
+encoder/decoder. It does not use Whisper.cpp, Python, ONNX Runtime, or custom
+native DLLs. Whisper **does not yet run on DirectML/GPU**.
+
+### Java API
+
+```java
+import com.aresstack.windirectml.inference.whisper.WhisperTranscriber;
+
+import java.io.IOException;
+import java.nio.file.Path;
+
+public final class WhisperExample {
+    public static void main(String[] args) throws IOException {
+        WhisperTranscriber transcriber =
+                new WhisperTranscriber(Path.of("model", "whisper-tiny"));
+
+        String transcript = transcriber.transcribe(
+                Path.of("recordings", "german-speech.wav"), 100);
+        System.out.println(transcript);
+    }
+}
+```
+
+The constructor takes the **model directory**. Reuse the transcriber rather
+than reloading model weights for each recording. Other public entry points:
+
+- `transcribe(float[] samples, int maxTokensPerChunk)`: process **16 kHz mono
+  float PCM** in 30-second chunks.
+- `transcribeShortRecording(float[] samples, int maxTokensPerChunk)`: process
+  short microphone recordings in smaller six-second chunks.
+- `transcribeMel(float[][] features, int maxTokens)`: process an already
+  Whisper-compatible log-Mel spectrogram (lower-level API).
+
+All return a synchronous `String` containing recognized speech. Input
+`float[]` samples are normalized, mono, 16,000 Hz PCM (nominally -1 to +1);
+raw PCM16 byte arrays must first be decoded and resampled. The WAV overload
+performs WAV decoding, mono conversion and resampling for you. The integer
+argument limits generated tokens per chunk.
+
+### Download model weights
+
+Download the **multilingual** model `openai/whisper-tiny` (not `.en`) and
+place the following files together under `model/whisper-tiny/`:
+
+- `config.json`
+- `model.safetensors`
+- `vocab.json`
+- `tokenizer.json`
+
+Model weights are neither committed to this repository nor bundled in the
+JAR. `model/whisper-*/` is git-ignored. Review the model's upstream license
+before distributing the weights.
+
+### Local microphone trial
+
+Run the Java main class
+`com.aresstack.windirectml.workbench.whisper.WhisperMicrophoneDemo` from
+IntelliJ or launch the Gradle task:
+
+```bash
+bash ./gradlew :directml-workbench:whisperMicrophoneDemo
+```
+
+On the Windows development machine there is also
+`tools/run-whisper-microphone.cmd`. The separate Swing window lets you choose
+a microphone, start and stop recording, then displays the transcribed German
+text. The window is a **Workbench demo**, not part of the library API.
+
+### Tests, limitations and Maven Central
+
+Real-checkpoint tests validate the encoder/decoder, preprocessing, WAV input
+and the short-recording path. A synthesized German speech sample was
+recognized as "Hallo? Dies ist ein Test der Deutschen Spracherkennung."
+(the original sentence differs slightly in case and punctuation).
+
+Whisper transcription is currently **experimental**, synchronous and
+CPU-bound. Run it off the UI thread. Incremental streaming results,
+speaker identification, word-level timestamps and returned segment/time
+metadata are not implemented. The short-recording path concatenates chunks
+without timestamp-aware segmentation. Accuracy outside the tested German
+sample is not yet established.
+
+Gradle already lists `directml-inference` as a publishable Maven module,
+but **these Whisper changes are not included in the existing v0.2.1 release tag**.
+The next Maven Central release can publish the API under
+`com.aresstack:directml-inference:<released-version>` after release
+validation. Do not use an older released artifact for Whisper transcription.
+
 ## Relationship to sidecars and ACP
 
 This repository is a Windows inference library. It deliberately does not contain
@@ -152,10 +248,11 @@ directml-windows-bindings           Java 21 FFM bindings for DXGI, D3D12, Direct
 directml-encoder                    MiniLM, E5 and reranker encoder/runtime code
 directml-runtime                    Public Java 21 API for direct in-process use
 
-Experimental Workbench (app feature, not published in new Maven releases):
-directml-inference                  Native Java/DirectML generation runtime + wdmlpack compilers/loaders
+Additional Java 21 inference module (configured for publication; experimental APIs):
+directml-inference                  Native Java inference runtime + Whisper transcription + wdmlpack compilers/loaders
                                     (Gemma, Qwen, SmolLM2, T5/CodeT5, Phi-3); no Python, no ONNX Runtime
-directml-workbench                  Java 21 Swing Workbench (Download/Convert + Summarizer generation tabs)
+Workbench applications (not published in new Maven releases):
+directml-workbench                  Java 21 Swing Workbench (Download/Convert, generation + microphone demo)
 directml-workbench-launcher         Launcher for the Java 21 Workbench
 
 Legacy / beta-era modules kept in source, not published in new releases:
@@ -250,7 +347,8 @@ Workbench generation quickstart:
 4. **Convert** the download to its `.wdmlpack` from the Download tab's package action.
 5. **Summarizer** tab: select the model, choose a Backend (WARP / AUTO / CPU), enter text, run.
 
-Known limits: text generation is experimental and not a published Maven artifact. Phi-3.5 stays
+Known limits: text generation is experimental; the Workbench app is not
+published, while `directml-inference` is configured for Maven publication. Phi-3.5 stays
 planned; larger Qwen (1.5B/3B) stay planned. The T5 certification covers exactly the four curated
 models above — other T5/CodeT5 checkpoints are not blanket-certified. Real-model tests are opt-in;
 large models can need several GB of RAM; downloaded `model/...` artifacts are git-ignored and never
@@ -267,6 +365,7 @@ and [`docs/release-notes-next.md`](docs/release-notes-next.md).
 | Reranker                                | Cross-encoder reranker available through the direct API.     |
 | CPU-only usage                          | Supported; not a failure mode.                               |
 | DirectML usage                          | Supported Windows acceleration path.                         |
+| Whisper-Tiny speech transcription         | Experimental Java 21 API in `directml-inference`; German real-model test passed, CPU only; not yet in released artifacts. |
 | Legacy JSON-RPC sidecar / Java 8 bridge | Source kept, no longer published in new releases.            |
 | Workbench text generation               | Experimental Workbench app feature (not a published artifact): Gemma-it, Qwen 0.5B, SmolLM2, T5/CodeT5 (4 curated, real-certified), Phi-3-mini runnable; Phi-3.5 + larger Qwen planned. Native Java/DirectML, no Python/ONNX Runtime. |
 | ACP / MCP / A2A orchestration           | Out of scope for this repository.                            |
@@ -312,8 +411,8 @@ redistributable.
 
 ## Releases / Maven Central
 
-New Maven Central releases publish only the core inference artifacts: the Java 21
-runtime modules plus the shared `directml-config` module.
+The Gradle Maven Central publication set contains seven Java library modules,
+including `directml-inference`. The Swing Workbench and legacy sidecar remain unpublished.
 
 ```gradle
 dependencies {
@@ -321,7 +420,7 @@ dependencies {
 }
 ```
 
-Published artifacts under `com.aresstack:`:
+Gradle-configured publishable artifacts under `com.aresstack:`:
 
 | Coordinate                                | Java        | Purpose                                                                     |
 |-------------------------------------------|-------------|-----------------------------------------------------------------------------|
@@ -329,12 +428,14 @@ Published artifacts under `com.aresstack:`:
 | `com.aresstack:directml-windows-bindings` | 21 preview  | FFM bindings to D3D12 / DXGI / DirectML plus low-level kernel primitives.   |
 | `com.aresstack:directml-encoder`          | 21 preview  | MiniLM, E5 and cross-encoder reranker pipelines with CPU + DirectML parity. |
 | `com.aresstack:directml-runtime`          | 21 preview  | Public direct Java 21 ML API for embeddings and reranking.                  |
+| `com.aresstack:directml-model-catalog` | 8/21 shared | Neutral model catalog metadata and backend compatibility. |
+| `com.aresstack:directml-model-package` | 21 preview | Model package/load contract used by inference. |
+| `com.aresstack:directml-inference` | 21 preview | Experimental text generation and Java CPU Whisper transcription API. |
 
-The experimental Workbench modules (`directml-inference`, `directml-workbench`,
-`directml-workbench-launcher`) and the legacy beta artifacts (`directml-sidecar`,
-`directml-sidecar-client-java8`, `directml-sidecar-protocol-java8`,
-`directml-sidecar-workbench`) are kept in the repository but are **not** published in new
-releases. Text generation is a Workbench app feature, not a Maven artifact.
+The `directml-inference` module is configured for publication. The Workbench
+applications (`directml-workbench`, `directml-workbench-launcher`) and the
+legacy beta sidecar artifacts are not published. API maturity and Maven artifact
+publication status are separate: Whisper and text generation remain experimental.
 
 Full artifact overview: [`docs/artifact-structure.md`](docs/artifact-structure.md).
 
