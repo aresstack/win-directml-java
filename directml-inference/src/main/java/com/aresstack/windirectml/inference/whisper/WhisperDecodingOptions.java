@@ -8,6 +8,10 @@ import java.util.Arrays;
  * compression-ratio limit of 2.4, an average log-probability limit of -1.0, a
  * no-speech probability limit of 0.6 and at most 224 tokens per 30-second window.
  *
+ * <p>An optional initial prompt (vocabulary, names, writing style) precedes every window as
+ * {@code <|startofprev|>} context. It is fixed text, so unlike the reference's conditioning
+ * on previous output it cannot carry a loop from one window into the next.
+ *
  * <p>Unlike the reference, previous windows are never used as a decoder prompt.
  * The reference documentation recommends disabling that conditioning when a model
  * falls into repetition loops; Whisper Tiny is the model most prone to them, and a
@@ -16,7 +20,7 @@ import java.util.Arrays;
 public final class WhisperDecodingOptions {
     private static final double[] DEFAULT_TEMPERATURES = {0.0, 0.2, 0.4, 0.6, 0.8, 1.0};
     private static final WhisperDecodingOptions DEFAULTS = new WhisperDecodingOptions(
-            DEFAULT_TEMPERATURES, 2.4, -1.0, 0.6, 224, true, 0L);
+            DEFAULT_TEMPERATURES, 2.4, -1.0, 0.6, 224, true, 0L, "");
 
     private final double[] temperatures;
     private final double compressionRatioThreshold;
@@ -25,11 +29,12 @@ public final class WhisperDecodingOptions {
     private final int maximumTokensPerWindow;
     private final boolean fullWindowEncoderInput;
     private final long samplingSeed;
+    private final String initialPrompt;
 
     private WhisperDecodingOptions(double[] temperatures, double compressionRatioThreshold,
                                    double logProbabilityThreshold, double noSpeechThreshold,
                                    int maximumTokensPerWindow, boolean fullWindowEncoderInput,
-                                   long samplingSeed) {
+                                   long samplingSeed, String initialPrompt) {
         if (temperatures.length == 0) {
             throw new IllegalArgumentException("At least one decoding temperature is required");
         }
@@ -48,6 +53,7 @@ public final class WhisperDecodingOptions {
         this.maximumTokensPerWindow = maximumTokensPerWindow;
         this.fullWindowEncoderInput = fullWindowEncoderInput;
         this.samplingSeed = samplingSeed;
+        this.initialPrompt = initialPrompt == null ? "" : initialPrompt.strip();
     }
 
     public static WhisperDecodingOptions defaults() {
@@ -57,12 +63,12 @@ public final class WhisperDecodingOptions {
     /** Temperatures tried in order until a window passes every quality check. */
     public WhisperDecodingOptions withTemperatures(double... temperatures) {
         return new WhisperDecodingOptions(temperatures, compressionRatioThreshold, logProbabilityThreshold,
-                noSpeechThreshold, maximumTokensPerWindow, fullWindowEncoderInput, samplingSeed);
+                noSpeechThreshold, maximumTokensPerWindow, fullWindowEncoderInput, samplingSeed, initialPrompt);
     }
 
     public WhisperDecodingOptions withMaximumTokensPerWindow(int maximumTokens) {
         return new WhisperDecodingOptions(temperatures, compressionRatioThreshold, logProbabilityThreshold,
-                noSpeechThreshold, maximumTokens, fullWindowEncoderInput, samplingSeed);
+                noSpeechThreshold, maximumTokens, fullWindowEncoderInput, samplingSeed, initialPrompt);
     }
 
     /**
@@ -72,28 +78,41 @@ public final class WhisperDecodingOptions {
      */
     public WhisperDecodingOptions withFullWindowEncoderInput(boolean fullWindow) {
         return new WhisperDecodingOptions(temperatures, compressionRatioThreshold, logProbabilityThreshold,
-                noSpeechThreshold, maximumTokensPerWindow, fullWindow, samplingSeed);
+                noSpeechThreshold, maximumTokensPerWindow, fullWindow, samplingSeed, initialPrompt);
     }
 
     public WhisperDecodingOptions withCompressionRatioThreshold(double threshold) {
         return new WhisperDecodingOptions(temperatures, threshold, logProbabilityThreshold,
-                noSpeechThreshold, maximumTokensPerWindow, fullWindowEncoderInput, samplingSeed);
+                noSpeechThreshold, maximumTokensPerWindow, fullWindowEncoderInput, samplingSeed, initialPrompt);
     }
 
     public WhisperDecodingOptions withLogProbabilityThreshold(double threshold) {
         return new WhisperDecodingOptions(temperatures, compressionRatioThreshold, threshold,
-                noSpeechThreshold, maximumTokensPerWindow, fullWindowEncoderInput, samplingSeed);
+                noSpeechThreshold, maximumTokensPerWindow, fullWindowEncoderInput, samplingSeed, initialPrompt);
     }
 
     public WhisperDecodingOptions withNoSpeechThreshold(double threshold) {
         return new WhisperDecodingOptions(temperatures, compressionRatioThreshold, logProbabilityThreshold,
-                threshold, maximumTokensPerWindow, fullWindowEncoderInput, samplingSeed);
+                threshold, maximumTokensPerWindow, fullWindowEncoderInput, samplingSeed, initialPrompt);
     }
 
     /** Seed sampled fallback attempts so identical audio always produces identical text. */
     public WhisperDecodingOptions withSamplingSeed(long seed) {
         return new WhisperDecodingOptions(temperatures, compressionRatioThreshold, logProbabilityThreshold,
-                noSpeechThreshold, maximumTokensPerWindow, fullWindowEncoderInput, seed);
+                noSpeechThreshold, maximumTokensPerWindow, fullWindowEncoderInput, seed, initialPrompt);
+    }
+
+    /**
+     * Precede every window with fixed context text, for example typical sentences and terms of
+     * the application domain. Keep it short; at most half of the text context is used.
+     */
+    public WhisperDecodingOptions withInitialPrompt(String prompt) {
+        return new WhisperDecodingOptions(temperatures, compressionRatioThreshold, logProbabilityThreshold,
+                noSpeechThreshold, maximumTokensPerWindow, fullWindowEncoderInput, samplingSeed, prompt);
+    }
+
+    public String initialPrompt() {
+        return initialPrompt;
     }
 
     public double[] temperatures() {
@@ -131,6 +150,7 @@ public final class WhisperDecodingOptions {
                 + ", logProbabilityThreshold=" + logProbabilityThreshold
                 + ", noSpeechThreshold=" + noSpeechThreshold
                 + ", maximumTokensPerWindow=" + maximumTokensPerWindow
-                + ", fullWindowEncoderInput=" + fullWindowEncoderInput + '}';
+                + ", fullWindowEncoderInput=" + fullWindowEncoderInput
+                + ", initialPrompt=" + (initialPrompt.isEmpty() ? "none" : "'" + initialPrompt + "'") + '}';
     }
 }

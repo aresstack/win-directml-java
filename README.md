@@ -183,6 +183,13 @@ TranscriptionResult result = transcriber.transcribe(samples,
         WhisperDecodingOptions.defaults(), window -> System.out.println(window.getText()));
 ```
 
+`WhisperDecodingOptions.withInitialPrompt(text)` precedes every window with fixed
+context, encoded by `WhisperTokenizer.encode`, a byte-level BPE encoder that matches
+the Hugging Face tokenizer. Measured with Whisper Tiny it helps spell domain terms
+("Confluence Wissensquelle" instead of "Konflu-N-Swissensquelle") but did not lower
+the word error rate of general dictation, and on noise without VAD the model
+repeated the prompt as text. It is therefore off by default.
+
 `transcribe(WhisperAudioSource, WhisperDecodingOptions, Consumer)` reads bounded
 windows from a source of any length and reports every committed window on the
 decoding thread with absolute timestamps; interrupting that thread stops the

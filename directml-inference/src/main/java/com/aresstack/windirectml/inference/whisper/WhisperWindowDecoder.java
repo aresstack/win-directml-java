@@ -28,6 +28,7 @@ final class WhisperWindowDecoder {
     private final int transcribe;
     private final int noTimestamps;
     private final int noSpeech;
+    private final int startOfPrevious;
 
     WhisperWindowDecoder(WhisperAudioEncoder encoder, WhisperTextDecoder decoder, WhisperTokenizer tokenizer,
                          WhisperModelConfig config, WhisperGenerationConfig generation) {
@@ -46,6 +47,7 @@ final class WhisperWindowDecoder {
         transcribe = tokenizer.requireSpecial("<|transcribe|>");
         noTimestamps = tokenizer.requireSpecial("<|notimestamps|>");
         noSpeech = tokenizer.findSpecial("<|nospeech|>", "<|nocaptions|>");
+        startOfPrevious = tokenizer.requireSpecial("<|startofprev|>");
     }
 
     /**
@@ -59,12 +61,13 @@ final class WhisperWindowDecoder {
                 parser.firstTimestamp() + (int) Math.min(1500, durationMillis / 20));
         int maximumTokens = Math.min(options.maximumTokensPerWindow(), config.textContext() / 2);
         double[] temperatures = options.temperatures();
+        List<Integer> prompt = promptTokens(options.initialPrompt());
 
         List<Attempt> attempts = new ArrayList<>();
         Attempt attempt = null;
         for (int index = 0; index < temperatures.length; index++) {
             Random random = new Random(options.samplingSeed() * 31 + offsetMillis * 7 + index);
-            Attempt current = attempt(audio, temperatures[index], random, maximumTokens,
+            Attempt current = attempt(audio, prompt, temperatures[index], random, maximumTokens,
                     permittedLastTimestamp, timestamps);
             LOGGER.log(System.Logger.Level.DEBUG, () -> String.format(java.util.Locale.ROOT,
                     "Whisper window %d ms, temperature %.1f: log-probability %.3f, compression %.2f, "
@@ -90,10 +93,26 @@ final class WhisperWindowDecoder {
         return new WindowDecoding(result, timestamps && endsWithOpenText(attempt.tokens), false, attempt);
     }
 
-    private Attempt attempt(WhisperTextDecoder.EncodedAudio audio, double temperature, Random random,
-                            int maximumTokens, int permittedLastTimestamp, boolean timestamps)
+    /** Encode the initial prompt, keeping its last tokens within half of the text context. */
+    private List<Integer> promptTokens(String prompt) {
+        if (prompt.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Integer> tokens = tokenizer.encode(" " + prompt);
+        int limit = config.textContext() / 2 - 1;
+        return tokens.size() <= limit ? tokens : tokens.subList(tokens.size() - limit, tokens.size());
+    }
+
+    private Attempt attempt(WhisperTextDecoder.EncodedAudio audio, List<Integer> prompt, double temperature,
+                            Random random, int maximumTokens, int permittedLastTimestamp, boolean timestamps)
             throws IOException {
         WhisperTextDecoder.Session session = decoder.newSession(audio);
+        if (!prompt.isEmpty()) {
+            session.nextLogits(startOfPrevious);
+            for (int token : prompt) {
+                session.nextLogits(token);
+            }
+        }
         float[] logits = session.nextLogits(startOfTranscript);
         double noSpeechProbability = noSpeech < 0 ? 0.0 : softmaxProbability(logits, noSpeech);
         logits = session.nextLogits(language);

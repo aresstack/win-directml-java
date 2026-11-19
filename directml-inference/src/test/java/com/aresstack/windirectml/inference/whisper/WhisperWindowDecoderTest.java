@@ -83,6 +83,10 @@ class WhisperWindowDecoderTest {
         assertEquals(0.6, defaults.noSpeechThreshold());
         assertEquals(224, defaults.maximumTokensPerWindow());
         assertTrue(defaults.fullWindowEncoderInput());
+        assertEquals("", defaults.initialPrompt(), "A prompt can leak into silent windows; it stays opt-in");
+        assertEquals("Confluence", defaults.withInitialPrompt("  Confluence ").initialPrompt());
+        assertEquals("Confluence", defaults.withInitialPrompt("Confluence").withMaximumTokensPerWindow(100)
+                .initialPrompt());
         assertThrows(IllegalArgumentException.class, defaults::withTemperatures);
         assertThrows(IllegalArgumentException.class, () -> defaults.withMaximumTokensPerWindow(0));
     }
