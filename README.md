@@ -437,12 +437,137 @@ publication status are separate: Whisper and text generation remain experimental
 
 Full artifact overview: [`docs/artifact-structure.md`](docs/artifact-structure.md).
 
-### Release command
+### How Maven Central publishing works
 
-```powershell
-./gradlew :directml-windows-bindings:test :directml-encoder:test :directml-runtime:test
-.\release.ps1 <version>
-```
+**Publish all seven modules together in one deployment.** The root
+`build.gradle` lists the seven artifact IDs in `publishableModules` and
+configures their Maven publications, POM metadata, source/Javadoc JARs and
+GPG signatures. The `com.gradleup.nmcp.aggregation` plugin combines them into
+**one** Sonatype Central Portal bundle using
+`:publishAggregationToCentralPortal`. The bundle contains seven components,
+all with the same version; **one deployment is not one artifact**.
 
-The release workflow publishes the core artifacts with the Central Portal
-configuration in the root Gradle build.
+The GitHub Actions workflow [`release.yml`](.github/workflows/release.yml)
+runs the aggregate task on a Java 21 Ubuntu runner. Sonatype validates the
+uploaded components and, with `publishingType = 'AUTOMATIC'` in the root
+`nmcpAggregation.centralPortal` configuration, publishes the bundle without
+an extra manual Publish click. The Swing Workbench, launcher and legacy
+JSON-RPC/Java-8 sidecar modules are excluded.
+
+**Never use `publishAllPublicationsToCentralPortal` for a normal release.**
+That older command uploads the modules as separate deployments; it caused the
+split 0.3.0 publication and complicates error recovery. Use the **root**
+`:publishAggregationToCentralPortal` task instead.
+
+### Repository setup (one time)
+
+Configure these GitHub Actions repository secrets in
+`aresstack/win-directml-java`:
+
+| GitHub secret | Purpose | Gradle property in `release.yml` |
+|---|---|---|
+| `CENTRAL_USERNAME` | Sonatype Central Portal publishing token username | `centralUsername` |
+| `CENTRAL_PASSWORD` | Sonatype Central Portal publishing token password | `centralPassword` |
+| `GPG_PRIVATE_KEY` | ASCII-armored PGP private key for Maven signatures | `signingInMemoryKey` |
+| `GPG_PASSPHRASE` | Passphrase for that key | `signingInMemoryKeyPassword` |
+
+The workflow passes these as `ORG_GRADLE_PROJECT_*` environment variables.
+The **root** `nmcpAggregation.centralPortal` block consumes the Sonatype
+credentials; the individual Maven publications consume the signing key.
+Do not commit tokens or private keys. Local `publishToMavenLocal` does not
+require publishing credentials.
+
+### Publish a new version
+
+1. Merge the intended changes into `main`. Confirm that the CI jobs for the
+   final code commit are green. The publishing workflow intentionally uses
+   `-x test`, so it **does not replace CI/testing**. GPU and real-model
+   reference tests are separate checks when the release requires them.
+2. From the repository root on Windows, update `main` and test the new
+   version (replace `0.4.0` below with the next unused version):
+
+   ```powershell
+   git switch main
+   git pull --ff-only origin main
+   git status --short
+   .\gradlew.bat clean build -Pversion=0.4.0 --no-daemon
+   .\gradlew.bat publishToMavenLocal -Pversion=0.4.0 --no-daemon
+   .\gradlew.bat :zipAggregation -Pversion=0.4.0 --no-daemon
+   ```
+
+   Check that `build/nmcp/zip/aggregation.zip` contains POMs for **all
+   seven** modules at the new version. Building the ZIP locally does **not**
+   upload it to Sonatype.
+3. Create the release from a clean, up-to-date `main` branch:
+
+   ```powershell
+   .\release.ps1 0.4.0
+   ```
+
+   The script updates version references in the README, commits any changes,
+   creates `v0.4.0`, and pushes the branch and tag. Pushing the **new tag**
+   automatically triggers `release.yml`, which derives `0.4.0` from the
+   tag. Never move or reuse a published version tag.
+4. Watch the **Release to Maven Central** run under
+   [GitHub Actions](https://github.com/aresstack/win-directml-java/actions),
+   or inspect the runs and logs with GitHub CLI:
+
+   ```powershell
+   gh run list -R aresstack/win-directml-java --workflow release.yml --limit 5
+   gh run view RUN_ID -R aresstack/win-directml-java --log
+   ```
+
+   Gradle builds and signs the seven publications, creates one aggregation
+   ZIP and uploads it to Sonatype. A successful local build or upload alone
+   does not mean the artifacts are publicly available.
+5. Verify Sonatype's **Deployments** tab reports `PUBLISHED`, then check
+   the seven `com.aresstack` coordinates on
+   [Maven Central](https://repo.maven.apache.org/maven2/com/aresstack/).
+   Confirm the new-version `.pom`, `.jar`, `-sources.jar` and
+   `-javadoc.jar` files for each module (HTTP 200). Public availability
+   can lag behind the initial Sonatype upload.
+
+For an explicitly controlled rerun, `release.yml` also supports
+`workflow_dispatch` with a `version` input and a selected branch. **Do not
+run it blindly for an existing version**: Maven Central coordinates cannot
+be overwritten, and an earlier deployment may still be publishing.
+
+### Failed workflows, slow Sonatype publishing and recovery
+
+A red GitHub Actions job is **not** proof that publication failed. For
+0.3.0, Sonatype accepted individual uploads while Gradle's deployment-status
+checks returned HTTP 404; a subsequent aggregate upload encountered duplicate
+coordinates. The final three-component recovery upload then exceeded the
+nmcp plugin's **10-minute wait timeout**, but Sonatype later marked it
+`PUBLISHED`. All seven 0.3.0 artifacts became publicly available.
+
+Follow this order when a publishing run fails:
+
+1. Read the failed workflow log and identify the **Sonatype deployment UUID**
+   from `Nmcp: deployment bundle ... uploaded`. Check whether Gradle failed
+   **before upload**, during **validation**, or only while **waiting**.
+2. Run the read-only
+   [`inspect-sonatype.yml`](.github/workflows/inspect-sonatype.yml)
+   workflow from `main` with one or more space-separated UUIDs as the
+   `deployment_ids` input. For example:
+
+   ```powershell
+   gh workflow run inspect-sonatype.yml -R aresstack/win-directml-java --ref main -f "deployment_ids=<deployment-uuid>"
+   ```
+
+   Read its logs for `deploymentState` and `errors`. It does not upload
+   anything. A deployment may be `PUBLISHING`, `PUBLISHED` or `FAILED`.
+3. If it is still `PUBLISHING`, **wait; do not start another upload**. If
+   it becomes `PUBLISHED`, verify the actual artifacts on Maven Central.
+   A timeout or transient status-query error alone is not a reason to retry.
+4. Only if some coordinates are genuinely **missing** after checking both
+   Sonatype and Maven Central, prepare a temporary, **isolated recovery
+   branch** whose `publishableModules` includes *only* missing modules.
+   Inspect `build/nmcp/zip/aggregation.zip` before any upload. Never
+   overwrite existing coordinates, re-tag `vX.Y.Z` or merge a
+   recovery-only module list into `main`. If the desired version cannot
+   safely be completed, use a new patch version after reviewing the state.
+
+See also [`build.gradle`](build.gradle) for the exact publication set and
+Sonatype plugin configuration, and [`release.ps1`](release.ps1) for the
+new-version tagging procedure.
