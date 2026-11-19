@@ -34,11 +34,12 @@ Check the particular voice/dataset license before redistributing a voice.
 - **Voice and phonemes:** `PiperVoiceConfig`,
   `PiperPhonemeIdEncoder`, `PiperSynthesisInput`,
   and the replaceable `PiperPhonemizer` interface.
-  `EspeakNgCliPhonemizer` is an optional adapter for a separately installed
-  eSpeak-NG executable. It invokes `--ipa=1 --stdin` with UTF-8 text and
-  bounded execution time; no eSpeak binary is distributed with the JAR.
-  The adapter has isolated command tests, but has **not yet passed a real
-  eSpeak-NG IPA/voice parity test** on this machine.
+  The optional `EspeakNgCliPhonemizer` adapter lives in **directml-workbench**,
+  not `directml-inference`: the latter forbids external process execution by
+  architecture test. The workbench adapter uses a separately installed eSpeak-NG
+  executable with `--ipa=1 --stdin`, UTF-8 and bounded execution time;
+  no eSpeak binary is distributed with the library. Its command tests pass,
+  but a real eSpeak-NG IPA/voice parity test is still pending.
 - **Model source:** `PiperOnnxModelSource` imports the ONNX protobuf
   through `OnnxModelReader`; the reader was extended to preserve tensor
   constants and handle ONNX attribute scalar fields correctly.

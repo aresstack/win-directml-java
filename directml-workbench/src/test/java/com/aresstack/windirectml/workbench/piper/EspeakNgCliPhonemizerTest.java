@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.inference.piper;
+package com.aresstack.windirectml.workbench.piper;
 
 import org.junit.jupiter.api.Test;
 

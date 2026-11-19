@@ -1,4 +1,6 @@
-package com.aresstack.windirectml.inference.piper;
+package com.aresstack.windirectml.workbench.piper;
+
+import com.aresstack.windirectml.inference.piper.PiperPhonemizer;
 
 import java.io.IOException;
 import java.nio.file.Path;
