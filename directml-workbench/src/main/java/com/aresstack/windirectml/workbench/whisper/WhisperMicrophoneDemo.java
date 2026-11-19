@@ -131,7 +131,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
     private void finishRecording() {
         stop.setEnabled(false);
         final boolean withTimestamps = showTimestamps.isSelected();
-        status.setText("Aufnahme beendet. Transkription läuft lokal …");
+        status.setText("Transkription läuft auf der CPU. Längere Aufnahmen können mehrere Minuten dauern …");
         background.execute(() -> {
             try {
                 float[] audio = recorder.stop();
@@ -141,7 +141,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
                 String recognized;
                 String completionStatus = "Transkription abgeschlossen. Neue Aufnahme möglich.";
                 if (withTimestamps) {
-                    TranscriptionResult result = transcriber.transcribeShortRecordingWithTimestamps(audio, 120);
+                    TranscriptionResult result = transcriber.transcribeShortRecordingWithTimestamps(audio, 400);
                     recognized = WhisperTranscriptFormatter.format(result);
                     if (result.getSegments().isEmpty() || result.hasUnalignedText()) {
                         completionStatus = "Fertig. Nicht alle Textstellen haben bestätigte Zeitstempel.";

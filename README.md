@@ -178,7 +178,7 @@ only intervals that the model emitted, without inventing segment boundaries:
 ```java
 WhisperTranscriber transcriber = new WhisperTranscriber(Path.of("model", "whisper-tiny"));
 TranscriptionResult result = transcriber.transcribeWithTimestamps(
-        Path.of("recordings", "german-speech.wav"), 120);
+        Path.of("recordings", "german-speech.wav"), 400);
 for (TranscriptionSegment segment : result.getSegments()) {
     System.out.println(segment.getStartMillis() + " - "
             + segment.getEndMillis() + ": " + segment.getText());
@@ -192,8 +192,13 @@ Import `TranscriptionResult` and `TranscriptionSegment` from
 Each result contains `getText()` for the full transcript, `getSegments()` for
 model-confirmed start/end positions in milliseconds and `getUnalignedText()`
 for words without a complete timestamp pair. Segment alignment is experimental;
-word-level times and streaming are not provided. The original plain-text API
-is unchanged. Use a sufficient token limit to leave room for the timestamp tokens.
+word-level times and streaming are not provided. For longer recordings the API
+splits at detectable speech pauses where possible, preserves offsets in the
+original recording and limits each decoder window to thirty seconds. The
+silence detection is energy-based, not a dedicated VAD model; noisy recordings
+may still contain imprecise timestamps. The original plain-text API is unchanged.
+Use a sufficient token limit (for example, 400 for longer recordings) to leave
+room for the timestamp tokens.
 
 ### Download model weights
 
@@ -226,8 +231,8 @@ text. Enable **Zeitstempel anzeigen (experimentell)** in the demo to display
 `[MM:SS.cc – MM:SS.cc]` before each recognized segment. Disable it to compare
 with the original plain-text decoding. The demo now records up to 120 seconds
 so that minute-level offsets can also be tested. Unaligned speech is displayed
-separately, not assigned a guessed time. Longer recordings take correspondingly
-longer to process on the CPU. The window is a **Workbench demo**, not part of
+separately, not assigned a guessed time. Longer recordings can take several minutes to process on the CPU; the UI
+remains responsive while decoding runs in the background. The window is a **Workbench demo**, not part of
 the library API.
 
 ### Tests, limitations and Maven Central
@@ -242,7 +247,10 @@ CPU-bound. Run it off the UI thread. Incremental streaming results,
 speaker identification and word-level timestamps are not implemented. The
 0.3.1 timestamp API offers model-confirmed segment times only; its greedy
 decoder may occasionally leave passages without a complete time interval.
-Accuracy outside the tested German sample is not yet established.
+A regression test with repeated German speech and intervening pauses verifies
+that the segments retain their original positions and do not loop indefinitely.
+Accuracy for longer, varied speech recordings remains to be established by
+real-world testing.
 
 Version **0.3.0** introduces the experimental Whisper API in the published
 `com.aresstack:directml-inference:0.3.0` artifact. Earlier versions, including

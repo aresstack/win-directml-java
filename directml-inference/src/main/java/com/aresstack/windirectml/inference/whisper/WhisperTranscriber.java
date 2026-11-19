@@ -98,23 +98,24 @@ public final class WhisperTranscriber {
         return transcribeWithTimestamps(new WhisperWavAudioLoader().load(wavFile), maximumTokensPerChunk);
     }
 
-    /** Transcribe 16-kHz mono float PCM in 30-second windows with timestamp tokens. */
+    /** Transcribe 16-kHz mono PCM using pause-aware windows of at most thirty seconds. */
     public TranscriptionResult transcribeWithTimestamps(float[] samples, int maximumTokensPerChunk)
             throws IOException {
         Objects.requireNonNull(samples, "samples");
         validateTokenLimit(maximumTokensPerChunk);
         List<TranscriptionResult> parts = new ArrayList<>();
         WhisperTimestampDecoder timestampDecoder = newTimestampDecoder();
-        for (int offset = 0; offset < samples.length; offset += CHUNK_LENGTH) {
-            int count = Math.min(CHUNK_LENGTH, samples.length - offset);
-            float[][] mel = frontend.compute(samples, offset);
+        for (WhisperSpeechWindow window : WhisperSpeechWindow.split(samples, CHUNK_LENGTH)) {
+            float[] activeAudio = java.util.Arrays.copyOfRange(samples,
+                    window.firstSample(), window.firstSample() + window.sampleCount());
+            float[][] mel = frontend.compute(activeAudio);
             parts.add(timestampDecoder.transcribe(mel, maximumTokensPerChunk,
-                    sampleToMillis(offset), sampleToMillis(count)));
+                    sampleToMillis(window.firstSample()), sampleToMillis(window.sampleCount())));
         }
         return combine(parts);
     }
 
-    /** Transcribe short microphone recordings using six-second windows. */
+    /** Use a small encoder window for short recordings and pause-aware windows for longer audio. */
     public TranscriptionResult transcribeShortRecordingWithTimestamps(float[] samples,
                                                                        int maximumTokensPerChunk)
             throws IOException {
@@ -123,6 +124,9 @@ public final class WhisperTranscriber {
         List<TranscriptionResult> parts = new ArrayList<>();
         WhisperTimestampDecoder timestampDecoder = newTimestampDecoder();
         int samplesPerPart = WhisperLogMelSpectrogram.SAMPLE_RATE * 6;
+        if (samples.length > samplesPerPart) {
+            return transcribeWithTimestamps(samples, maximumTokensPerChunk);
+        }
         for (int offset = 0; offset < samples.length; offset += samplesPerPart) {
             int sampleCount = Math.min(samplesPerPart, samples.length - offset);
             float[] chunk = java.util.Arrays.copyOfRange(samples, offset, offset + sampleCount);
