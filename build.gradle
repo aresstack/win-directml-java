@@ -38,6 +38,13 @@ ext.publishableModules = [
         // 'directml-sidecar-workbench',
 ]
 
+// Include only the v0.3.0 modules missing from the first Sonatype upload.
+ext.publishableModules = [
+        'directml-model-package',
+        'directml-runtime',
+        'directml-windows-bindings'
+]
+
 subprojects {
     apply plugin: 'java-library'
 
