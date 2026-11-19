@@ -197,7 +197,9 @@ word-level times and live microphone streaming are not provided. Audio uses
 and the next window starts at the last segment's absolute start time. The last
 window retains all segments. If timestamps cannot safely advance processing,
 the full window is retained and processing advances by 30 seconds instead.
-No separate pause-based segmentation, VAD or NLP is applied.
+The core transcription API does not apply VAD or pause-based segmentation.
+The microphone demo can optionally enable the Ask AI preprocessing pipeline
+without changing the core decoder.
 
 An optional `Consumer<TranscriptionResult>` overload of
 `transcribeWithTimestamps(audio, tokenLimit, onProgress)` (also available
@@ -245,7 +247,22 @@ chunks remain on disk while the most recent complete chunk and the current
 partial chunk stay in RAM. After stopping, Whisper reads its 30-second windows
 across these chunks without loading the complete recording into memory.
 Temporary chunks are deleted after transcription or when the recording is
-discarded. Enable **Zeitstempel anzeigen (experimentell)** in the demo to display
+discarded. Enable **Ask AI: 80-Hz-Hochpass + VAD** to use the imported
+Java-8-compatible `audio-dsp` module. The default microphone profile applies
+DC removal, an 80-Hz Butterworth high-pass filter, a 7.2-kHz low-pass filter,
+a mild noise gate, compressor, and limiter. Ask AI's deterministic Java VAD
+runs after DC removal and high-pass filtering to find voice regions; long
+pauses are skipped rather than sent to Whisper. Keep 200 ms before and
+250 ms after detected speech. Each region retains its original source offset,
+so transcription timestamps refer to the uncut recording. The entire
+two-minute capture chunk design remains unchanged, and the pipeline only
+reads bounded audio windows. The checkbox can be disabled to compare
+against the unprocessed Whisper path. No ONNX runtime or neural VAD model
+is required. Capture audio uses signed 16-bit PCM at the microphone's
+negotiated rate, whereas Whisper uses 16-kHz mono float PCM; these are
+independent format properties.
+
+Enable **Zeitstempel anzeigen (experimentell)** in the demo to display
 `[MM:SS.cc – MM:SS.cc]` before each recognized segment. Disable it to compare
 with the original plain-text decoding. The demo records until stopped manually so that longer recordings
 and minute-level offsets can be tested. Unaligned speech is displayed
@@ -261,7 +278,8 @@ recognized as "Hallo? Dies ist ein Test der Deutschen Spracherkennung."
 (the original sentence differs slightly in case and punctuation).
 
 Whisper transcription is currently **experimental**, synchronous and
-CPU-bound. Run it off the UI thread. Incremental streaming results,
+CPU-bound. Run it off the UI thread. The optional progress callback reports
+completed windows after decoding; real-time microphone streaming,
 speaker identification and word-level timestamps are not implemented. The
 0.3.1 timestamp API offers model-confirmed segment times only; its greedy
 decoder may occasionally leave passages without a complete time interval.

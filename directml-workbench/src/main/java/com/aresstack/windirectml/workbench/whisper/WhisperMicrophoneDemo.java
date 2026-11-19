@@ -29,6 +29,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
     private final JButton start = new JButton("Aufnahme starten");
     private final JButton stop = new JButton("Aufnahme stoppen");
     private final JCheckBox showTimestamps = new JCheckBox("Zeitstempel anzeigen (experimentell)", true);
+    private final JCheckBox cleanAudio = new JCheckBox("Ask AI: 80-Hz-Hochpass + VAD", true);
     private final JTextArea transcript = new JTextArea(8, 56);
     private final JLabel status = new JLabel("Bereit");
     private final MicrophoneRecorder recorder = new MicrophoneRecorder();
@@ -71,6 +72,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
         actions.add(start);
         actions.add(stop);
         actions.add(showTimestamps);
+        actions.add(cleanAudio);
         start.addActionListener(event -> beginRecording());
         stop.addActionListener(event -> finishRecording());
 
@@ -114,6 +116,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
         start.setEnabled(false);
         devices.setEnabled(false);
         showTimestamps.setEnabled(false);
+        cleanAudio.setEnabled(false);
         status.setText("Mikrofon wird gestartet …");
         background.execute(() -> {
             try {
@@ -132,6 +135,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
     private void finishRecording() {
         stop.setEnabled(false);
         final boolean withTimestamps = showTimestamps.isSelected();
+        final boolean withAudioCleanup = cleanAudio.isSelected();
         status.setText("Transkription läuft auf der CPU. Längere Aufnahmen können mehrere Minuten dauern …");
         background.execute(() -> {
             try (ChunkedPcmAudioSource audio = recorder.stop()) {
@@ -142,14 +146,19 @@ public final class WhisperMicrophoneDemo extends JFrame {
                 String completionStatus = "Transkription abgeschlossen. Neue Aufnahme möglich.";
                 if (withTimestamps) {
                     AtomicInteger decodedWindows = new AtomicInteger();
-                    TranscriptionResult result = transcriber.transcribeWithTimestamps(audio, 400,
-                            chunk -> showTranscriptionProgress(chunk, decodedWindows.incrementAndGet()));
+                    TranscriptionResult result = withAudioCleanup
+                            ? new AskAiWhisperPipeline().transcribeWithTimestamps(audio, transcriber, 400,
+                                    chunk -> showTranscriptionProgress(chunk, decodedWindows.incrementAndGet()))
+                            : transcriber.transcribeWithTimestamps(audio, 400,
+                                    chunk -> showTranscriptionProgress(chunk, decodedWindows.incrementAndGet()));
                     recognized = WhisperTranscriptFormatter.format(result);
                     if (result.getSegments().isEmpty() || result.hasUnalignedText()) {
                         completionStatus = "Fertig. Nicht alle Textstellen haben bestätigte Zeitstempel.";
                     }
                 } else {
-                    recognized = transcriber.transcribeShortRecording(audio, 80);
+                    recognized = withAudioCleanup
+                            ? new AskAiWhisperPipeline().transcribePlain(audio, transcriber, 80)
+                            : transcriber.transcribeShortRecording(audio, 80);
                     if (recognized.isBlank()) {
                         recognized = "(Keine Sprache erkannt)";
                     }
@@ -162,6 +171,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
                     start.setEnabled(true);
                     devices.setEnabled(true);
                     showTimestamps.setEnabled(true);
+                    cleanAudio.setEnabled(true);
                 });
             } catch (Exception exception) {
                 showFailure("Transkription fehlgeschlagen", exception);
@@ -190,6 +200,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
             transcript.setText(description + "\n" + exception);
             devices.setEnabled(true);
             showTimestamps.setEnabled(true);
+            cleanAudio.setEnabled(true);
             start.setEnabled(modelAvailable() && devices.getItemCount() > 0);
             stop.setEnabled(false);
         });
