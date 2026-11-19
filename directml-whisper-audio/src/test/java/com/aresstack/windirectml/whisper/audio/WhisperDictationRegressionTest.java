@@ -100,6 +100,25 @@ class WhisperDictationRegressionTest {
         }
     }
 
+    @Test
+    void transcribesEnglishWhenSetAndDetectsTheLanguageAutomatically() throws Exception {
+        String english = "Please search the knowledge base and summarize all pages about travel expenses.";
+        float[] englishAudio = microphone(silence(0.5), speech("en-sentence.wav"), silence(0.5));
+        float[] germanAudio = microphone(silence(0.5), speech("de-sentence.wav"), silence(0.5));
+        WhisperDecodingOptions auto = WhisperDecodingOptions.defaults().withLanguage("auto");
+
+        String fixed = transcriber.transcribe(englishAudio,
+                WhisperDecodingOptions.defaults().withLanguage("en"), ignored -> { }).getText();
+        String detectedEnglish = transcriber.transcribe(englishAudio, auto, ignored -> { }).getText();
+        String detectedGerman = transcriber.transcribe(germanAudio, auto, ignored -> { }).getText();
+        System.out.println("WHISPER-REGRESSION language | en: " + fixed + " | auto en: " + detectedEnglish
+                + " | auto de: " + detectedGerman);
+
+        assertTrue(wordErrorRate(english, fixed) <= MAXIMUM_WORD_ERROR_RATE, "English: " + fixed);
+        assertTrue(wordErrorRate(english, detectedEnglish) <= MAXIMUM_WORD_ERROR_RATE, "auto en: " + detectedEnglish);
+        assertTrue(wordErrorRate(SENTENCE, detectedGerman) <= MAXIMUM_WORD_ERROR_RATE, "auto de: " + detectedGerman);
+    }
+
     private static int wordCount(String text) {
         return text.isBlank() ? 0 : text.trim().split("\s+").length;
     }

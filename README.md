@@ -183,6 +183,12 @@ TranscriptionResult result = transcriber.transcribe(samples,
         WhisperDecodingOptions.defaults(), window -> System.out.println(window.getText()));
 ```
 
+`WhisperDecodingOptions.withLanguage(code)` selects the spoken language (`"de"`
+by default, `"en"`, `"fr"`, ... for any of the 99 language tokens of the
+multilingual checkpoint) or `"auto"`, which picks the most probable language
+token of every window as the reference decoder does. Set a known language
+explicitly: detection on short or noisy audio is less reliable with Whisper Tiny.
+
 `WhisperDecodingOptions.withInitialPrompt(text)` precedes every window with fixed
 context, encoded by `WhisperTokenizer.encode`, a byte-level BPE encoder that matches
 the Hugging Face tokenizer. Measured with Whisper Tiny it helps spell domain terms
@@ -290,8 +296,7 @@ rate of at most 0.15, no repetition loop and empty output for silence; on a
 Whisper transcription is synchronous and CPU-bound; batched encoder operations
 use all cores. Run it off the UI thread. The progress callback reports
 committed windows after decoding; live decoding while recording, speaker
-identification, beam search, language detection (German is fixed) and
-word-level timestamps are not implemented.
+identification, beam search and word-level timestamps are not implemented.
 
 Version **0.3.0** introduced the experimental Whisper API, **0.3.1** segment
 timestamps and the optional audio adapter, and **0.3.2** the guarded decoder,

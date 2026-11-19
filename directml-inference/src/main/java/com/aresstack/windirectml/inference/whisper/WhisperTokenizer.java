@@ -79,6 +79,24 @@ public final class WhisperTokenizer {
         return -1;
     }
 
+    /**
+     * Return the language tokens of a multilingual checkpoint by language code, in vocabulary
+     * order: every special token between {@code <|startoftranscript|>} and {@code <|translate|>}.
+     */
+    public Map<String, Integer> languageTokens() {
+        int first = requireSpecial("<|startoftranscript|>") + 1;
+        int last = requireSpecial("<|translate|>") - 1;
+        Map<String, Integer> languages = new java.util.TreeMap<>();
+        for (Map.Entry<String, Integer> special : specialTokens.entrySet()) {
+            String name = special.getKey();
+            if (special.getValue() >= first && special.getValue() <= last
+                    && name.startsWith("<|") && name.endsWith("|>")) {
+                languages.put(name.substring(2, name.length() - 2), special.getValue());
+            }
+        }
+        return languages;
+    }
+
     public int textTokenCount() {
         return pieces.length;
     }

@@ -87,6 +87,10 @@ class WhisperWindowDecoderTest {
         assertEquals("Confluence", defaults.withInitialPrompt("  Confluence ").initialPrompt());
         assertEquals("Confluence", defaults.withInitialPrompt("Confluence").withMaximumTokensPerWindow(100)
                 .initialPrompt());
+        assertEquals("de", defaults.language());
+        assertEquals("auto", defaults.withLanguage(" AUTO ").language());
+        assertEquals("en", defaults.withLanguage("en").withInitialPrompt("x").language());
+        assertThrows(IllegalArgumentException.class, () -> defaults.withLanguage("german"));
         assertThrows(IllegalArgumentException.class, defaults::withTemperatures);
         assertThrows(IllegalArgumentException.class, () -> defaults.withMaximumTokensPerWindow(0));
     }

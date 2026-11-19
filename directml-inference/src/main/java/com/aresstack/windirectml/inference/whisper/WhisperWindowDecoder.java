@@ -24,7 +24,7 @@ final class WhisperWindowDecoder {
     private final WhisperTimestampTokenSelector rules;
     private final WhisperRepetitionGuard repetitionGuard;
     private final int startOfTranscript;
-    private final int language;
+    private final java.util.Map<String, Integer> languages;
     private final int transcribe;
     private final int noTimestamps;
     private final int noSpeech;
@@ -43,7 +43,7 @@ final class WhisperWindowDecoder {
         repetitionGuard = new WhisperRepetitionGuard(tokenizer.textTokenCount(),
                 parser.firstTimestamp(), parser.lastTimestamp(), tokenizer::decode);
         startOfTranscript = tokenizer.requireSpecial("<|startoftranscript|>");
-        language = tokenizer.requireSpecial("<|de|>");
+        languages = tokenizer.languageTokens();
         transcribe = tokenizer.requireSpecial("<|transcribe|>");
         noTimestamps = tokenizer.requireSpecial("<|notimestamps|>");
         noSpeech = tokenizer.findSpecial("<|nospeech|>", "<|nocaptions|>");
@@ -67,7 +67,7 @@ final class WhisperWindowDecoder {
         Attempt attempt = null;
         for (int index = 0; index < temperatures.length; index++) {
             Random random = new Random(options.samplingSeed() * 31 + offsetMillis * 7 + index);
-            Attempt current = attempt(audio, prompt, temperatures[index], random, maximumTokens,
+            Attempt current = attempt(audio, prompt, options.language(), temperatures[index], random, maximumTokens,
                     permittedLastTimestamp, timestamps);
             LOGGER.log(System.Logger.Level.DEBUG, () -> String.format(java.util.Locale.ROOT,
                     "Whisper window %d ms, temperature %.1f: log-probability %.3f, compression %.2f, "
@@ -103,8 +103,27 @@ final class WhisperWindowDecoder {
         return tokens.size() <= limit ? tokens : tokens.subList(tokens.size() - limit, tokens.size());
     }
 
-    private Attempt attempt(WhisperTextDecoder.EncodedAudio audio, List<Integer> prompt, double temperature,
-                            Random random, int maximumTokens, int permittedLastTimestamp, boolean timestamps)
+    /** Use the requested language, or the most probable language token after the start token. */
+    private int languageToken(String code, float[] logitsAfterStart) {
+        if (!"auto".equals(code)) {
+            Integer token = languages.get(code);
+            if (token == null) {
+                throw new IllegalArgumentException("The Whisper checkpoint does not support language: " + code);
+            }
+            return token;
+        }
+        int best = -1;
+        for (int token : languages.values()) {
+            if (best < 0 || logitsAfterStart[token] > logitsAfterStart[best]) {
+                best = token;
+            }
+        }
+        return best;
+    }
+
+    private Attempt attempt(WhisperTextDecoder.EncodedAudio audio, List<Integer> prompt, String language,
+                            double temperature, Random random, int maximumTokens, int permittedLastTimestamp,
+                            boolean timestamps)
             throws IOException {
         WhisperTextDecoder.Session session = decoder.newSession(audio);
         if (!prompt.isEmpty()) {
@@ -115,7 +134,7 @@ final class WhisperWindowDecoder {
         }
         float[] logits = session.nextLogits(startOfTranscript);
         double noSpeechProbability = noSpeech < 0 ? 0.0 : softmaxProbability(logits, noSpeech);
-        logits = session.nextLogits(language);
+        logits = session.nextLogits(languageToken(language, logits));
         logits = session.nextLogits(transcribe);
         if (!timestamps) {
             logits = session.nextLogits(noTimestamps);

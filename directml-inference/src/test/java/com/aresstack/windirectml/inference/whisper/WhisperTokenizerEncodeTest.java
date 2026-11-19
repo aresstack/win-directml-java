@@ -36,4 +36,15 @@ class WhisperTokenizerEncodeTest {
 
         assertEquals(text, tokenizer.decode(tokenizer.encode(text)));
     }
+
+    @Test
+    void listsTheLanguageTokensOfTheMultilingualCheckpoint() throws Exception {
+        Assumptions.assumeTrue(Files.isRegularFile(MODEL.resolve("vocab.json")));
+        java.util.Map<String, Integer> languages = new WhisperTokenizer(MODEL).languageTokens();
+
+        assertEquals(99, languages.size());
+        assertEquals(50259, languages.get("en"));
+        assertEquals(50261, languages.get("de"));
+        assertEquals(50357, languages.get("su"));
+    }
 }
