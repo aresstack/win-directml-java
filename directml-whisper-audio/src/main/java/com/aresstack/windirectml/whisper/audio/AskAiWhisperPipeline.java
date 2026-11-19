@@ -5,6 +5,7 @@ import com.aresstack.windirectml.inference.whisper.TranscriptionResult;
 import com.aresstack.windirectml.inference.whisper.TranscriptionSegment;
 import com.aresstack.windirectml.inference.whisper.WhisperAudioSource;
 import com.aresstack.windirectml.inference.whisper.WhisperDecodingOptions;
+import com.aresstack.windirectml.inference.whisper.WhisperIncrementalTranscription;
 import com.aresstack.windirectml.inference.whisper.WhisperTranscriber;
 
 import java.io.IOException;
@@ -87,6 +88,21 @@ public final class AskAiWhisperPipeline {
             recognized.add(shift(region, offsetMillis));
         }
         return combine(recognized);
+    }
+
+    /**
+     * Transcribe a recording while it is still growing, with the same speech profile and decoding
+     * options. The VAD needs the complete recording, so long pauses are not skipped here; the
+     * guarded decoder handles them inside each window. Timestamps refer to the recording start.
+     */
+    public WhisperIncrementalTranscription transcribeIncrementally(WhisperAudioSource growingSource,
+                                                                   WhisperTranscriber transcriber,
+                                                                   Consumer<TranscriptionResult> progress) {
+        Objects.requireNonNull(growingSource, "growingSource");
+        Objects.requireNonNull(transcriber, "transcriber");
+        Objects.requireNonNull(progress, "progress");
+        return transcriber.transcribeIncrementally(
+                new AskAiProcessedSpeechSource(growingSource, null, profile), options, progress);
     }
 
     /** Transcribe detected speech regions and return the transcript without timestamps. */

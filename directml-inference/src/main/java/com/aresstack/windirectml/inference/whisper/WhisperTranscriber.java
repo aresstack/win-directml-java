@@ -57,21 +57,46 @@ public final class WhisperTranscriber {
         validateTokenLimit(options.maximumTokensPerWindow());
         WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(source.sampleCount());
         while (stitcher.hasNextWindow()) {
-            if (Thread.currentThread().isInterrupted()) {
-                throw new InterruptedIOException("Whisper transcription was interrupted");
-            }
-            long offset = stitcher.nextStartSample();
-            int count = stitcher.nextWindowSamples();
-            float[] samples = source.readSamples(offset, count);
-            if (samples.length != count) {
-                throw new IOException("Audio source did not return the requested sample window");
-            }
-            WhisperWindowDecoder.WindowDecoding window = windowDecoder.decode(
-                    melForWindow(samples, options), sampleToMillis(offset), sampleToMillis(count),
-                    options, true);
-            onProgress.accept(stitcher.accept(window.result, window.trailingOpenText));
+            onProgress.accept(decodeNextWindow(stitcher, source, options));
         }
         return combine(stitcher.acceptedWindows());
+    }
+
+    /**
+     * Transcribe a recording that is still growing. Decode completed 30-second windows with
+     * {@link WhisperIncrementalTranscription#decodeAvailable()} while recording continues, and the
+     * rest with {@link WhisperIncrementalTranscription#finish()} once it has stopped. The windows,
+     * safeguards and stitching rules are those of the batch path, so both produce the same text.
+     *
+     * @param growingSource a source whose {@code sampleCount()} grows while recording; every reported
+     *                      sample must remain readable and unchanged
+     */
+    public WhisperIncrementalTranscription transcribeIncrementally(WhisperAudioSource growingSource,
+                                                                   WhisperDecodingOptions options,
+                                                                   Consumer<TranscriptionResult> onCommitted) {
+        Objects.requireNonNull(growingSource, "growingSource");
+        Objects.requireNonNull(options, "options");
+        Objects.requireNonNull(onCommitted, "onCommitted");
+        validateTokenLimit(options.maximumTokensPerWindow());
+        return new WhisperIncrementalTranscription(this, growingSource, options, onCommitted);
+    }
+
+    /** Decode and commit the window at the stitcher's next position. */
+    TranscriptionResult decodeNextWindow(WhisperTimestampWindowStitcher stitcher, WhisperAudioSource source,
+                                         WhisperDecodingOptions options) throws IOException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedIOException("Whisper transcription was interrupted");
+        }
+        long offset = stitcher.nextStartSample();
+        int count = stitcher.nextWindowSamples();
+        float[] samples = source.readSamples(offset, count);
+        if (samples.length != count) {
+            throw new IOException("Audio source did not return the requested sample window");
+        }
+        WhisperWindowDecoder.WindowDecoding window = windowDecoder.decode(
+                melForWindow(samples, options), sampleToMillis(offset), sampleToMillis(count),
+                options, true);
+        return stitcher.accept(window.result, window.trailingOpenText);
     }
 
     /** Transcribe already decoded 16-kHz mono PCM with the guarded decoder. */
@@ -246,7 +271,7 @@ public final class WhisperTranscriber {
         return samples * 1000 / WhisperLogMelSpectrogram.SAMPLE_RATE;
     }
 
-    private static TranscriptionResult combine(List<TranscriptionResult> parts) {
+    static TranscriptionResult combine(List<TranscriptionResult> parts) {
         StringBuilder text = new StringBuilder();
         StringBuilder unaligned = new StringBuilder();
         List<TranscriptionSegment> segments = new ArrayList<>();

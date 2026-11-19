@@ -162,6 +162,23 @@ class WhisperTimestampWindowStitcherTest {
         assertEquals("Unaligned speech", stitcher.acceptedWindows().get(0).getText());
     }
 
+    @Test
+    void treatsEveryWindowOfAnOpenRecordingAsNonFinalUntilItIsCompleted() {
+        WhisperTimestampWindowStitcher stitcher = WhisperTimestampWindowStitcher.open();
+        assertEquals(30 * 16000, stitcher.nextWindowSamples());
+
+        TranscriptionResult committed = stitcher.accept(result(segment(0, 12, "First."), segment(12, 30, "Cut.")));
+        assertEquals("First.", committed.getText(), "A boundary segment of an open recording is withheld");
+        assertEquals(12 * 16000, stitcher.nextStartSample());
+
+        stitcher.complete(20 * 16000);
+        assertEquals(8 * 16000, stitcher.nextWindowSamples());
+        TranscriptionResult last = stitcher.accept(result(segment(12, 19, "Cut and finished."),
+                segment(19, 20, "End.")));
+        assertEquals("Cut and finished. End.", last.getText());
+        assertFalse(stitcher.hasNextWindow());
+    }
+
     private static TranscriptionResult result(TranscriptionSegment... segments) {
         String text = Arrays.stream(segments).map(TranscriptionSegment::getText)
                 .collect(Collectors.joining(" "));

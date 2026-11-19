@@ -21,7 +21,8 @@ final class WhisperTimestampWindowStitcher {
     private static final int MINIMUM_ADVANCE_SAMPLES = SAMPLE_RATE;
     private static final int BOUNDARY_MARGIN_SAMPLES = SAMPLE_RATE / 2;
 
-    private final long totalSamples;
+    /** The recording length; {@link Long#MAX_VALUE} while a growing recording is still open. */
+    private long totalSamples;
     private final List<TranscriptionResult> acceptedWindows = new ArrayList<>();
     private long nextStartSample;
 
@@ -30,6 +31,19 @@ final class WhisperTimestampWindowStitcher {
             throw new IllegalArgumentException("Audio length must not be negative");
         }
         this.totalSamples = totalSamples;
+    }
+
+    /** Stitch a recording that is still growing; every window is non-final until {@link #complete}. */
+    static WhisperTimestampWindowStitcher open() {
+        return new WhisperTimestampWindowStitcher(Long.MAX_VALUE);
+    }
+
+    /** Fix the final length of a growing recording; the remaining windows use final-window rules. */
+    void complete(long finalSamples) {
+        if (finalSamples < nextStartSample) {
+            throw new IllegalArgumentException("The recording cannot end before committed audio");
+        }
+        totalSamples = finalSamples;
     }
 
     boolean hasNextWindow() {

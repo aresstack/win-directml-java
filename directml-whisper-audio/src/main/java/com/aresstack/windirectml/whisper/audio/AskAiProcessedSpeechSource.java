@@ -28,6 +28,7 @@ final class AskAiProcessedSpeechSource implements WhisperAudioSource {
     static final int WARM_UP_SAMPLES = 8000;
 
     private final WhisperAudioSource original;
+    /** The speech interval, or {@code null} for the whole recording while it is still growing. */
     private final SpeechInterval interval;
     private final AudioProfileProcessor processor = new AudioProfileProcessor();
     private final AudioProcessingProfile profile;
@@ -35,7 +36,7 @@ final class AskAiProcessedSpeechSource implements WhisperAudioSource {
     AskAiProcessedSpeechSource(WhisperAudioSource original, SpeechInterval interval,
                                AudioProcessingProfile profile) {
         this.original = Objects.requireNonNull(original, "original");
-        this.interval = Objects.requireNonNull(interval, "interval");
+        this.interval = interval;
         this.profile = Objects.requireNonNull(profile, "profile");
     }
 
@@ -86,7 +87,7 @@ final class AskAiProcessedSpeechSource implements WhisperAudioSource {
 
     @Override
     public long sampleCount() {
-        return interval.endSample() - interval.startSample();
+        return interval == null ? original.sampleCount() : interval.endSample() - interval.startSample();
     }
 
     @Override
@@ -94,7 +95,7 @@ final class AskAiProcessedSpeechSource implements WhisperAudioSource {
         if (startSample < 0 || sampleCount < 0 || startSample > sampleCount() - sampleCount) {
             throw new IllegalArgumentException("Speech interval request exceeds its sample range");
         }
-        long absoluteStart = interval.startSample() + startSample;
+        long absoluteStart = (interval == null ? 0 : interval.startSample()) + startSample;
         int warmUp = (int) Math.min(WARM_UP_SAMPLES, absoluteStart);
         int total = warmUp + sampleCount;
         float[] samples = original.readSamples(absoluteStart - warmUp, total);

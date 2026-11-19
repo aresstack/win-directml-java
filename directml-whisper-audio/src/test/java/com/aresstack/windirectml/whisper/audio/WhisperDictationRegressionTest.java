@@ -119,6 +119,76 @@ class WhisperDictationRegressionTest {
         assertTrue(wordErrorRate(SENTENCE, detectedGerman) <= MAXIMUM_WORD_ERROR_RATE, "auto de: " + detectedGerman);
     }
 
+    /**
+     * Decoding a recording while it grows in five-second steps must yield exactly the batch
+     * transcript, and most of it must already be committed before recording stops.
+     */
+    @Test
+    void incrementalTranscriptionWhileRecordingEqualsTheBatchTranscript() throws Exception {
+        float[] audio = microphone(silence(0.5), speech("de-long.wav"), silence(0.5));
+        WhisperDecodingOptions options = WhisperDecodingOptions.defaults();
+        String batch = transcriber.transcribe(audio, options, ignored -> { }).getText();
+
+        long[] visible = {0};
+        com.aresstack.windirectml.inference.whisper.WhisperAudioSource growing =
+                new com.aresstack.windirectml.inference.whisper.WhisperAudioSource() {
+                    @Override
+                    public long sampleCount() {
+                        return visible[0];
+                    }
+
+                    @Override
+                    public float[] readSamples(long start, int count) {
+                        if (start + count > visible[0]) {
+                            throw new IllegalArgumentException("Read beyond the recorded audio");
+                        }
+                        return java.util.Arrays.copyOfRange(audio, (int) start, (int) start + count);
+                    }
+                };
+        StringBuilder whileRecording = new StringBuilder();
+        com.aresstack.windirectml.inference.whisper.WhisperIncrementalTranscription live =
+                transcriber.transcribeIncrementally(growing, options, window -> whileRecording.append(window.getText()));
+        for (visible[0] = 0; visible[0] < audio.length; visible[0] = Math.min(audio.length, visible[0] + 5 * SAMPLE_RATE)) {
+            live.decodeAvailable();
+        }
+        int committedBeforeStop = whileRecording.length();
+        long started = System.nanoTime();
+        String incremental = live.finish().getText();
+        double afterStop = (System.nanoTime() - started) / 1e9;
+        System.out.printf("WHISPER-REGRESSION incremental | %d of %d characters before stop, %.1f s after stop%n",
+                committedBeforeStop, incremental.length(), afterStop);
+
+        assertEquals(batch, incremental);
+        assertTrue(committedBeforeStop > incremental.length() / 2,
+                "Most of the transcript must be committed while recording");
+    }
+
+    @Test
+    void pipelineTranscribesAGrowingRecordingWithTheSpeechProfile() throws Exception {
+        float[] audio = microphone(silence(0.5), speech("de-long.wav"), silence(0.5));
+        long[] visible = {0};
+        com.aresstack.windirectml.inference.whisper.WhisperAudioSource growing =
+                new com.aresstack.windirectml.inference.whisper.WhisperAudioSource() {
+                    @Override
+                    public long sampleCount() {
+                        return visible[0];
+                    }
+
+                    @Override
+                    public float[] readSamples(long start, int count) {
+                        return java.util.Arrays.copyOfRange(audio, (int) start, (int) start + count);
+                    }
+                };
+        com.aresstack.windirectml.inference.whisper.WhisperIncrementalTranscription live =
+                new AskAiWhisperPipeline().transcribeIncrementally(growing, transcriber, ignored -> { });
+        for (visible[0] = 0; visible[0] < audio.length; visible[0] = Math.min(audio.length, visible[0] + 7 * SAMPLE_RATE)) {
+            live.decodeAvailable();
+        }
+        String text = live.finish().getText();
+
+        assertQuality("pipeline while recording", LONG, text);
+    }
+
     private static int wordCount(String text) {
         return text.isBlank() ? 0 : text.trim().split("\s+").length;
     }
