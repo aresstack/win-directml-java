@@ -1,9 +1,11 @@
 package com.aresstack.windirectml.workbench.whisper;
 
+import com.aresstack.windirectml.inference.whisper.TranscriptionResult;
 import com.aresstack.windirectml.inference.whisper.WhisperTranscriber;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -25,6 +27,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
     private final JComboBox<MicrophoneRecorder.Device> devices = new JComboBox<>();
     private final JButton start = new JButton("Aufnahme starten");
     private final JButton stop = new JButton("Aufnahme stoppen");
+    private final JCheckBox showTimestamps = new JCheckBox("Zeitstempel anzeigen (experimentell)", true);
     private final JTextArea transcript = new JTextArea(8, 56);
     private final JLabel status = new JLabel("Bereit");
     private final MicrophoneRecorder recorder = new MicrophoneRecorder();
@@ -66,6 +69,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
         actions.add(devices);
         actions.add(start);
         actions.add(stop);
+        actions.add(showTimestamps);
         start.addActionListener(event -> beginRecording());
         stop.addActionListener(event -> finishRecording());
 
@@ -108,6 +112,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
         MicrophoneRecorder.Device selected = (MicrophoneRecorder.Device) devices.getSelectedItem();
         start.setEnabled(false);
         devices.setEnabled(false);
+        showTimestamps.setEnabled(false);
         status.setText("Mikrofon wird gestartet …");
         background.execute(() -> {
             try {
@@ -115,7 +120,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
                 SwingUtilities.invokeLater(() -> {
                     transcript.setText("");
                     stop.setEnabled(true);
-                    status.setText("Aufnahme läuft (maximal 12 Sekunden). Bitte sprechen.");
+                    status.setText("Aufnahme läuft (maximal " + MicrophoneRecorder.MAX_SECONDS + " Sekunden). Bitte sprechen.");
                 });
             } catch (Exception exception) {
                 showFailure("Mikrofon konnte nicht geöffnet werden", exception);
@@ -125,6 +130,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
 
     private void finishRecording() {
         stop.setEnabled(false);
+        final boolean withTimestamps = showTimestamps.isSelected();
         status.setText("Aufnahme beendet. Transkription läuft lokal …");
         background.execute(() -> {
             try {
@@ -132,12 +138,28 @@ public final class WhisperMicrophoneDemo extends JFrame {
                 if (transcriber == null) {
                     transcriber = new WhisperTranscriber(modelDirectory);
                 }
-                String recognized = transcriber.transcribeShortRecording(audio, 80);
+                String recognized;
+                String completionStatus = "Transkription abgeschlossen. Neue Aufnahme möglich.";
+                if (withTimestamps) {
+                    TranscriptionResult result = transcriber.transcribeShortRecordingWithTimestamps(audio, 120);
+                    recognized = WhisperTranscriptFormatter.format(result);
+                    if (result.getSegments().isEmpty() || result.hasUnalignedText()) {
+                        completionStatus = "Fertig. Nicht alle Textstellen haben bestätigte Zeitstempel.";
+                    }
+                } else {
+                    recognized = transcriber.transcribeShortRecording(audio, 80);
+                    if (recognized.isBlank()) {
+                        recognized = "(Keine Sprache erkannt)";
+                    }
+                }
+                String displayedText = recognized;
+                String displayedStatus = completionStatus;
                 SwingUtilities.invokeLater(() -> {
-                    transcript.setText(recognized.isBlank() ? "(Keine Sprache erkannt)" : recognized);
-                    status.setText("Transkription abgeschlossen. Neue Aufnahme möglich.");
+                    transcript.setText(displayedText);
+                    status.setText(displayedStatus);
                     start.setEnabled(true);
                     devices.setEnabled(true);
+                    showTimestamps.setEnabled(true);
                 });
             } catch (Exception exception) {
                 showFailure("Transkription fehlgeschlagen", exception);
@@ -150,6 +172,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
             status.setText(description + ": " + exception.getMessage());
             transcript.setText(description + "\n" + exception);
             devices.setEnabled(true);
+            showTimestamps.setEnabled(true);
             start.setEnabled(modelAvailable() && devices.getItemCount() > 0);
             stop.setEnabled(false);
         });

@@ -13,8 +13,8 @@ import java.util.Objects;
  * Execute multilingual Whisper speech-to-text completely inside the Java 21 JVM.
  * Keep the transcription use case independent of the file decoder and backend.
  *
- * The first implementation uses greedy decoding and fixed 30-second segments;
- * timestamp-aligned boundary recovery remains a separate enhancement.
+ * Preserve the original plain-text methods and expose timestamp-token decoding
+ * through independent, additive segment-returning methods.
  */
 public final class WhisperTranscriber {
     private static final int CHUNK_LENGTH = WhisperLogMelSpectrogram.SAMPLES_PER_CHUNK;
@@ -91,6 +91,104 @@ public final class WhisperTranscriber {
         }
         return result.toString();
     }
+
+    /** Return Whisper-generated speech intervals for a WAV recording. */
+    public TranscriptionResult transcribeWithTimestamps(Path wavFile, int maximumTokensPerChunk)
+            throws IOException {
+        return transcribeWithTimestamps(new WhisperWavAudioLoader().load(wavFile), maximumTokensPerChunk);
+    }
+
+    /** Transcribe 16-kHz mono float PCM in 30-second windows with timestamp tokens. */
+    public TranscriptionResult transcribeWithTimestamps(float[] samples, int maximumTokensPerChunk)
+            throws IOException {
+        Objects.requireNonNull(samples, "samples");
+        validateTokenLimit(maximumTokensPerChunk);
+        List<TranscriptionResult> parts = new ArrayList<>();
+        WhisperTimestampDecoder timestampDecoder = newTimestampDecoder();
+        for (int offset = 0; offset < samples.length; offset += CHUNK_LENGTH) {
+            int count = Math.min(CHUNK_LENGTH, samples.length - offset);
+            float[][] mel = frontend.compute(samples, offset);
+            parts.add(timestampDecoder.transcribe(mel, maximumTokensPerChunk,
+                    sampleToMillis(offset), sampleToMillis(count)));
+        }
+        return combine(parts);
+    }
+
+    /** Transcribe short microphone recordings using six-second windows. */
+    public TranscriptionResult transcribeShortRecordingWithTimestamps(float[] samples,
+                                                                       int maximumTokensPerChunk)
+            throws IOException {
+        Objects.requireNonNull(samples, "samples");
+        validateTokenLimit(maximumTokensPerChunk);
+        List<TranscriptionResult> parts = new ArrayList<>();
+        WhisperTimestampDecoder timestampDecoder = newTimestampDecoder();
+        int samplesPerPart = WhisperLogMelSpectrogram.SAMPLE_RATE * 6;
+        for (int offset = 0; offset < samples.length; offset += samplesPerPart) {
+            int sampleCount = Math.min(samplesPerPart, samples.length - offset);
+            float[] chunk = java.util.Arrays.copyOfRange(samples, offset, offset + sampleCount);
+            float[][] fullMel = frontend.compute(chunk);
+            int frames = Math.min(WhisperLogMelSpectrogram.FRAMES_PER_CHUNK,
+                    Math.max(40, (sampleCount + WhisperLogMelSpectrogram.HOP_LENGTH - 1)
+                            / WhisperLogMelSpectrogram.HOP_LENGTH + 60));
+            float[][] shortMel = new float[config.melBands()][frames];
+            for (int band = 0; band < config.melBands(); band++) {
+                System.arraycopy(fullMel[band], 0, shortMel[band], 0, frames);
+            }
+            parts.add(timestampDecoder.transcribe(shortMel, maximumTokensPerChunk,
+                    sampleToMillis(offset), sampleToMillis(sampleCount)));
+        }
+        return combine(parts);
+    }
+
+    /** Decode prepared log-Mel features and model-emitted timestamp tokens. */
+    public TranscriptionResult transcribeMelWithTimestamps(float[][] mel, int maximumTokens,
+                                                           long windowStartMillis,
+                                                           long windowDurationMillis)
+            throws IOException {
+        validateTokenLimit(maximumTokens);
+        if (windowStartMillis < 0 || windowDurationMillis < 0 || windowDurationMillis > 30000) {
+            throw new IllegalArgumentException("Invalid Whisper audio window");
+        }
+        return newTimestampDecoder().transcribe(mel, maximumTokens,
+                windowStartMillis, windowDurationMillis);
+    }
+
+    private WhisperTimestampDecoder newTimestampDecoder() {
+        return new WhisperTimestampDecoder(encoder, decoder, tokenizer, config);
+    }
+
+    private void validateTokenLimit(int maximumTokens) {
+        if (maximumTokens < 1 || maximumTokens > config.textContext() - 4) {
+            throw new IllegalArgumentException("Invalid Whisper token limit");
+        }
+    }
+
+    private static long sampleToMillis(int samples) {
+        return (long) samples * 1000 / WhisperLogMelSpectrogram.SAMPLE_RATE;
+    }
+
+    private static TranscriptionResult combine(List<TranscriptionResult> parts) {
+        StringBuilder text = new StringBuilder();
+        StringBuilder unaligned = new StringBuilder();
+        List<TranscriptionSegment> segments = new ArrayList<>();
+        for (TranscriptionResult part : parts) {
+            appendText(text, part.getText());
+            appendText(unaligned, part.getUnalignedText());
+            segments.addAll(part.getSegments());
+        }
+        return new TranscriptionResult(text.toString(), unaligned.toString(), segments);
+    }
+
+    private static void appendText(StringBuilder output, String next) {
+        if (next.isBlank()) {
+            return;
+        }
+        if (output.length() > 0) {
+            output.append(' ');
+        }
+        output.append(next.strip());
+    }
+
     /**
      * Transcribe a prepared mel spectrogram, using smaller frame counts for
      * focused integration tests and the full 3000 frames for normal audio.

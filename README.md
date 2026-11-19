@@ -164,11 +164,36 @@ than reloading model weights for each recording. Other public entry points:
 - `transcribeMel(float[][] features, int maxTokens)`: process an already
   Whisper-compatible log-Mel spectrogram (lower-level API).
 
-All return a synchronous `String` containing recognized speech. Input
+These original methods return a synchronous `String` containing recognized speech. Input
 `float[]` samples are normalized, mono, 16,000 Hz PCM (nominally -1 to +1);
 raw PCM16 byte arrays must first be decoded and resampled. The WAV overload
 performs WAV decoding, mono conversion and resampling for you. The integer
 argument limits generated tokens per chunk.
+
+### Segment timestamps (planned patch 0.3.1)
+
+Whisper Tiny can emit 20-ms timestamp tokens. The additive 0.3.1 API exposes
+only intervals that the model emitted, without inventing segment boundaries:
+
+```java
+WhisperTranscriber transcriber = new WhisperTranscriber(Path.of("model", "whisper-tiny"));
+TranscriptionResult result = transcriber.transcribeWithTimestamps(
+        Path.of("recordings", "german-speech.wav"), 120);
+for (TranscriptionSegment segment : result.getSegments()) {
+    System.out.println(segment.getStartMillis() + " - "
+            + segment.getEndMillis() + ": " + segment.getText());
+}
+```
+
+Import `TranscriptionResult` and `TranscriptionSegment` from
+`com.aresstack.windirectml.inference.whisper`. For an existing 16-kHz mono
+`float[]` use `transcribeWithTimestamps(float[], int)` or
+`transcribeShortRecordingWithTimestamps(float[], int)` for microphone recordings.
+Each result contains `getText()` for the full transcript, `getSegments()` for
+model-confirmed start/end positions in milliseconds and `getUnalignedText()`
+for words without a complete timestamp pair. Segment alignment is experimental;
+word-level times and streaming are not provided. The original plain-text API
+is unchanged. Use a sufficient token limit to leave room for the timestamp tokens.
 
 ### Download model weights
 
@@ -197,7 +222,13 @@ bash ./gradlew :directml-workbench:whisperMicrophoneDemo
 On the Windows development machine there is also
 `tools/run-whisper-microphone.cmd`. The separate Swing window lets you choose
 a microphone, start and stop recording, then displays the transcribed German
-text. The window is a **Workbench demo**, not part of the library API.
+text. Enable **Zeitstempel anzeigen (experimentell)** in the demo to display
+`[MM:SS.cc – MM:SS.cc]` before each recognized segment. Disable it to compare
+with the original plain-text decoding. The demo now records up to 120 seconds
+so that minute-level offsets can also be tested. Unaligned speech is displayed
+separately, not assigned a guessed time. Longer recordings take correspondingly
+longer to process on the CPU. The window is a **Workbench demo**, not part of
+the library API.
 
 ### Tests, limitations and Maven Central
 
@@ -208,14 +239,15 @@ recognized as "Hallo? Dies ist ein Test der Deutschen Spracherkennung."
 
 Whisper transcription is currently **experimental**, synchronous and
 CPU-bound. Run it off the UI thread. Incremental streaming results,
-speaker identification, word-level timestamps and returned segment/time
-metadata are not implemented. The short-recording path concatenates chunks
-without timestamp-aware segmentation. Accuracy outside the tested German
-sample is not yet established.
+speaker identification and word-level timestamps are not implemented. The
+0.3.1 timestamp API offers model-confirmed segment times only; its greedy
+decoder may occasionally leave passages without a complete time interval.
+Accuracy outside the tested German sample is not yet established.
 
 Version **0.3.0** introduces the experimental Whisper API in the published
 `com.aresstack:directml-inference:0.3.0` artifact. Earlier versions, including
-0.2.1, do not contain the Whisper transcription API.
+0.2.1, do not contain the Whisper transcription API. Segment timestamps are
+being added for a separate 0.3.1 patch release (not part of 0.3.0).
 
 ## Relationship to sidecars and ACP
 
