@@ -164,11 +164,55 @@ than reloading model weights for each recording. Other public entry points:
 - `transcribeMel(float[][] features, int maxTokens)`: process an already
   Whisper-compatible log-Mel spectrogram (lower-level API).
 
-All return a synchronous `String` containing recognized speech. Input
+These original methods return a synchronous `String` containing recognized speech. Input
 `float[]` samples are normalized, mono, 16,000 Hz PCM (nominally -1 to +1);
 raw PCM16 byte arrays must first be decoded and resampled. The WAV overload
 performs WAV decoding, mono conversion and resampling for you. The integer
 argument limits generated tokens per chunk.
+
+### Segment timestamps (planned patch 0.3.1)
+
+Whisper Tiny can emit 20-ms timestamp tokens. The additive 0.3.1 API exposes
+only intervals that the model emitted, without inventing segment boundaries:
+
+```java
+WhisperTranscriber transcriber = new WhisperTranscriber(Path.of("model", "whisper-tiny"));
+TranscriptionResult result = transcriber.transcribeWithTimestamps(
+        Path.of("recordings", "german-speech.wav"), 400);
+for (TranscriptionSegment segment : result.getSegments()) {
+    System.out.println(segment.getStartMillis() + " - "
+            + segment.getEndMillis() + ": " + segment.getText());
+}
+```
+
+Import `TranscriptionResult` and `TranscriptionSegment` from
+`com.aresstack.windirectml.inference.whisper`. For an existing 16-kHz mono
+`float[]` use `transcribeWithTimestamps(float[], int)` or
+`transcribeShortRecordingWithTimestamps(float[], int)` for microphone recordings.
+Each result contains `getText()` for the full transcript, `getSegments()` for
+model-confirmed start/end positions in milliseconds and `getUnalignedText()`
+for words without a complete timestamp pair. Segment alignment is experimental;
+word-level times and live microphone streaming are not provided. Audio uses
+30-second Whisper windows; all confirmed segments except the last are retained,
+and the next window starts at the last segment's absolute start time. The last
+window retains all segments. If timestamps cannot safely advance processing,
+the full window is retained and processing advances by 30 seconds instead.
+The core transcription API does not apply VAD or pause-based segmentation.
+The microphone demo can optionally enable the Ask AI preprocessing pipeline
+without changing the core decoder.
+
+An optional `Consumer<TranscriptionResult>` overload of
+`transcribeWithTimestamps(audio, tokenLimit, onProgress)` (also available
+for WAV paths and short microphone recordings) reports only finalized segments
+after decoding each window, with absolute timestamps. The last window is
+reported in full, and the method still returns the complete result. Callbacks
+execute on the decoding thread, so Swing clients must dispatch UI updates
+to the event thread. This is pseudo-streaming *during transcription of an
+already supplied recording*, not live decoding while recording. Updates
+occur after each window finishes processing, not necessarily every 30 seconds
+of wall-clock time. The original plain-text API is unchanged. Use a sufficient
+token limit (for example, 400 for longer recordings) to leave room for the
+timestamp tokens.
 
 ### Download model weights
 
@@ -197,7 +241,34 @@ bash ./gradlew :directml-workbench:whisperMicrophoneDemo
 On the Windows development machine there is also
 `tools/run-whisper-microphone.cmd`. The separate Swing window lets you choose
 a microphone, start and stop recording, then displays the transcribed German
-text. The window is a **Workbench demo**, not part of the library API.
+text. Capture buffers two-minute PCM chunks in memory: a completed chunk is
+written to a temporary file only after the following chunk has filled. Older
+chunks remain on disk while the most recent complete chunk and the current
+partial chunk stay in RAM. After stopping, Whisper reads its 30-second windows
+across these chunks without loading the complete recording into memory.
+Temporary chunks are deleted after transcription or when the recording is
+discarded. Enable **Ask AI: 80-Hz-Hochpass + VAD** to use the imported
+Java-8-compatible `audio-dsp` module. The default microphone profile applies
+DC removal, an 80-Hz Butterworth high-pass filter, a 7.2-kHz low-pass filter,
+a mild noise gate, compressor, and limiter. Ask AI's deterministic Java VAD
+runs after DC removal and high-pass filtering to find voice regions; long
+pauses are skipped rather than sent to Whisper. Keep 200 ms before and
+250 ms after detected speech. Each region retains its original source offset,
+so transcription timestamps refer to the uncut recording. The entire
+two-minute capture chunk design remains unchanged, and the pipeline only
+reads bounded audio windows. The checkbox can be disabled to compare
+against the unprocessed Whisper path. No ONNX runtime or neural VAD model
+is required. Capture audio uses signed 16-bit PCM at the microphone's
+negotiated rate, whereas Whisper uses 16-kHz mono float PCM; these are
+independent format properties.
+
+Enable **Zeitstempel anzeigen (experimentell)** in the demo to display
+`[MM:SS.cc – MM:SS.cc]` before each recognized segment. Disable it to compare
+with the original plain-text decoding. The demo records until stopped manually so that longer recordings
+and minute-level offsets can be tested. Unaligned speech is displayed
+separately, not assigned a guessed time. Longer recordings can take several minutes to process on the CPU; the UI
+remains responsive while decoding runs in the background. The window is a **Workbench demo**, not part of
+the library API.
 
 ### Tests, limitations and Maven Central
 
@@ -207,15 +278,18 @@ recognized as "Hallo? Dies ist ein Test der Deutschen Spracherkennung."
 (the original sentence differs slightly in case and punctuation).
 
 Whisper transcription is currently **experimental**, synchronous and
-CPU-bound. Run it off the UI thread. Incremental streaming results,
-speaker identification, word-level timestamps and returned segment/time
-metadata are not implemented. The short-recording path concatenates chunks
-without timestamp-aware segmentation. Accuracy outside the tested German
-sample is not yet established.
+CPU-bound. Run it off the UI thread. The optional progress callback reports
+completed windows after decoding; real-time microphone streaming,
+speaker identification and word-level timestamps are not implemented. The
+0.3.1 timestamp API offers model-confirmed segment times only; its greedy
+decoder may occasionally leave passages without a complete time interval.
+Accuracy for longer, varied speech recordings remains to be established by
+real-world testing.
 
 Version **0.3.0** introduces the experimental Whisper API in the published
 `com.aresstack:directml-inference:0.3.0` artifact. Earlier versions, including
-0.2.1, do not contain the Whisper transcription API.
+0.2.1, do not contain the Whisper transcription API. Segment timestamps are
+being added for a separate 0.3.1 patch release (not part of 0.3.0).
 
 ## Relationship to sidecars and ACP
 
@@ -409,8 +483,10 @@ redistributable.
 
 ## Releases / Maven Central
 
-The Gradle Maven Central publication set contains seven Java library modules,
-including `directml-inference`. The Swing Workbench and legacy sidecar remain unpublished.
+The Gradle Maven Central publication set contains nine Java library modules,
+including `directml-inference`, the Java-8-compatible `audio-dsp` pipeline, and
+`directml-whisper-audio`, the optional VAD/audio-processing adapter for Whisper.
+The Swing Workbench and legacy sidecar remain unpublished.
 
 ```gradle
 dependencies {
@@ -439,12 +515,12 @@ Full artifact overview: [`docs/artifact-structure.md`](docs/artifact-structure.m
 
 ### How Maven Central publishing works
 
-**Publish all seven modules together in one deployment.** The root
-`build.gradle` lists the seven artifact IDs in `publishableModules` and
+**Publish all nine modules together in one deployment.** The root
+`build.gradle` lists the nine artifact IDs in `publishableModules` and
 configures their Maven publications, POM metadata, source/Javadoc JARs and
 GPG signatures. The `com.gradleup.nmcp.aggregation` plugin combines them into
 **one** Sonatype Central Portal bundle using
-`:publishAggregationToCentralPortal`. The bundle contains seven components,
+`:publishAggregationToCentralPortal`. The bundle contains nine components,
 all with the same version; **one deployment is not one artifact**.
 
 The GitHub Actions workflow [`release.yml`](.github/workflows/release.yml)
@@ -496,7 +572,7 @@ require publishing credentials.
    ```
 
    Check that `build/nmcp/zip/aggregation.zip` contains POMs for **all
-   seven** modules at the new version. Building the ZIP locally does **not**
+   nine** modules at the new version. Building the ZIP locally does **not**
    upload it to Sonatype.
 3. Create the release from a clean, up-to-date `main` branch:
 
@@ -517,11 +593,11 @@ require publishing credentials.
    gh run view RUN_ID -R aresstack/win-directml-java --log
    ```
 
-   Gradle builds and signs the seven publications, creates one aggregation
+   Gradle builds and signs the nine publications, creates one aggregation
    ZIP and uploads it to Sonatype. A successful local build or upload alone
    does not mean the artifacts are publicly available.
 5. Verify Sonatype's **Deployments** tab reports `PUBLISHED`, then check
-   the seven `com.aresstack` coordinates on
+   the nine `com.aresstack` coordinates on
    [Maven Central](https://repo.maven.apache.org/maven2/com/aresstack/).
    Confirm the new-version `.pom`, `.jar`, `-sources.jar` and
    `-javadoc.jar` files for each module (HTTP 200). Public availability

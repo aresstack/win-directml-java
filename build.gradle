@@ -15,7 +15,7 @@ allprojects {
 }
 
 // ── Publishable modules ─────────────────────────────────────────────
-// Maven Central now publishes only the Java 21 core Windows inference API.
+// Maven Central publishes the Windows inference API and two optional audio libraries.
 // Sidecar / Java-8 bridge / workbench modules remain in the repository as
 // frozen beta/legacy adapters, but are no longer part of new releases. A
 // future ACP sidecar / manager project should consume directml-runtime
@@ -31,6 +31,8 @@ ext.publishableModules = [
         // Java-21 sidecar. Public API is com.aresstack.windirectml.inference.api; the rest of the
         // module ships as implementation detail with no compatibility guarantee.
         'directml-inference',
+        'audio-dsp',
+        'directml-whisper-audio',
         // Sidecar / Java-8 bridge modules remain unpublished:
         // 'directml-sidecar-protocol-java8',
         // 'directml-sidecar-client-java8',

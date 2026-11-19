@@ -13,7 +13,7 @@
       GPG_PRIVATE_KEY       ASCII-armored GPG private key
       GPG_PASSPHRASE        passphrase of the GPG key
 
-    New releases publish these seven modules from root build.gradle
+    New releases publish these nine modules from root build.gradle
     `publishableModules` in one aggregated Sonatype deployment:
       directml-config              shared config/registry module
       directml-model-catalog       model catalog metadata
@@ -22,6 +22,8 @@
       directml-encoder             Java 21 encoder/reranker module
       directml-runtime             Java 21 public API module
       directml-inference           experimental generation / Whisper API
+      audio-dsp                    Java-8 PCM speech preparation and VAD
+      directml-whisper-audio       optional Whisper integration with AskAI DSP
 
     Legacy beta sidecar / Java-8 bridge / workbench artifacts remain in source
     but are not published by new releases.

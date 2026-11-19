@@ -50,6 +50,7 @@ jobs:
         run: >-
           ./gradlew
           :directml-config:test
+          :audio-dsp:test
           :directml-sidecar-protocol-java8:test
           :directml-sidecar-client-java8:test
           :directml-sidecar-workbench:test
@@ -63,6 +64,7 @@ jobs:
           name: test-reports-java8-${{ matrix.os }}
           path: |
             directml-config/build/reports/tests/
+            audio-dsp/build/reports/tests/
             directml-sidecar-protocol-java8/build/reports/tests/
             directml-sidecar-client-java8/build/reports/tests/
             directml-sidecar-workbench/build/reports/tests/
@@ -102,6 +104,7 @@ jobs:
           ./gradlew
           :directml-windows-bindings:test
           :directml-inference:test
+          :directml-whisper-audio:test
           :directml-encoder:test
           :directml-runtime:test
           :directml-sidecar:test
@@ -115,6 +118,7 @@ jobs:
           path: |
             directml-windows-bindings/build/reports/tests/
             directml-inference/build/reports/tests/
+            directml-whisper-audio/build/reports/tests/
             directml-encoder/build/reports/tests/
             directml-runtime/build/reports/tests/
             directml-sidecar/build/reports/tests/

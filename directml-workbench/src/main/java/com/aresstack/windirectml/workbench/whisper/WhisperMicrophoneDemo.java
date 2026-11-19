@@ -1,9 +1,12 @@
 package com.aresstack.windirectml.workbench.whisper;
 
+import com.aresstack.windirectml.inference.whisper.TranscriptionResult;
 import com.aresstack.windirectml.inference.whisper.WhisperTranscriber;
+import com.aresstack.windirectml.whisper.audio.AskAiWhisperPipeline;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -19,12 +22,15 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Record local German speech and display Whisper recognition in a standalone window. */
 public final class WhisperMicrophoneDemo extends JFrame {
     private final JComboBox<MicrophoneRecorder.Device> devices = new JComboBox<>();
     private final JButton start = new JButton("Aufnahme starten");
     private final JButton stop = new JButton("Aufnahme stoppen");
+    private final JCheckBox showTimestamps = new JCheckBox("Zeitstempel anzeigen (experimentell)", true);
+    private final JCheckBox cleanAudio = new JCheckBox("Ask AI: 80-Hz-Hochpass + VAD", true);
     private final JTextArea transcript = new JTextArea(8, 56);
     private final JLabel status = new JLabel("Bereit");
     private final MicrophoneRecorder recorder = new MicrophoneRecorder();
@@ -66,6 +72,8 @@ public final class WhisperMicrophoneDemo extends JFrame {
         actions.add(devices);
         actions.add(start);
         actions.add(stop);
+        actions.add(showTimestamps);
+        actions.add(cleanAudio);
         start.addActionListener(event -> beginRecording());
         stop.addActionListener(event -> finishRecording());
 
@@ -108,6 +116,8 @@ public final class WhisperMicrophoneDemo extends JFrame {
         MicrophoneRecorder.Device selected = (MicrophoneRecorder.Device) devices.getSelectedItem();
         start.setEnabled(false);
         devices.setEnabled(false);
+        showTimestamps.setEnabled(false);
+        cleanAudio.setEnabled(false);
         status.setText("Mikrofon wird gestartet …");
         background.execute(() -> {
             try {
@@ -115,7 +125,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
                 SwingUtilities.invokeLater(() -> {
                     transcript.setText("");
                     stop.setEnabled(true);
-                    status.setText("Aufnahme läuft (maximal 12 Sekunden). Bitte sprechen.");
+                    status.setText("Aufnahme läuft. Mit „Aufnahme stoppen“ beenden.");
                 });
             } catch (Exception exception) {
                 showFailure("Mikrofon konnte nicht geöffnet werden", exception);
@@ -125,23 +135,63 @@ public final class WhisperMicrophoneDemo extends JFrame {
 
     private void finishRecording() {
         stop.setEnabled(false);
-        status.setText("Aufnahme beendet. Transkription läuft lokal …");
+        final boolean withTimestamps = showTimestamps.isSelected();
+        final boolean withAudioCleanup = cleanAudio.isSelected();
+        status.setText("Transkription läuft auf der CPU. Längere Aufnahmen können mehrere Minuten dauern …");
         background.execute(() -> {
-            try {
-                float[] audio = recorder.stop();
+            try (ChunkedPcmAudioSource audio = recorder.stop()) {
                 if (transcriber == null) {
                     transcriber = new WhisperTranscriber(modelDirectory);
                 }
-                String recognized = transcriber.transcribeShortRecording(audio, 80);
+                String recognized;
+                String completionStatus = "Transkription abgeschlossen. Neue Aufnahme möglich.";
+                if (withTimestamps) {
+                    AtomicInteger decodedWindows = new AtomicInteger();
+                    TranscriptionResult result = withAudioCleanup
+                            ? new AskAiWhisperPipeline().transcribeWithTimestamps(audio, transcriber, 400,
+                                    chunk -> showTranscriptionProgress(chunk, decodedWindows.incrementAndGet()))
+                            : transcriber.transcribeWithTimestamps(audio, 400,
+                                    chunk -> showTranscriptionProgress(chunk, decodedWindows.incrementAndGet()));
+                    recognized = WhisperTranscriptFormatter.format(result);
+                    if (result.getSegments().isEmpty() || result.hasUnalignedText()) {
+                        completionStatus = "Fertig. Nicht alle Textstellen haben bestätigte Zeitstempel.";
+                    }
+                } else {
+                    recognized = withAudioCleanup
+                            ? new AskAiWhisperPipeline().transcribePlain(audio, transcriber, 80)
+                            : transcriber.transcribeShortRecording(audio, 80);
+                    if (recognized.isBlank()) {
+                        recognized = "(Keine Sprache erkannt)";
+                    }
+                }
+                String displayedText = recognized;
+                String displayedStatus = completionStatus;
                 SwingUtilities.invokeLater(() -> {
-                    transcript.setText(recognized.isBlank() ? "(Keine Sprache erkannt)" : recognized);
-                    status.setText("Transkription abgeschlossen. Neue Aufnahme möglich.");
+                    transcript.setText(displayedText);
+                    status.setText(displayedStatus);
                     start.setEnabled(true);
                     devices.setEnabled(true);
+                    showTimestamps.setEnabled(true);
+                    cleanAudio.setEnabled(true);
                 });
             } catch (Exception exception) {
                 showFailure("Transkription fehlgeschlagen", exception);
             }
+        });
+    }
+
+    private void showTranscriptionProgress(TranscriptionResult chunk, int decodedWindows) {
+        String finalizedText = chunk.getSegments().isEmpty() ? "" : WhisperTranscriptFormatter.format(
+                new TranscriptionResult(chunk.getText(), "", chunk.getSegments()));
+        SwingUtilities.invokeLater(() -> {
+            if (!finalizedText.isEmpty()) {
+                if (!transcript.getText().isBlank()) {
+                    transcript.append("\n");
+                }
+                transcript.append(finalizedText);
+                transcript.setCaretPosition(transcript.getDocument().getLength());
+            }
+            status.setText("Transkription läuft: " + decodedWindows + " Audiofenster verarbeitet …");
         });
     }
 
@@ -150,6 +200,8 @@ public final class WhisperMicrophoneDemo extends JFrame {
             status.setText(description + ": " + exception.getMessage());
             transcript.setText(description + "\n" + exception);
             devices.setEnabled(true);
+            showTimestamps.setEnabled(true);
+            cleanAudio.setEnabled(true);
             start.setEnabled(modelAvailable() && devices.getItemCount() > 0);
             stop.setEnabled(false);
         });

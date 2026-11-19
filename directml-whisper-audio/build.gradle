@@ -1,0 +1,9 @@
+// Publish the optional Whisper speech-preparation layer separately from core inference.
+// Keep the Java-8 AskAI DSP reusable and avoid a dependency cycle.
+dependencies {
+    api project(':directml-inference')
+    api project(':audio-dsp')
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}

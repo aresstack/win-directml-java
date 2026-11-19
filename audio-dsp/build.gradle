@@ -1,0 +1,31 @@
+// Audio capture + DSP module. Keep Java 8 compatibility and use iirj for configurable IIR filters.
+ext.java8Module = true
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+
+compileTestJava {
+    options.encoding = 'UTF-8'
+    options.release.set(8)
+}
+// The module also ships a standalone Maven pom.xml with the identical dependency set.
+
+dependencies {
+    implementation 'uk.me.berndporr:iirj:1.7'
+    // Java 8 compatible FFT for the spectral (STFT) block variants; no runtime dependencies of its own.
+    implementation 'org.apache.commons:commons-math3:3.6.1'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+// Override the parent project's JUnit Platform convention for the existing JUnit 4 tests.
+afterEvaluate {
+    tasks.named('test', Test) {
+        useJUnit()
+    }
+}
