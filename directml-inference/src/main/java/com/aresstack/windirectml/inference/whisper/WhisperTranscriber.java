@@ -98,20 +98,21 @@ public final class WhisperTranscriber {
         return transcribeWithTimestamps(new WhisperWavAudioLoader().load(wavFile), maximumTokensPerChunk);
     }
 
-    /** Transcribe 16-kHz mono float PCM in fixed 30-second windows with timestamp tokens. */
+    /** Transcribe 16-kHz mono PCM using timestamp-driven 30-second windows. */
     public TranscriptionResult transcribeWithTimestamps(float[] samples, int maximumTokensPerChunk)
             throws IOException {
         Objects.requireNonNull(samples, "samples");
         validateTokenLimit(maximumTokensPerChunk);
-        List<TranscriptionResult> parts = new ArrayList<>();
+        WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(samples.length);
         WhisperTimestampDecoder timestampDecoder = newTimestampDecoder();
-        for (int offset = 0; offset < samples.length; offset += CHUNK_LENGTH) {
+        while (stitcher.hasNextWindow()) {
+            int offset = stitcher.nextStartSample();
             int count = Math.min(CHUNK_LENGTH, samples.length - offset);
             float[][] mel = frontend.compute(samples, offset);
-            parts.add(timestampDecoder.transcribe(mel, maximumTokensPerChunk,
+            stitcher.accept(timestampDecoder.transcribe(mel, maximumTokensPerChunk,
                     sampleToMillis(offset), sampleToMillis(count)));
         }
-        return combine(parts);
+        return combine(stitcher.acceptedWindows());
     }
 
     /** Use a small encoder window for short recordings and fixed 30-second windows for longer audio. */

@@ -192,11 +192,14 @@ Import `TranscriptionResult` and `TranscriptionSegment` from
 Each result contains `getText()` for the full transcript, `getSegments()` for
 model-confirmed start/end positions in milliseconds and `getUnalignedText()`
 for words without a complete timestamp pair. Segment alignment is experimental;
-word-level times and streaming are not provided. Audio is processed in fixed
-30-second Whisper windows; the offsets of these windows are preserved. No
-additional pause-based segmentation or VAD is applied. The original plain-text
-API is unchanged. Use a sufficient token limit (for example, 400 for longer
-recordings) to leave room for the timestamp tokens.
+word-level times and streaming are not provided. Audio uses 30-second
+Whisper windows; all confirmed segments except the last are retained, and
+the next window starts at the last segment's absolute start time. The last
+window retains all segments. If timestamps cannot safely advance processing,
+the full window is retained and processing advances by 30 seconds instead.
+No separate pause-based segmentation, VAD or NLP is applied. The original
+plain-text API is unchanged. Use a sufficient token limit (for example, 400
+for longer recordings) to leave room for the timestamp tokens.
 
 ### Download model weights
 
