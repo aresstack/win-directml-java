@@ -26,7 +26,9 @@ tasks.withType(Test).configureEach {
      // T5-CORRECTNESS-CERT-1: opt-in T5 WARP/AUTO-vs-reference correctness toggles.
      't5.correctness.cert', 't5.realModel', 't5.testModelDir',
      // PHI3 real-model gated tests: ONNX->wdmlpack compile + heap-light decode smoke.
-     'phi3.compile.realModel', 'phi3.realModel', 'phi3.testModelDir'].each { key ->
+     'phi3.compile.realModel', 'phi3.realModel', 'phi3.testModelDir',
+     // Piper ONNX importer opt-in test; keep the 63 MB voice outside Git/CI.
+     'piper.realModel', 'piper.modelFile'].each { key ->
         def value = System.getProperty(key)
         if (value != null) {
             systemProperty(key, value)

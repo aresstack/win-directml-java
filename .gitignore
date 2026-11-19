@@ -37,6 +37,8 @@ model/codet5-base-multi-sum/
 model/phi-3-mini-4k-instruct-onnx/
 # Local Whisper speech-to-text checkpoints
 model/whisper-*/
+# Downloaded Piper TTS voices (keep model weights out of Git)
+model/piper-*/
 
 .commitmsg.tmp
 

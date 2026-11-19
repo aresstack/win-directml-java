@@ -1,5 +1,11 @@
 # Supported models
 
+> **Piper TTS (`de_DE-thorsten-medium`): planned.** The native Java ONNX
+> importer, voice JSON configuration, phoneme-ID encoder and convolution
+> reference kernels are implemented. Full VITS inference and DirectML kernel
+> parity are **not** available yet. See [Piper progress](docs/piper-native-vits.md).
+
+
 This file is the authoritative list of model checkpoints that
 win-directml-java ships **runtime support for** in the published
 artifacts. The model **weights** themselves are not redistributed
