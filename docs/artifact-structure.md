@@ -1,67 +1,65 @@
 # Maven artifact structure
 
-This project now publishes only the core inference artifacts as new Maven Central artifacts: the Java 21 runtime modules
-plus the shared `directml-config` module. The JSON-RPC sidecar, Java 8 bridge, protocol module and workbench remain in
-the repository for compatibility with the previous beta line, but they are no longer part of new Maven Central releases.
+Starting with 0.3.1, Maven Central publishes nine library modules in one aggregated
+Sonatype deployment under group `com.aresstack`. The WinDirectML Swing workbench,
+launcher, and legacy JSON-RPC sidecar modules remain unpublished.
 
-The intended downstream architecture is:
+## Public artifacts
 
-```text
-Java 21 application / ACP sidecar / manager project
-    -> directml-runtime
-    -> directml-encoder
-    -> directml-windows-bindings
-    -> directml-config
-    -> Windows CPU / DirectML inference
-```
+| Artifact | Java | Purpose |
+|---|---|---|
+| `directml-config` | 8-compatible | Shared runtime configuration |
+| `directml-model-catalog` | 8-compatible | Model catalog and capabilities |
+| `directml-model-package` | 21 | Model package contracts |
+| `directml-windows-bindings` | 21 preview | Windows DirectML and D3D12 bindings |
+| `directml-encoder` | 21 preview | Embedding and reranking encoders |
+| `directml-runtime` | 21 preview | Public local inference API |
+| `directml-inference` | 21 preview | Text generation and experimental Whisper transcription |
+| `audio-dsp` | 8 | Ask AI's reusable PCM16 filtering and voice activity detection pipeline |
+| `directml-whisper-audio` | 21 | Optional Ask AI PCM processing and VAD adapter for Whisper |
 
-A future ACP sidecar or manager-agent project should consume this repository as a pure Java library. It should not
-depend on this repository's legacy JSON-RPC sidecar as its product boundary.
+The `audio-dsp` module works independently of Whisper, DirectML, and any
+neural inference runtime. The `directml-whisper-audio` module depends on the
+`audio-dsp` and `directml-inference` libraries. It exposes
+`com.aresstack.windirectml.whisper.audio.AskAiWhisperPipeline` for optional
+speech-region detection, filtering and timestamp-preserving transcription.
+The unprocessed `WhisperTranscriber` API remains available independently.
 
-## Published Maven Central artifacts going forward
+## Gradle dependencies
 
-All artifacts use group id `com.aresstack`.
+A Java 21 application can use the optional audio pipeline:
 
-| Artifact                          |                                      Java | Published going forward | Purpose                                                                                                     |
-|-----------------------------------|------------------------------------------:|------------------------:|-------------------------------------------------------------------------------------------------------------|
-| `directml-config`                 | 8-compatible API surface where applicable |                     yes | Shared configuration, limits and model registry types used by the core runtime.                             |
-| `directml-windows-bindings`       |                                21 preview |                     yes | Java FFM bindings for DXGI, D3D12, DirectML and low-level Windows runtime access.                           |
-| `directml-encoder`                |                                21 preview |                     yes | MiniLM, WordPiece E5 and cross-encoder reranker implementations.                                            |
-| `directml-runtime`                |                                21 preview |                     yes | Public Java 21 in-process ML runtime API for embeddings and reranking.                                      |
-| `directml-inference`              |                                21 preview |                      no | Legacy/experimental Phi-3 inference path from the beta line. Kept in source, not published in new releases. |
-| `directml-sidecar-protocol-java8` |                                         8 |                      no | Legacy beta protocol/validation module. Kept in source, not published in new releases.                      |
-| `directml-sidecar-client-java8`   |                                         8 |                      no | Legacy Java 8 JSON-RPC client. Kept in source, not published in new releases.                               |
-| `directml-sidecar`                |                                21 preview |                      no | Legacy JSON-RPC sidecar adapter. Kept in source, not published in new releases.                             |
-| `directml-sidecar-workbench`      |                                         8 |                      no | Legacy diagnostics UI. Kept in source, not published in new releases.                                       |
-
-## Dependency choices
-
-### Java 21 application, ACP sidecar, or manager project
-
-Use the direct runtime API:
-
-```gradle
+```groovy
 dependencies {
-    implementation 'com.aresstack:directml-runtime:<version>'
+    implementation 'com.aresstack:directml-whisper-audio:0.3.1'
 }
 ```
 
-This is the canonical path. It calls embeddings and reranking in-process and does not require JSON-RPC or a sidecar
-process.
+Or depend only on the direct inference engine:
 
-### Legacy Java 8 bridge
+```groovy
+dependencies {
+    implementation 'com.aresstack:directml-inference:0.3.1'
+}
+```
 
-The Java 8 bridge modules remain in the source tree to preserve the previous beta implementation, but they are not part
-of new Maven Central releases. A project that still needs that bridge should stay on the previous beta artifacts or
-build the legacy modules from source.
+For general PCM processing without Whisper:
 
-New integration work should prefer a separate Java 21 ACP/manager project that depends on `directml-runtime` directly.
+```groovy
+dependencies {
+    implementation 'com.aresstack:audio-dsp:0.3.1'
+}
+```
 
-## Compatibility rules
+## Compatibility and distribution
 
-- New releases focus on the core Java API and Windows inference engine.
-- The published core set contains Java 21 runtime modules plus the shared `directml-config` module.
-- Sidecar/protocol/workbench modules are legacy beta code unless explicitly reactivated later.
-- The Java 21 API must not require JSON-RPC, ACP, MCP, A2A or sidecar concepts.
-- Model weights are never shipped in Maven Central artifacts.
-- Existing source modules are kept to avoid deleting beta-era code, but they should not drive new product architecture.
+- Core inference and the Whisper adapter require Java 21.
+- The `audio-dsp` module is compiled with Java 8 bytecode and operates on
+  signed 16-bit PCM; its configured sample rate is independent of bit depth.
+- The workbench is built as its own Shadow JAR and is **not** distributed
+  through Maven Central.
+- Model weights are never bundled into Maven Central artifacts.
+- Publish the entire artifact set in one Sonatype aggregation; never release
+  individual artifacts with inconsistent versions.
+- Verify the CI status, local `:zipAggregation` bundle and Sonatype publication
+  state before claiming a version is publicly available.

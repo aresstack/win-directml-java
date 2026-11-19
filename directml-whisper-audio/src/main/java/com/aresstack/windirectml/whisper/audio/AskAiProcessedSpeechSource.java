@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.workbench.whisper;
+package com.aresstack.windirectml.whisper.audio;
 
 import com.aresstack.audio.domain.AudioBuffer;
 import com.aresstack.audio.domain.PcmAudioFormat;

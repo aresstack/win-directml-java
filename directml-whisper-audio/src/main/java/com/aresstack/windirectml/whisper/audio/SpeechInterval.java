@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.workbench.whisper;
+package com.aresstack.windirectml.whisper.audio;
 
 /** Keep a detected speech region in the original 16-kHz recording timeline. */
 final class SpeechInterval {

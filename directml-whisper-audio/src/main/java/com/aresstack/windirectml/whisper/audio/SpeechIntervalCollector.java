@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.workbench.whisper;
+package com.aresstack.windirectml.whisper.audio;
 
 import java.util.ArrayList;
 import java.util.Collections;

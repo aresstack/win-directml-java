@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.workbench.whisper;
+package com.aresstack.windirectml.whisper.audio;
 
 import com.aresstack.audio.dsp.SpeechActivityMetadata;
 import com.aresstack.audio.dsp.VoiceActivityDetector;

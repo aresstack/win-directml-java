@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.workbench.whisper;
+package com.aresstack.windirectml.whisper.audio;
 
 import com.aresstack.windirectml.inference.whisper.TranscriptionResult;
 import com.aresstack.windirectml.inference.whisper.TranscriptionSegment;

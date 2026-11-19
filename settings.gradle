@@ -13,6 +13,7 @@ include 'directml-runtime'
 include 'directml-sidecar-workbench'
 include 'directml-workbench'
 include 'audio-dsp'
+include 'directml-whisper-audio'
 include 'directml-workbench-launcher'
 include 'examples:java8-client'
 project(':examples:java8-client').projectDir = file('examples/java8-client')

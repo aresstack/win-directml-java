@@ -2,6 +2,7 @@ package com.aresstack.windirectml.workbench.whisper;
 
 import com.aresstack.windirectml.inference.whisper.TranscriptionResult;
 import com.aresstack.windirectml.inference.whisper.WhisperTranscriber;
+import com.aresstack.windirectml.whisper.audio.AskAiWhisperPipeline;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;

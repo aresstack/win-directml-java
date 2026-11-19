@@ -1,4 +1,4 @@
-package com.aresstack.windirectml.workbench.whisper;
+package com.aresstack.windirectml.whisper.audio;
 
 import com.aresstack.audio.profile.AudioProcessingProfile;
 import com.aresstack.windirectml.inference.whisper.TranscriptionResult;
@@ -16,14 +16,19 @@ import java.util.function.Consumer;
  * Coordinate the Ask AI VAD, configurable PCM processing profile and Whisper.
  * Skip gaps rather than concatenating them, preserving original timestamp positions.
  */
-final class AskAiWhisperPipeline {
+public final class AskAiWhisperPipeline {
     private static final int SAMPLE_RATE = 16000;
 
     private final SpeechRegionDetector regionDetector;
     private final AudioProcessingProfile profile;
 
-    AskAiWhisperPipeline() {
-        this(new SpeechRegionDetector(), AskAiProcessedSpeechSource.speechProfile());
+    public AskAiWhisperPipeline() {
+        this(AskAiProcessedSpeechSource.speechProfile());
+    }
+
+    /** Use a custom timebase-preserving Ask AI audio processing profile. */
+    public AskAiWhisperPipeline(AudioProcessingProfile profile) {
+        this(new SpeechRegionDetector(), profile);
     }
 
     AskAiWhisperPipeline(SpeechRegionDetector regionDetector, AudioProcessingProfile profile) {
@@ -31,7 +36,14 @@ final class AskAiWhisperPipeline {
         this.profile = Objects.requireNonNull(profile, "profile");
     }
 
-    TranscriptionResult transcribeWithTimestamps(WhisperAudioSource source,
+    /** Transcribe detected speech intervals without progress events. */
+    public TranscriptionResult transcribeWithTimestamps(WhisperAudioSource source,
+                                                        WhisperTranscriber transcriber,
+                                                        int maximumTokens) throws IOException {
+        return transcribeWithTimestamps(source, transcriber, maximumTokens, ignored -> { });
+    }
+
+    public TranscriptionResult transcribeWithTimestamps(WhisperAudioSource source,
                                                  WhisperTranscriber transcriber,
                                                  int maximumTokens,
                                                  Consumer<TranscriptionResult> progress)
@@ -50,7 +62,7 @@ final class AskAiWhisperPipeline {
         return combine(recognized);
     }
 
-    String transcribePlain(WhisperAudioSource source, WhisperTranscriber transcriber,
+    public String transcribePlain(WhisperAudioSource source, WhisperTranscriber transcriber,
                            int maximumTokens) throws IOException {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(transcriber, "transcriber");

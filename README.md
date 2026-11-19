@@ -483,8 +483,10 @@ redistributable.
 
 ## Releases / Maven Central
 
-The Gradle Maven Central publication set contains seven Java library modules,
-including `directml-inference`. The Swing Workbench and legacy sidecar remain unpublished.
+The Gradle Maven Central publication set contains nine Java library modules,
+including `directml-inference`, the Java-8-compatible `audio-dsp` pipeline, and
+`directml-whisper-audio`, the optional VAD/audio-processing adapter for Whisper.
+The Swing Workbench and legacy sidecar remain unpublished.
 
 ```gradle
 dependencies {
@@ -513,12 +515,12 @@ Full artifact overview: [`docs/artifact-structure.md`](docs/artifact-structure.m
 
 ### How Maven Central publishing works
 
-**Publish all seven modules together in one deployment.** The root
-`build.gradle` lists the seven artifact IDs in `publishableModules` and
+**Publish all nine modules together in one deployment.** The root
+`build.gradle` lists the nine artifact IDs in `publishableModules` and
 configures their Maven publications, POM metadata, source/Javadoc JARs and
 GPG signatures. The `com.gradleup.nmcp.aggregation` plugin combines them into
 **one** Sonatype Central Portal bundle using
-`:publishAggregationToCentralPortal`. The bundle contains seven components,
+`:publishAggregationToCentralPortal`. The bundle contains nine components,
 all with the same version; **one deployment is not one artifact**.
 
 The GitHub Actions workflow [`release.yml`](.github/workflows/release.yml)
@@ -570,7 +572,7 @@ require publishing credentials.
    ```
 
    Check that `build/nmcp/zip/aggregation.zip` contains POMs for **all
-   seven** modules at the new version. Building the ZIP locally does **not**
+   nine** modules at the new version. Building the ZIP locally does **not**
    upload it to Sonatype.
 3. Create the release from a clean, up-to-date `main` branch:
 
@@ -591,11 +593,11 @@ require publishing credentials.
    gh run view RUN_ID -R aresstack/win-directml-java --log
    ```
 
-   Gradle builds and signs the seven publications, creates one aggregation
+   Gradle builds and signs the nine publications, creates one aggregation
    ZIP and uploads it to Sonatype. A successful local build or upload alone
    does not mean the artifacts are publicly available.
 5. Verify Sonatype's **Deployments** tab reports `PUBLISHED`, then check
-   the seven `com.aresstack` coordinates on
+   the nine `com.aresstack` coordinates on
    [Maven Central](https://repo.maven.apache.org/maven2/com/aresstack/).
    Confirm the new-version `.pom`, `.jar`, `-sources.jar` and
    `-javadoc.jar` files for each module (HTTP 200). Public availability
