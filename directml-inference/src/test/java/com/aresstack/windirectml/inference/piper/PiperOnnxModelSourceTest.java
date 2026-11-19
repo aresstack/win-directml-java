@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,15 +34,30 @@ final class PiperOnnxModelSourceTest {
         assertFalse(imported.graph().initializers().isEmpty());
 
         PiperSynthesisInput tokens = PiperSynthesisInput.of(imported.voice(), "a", 0);
-        PiperNativeGraphPrefixRunner.PrefixResult prefix =
-                new PiperNativeGraphPrefixRunner().execute(imported, tokens, 976);
-        assertEquals(976, prefix.executedNodes());
-        assertEquals(imported.graph().nodes().get(862).opType(), prefix.lastOperator());
-        assertTrue(prefix.output().length() > 0);
-        assertTrue(prefix.output().rank() >= 1);
-        for (float sample : prefix.output().floatData()) {
-            assertTrue(Float.isFinite(sample), "Native convolution must produce finite values");
+        PiperNativeGraphPrefixRunner runner = new PiperNativeGraphPrefixRunner(42L);
+        PiperNativeGraphPrefixRunner.PrefixResult scalar = runner.execute(imported, tokens, 1200);
+        assertEquals(1200, scalar.executedNodes());
+        assertArrayEquals(new int[0], scalar.output().shape());
+        assertEquals(1, scalar.output().length());
+
+        PiperNativeGraphPrefixRunner.PrefixResult prefix = runner.execute(imported, tokens, imported.nodeCount());
+        assertEquals(imported.nodeCount(), prefix.executedNodes());
+        assertEquals(imported.graph().nodes().get(prefix.executedNodes() - 1).opType(),
+                prefix.lastOperator());
+        assertEquals(PiperTensor.FLOAT32, prefix.output().dataType());
+        assertTrue(prefix.output().rank() >= 3);
+        float[] audio = prefix.output().floatData();
+        assertTrue(audio.length > 100, "Piper must emit an actual audio waveform");
+        boolean audibleSamples = false;
+        for (float sample : audio) {
+            assertTrue(Float.isFinite(sample), "The output must contain only finite PCM values");
+            assertTrue(sample >= -1.001f && sample <= 1.001f,
+                    "The final Tanh must bound output samples");
+            if (Math.abs(sample) > 0.0001f) {
+                audibleSamples = true;
+            }
         }
+        assertTrue(audibleSamples, "The waveform must not be silent");
 
         System.out.println("Piper VITS parsed: nodes=" + imported.nodeCount()
                 + " operators=" + imported.operators());

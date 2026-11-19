@@ -1,117 +1,122 @@
-# Piper VITS import and native Java/DirectML implementation
+# Native Piper VITS in win-directml-java
 
-## Scope
+## Goal and architecture
 
-Implement Piper TTS in this repository's **own** Java/DirectML engine. Use ONNX
-as the **input format**, exactly as the Phi-3 import does: parse its graph,
-extract and compile tensors, and execute our own kernels. **Do not add ONNX
-Runtime, Python, or Piper subprocess synthesis** to the Java inference runtime.
+Support Piper text-to-speech in the project's **own Java/DirectML engine**, using
+ONNX strictly as a **model import format**, as already done for Phi-3.
+There is **no ONNX Runtime or Python dependency** in the inference path.
 
-The implementation now also includes a **bounded native Java reference graph
-executor**. It executes the **first 976 of 2,682 nodes** of the real German
-Piper ONNX model without ONNX Runtime. This is not yet a runnable text-to-speech
-engine: the remaining VITS flow, stochastic sampling, transposed convolution
-decoder, and phonemization are unfinished. No user-facing API should claim
-successful synthesis before the complete graph produces a verified waveform.
+The first milestone is now a **complete CPU reference implementation**.
+`PiperNativeGraphPrefixRunner` executes all **2,682/2,682** operators of the
+tested German Piper voice and produces a real waveform. The implementation is
+deliberately still called a **reference**: no DirectML GPU backend or native
+eSpeak text phonemizer has been integrated, and audible quality/parity against
+upstream Piper has not yet been established.
 
-## Verified real Piper model
+## Verified German model
 
-- Voice: `rhasspy/piper-voices`, `de/de_DE/thorsten/medium`
-- Files: `de_DE-thorsten-medium.onnx` (~63 MB) and
-  `de_DE-thorsten-medium.onnx.json`
-- Language: German, eSpeak voice `de`
-- Input contract: `input` (INT64 token IDs), `input_lengths` (INT64),
-  `scales` (FLOAT32; noise scale, inverse speed/length scale, duration noise)
-- Output: `output` (audio)
-- Sampling rate: 22,050 Hz, one speaker
-- Parsed with existing
-  `com.aresstack.windirectml.windows.OnnxModelReader`:
-  **2,682 nodes**, including 129 `Conv` and 3 `ConvTranspose`.
-  The model was imported locally with `PiperOnnxModelSourceTest`.
-- Model weights are **not committed**; `.gitignore` covers `model/piper-*/`.
+- Source: `rhasspy/piper-voices` / `de/de_DE/thorsten/medium`
+- Files: `de_DE-thorsten-medium.onnx` (~63 MB) and the paired `.onnx.json`
+- Inputs: `input` (INT64 phoneme IDs), `input_lengths` (INT64),
+  `scales` (FLOAT32: noise, speaking speed, duration noise)
+- Output: mono floating point audio, sampled at **22,050 Hz**
+- Graph: **2,682 nodes**, 405 initializers, including 129 `Conv`
+  and 3 `ConvTranspose` operations
+- All nodes execute using the repository's own Java code, not ONNX Runtime.
+- The opt-in model test checks that the produced audio is non-silent, finite
+  and bounded by the final tanh output.
 
-Selected observed operators include `Conv`, `ConvTranspose`, `MatMul`,
-`LeakyRelu`, `Sigmoid`, `Erf`, `Softmax`, `Gather`, `GatherND`,
-`ScatterND`, `CumSum`, `Range`, `Pad`, `Expand`, `Slice`,
-`RandomNormalLike`, `Where`, `Reshape`, `Transpose`, `Concat`,
-`ReduceMean`, `Sqrt`, `Pow`, `Exp`, `Tanh` and `Softplus`.
-These are **model requirements**, not a claim that every operation is already
-implemented in our native execution engine.
+Do not commit voice/model binaries. `.gitignore` excludes `model/piper-*/`.
+Check the particular voice/dataset license before redistributing a voice.
 
-## Implemented boundary
+## Implemented Java components
 
-- `PiperVoiceConfig`: read paired Piper JSON voice configuration and
-  validate eSpeak, sample rate, speakers, inference scalars and phoneme ID map.
-- `PiperPhonemeIdEncoder`: turn IPA codepoints into Piper's beginning,
-  separator and end IDs; reject unknown phonemes.
-- `PiperSynthesisInput`: provide typed VITS input tensors and
-  `noise_scale / length_scale / noise_w` in model order.
-- `PiperPhonemizer`: phonemization port. A German eSpeak-NG adapter is still
-  needed; the phoneme encoder does **not** implement text-to-phoneme rules.
-- `PiperOnnxModelSource`: reuse the existing dependency-free ONNX protobuf
-  importer, validate VITS inputs and outputs, retain node/tensor metadata and
-  report the real model's required operator inventory.
-- `PiperConv1dReference` and `PiperConvTranspose1dReference`: deterministic
-  CPU baselines for grouped 1-D convolution and decoder upsampling, with
-  synthetic output parity tests. `Conv` is connected to the prefix executor;
-  `ConvTranspose` is ready as a reference but is not yet wired to the graph.
-- `PiperTensor` and `PiperTensorOperations`: typed INT64/FLOAT32/BOOL
-  tensor representation and testable native Java kernels for broadcasting,
-  embedding lookup, shape and reshape, transpose, concat/split, slicing,
-  padding, batched matrix multiplication, reductions, Softmax, Erf and
-  common elementwise operations.
-- `PiperNativeGraphPrefixRunner`: execute a bounded prefix of the actual
-  VITS computation graph with the reference operators, including multiple
-  encoder attention layers and the duration predictor. The real-model
-  opt-in test successfully runs **976 consecutive ONNX nodes** and asserts
-  finite outputs. It intentionally rejects unimplemented operators.
-- `OnnxModelReader`: correct the standard ONNX `AttributeProto` scalar
-  wire-field decoding and add tensor-valued `Constant` plus repeated-float
-  support. `OnnxAttributeParsingTest` covers these contracts independently
-  of the Piper model.
+- **Voice and phonemes:** `PiperVoiceConfig`,
+  `PiperPhonemeIdEncoder`, `PiperSynthesisInput`,
+  and the replaceable `PiperPhonemizer` interface.
+  `EspeakNgCliPhonemizer` is an optional adapter for a separately installed
+  eSpeak-NG executable. It invokes `--ipa=1 --stdin` with UTF-8 text and
+  bounded execution time; no eSpeak binary is distributed with the JAR.
+  The adapter has isolated command tests, but has **not yet passed a real
+  eSpeak-NG IPA/voice parity test** on this machine.
+- **Model source:** `PiperOnnxModelSource` imports the ONNX protobuf
+  through `OnnxModelReader`; the reader was extended to preserve tensor
+  constants and handle ONNX attribute scalar fields correctly.
+- **Native reference execution:** `PiperNativeGraphPrefixRunner` evaluates
+  the entire graph. `PiperTensor` carries typed shapes and data;
+  `PiperTensorOperations`, `PiperIndexOperations`,
+  `PiperShapeOperations`, `PiperReductionOperations`, and
+  `PiperActivationOperations` implement the required computation.
+- **Audio decoder:** `PiperConvolutionExecutor` adapts ONNX NCL tensor
+  layouts to the independent grouped `PiperConv1dReference` and
+  `PiperConvTranspose1dReference` kernels.
+- **Synthesis API:** `PiperReferenceSynthesizer.synthesizePhonemes(ipa)`
+  runs the complete model and returns immutable `PiperAudio`.
+  `synthesizeText(text, phonemizer)` additionally uses an injected
+  `PiperPhonemizer` strategy; a full eSpeak-NG implementation is not yet
+  bundled. `PiperWavWriter` exports mono PCM16 WAV.
 
-This is **CPU reference execution**, not yet a DirectML/GPU inference backend.
-The source works with the current Java 21 inference module. No ONNX Runtime
-dependency is added.
+The `RandomNormalLike` reference currently uses an explicitly seeded
+`java.util.Random`. Its statistical contract is implemented, but its
+random samples are **not bit-exact** with ONNX or upstream Piper. Deterministic
+integration tests use seed 42.
 
-## Next native VITS implementation steps
+## Local smoke test
 
-1. **Phonemizer.** Implement an eSpeak-NG phonemization adapter and verify
-   IPA codepoint sequences against Piper's own voice-specific expectations.
-   Keep the native phonemizer behind `PiperPhonemizer`.
-2. **Compiled model.** Extend the existing ONNX-to-`.wdmlpack` architecture
-   with Piper-specific graph operator metadata and tensor layouts; validate
-   dynamic input/output shapes and all Constant node attributes. Do not load
-   the ONNX model in the production execution path after compilation.
-3. **Native operators.** Extend the Java graph reference beyond node 976:
-   `ConstantOfShape`, `RandomNormalLike`, the flow's indexing/scatter
-   operations, `CumSum`, `Expand` and `GatherND`/`GatherElements`, plus
-   the VITS audio-decoder `ConvTranspose` stages. Add DirectML GPU kernels
-   for the required operations and test their numerical parity against the
-   reference. Do not silently treat the CPU reference as GPU acceleration.
-4. **Real synthesis test.** Feed known German text with a recorded
-   eSpeak phoneme-ID sequence into the whole graph, export the generated
-   22,050 Hz waveform and compare its shape, length and audio output with a
-   pinned Piper reference. Only then mark the voice `experimental` and expose
-   a `PiperTextToSpeech` facade in `directml-inference`.
-5. **Workbench / release.** Add voice selection, synthesized PCM playback and
-   model-license provenance. Do not ship the example voice without checking
-   its individual voice/dataset license.
-
-## Tests
-
-Run pure unit tests without a voice (the opt-in real-model test skips):
+Place the two voice files in `model/piper-de_DE-thorsten-medium/`. Run:
 
 ```powershell
-.\gradlew.bat :directml-inference:test --tests 'com.aresstack.windirectml.inference.piper.*' --max-workers=1
+cmd.exe /c ".\gradlew.bat :directml-inference:test --tests com.aresstack.windirectml.inference.piper.* -Dpiper.realModel=true --no-daemon --max-workers=1"
 ```
 
-For the gated real-model import test, place the model in
-`model/piper-de_DE-thorsten-medium/` and run:
+This includes `PiperReferenceSynthesizerTest`, which synthesizes the test
+IPA string `hˈaloː` and writes a WAV for manual listening:
+
+```
+directml-inference/build/piper-demo/thorsten-hallo.wav
+```
+
+The WAV file remains in the ignored build directory. **A successful WAV
+export is not a passed perceptual listening test.** It verifies the complete
+numeric graph and produces audio samples, but pronunciation and acoustic
+parity still need to be reviewed.
+
+Normal unit tests (no model file required):
 
 ```powershell
-cmd.exe /c ".\gradlew.bat :directml-inference:test --tests com.aresstack.windirectml.inference.piper.PiperOnnxModelSourceTest -Dpiper.realModel=true --max-workers=1"
+.\gradlew.bat :directml-inference:test --tests 'com.aresstack.windirectml.inference.piper.*' --no-daemon --max-workers=1
 ```
 
-The voice can be obtained from
-https://huggingface.co/rhasspy/piper-voices/tree/main/de/de_DE/thorsten/medium.
+The optional real-model suite is disabled on standard CI and other platforms.
+
+## Remaining work
+
+1. **Text phonemization:** Verify the optional eSpeak-NG CLI adapter against a
+   real installed phonemizer and Piper's native eSpeak phoneme sequences,
+   including UTF-8, sentence splitting, language selection, IPA mapping,
+   punctuation and voice-specific pronunciation parity. The CLI adapter
+   remains optional, with no bundled GPL binaries.
+2. **DirectML GPU compiler:** Reuse the Phi-3 ONNX-to-`.wdmlpack` architecture.
+   Lower VITS tensor layouts and all required operators to the existing DML
+   device/runtime; validate dynamic shapes, memory reuse, GPU dispatch
+   ordering and random sampling behavior. The working CPU reference is the
+   numerical oracle, not a performance substitute.
+3. **Parity and listening:** Compare real-voice waveform duration and
+   acoustic quality with the upstream Piper implementation, taking the random
+   seed into account. Run a human listening test for German pronunciation.
+4. **Production performance:** Avoid keeping all intermediate graph outputs
+   live, reuse model weights and compiled operators, process long text by
+   sentence, stream output and add cancellation.
+5. **Licenses and release:** Check the model-specific voice/dataset license
+   and eSpeak-NG license before bundling weights or phonemizer binaries.
+   Only promote the API to production when those checks and GPU acceptance
+   tests pass.
+
+## Sources
+
+- Model and license metadata:
+  https://huggingface.co/rhasspy/piper-voices/tree/main/de/de_DE/thorsten/medium
+- Piper voice and phoneme format:
+  https://github.com/rhasspy/piper
+- eSpeak-NG:
+  https://github.com/espeak-ng/espeak-ng

@@ -132,6 +132,28 @@ public final class PiperTensorOperations {
         return PiperTensor.floats(result, input.shape());
     }
 
+    public static PiperTensor not(PiperTensor input) {
+        boolean[] source = input.requireBoolean();
+        boolean[] result = new boolean[source.length];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = !source[i];
+        }
+        return PiperTensor.bools(result, input.shape());
+    }
+
+    public static PiperTensor randomNormalLike(PiperTensor input, int dataType,
+                                               java.util.Random random) {
+        java.util.Objects.requireNonNull(random, "random");
+        if (dataType != PiperTensor.FLOAT32) {
+            throw new IllegalArgumentException("Piper reference random only supports FLOAT32");
+        }
+        float[] values = new float[input.length()];
+        for (int i = 0; i < values.length; i++) {
+            values[i] = (float) random.nextGaussian();
+        }
+        return PiperTensor.floats(values, input.shape());
+    }
+
     public static PiperTensor equal(PiperTensor first, PiperTensor second) {
         int[] outputShape = broadcastShape(first.shape(), second.shape());
         int[] outputStride = strides(outputShape);
@@ -687,6 +709,9 @@ public final class PiperTensorOperations {
     }
 
     public static PiperTensor range(PiperTensor start, PiperTensor limit, PiperTensor step) {
+        if (start.dataType() == PiperTensor.FLOAT32) {
+            return floatRange(start, limit, step);
+        }
         long from = scalarInteger(start);
         long until = scalarInteger(limit);
         long delta = scalarInteger(step);
@@ -706,18 +731,60 @@ public final class PiperTensorOperations {
         return PiperTensor.integers(values, values.length);
     }
 
+    private static PiperTensor floatRange(PiperTensor start, PiperTensor limit, PiperTensor step) {
+        if (start.length() != 1 || limit.length() != 1 || step.length() != 1
+                || limit.dataType() != PiperTensor.FLOAT32
+                || step.dataType() != PiperTensor.FLOAT32) {
+            throw new IllegalArgumentException("Piper float Range requires three FLOAT32 scalars");
+        }
+        double from = start.requireFloat()[0];
+        double end = limit.requireFloat()[0];
+        double increment = step.requireFloat()[0];
+        if (!Double.isFinite(from) || !Double.isFinite(end)
+                || !Double.isFinite(increment) || increment == 0) {
+            throw new IllegalArgumentException("Piper float Range requires finite nonzero step");
+        }
+        double distance = (end - from) / increment;
+        double requested = distance <= 0 ? 0 : Math.ceil(distance);
+        if (requested > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Piper float Range exceeds Java array limits");
+        }
+        float[] values = new float[(int) requested];
+        for (int i = 0; i < values.length; i++) {
+            values[i] = (float) (from + i * increment);
+        }
+        return PiperTensor.floats(values, values.length);
+    }
+
     public static PiperTensor binary(String operation, PiperTensor first, PiperTensor second) {
         int[] outputShape = broadcastShape(first.shape(), second.shape());
         int[] outputStride = strides(outputShape);
         int[] firstStride = broadcastStrides(first.shape(), outputShape);
         int[] secondStride = broadcastStrides(second.shape(), outputShape);
         int count = PiperTensor.elementCount(outputShape);
-        if ("Less".equals(operation)) {
+        if ("Less".equals(operation) || "GreaterOrEqual".equals(operation)
+                || "LessOrEqual".equals(operation)) {
             boolean[] output = new boolean[count];
             for (int i = 0; i < count; i++) {
                 int x = broadcastOffset(i, outputStride, firstStride);
                 int y = broadcastOffset(i, outputStride, secondStride);
-                output[i] = numericValue(first, x) < numericValue(second, y);
+                double a = numericValue(first, x);
+                double b = numericValue(second, y);
+                output[i] = switch (operation) {
+                    case "Less" -> a < b;
+                    case "GreaterOrEqual" -> a >= b;
+                    default -> a <= b;
+                };
+            }
+            return PiperTensor.bools(output, outputShape);
+        }
+        if ("And".equals(operation)) {
+            boolean[] a = first.requireBoolean();
+            boolean[] b = second.requireBoolean();
+            boolean[] output = new boolean[count];
+            for (int i = 0; i < count; i++) {
+                output[i] = a[broadcastOffset(i, outputStride, firstStride)]
+                        && b[broadcastOffset(i, outputStride, secondStride)];
             }
             return PiperTensor.bools(output, outputShape);
         }

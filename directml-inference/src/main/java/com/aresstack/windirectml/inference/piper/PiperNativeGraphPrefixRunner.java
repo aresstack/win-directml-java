@@ -16,6 +16,16 @@ import java.util.Objects;
  */
 public final class PiperNativeGraphPrefixRunner {
 
+    private final long randomSeed;
+
+    public PiperNativeGraphPrefixRunner() {
+        this(42L);
+    }
+
+    public PiperNativeGraphPrefixRunner(long randomSeed) {
+        this.randomSeed = randomSeed;
+    }
+
     public PrefixResult execute(PiperModelImport imported, PiperSynthesisInput input, int nodeLimit)
             throws IOException {
         Objects.requireNonNull(imported, "imported");
@@ -31,6 +41,7 @@ public final class PiperNativeGraphPrefixRunner {
         active.put("scales", PiperTensor.floats(input.scales(), 3));
         Map<String, OnnxTensor> initializers = imported.graph().initializers();
         PiperTensor last = null;
+        java.util.Random random = new java.util.Random(randomSeed);
 
         for (int index = 0; index < nodeLimit; index++) {
             OnnxNode node = nodes.get(index);
@@ -46,7 +57,7 @@ public final class PiperNativeGraphPrefixRunner {
                 continue;
             }
             try {
-                last = evaluate(node, active, initializers);
+                last = evaluate(node, active, initializers, random);
             } catch (UnsupportedOperationException unsupported) {
                 throw new UnsupportedOperationException("Piper native reference does not support "
                         + node.opType() + " at node " + index, unsupported);
@@ -64,23 +75,60 @@ public final class PiperNativeGraphPrefixRunner {
     }
 
     private static PiperTensor evaluate(OnnxNode node, Map<String, PiperTensor> active,
-                                        Map<String, OnnxTensor> initializers) throws IOException {
+                                        Map<String, OnnxTensor> initializers,
+                                        java.util.Random random) throws IOException {
         String operator = node.opType();
         return switch (operator) {
+            case "GatherND" -> PiperIndexOperations.gatherNd(input(node, 0, active, initializers),
+                    input(node, 1, active, initializers));
+            case "ScatterND" -> PiperIndexOperations.scatterNd(input(node, 0, active, initializers),
+                    input(node, 1, active, initializers),
+                    input(node, 2, active, initializers));
+            case "GatherElements" -> PiperIndexOperations.gatherElements(
+                    input(node, 0, active, initializers),
+                    input(node, 1, active, initializers),
+                    Math.toIntExact(node.getInt("axis", 0)));
+            case "NonZero" -> PiperIndexOperations.nonZero(input(node, 0, active, initializers));
             case "Gather" -> PiperTensorOperations.gather(
                     input(node, 0, active, initializers),
                     input(node, 1, active, initializers),
                     Math.toIntExact(node.getInt("axis", 0)));
-            case "Mul", "Add", "Sub", "Div", "Pow", "Less" -> PiperTensorOperations.binary(operator,
+            case "Mul", "Add", "Sub", "Div", "Pow", "Less",
+                    "GreaterOrEqual", "LessOrEqual", "And" -> PiperTensorOperations.binary(operator,
                     input(node, 0, active, initializers), input(node, 1, active, initializers));
             case "Transpose" -> PiperTensorOperations.transpose(
                     input(node, 0, active, initializers), node.getInts("perm"));
             case "Shape" -> PiperTensorOperations.shape(input(node, 0, active, initializers));
+            case "ConstantOfShape" -> PiperShapeOperations.constantOfShape(
+                    input(node, 0, active, initializers), node.getTensor("value"));
+            case "RandomNormalLike" -> PiperTensorOperations.randomNormalLike(
+                    input(node, 0, active, initializers),
+                    Math.toIntExact(node.getInt("dtype", PiperTensor.FLOAT32)), random);
+            case "Expand" -> PiperShapeOperations.expand(input(node, 0, active, initializers),
+                    input(node, 1, active, initializers));
+            case "Squeeze" -> PiperShapeOperations.squeeze(input(node, 0, active, initializers),
+                    node.inputs().size() > 1 && !node.inputs().get(1).isEmpty()
+                            ? input(node, 1, active, initializers) : null);
+            case "Not" -> PiperTensorOperations.not(input(node, 0, active, initializers));
+            case "CumSum" -> PiperReductionOperations.cumSum(
+                    input(node, 0, active, initializers),
+                    input(node, 1, active, initializers),
+                    node.getInt("exclusive", 0) != 0,
+                    node.getInt("reverse", 0) != 0);
+            case "ReduceSum", "ReduceMax" -> reduce(node, active, initializers);
             case "ReduceMean" -> PiperTensorOperations.reduceMean(
                     input(node, 0, active, initializers), node.getInts("axes"),
                     node.getInt("keepdims", 1) != 0);
             case "Relu", "Sqrt", "Erf", "Exp", "Tanh", "Sigmoid", "Neg" -> PiperTensorOperations.unary(
                     operator, input(node, 0, active, initializers));
+            case "Softplus" -> PiperActivationOperations.softplus(
+                    input(node, 0, active, initializers));
+            case "Ceil" -> PiperActivationOperations.ceil(
+                    input(node, 0, active, initializers));
+            case "LeakyRelu" -> PiperActivationOperations.leakyRelu(
+                    input(node, 0, active, initializers),
+                    ((Number) node.attrs().getOrDefault("alpha", 0.01f)).floatValue());
+            case "Clip" -> clip(node, active, initializers);
             case "Range" -> PiperTensorOperations.range(input(node, 0, active, initializers),
                     input(node, 1, active, initializers), input(node, 2, active, initializers));
             case "Unsqueeze" -> PiperTensorOperations.unsqueeze(
@@ -100,16 +148,54 @@ public final class PiperNativeGraphPrefixRunner {
                     input(node, 2, active, initializers));
             case "Softmax" -> PiperTensorOperations.softmax(input(node, 0, active, initializers),
                     Math.toIntExact(node.getInt("axis", -1)));
-            case "Slice" -> PiperTensorOperations.slice(
-                    input(node, 0, active, initializers),
-                    input(node, 1, active, initializers),
-                    input(node, 2, active, initializers),
-                    input(node, 3, active, initializers),
-                    input(node, 4, active, initializers));
+            case "Slice" -> slice(node, active, initializers);
             case "Pad" -> zeroPad(node, active, initializers);
-            case "Conv" -> convolution(node, active, initializers);
+            case "Conv", "ConvTranspose" -> convolution(node, active, initializers);
             default -> throw new UnsupportedOperationException(operator);
         };
+    }
+
+    private static PiperTensor clip(OnnxNode node, Map<String, PiperTensor> active,
+                                    Map<String, OnnxTensor> initializers) throws IOException {
+        PiperTensor lower = node.inputs().size() > 1 && !node.inputs().get(1).isEmpty()
+                ? input(node, 1, active, initializers) : null;
+        PiperTensor upper = node.inputs().size() > 2 && !node.inputs().get(2).isEmpty()
+                ? input(node, 2, active, initializers) : null;
+        return PiperActivationOperations.clip(input(node, 0, active, initializers), lower, upper);
+    }
+
+    private static PiperTensor reduce(OnnxNode node, Map<String, PiperTensor> active,
+                                      Map<String, OnnxTensor> initializers) throws IOException {
+        long[] axes = node.inputs().size() > 1 && !node.inputs().get(1).isEmpty()
+                ? input(node, 1, active, initializers).requireInteger()
+                : node.getInts("axes").stream().mapToLong(Long::longValue).toArray();
+        PiperTensor source = input(node, 0, active, initializers);
+        boolean keepDimensions = node.getInt("keepdims", 1) != 0;
+        boolean noop = node.getInt("noop_with_empty_axes", 0) != 0;
+        return "ReduceMax".equals(node.opType())
+                ? PiperReductionOperations.reduceMax(source, axes, keepDimensions, noop)
+                : PiperReductionOperations.reduceSum(source, axes, keepDimensions, noop);
+    }
+
+    private static PiperTensor slice(OnnxNode node, Map<String, PiperTensor> active,
+                                     Map<String, OnnxTensor> initializers) throws IOException {
+        PiperTensor start = input(node, 1, active, initializers);
+        PiperTensor end = input(node, 2, active, initializers);
+        int count = start.length();
+        long[] defaultAxes = new long[count];
+        long[] defaultSteps = new long[count];
+        for (int i = 0; i < count; i++) {
+            defaultAxes[i] = i;
+            defaultSteps[i] = 1L;
+        }
+        PiperTensor axes = node.inputs().size() > 3 && !node.inputs().get(3).isEmpty()
+                ? input(node, 3, active, initializers)
+                : PiperTensor.integers(defaultAxes, count);
+        PiperTensor steps = node.inputs().size() > 4 && !node.inputs().get(4).isEmpty()
+                ? input(node, 4, active, initializers)
+                : PiperTensor.integers(defaultSteps, count);
+        return PiperTensorOperations.slice(input(node, 0, active, initializers),
+                start, end, axes, steps);
     }
 
     private static List<PiperTensor> split(OnnxNode node, Map<String, PiperTensor> active,
@@ -152,64 +238,11 @@ public final class PiperNativeGraphPrefixRunner {
 
     private static PiperTensor convolution(OnnxNode node, Map<String, PiperTensor> active,
                                            Map<String, OnnxTensor> initializers) throws IOException {
-        PiperTensor source = input(node, 0, active, initializers);
-        PiperTensor filters = input(node, 1, active, initializers);
         PiperTensor bias = node.inputs().size() > 2 && !node.inputs().get(2).isEmpty()
                 ? input(node, 2, active, initializers) : null;
-        int[] xShape = source.shape();
-        int[] wShape = filters.shape();
-        if (xShape.length != 3 || wShape.length != 3) {
-            throw new IllegalArgumentException("Only 1-D NCL Piper convolution is implemented");
-        }
-        int batches = xShape[0];
-        int inputs = xShape[1];
-        int width = xShape[2];
-        int outputs = wShape[0];
-        int channelsPerGroup = wShape[1];
-        int kernel = wShape[2];
-        int groupCount = Math.toIntExact(node.getInt("group", 1));
-        int stride = parameter(node, "strides", 1);
-        int dilation = parameter(node, "dilations", 1);
-        List<Long> pads = node.getInts("pads");
-        int left = pads.isEmpty() ? 0 : Math.toIntExact(pads.get(0));
-        int right = pads.isEmpty() ? 0 : Math.toIntExact(pads.get(1));
-        float[] sourceValues = source.requireFloat();
-        float[] weightValues = filters.requireFloat();
-        float[] biases = bias == null ? null : bias.requireFloat();
-
-        float[][][] weights = new float[outputs][channelsPerGroup][kernel];
-        for (int channel = 0; channel < outputs; channel++) {
-            for (int sourceChannel = 0; sourceChannel < channelsPerGroup; sourceChannel++) {
-                System.arraycopy(weightValues,
-                        (channel * channelsPerGroup + sourceChannel) * kernel,
-                        weights[channel][sourceChannel], 0, kernel);
-            }
-        }
-        float[] flattened = null;
-        int outputWidth = 0;
-        for (int batch = 0; batch < batches; batch++) {
-            float[][] x = new float[inputs][width];
-            for (int channel = 0; channel < inputs; channel++) {
-                System.arraycopy(sourceValues, (batch * inputs + channel) * width,
-                        x[channel], 0, width);
-            }
-            float[][] y = PiperConv1dReference.apply(x, weights, biases,
-                    stride, dilation, left, right, groupCount);
-            if (flattened == null) {
-                outputWidth = y[0].length;
-                flattened = new float[Math.multiplyExact(Math.multiplyExact(batches, outputs), outputWidth)];
-            }
-            for (int channel = 0; channel < outputs; channel++) {
-                System.arraycopy(y[channel], 0, flattened,
-                        (batch * outputs + channel) * outputWidth, outputWidth);
-            }
-        }
-        return PiperTensor.floats(flattened, batches, outputs, outputWidth);
-    }
-
-    private static int parameter(OnnxNode node, String name, int defaultValue) {
-        List<Long> values = node.getInts(name);
-        return values.isEmpty() ? defaultValue : Math.toIntExact(values.get(0));
+        return PiperConvolutionExecutor.apply(node,
+                input(node, 0, active, initializers),
+                input(node, 1, active, initializers), bias);
     }
 
     private static PiperTensor input(OnnxNode node, int index, Map<String, PiperTensor> active,

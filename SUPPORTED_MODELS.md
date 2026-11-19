@@ -1,9 +1,10 @@
 # Supported models
 
-> **Piper TTS (`de_DE-thorsten-medium`): planned.** The native Java ONNX
-> importer, voice JSON configuration, phoneme-ID encoder and convolution
-> reference kernels are implemented. Full VITS inference and DirectML kernel
-> parity are **not** available yet. See [Piper progress](docs/piper-native-vits.md).
+> **Piper TTS (`de_DE-thorsten-medium`): experimental CPU reference.** The
+> complete native Java VITS graph now synthesizes a mono WAV from supplied
+> phonemes (2,682 / 2,682 nodes, no ONNX Runtime). Text phonemization, GPU
+> DirectML execution, listening/parity tests and model redistribution are **not
+> yet certified**. See [Piper progress](docs/piper-native-vits.md).
 
 
 This file is the authoritative list of model checkpoints that

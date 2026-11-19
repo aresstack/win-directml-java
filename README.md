@@ -449,7 +449,7 @@ and [`docs/release-notes-next.md`](docs/release-notes-next.md).
 | CPU-only usage                          | Supported; not a failure mode.                               |
 | DirectML usage                          | Supported Windows acceleration path.                         |
 | Whisper-Tiny speech transcription         | Experimental Java 21 API in `directml-inference` since 0.3.0; German real-model test passed, CPU only. |
-| Piper TTS (VITS ONNX import)             | Planned: real German Piper ONNX importer, phoneme IDs and convolution CPU references added; native full-graph synthesis **not implemented**. See [Piper design](docs/piper-native-vits.md). |
+| Piper TTS (VITS ONNX import)             | Experimental complete Java CPU reference synthesis (2,682 / 2,682 German VITS nodes), WAV export and phoneme-ID API; **DirectML GPU / eSpeak text integration pending**. No ONNX Runtime. See [Piper design](docs/piper-native-vits.md). |
 | Legacy JSON-RPC sidecar / Java 8 bridge | Source kept, no longer published in new releases.            |
 | Workbench text generation               | Experimental Workbench app feature (not a published artifact): Gemma-it, Qwen 0.5B, SmolLM2, T5/CodeT5 (4 curated, real-certified), Phi-3-mini runnable; Phi-3.5 + larger Qwen planned. Native Java/DirectML, no Python/ONNX Runtime. |
 | ACP / MCP / A2A orchestration           | Out of scope for this repository.                            |

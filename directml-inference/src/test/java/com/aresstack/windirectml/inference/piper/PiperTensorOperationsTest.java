@@ -164,6 +164,25 @@ final class PiperTensorOperationsTest {
     }
 
     @Test
+    void rangeSupportsFloatStepsUsedByAlignmentGraph() {
+        PiperTensor ascending = PiperTensorOperations.range(
+                PiperTensor.floats(new float[]{0f}),
+                PiperTensor.floats(new float[]{1.5f}),
+                PiperTensor.floats(new float[]{0.5f}));
+        PiperTensor descending = PiperTensorOperations.range(
+                PiperTensor.floats(new float[]{2f}),
+                PiperTensor.floats(new float[]{-1f}),
+                PiperTensor.floats(new float[]{-1f}));
+
+        assertArrayEquals(new float[]{0f, 0.5f, 1f}, ascending.floatData(), 0f);
+        assertArrayEquals(new float[]{2f, 1f, 0f}, descending.floatData(), 0f);
+        assertThrows(IllegalArgumentException.class, () -> PiperTensorOperations.range(
+                PiperTensor.floats(new float[]{0f}),
+                PiperTensor.floats(new float[]{1f}),
+                PiperTensor.floats(new float[]{0f})));
+    }
+
+    @Test
     void rejectsReshapeAndCastOutsideValidOnnxContract() {
         PiperTensor values = PiperTensor.floats(new float[]{1, 2, 3}, 3);
 
