@@ -220,18 +220,14 @@ configure(subprojects.findAll { it.name in publishableModules }) {
         }
     }
 }
-// Aggregate-publish all publishable modules to the Sonatype Central
-// Portal in one upload. The nmcp.aggregation plugin registers
-// `publishAllPublicationsToCentralPortal` via
-// `publishAllProjectsProbablyBreakingProjectIsolation`; credentials come
-// from ORG_GRADLE_PROJECT_centralUsername / centralPassword.
+// Aggregate all publishable module artifacts into a single Sonatype deployment.
+// Configure credentials on the root aggregation publisher, not on subprojects.
 nmcpAggregation {
-    publishAllProjectsProbablyBreakingProjectIsolation {
+    publishAllProjectsProbablyBreakingProjectIsolation { }
+    centralPortal {
         username = providers.gradleProperty('centralUsername')
         password = providers.gradleProperty('centralPassword')
-        // Auto-publish after validation passes. Set to 'USER_MANAGED'
-        // for a stop-the-line manual sanity check in the Central Portal
-        // web UI before going live.
+        // Publish automatically after Central Portal validation succeeds.
         publishingType = 'AUTOMATIC'
     }
 }
