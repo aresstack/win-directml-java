@@ -113,7 +113,7 @@ subprojects { sub ->
 //
 // Triggers:
 //   ./gradlew publishToMavenLocal                       # local install for testing
-//   ./gradlew publishAllPublicationsToCentralPortal     # upload all publishable
+//   ./gradlew :publishAggregationToCentralPortal        # upload all publishable
 //                                                         modules to Central
 //                                                         Portal (CI release job)
 //
@@ -209,8 +209,8 @@ configure(subprojects.findAll { it.name in publishableModules }) {
             def signingPwd = providers.gradleProperty('signingInMemoryKeyPassword').orNull
             required = {
                 gradle.taskGraph.allTasks.any { task ->
-                    task.name == 'publishAllPublicationsToCentralPortal'
-                            || task.path.endsWith(':publishAllPublicationsToCentralPortal')
+                    task.name == 'publishAggregationToCentralPortal'
+                            || task.name == 'publishAllPublicationsToCentralPortal'
                 } && !version.toString().endsWith('-SNAPSHOT')
             }
             if (signingKey != null) {
