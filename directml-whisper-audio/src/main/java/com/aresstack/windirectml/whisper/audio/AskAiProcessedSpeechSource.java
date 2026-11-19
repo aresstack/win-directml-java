@@ -15,11 +15,17 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Adapt Ask AI's full 16-bit PCM processing pipeline to one original-timeline
- * speech interval. Keep the recording's original sample offsets unchanged.
+ * Adapt Ask AI's 16-bit PCM processing pipeline to one original-timeline speech
+ * interval. Keep the recording's original sample offsets unchanged.
+ *
+ * <p>The processor creates fresh filter state for every call. Each read therefore
+ * starts half a second earlier in the original recording and discards that warm-up,
+ * so every window equals continuous processing of the whole recording: the 80-Hz
+ * high-pass and the DC estimate settle within a few milliseconds.
  */
 final class AskAiProcessedSpeechSource implements WhisperAudioSource {
     private static final PcmAudioFormat FORMAT = PcmAudioFormat.speechDefault();
+    static final int WARM_UP_SAMPLES = 8000;
 
     private final WhisperAudioSource original;
     private final SpeechInterval interval;
@@ -41,7 +47,22 @@ final class AskAiProcessedSpeechSource implements WhisperAudioSource {
         return new AudioProcessingProfile("whisper-vad", "VAD cleanup", true, blocks);
     }
 
-    static AudioProcessingProfile speechProfile() {
+    /**
+     * Remove DC offset and rumble below 80 Hz only. Both leave the speech band untouched;
+     * gates, compressors, limiters and low-pass filters change what Whisper hears.
+     */
+    static AudioProcessingProfile speechProfile(boolean highPass) {
+        AudioBlockRegistry registry = AudioBlockRegistry.getInstance();
+        List<AudioBlockDefinition> blocks = new ArrayList<>();
+        blocks.add(registry.defaultDefinition(AudioBlockType.DC_OFFSET_REMOVAL, "whisper-dc-offset"));
+        if (highPass) {
+            blocks.add(highPass(registry, "whisper-high-pass"));
+        }
+        return new AudioProcessingProfile("whisper-speech", "Whisper speech preparation", true, blocks);
+    }
+
+    /** Reproduce the 0.3.1 cleanup chain, including gate, compressor, limiter and low-pass. */
+    static AudioProcessingProfile enhancedSpeechProfile() {
         AudioBlockRegistry registry = AudioBlockRegistry.getInstance();
         List<AudioBlockDefinition> blocks = new ArrayList<>();
         blocks.add(registry.defaultDefinition(AudioBlockType.DC_OFFSET_REMOVAL, "whisper-dc-offset"));
@@ -53,7 +74,7 @@ final class AskAiProcessedSpeechSource implements WhisperAudioSource {
                 .withParameter("closedGain", "0.4"));
         blocks.add(registry.defaultDefinition(AudioBlockType.COMPRESSOR, "whisper-compressor"));
         blocks.add(registry.defaultDefinition(AudioBlockType.LIMITER, "whisper-limiter"));
-        return new AudioProcessingProfile("whisper-speech", "Whisper speech cleanup", true, blocks);
+        return new AudioProcessingProfile("whisper-enhanced", "Whisper speech cleanup", true, blocks);
     }
 
     private static AudioBlockDefinition highPass(AudioBlockRegistry registry, String blockId) {
@@ -73,24 +94,27 @@ final class AskAiProcessedSpeechSource implements WhisperAudioSource {
         if (startSample < 0 || sampleCount < 0 || startSample > sampleCount() - sampleCount) {
             throw new IllegalArgumentException("Speech interval request exceeds its sample range");
         }
-        float[] samples = original.readSamples(interval.startSample() + startSample, sampleCount);
-        if (samples.length != sampleCount) {
+        long absoluteStart = interval.startSample() + startSample;
+        int warmUp = (int) Math.min(WARM_UP_SAMPLES, absoluteStart);
+        int total = warmUp + sampleCount;
+        float[] samples = original.readSamples(absoluteStart - warmUp, total);
+        if (samples.length != total) {
             throw new IOException("Audio source returned an incomplete speech interval");
         }
-        short[] pcm = new short[sampleCount];
-        for (int i = 0; i < sampleCount; i++) {
+        short[] pcm = new short[total];
+        for (int i = 0; i < total; i++) {
             pcm[i] = SpeechRegionDetector.toPcm16(samples[i]);
         }
         AudioBuffer result = processor.process(new AudioBuffer(pcm, FORMAT), profile);
         short[] processed = result.getSamples();
         if (result.getFormat().getSampleRateHz() != FORMAT.getSampleRateHz()
                 || result.getFormat().getChannels() != 1
-                || processed.length != sampleCount) {
+                || processed.length != total) {
             throw new IOException("Ask AI speech profile must preserve the sample timebase");
         }
         float[] normalized = new float[sampleCount];
         for (int i = 0; i < sampleCount; i++) {
-            normalized[i] = processed[i] / 32768.0f;
+            normalized[i] = processed[warmUp + i] / 32768.0f;
         }
         return normalized;
     }

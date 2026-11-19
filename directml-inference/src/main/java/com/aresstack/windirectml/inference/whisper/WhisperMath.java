@@ -1,10 +1,26 @@
 package com.aresstack.windirectml.inference.whisper;
 
 import java.io.IOException;
+import java.util.function.IntConsumer;
+import java.util.stream.IntStream;
 
-/** Implement Whisper's float32 math independently of model storage and audio I/O. */
+/**
+ * Implement Whisper's float32 math independently of model storage and audio I/O.
+ * Batched operations process independent rows in parallel; every row is computed
+ * exactly as in sequential order, so results do not depend on the thread count.
+ */
 final class WhisperMath {
+    private static final int PARALLEL_ROWS = 16;
+
     private WhisperMath() {}
+
+    static void forEachRow(int rows, IntConsumer action) {
+        if (rows < PARALLEL_ROWS) {
+            for (int row = 0; row < rows; row++) action.accept(row);
+        } else {
+            IntStream.range(0, rows).parallel().forEach(action);
+        }
+    }
 
     static float[] project(float[] input, WhisperCheckpoint.Tensor weights,
                            WhisperCheckpoint.Tensor bias) {
@@ -25,7 +41,7 @@ final class WhisperMath {
 
     static float[][] project(float[][] input, WhisperCheckpoint.Tensor w, WhisperCheckpoint.Tensor b) {
         float[][] result = new float[input.length][];
-        for (int i = 0; i < input.length; i++) result[i] = project(input[i], w, b);
+        forEachRow(input.length, i -> result[i] = project(input[i], w, b));
         return result;
     }
 
@@ -46,7 +62,7 @@ final class WhisperMath {
 
     static float[][] norm(float[][] input, WhisperCheckpoint.Tensor w, WhisperCheckpoint.Tensor b) {
         float[][] result = new float[input.length][];
-        for (int i = 0; i < input.length; i++) result[i] = norm(input[i], w, b);
+        forEachRow(input.length, i -> result[i] = norm(input[i], w, b));
         return result;
     }
 
@@ -83,8 +99,7 @@ final class WhisperMath {
                                  WhisperCheckpoint.Tensor firstBias, WhisperCheckpoint.Tensor second,
                                  WhisperCheckpoint.Tensor secondBias) {
         float[][] result = new float[input.length][];
-        for (int i = 0; i < input.length; i++)
-            result[i] = feedForward(input[i], first, firstBias, second, secondBias);
+        forEachRow(input.length, i -> result[i] = feedForward(input[i], first, firstBias, second, secondBias));
         return result;
     }
 
@@ -98,7 +113,7 @@ final class WhisperMath {
         float[] b = bias.values();
         int count = (input.length - 1) / stride + 1;
         float[][] result = new float[count][channels];
-        for (int step = 0; step < count; step++) {
+        forEachRow(count, step -> {
             int center = step * stride;
             for (int channel = 0; channel < channels; channel++) {
                 int kernelStart = channel * inputs * 3;
@@ -111,7 +126,7 @@ final class WhisperMath {
                 }
                 result[step][channel] = gelu((float) sum);
             }
-        }
+        });
         return result;
     }
 
@@ -147,8 +162,7 @@ final class WhisperMath {
 
     static float[][] attention(float[][] queries, float[][] keys, float[][] values, int heads) {
         float[][] result = new float[queries.length][];
-        for (int i = 0; i < queries.length; i++)
-            result[i] = attention(queries[i], keys, values, heads, keys.length);
+        forEachRow(queries.length, i -> result[i] = attention(queries[i], keys, values, heads, keys.length));
         return result;
     }
 

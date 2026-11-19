@@ -71,6 +71,37 @@ class WhisperTimestampTokenSelectorTest {
         assertEquals(141, selector.select(logits, Arrays.asList(100, 0, 140, 140, 1), 200));
     }
 
+    @Test
+    void masksSuppressedTokensAndBlankAtTheBeginningWithoutTimestamps() {
+        WhisperTimestampTokenSelector rules = new WhisperTimestampTokenSelector(
+                100, 200, 5, 5, new int[]{2}, new int[]{3, 5});
+        float[] logits = scores();
+        logits[2] = 30;
+        logits[3] = 20;
+        logits[5] = 15;
+        logits[150] = 40;
+        logits[1] = 1;
+
+        float[] first = rules.constrain(logits, Collections.emptyList(), 200, false);
+        assertEquals(1, WhisperTimestampTokenSelector.argmax(first));
+        assertEquals(Float.NEGATIVE_INFINITY, first[150], "Timestamps are disabled");
+
+        float[] later = rules.constrain(logits, Arrays.asList(1), 200, false);
+        assertEquals(3, WhisperTimestampTokenSelector.argmax(later));
+        assertEquals(Float.NEGATIVE_INFINITY, later[2]);
+    }
+
+    @Test
+    void forbidsTimestampsAfterTheEndOfTheRecordedAudio() {
+        float[] logits = scores();
+        logits[180] = 20;
+        logits[5] = 1;
+
+        float[] masked = selector.constrain(logits, Arrays.asList(100, 0), 150, true);
+        assertEquals(Float.NEGATIVE_INFINITY, masked[180]);
+        assertEquals(5, WhisperTimestampTokenSelector.argmax(masked));
+    }
+
     private static float[] scores() {
         float[] scores = new float[201];
         Arrays.fill(scores, -1000);

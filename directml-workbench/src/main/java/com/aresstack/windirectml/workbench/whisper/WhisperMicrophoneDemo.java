@@ -1,6 +1,7 @@
 package com.aresstack.windirectml.workbench.whisper;
 
 import com.aresstack.windirectml.inference.whisper.TranscriptionResult;
+import com.aresstack.windirectml.inference.whisper.WhisperDecodingOptions;
 import com.aresstack.windirectml.inference.whisper.WhisperTranscriber;
 import com.aresstack.windirectml.whisper.audio.AskAiWhisperPipeline;
 
@@ -148,9 +149,9 @@ public final class WhisperMicrophoneDemo extends JFrame {
                 if (withTimestamps) {
                     AtomicInteger decodedWindows = new AtomicInteger();
                     TranscriptionResult result = withAudioCleanup
-                            ? new AskAiWhisperPipeline().transcribeWithTimestamps(audio, transcriber, 400,
+                            ? new AskAiWhisperPipeline().transcribe(audio, transcriber,
                                     chunk -> showTranscriptionProgress(chunk, decodedWindows.incrementAndGet()))
-                            : transcriber.transcribeWithTimestamps(audio, 400,
+                            : transcriber.transcribe(audio, WhisperDecodingOptions.defaults(),
                                     chunk -> showTranscriptionProgress(chunk, decodedWindows.incrementAndGet()));
                     recognized = WhisperTranscriptFormatter.format(result);
                     if (result.getSegments().isEmpty() || result.hasUnalignedText()) {
@@ -158,8 +159,9 @@ public final class WhisperMicrophoneDemo extends JFrame {
                     }
                 } else {
                     recognized = withAudioCleanup
-                            ? new AskAiWhisperPipeline().transcribePlain(audio, transcriber, 80)
-                            : transcriber.transcribeShortRecording(audio, 80);
+                            ? new AskAiWhisperPipeline().transcribePlain(audio, transcriber)
+                            : transcriber.transcribe(audio, WhisperDecodingOptions.defaults(), ignored -> { })
+                                    .getText();
                     if (recognized.isBlank()) {
                         recognized = "(Keine Sprache erkannt)";
                     }

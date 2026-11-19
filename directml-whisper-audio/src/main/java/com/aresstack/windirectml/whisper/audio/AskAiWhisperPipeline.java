@@ -4,6 +4,7 @@ import com.aresstack.audio.profile.AudioProcessingProfile;
 import com.aresstack.windirectml.inference.whisper.TranscriptionResult;
 import com.aresstack.windirectml.inference.whisper.TranscriptionSegment;
 import com.aresstack.windirectml.inference.whisper.WhisperAudioSource;
+import com.aresstack.windirectml.inference.whisper.WhisperDecodingOptions;
 import com.aresstack.windirectml.inference.whisper.WhisperTranscriber;
 
 import java.io.IOException;
@@ -13,41 +14,62 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * Coordinate the Ask AI VAD, configurable PCM processing profile and Whisper.
- * Skip gaps rather than concatenating them, preserving original timestamp positions.
+ * Coordinate the Ask AI VAD, a timebase-preserving PCM profile and the guarded Whisper decoder.
+ *
+ * <p>The default profile removes only DC offset and rumble below 80 Hz. The VAD skips long
+ * silence between speech regions; every region keeps its original recording positions and is
+ * transcribed in windows of at most thirty seconds. Nothing is concatenated, so timestamps map
+ * directly to the recording. Plain text is the timestamped transcript without timestamps.
  */
 public final class AskAiWhisperPipeline {
     private static final int SAMPLE_RATE = 16000;
 
     private final SpeechRegionDetector regionDetector;
     private final AudioProcessingProfile profile;
+    private final WhisperDecodingOptions options;
 
+    /** Use the minimal speech profile and the default guarded decoding options. */
     public AskAiWhisperPipeline() {
-        this(AskAiProcessedSpeechSource.speechProfile());
+        this(defaultSpeechProfile());
     }
 
     /** Use a custom timebase-preserving Ask AI audio processing profile. */
     public AskAiWhisperPipeline(AudioProcessingProfile profile) {
-        this(new SpeechRegionDetector(), profile);
+        this(profile, WhisperDecodingOptions.defaults());
     }
 
-    AskAiWhisperPipeline(SpeechRegionDetector regionDetector, AudioProcessingProfile profile) {
+    public AskAiWhisperPipeline(AudioProcessingProfile profile, WhisperDecodingOptions options) {
+        this(new SpeechRegionDetector(), profile, options);
+    }
+
+    AskAiWhisperPipeline(SpeechRegionDetector regionDetector, AudioProcessingProfile profile,
+                         WhisperDecodingOptions options) {
         this.regionDetector = Objects.requireNonNull(regionDetector, "regionDetector");
         this.profile = Objects.requireNonNull(profile, "profile");
+        this.options = Objects.requireNonNull(options, "options");
     }
 
-    /** Transcribe detected speech intervals without progress events. */
-    public TranscriptionResult transcribeWithTimestamps(WhisperAudioSource source,
-                                                        WhisperTranscriber transcriber,
-                                                        int maximumTokens) throws IOException {
-        return transcribeWithTimestamps(source, transcriber, maximumTokens, ignored -> { });
+    /** DC-offset removal and an 80-Hz Butterworth high-pass: the default speech preparation. */
+    public static AudioProcessingProfile defaultSpeechProfile() {
+        return AskAiProcessedSpeechSource.speechProfile(true);
     }
 
-    public TranscriptionResult transcribeWithTimestamps(WhisperAudioSource source,
-                                                 WhisperTranscriber transcriber,
-                                                 int maximumTokens,
-                                                 Consumer<TranscriptionResult> progress)
-            throws IOException {
+    /** DC-offset removal only, for sources that are already high-pass filtered. */
+    public static AudioProcessingProfile withoutHighPassProfile() {
+        return AskAiProcessedSpeechSource.speechProfile(false);
+    }
+
+    /**
+     * The 0.3.1 cleanup chain with low-pass, noise gate, compressor and limiter. These blocks
+     * alter the speech signal Whisper was trained on; use them only after measuring a benefit.
+     */
+    public static AudioProcessingProfile enhancedSpeechProfile() {
+        return AskAiProcessedSpeechSource.enhancedSpeechProfile();
+    }
+
+    /** Transcribe detected speech regions and return segments with original recording times. */
+    public TranscriptionResult transcribe(WhisperAudioSource source, WhisperTranscriber transcriber,
+                                          Consumer<TranscriptionResult> progress) throws IOException {
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(transcriber, "transcriber");
         Objects.requireNonNull(progress, "progress");
@@ -55,23 +77,56 @@ public final class AskAiWhisperPipeline {
         for (SpeechInterval interval : regionDetector.detect(source)) {
             WhisperAudioSource prepared = new AskAiProcessedSpeechSource(source, interval, profile);
             long offsetMillis = toMillis(interval.startSample());
-            TranscriptionResult region = transcriber.transcribeWithTimestamps(prepared,
-                    maximumTokens, part -> progress.accept(shift(part, offsetMillis)));
+            TranscriptionResult region = transcriber.transcribe(prepared, options,
+                    part -> progress.accept(shift(part, offsetMillis)));
             recognized.add(shift(region, offsetMillis));
         }
         return combine(recognized);
     }
 
+    /** Transcribe detected speech regions and return the transcript without timestamps. */
+    public String transcribePlain(WhisperAudioSource source, WhisperTranscriber transcriber)
+            throws IOException {
+        return transcribe(source, transcriber, ignored -> { }).getText();
+    }
+
+    /**
+     * @deprecated Since 0.3.2 the token limit belongs to {@link WhisperDecodingOptions};
+     * use {@link #transcribe(WhisperAudioSource, WhisperTranscriber, Consumer)}.
+     */
+    @Deprecated
+    public TranscriptionResult transcribeWithTimestamps(WhisperAudioSource source,
+                                                        WhisperTranscriber transcriber,
+                                                        int maximumTokens) throws IOException {
+        return withTokenLimit(maximumTokens).transcribe(source, transcriber, ignored -> { });
+    }
+
+    /**
+     * @deprecated Since 0.3.2 the token limit belongs to {@link WhisperDecodingOptions};
+     * use {@link #transcribe(WhisperAudioSource, WhisperTranscriber, Consumer)}.
+     */
+    @Deprecated
+    public TranscriptionResult transcribeWithTimestamps(WhisperAudioSource source,
+                                                        WhisperTranscriber transcriber,
+                                                        int maximumTokens,
+                                                        Consumer<TranscriptionResult> progress)
+            throws IOException {
+        return withTokenLimit(maximumTokens).transcribe(source, transcriber, progress);
+    }
+
+    /**
+     * @deprecated Since 0.3.2 plain text uses the guarded timestamp decoder;
+     * use {@link #transcribePlain(WhisperAudioSource, WhisperTranscriber)}.
+     */
+    @Deprecated
     public String transcribePlain(WhisperAudioSource source, WhisperTranscriber transcriber,
-                           int maximumTokens) throws IOException {
-        Objects.requireNonNull(source, "source");
-        Objects.requireNonNull(transcriber, "transcriber");
-        StringBuilder text = new StringBuilder();
-        for (SpeechInterval interval : regionDetector.detect(source)) {
-            WhisperAudioSource prepared = new AskAiProcessedSpeechSource(source, interval, profile);
-            append(text, transcriber.transcribeShortRecording(prepared, maximumTokens));
-        }
-        return text.toString();
+                                  int maximumTokens) throws IOException {
+        return withTokenLimit(maximumTokens).transcribePlain(source, transcriber);
+    }
+
+    private AskAiWhisperPipeline withTokenLimit(int maximumTokens) {
+        return new AskAiWhisperPipeline(regionDetector, profile,
+                options.withMaximumTokensPerWindow(maximumTokens));
     }
 
     static TranscriptionResult shift(TranscriptionResult result, long offsetMillis) {

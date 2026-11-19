@@ -45,6 +45,17 @@ public final class WhisperTokenizer {
         return token;
     }
 
+    /** Return the ID of the first special token that exists, or -1 if none does. */
+    public int findSpecial(String... names) {
+        for (String name : names) {
+            Integer token = specialTokens.get(name);
+            if (token != null) {
+                return token;
+            }
+        }
+        return -1;
+    }
+
     public int textTokenCount() {
         return pieces.length;
     }

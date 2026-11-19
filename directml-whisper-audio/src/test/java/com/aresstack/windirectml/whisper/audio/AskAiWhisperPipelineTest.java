@@ -56,7 +56,7 @@ class AskAiWhisperPipelineTest {
         SpeechInterval interval = new SpeechInterval(SAMPLE_RATE, SAMPLE_RATE * 2L);
 
         WhisperAudioSource filtered = new AskAiProcessedSpeechSource(
-                source(audio), interval, AskAiProcessedSpeechSource.speechProfile());
+                source(audio), interval, AskAiProcessedSpeechSource.speechProfile(true));
         float[] processed = filtered.readSamples(0, SAMPLE_RATE);
 
         assertEquals(SAMPLE_RATE, processed.length);
@@ -79,6 +79,51 @@ class AskAiWhisperPipelineTest {
     }
 
     @Test
+    void windowedReadsEqualContinuousFilteringOfTheWholeRecording() throws Exception {
+        float[] audio = new float[SAMPLE_RATE * 6];
+        java.util.Random random = new java.util.Random(3);
+        for (int i = 0; i < audio.length; i++) {
+            audio[i] = 0.2f * (float) Math.sin(2 * Math.PI * 30 * i / SAMPLE_RATE)
+                    + 0.1f * (float) Math.sin(2 * Math.PI * 700 * i / SAMPLE_RATE)
+                    + 0.02f * (float) random.nextGaussian() + 0.05f;
+        }
+        SpeechInterval interval = new SpeechInterval(SAMPLE_RATE, audio.length);
+        WhisperAudioSource filtered = new AskAiProcessedSpeechSource(
+                source(audio), interval, AskAiWhisperPipeline.defaultSpeechProfile());
+
+        float[] whole = filtered.readSamples(0, (int) filtered.sampleCount());
+        for (int start = 0; start < whole.length; start += 12345) {
+            int count = Math.min(12345, whole.length - start);
+            float[] window = filtered.readSamples(start, count);
+            for (int i = 0; i < count; i++) {
+                assertEquals(whole[start + i], window[i], 2.0f / 32768,
+                        "Filter state restarted at window offset " + start);
+            }
+        }
+    }
+
+    @Test
+    void defaultProfileOnlyRemovesDcOffsetAndRumble() {
+        List<com.aresstack.audio.profile.AudioBlockType> blocks = new java.util.ArrayList<>();
+        AskAiWhisperPipeline.defaultSpeechProfile().getBlocks().forEach(block -> blocks.add(block.getType()));
+
+        assertEquals(Arrays.asList(com.aresstack.audio.profile.AudioBlockType.DC_OFFSET_REMOVAL,
+                com.aresstack.audio.profile.AudioBlockType.HIGH_PASS), blocks);
+        assertEquals(1, AskAiWhisperPipeline.withoutHighPassProfile().getBlocks().size());
+    }
+
+    @Test
+    void defaultProfileLeavesSpeechBandLevelsUnchanged() throws Exception {
+        float[] quiet = sineWave(1000, SAMPLE_RATE, 0.01f);
+        float[] loud = sineWave(1000, SAMPLE_RATE, 0.5f);
+
+        double quietRatio = energy(filtered(quiet), SAMPLE_RATE / 5) / energy(quiet, SAMPLE_RATE / 5);
+        double loudRatio = energy(filtered(loud), SAMPLE_RATE / 5) / energy(loud, SAMPLE_RATE / 5);
+        assertEquals(1.0, quietRatio, 0.05, "No gate may attenuate quiet speech");
+        assertEquals(1.0, loudRatio, 0.05, "No compressor or limiter may reduce loud speech");
+    }
+
+    @Test
     void shiftsTranscriptSegmentsToOriginalRecordingTime() {
         TranscriptionResult relative = new TranscriptionResult("nach oben", "",
                 Arrays.asList(new TranscriptionSegment(100, 600, "nach oben")));
@@ -92,7 +137,7 @@ class AskAiWhisperPipelineTest {
 
     private static float[] filtered(float[] samples) throws Exception {
         WhisperAudioSource source = new AskAiProcessedSpeechSource(source(samples),
-                new SpeechInterval(0, samples.length), AskAiProcessedSpeechSource.speechProfile());
+                new SpeechInterval(0, samples.length), AskAiWhisperPipeline.defaultSpeechProfile());
         return source.readSamples(0, samples.length);
     }
 

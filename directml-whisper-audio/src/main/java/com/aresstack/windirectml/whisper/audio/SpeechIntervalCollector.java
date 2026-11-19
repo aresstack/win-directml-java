@@ -11,9 +11,11 @@ import java.util.List;
 final class SpeechIntervalCollector {
     private static final int SAMPLE_RATE = 16000;
     private static final long MIN_SPEECH_SAMPLES = SAMPLE_RATE * 96L / 1000L;
-    private static final long MIN_SILENCE_SAMPLES = SAMPLE_RATE * 350L / 1000L;
-    private static final long PRE_ROLL_SAMPLES = SAMPLE_RATE * 200L / 1000L;
-    private static final long POST_ROLL_SAMPLES = SAMPLE_RATE * 250L / 1000L;
+    // Conservative limits: only silence longer than about two seconds separates regions,
+    // and generous margins keep soft word onsets and trailing syllables inside a region.
+    private static final long MIN_SILENCE_SAMPLES = SAMPLE_RATE * 800L / 1000L;
+    private static final long PRE_ROLL_SAMPLES = SAMPLE_RATE * 400L / 1000L;
+    private static final long POST_ROLL_SAMPLES = SAMPLE_RATE * 600L / 1000L;
     private static final double START_THRESHOLD = 0.50d;
     private static final double END_THRESHOLD = 0.35d;
 

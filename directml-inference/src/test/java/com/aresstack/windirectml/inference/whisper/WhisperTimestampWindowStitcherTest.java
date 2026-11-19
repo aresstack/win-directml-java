@@ -78,7 +78,7 @@ class WhisperTimestampWindowStitcherTest {
     }
 
     @Test
-    void advancesFullWindowWhenThereAreTooFewSegments() {
+    void advancesFullWindowWhenTheOnlySegmentSpansTheWholeWindow() {
         WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(60 * 16000);
         stitcher.accept(result(segment(0, 30, "Single segment.")));
 
@@ -88,13 +88,54 @@ class WhisperTimestampWindowStitcherTest {
     }
 
     @Test
-    void advancesFullWindowWhenLastSegmentWouldCauseMinimalProgress() {
+    void decodesALongBoundarySegmentAgainFromItsStart() {
         WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(60 * 16000);
-        stitcher.accept(result(segment(0, 3, "First."),
-                segment(3, 30, "Very long second.")));
+        TranscriptionResult committed = stitcher.accept(result(segment(0, 3, "First."),
+                segment(3, 30, "Cut by the window.")));
+
+        assertEquals(3 * 16000, stitcher.nextStartSample());
+        assertEquals("First.", committed.getText());
+    }
+
+    @Test
+    void resumesAfterASingleWordInsteadOfSkippingTheRestOfTheWindow() {
+        WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(60 * 16000);
+        TranscriptionResult committed = stitcher.accept(result(segment(1, 2, "Hallo.")));
+
+        assertEquals("Hallo.", committed.getText());
+        assertEquals(2 * 16000, stitcher.nextStartSample(),
+                "Audio after the word must be decoded again, not skipped");
+    }
+
+    @Test
+    void resumesAtTheLastClosedSegmentWhenTextRunsIntoTheBoundary() {
+        WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(60 * 16000);
+        TranscriptionResult withOpenText = new TranscriptionResult("First. Second. Open",
+                "Open", Arrays.asList(segment(0, 10, "First."), segment(10, 22, "Second.")));
+
+        TranscriptionResult committed = stitcher.accept(withOpenText, true);
+
+        assertEquals("First. Second.", committed.getText());
+        assertEquals(22 * 16000, stitcher.nextStartSample());
+    }
+
+    @Test
+    void keepsOpenTextOfTheFinalWindow() {
+        WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(20 * 16000);
+        TranscriptionResult withOpenText = new TranscriptionResult("First. Open end",
+                "Open end", Arrays.asList(segment(0, 10, "First.")));
+
+        assertEquals("First. Open end", stitcher.accept(withOpenText, true).getText());
+        assertFalse(stitcher.hasNextWindow());
+    }
+
+    @Test
+    void guaranteesProgressWhenTheModelStopsWithinTheFirstSecond() {
+        WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(60 * 16000);
+        stitcher.accept(new TranscriptionResult("Ja", "",
+                Arrays.asList(new TranscriptionSegment(0, 400, "Ja"))));
 
         assertEquals(30 * 16000, stitcher.nextStartSample());
-        assertEquals(2, stitchedSegments(stitcher).size());
     }
 
     @Test

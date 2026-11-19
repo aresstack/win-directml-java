@@ -155,64 +155,70 @@ public final class WhisperExample {
 ```
 
 The constructor takes the **model directory**. Reuse the transcriber rather
-than reloading model weights for each recording. Other public entry points:
+than reloading model weights for each recording.
 
-- `transcribe(float[] samples, int maxTokensPerChunk)`: process **16 kHz mono
-  float PCM** in 30-second chunks.
-- `transcribeShortRecording(float[] samples, int maxTokensPerChunk)`: process
-  short microphone recordings in smaller six-second chunks.
-- `transcribeMel(float[][] features, int maxTokens)`: process an already
-  Whisper-compatible log-Mel spectrogram (lower-level API).
+Since 0.3.2 every entry point shares one guarded decoding path, modelled on the
+OpenAI reference transcription:
 
-These original methods return a synchronous `String` containing recognized speech. Input
-`float[]` samples are normalized, mono, 16,000 Hz PCM (nominally -1 to +1);
-raw PCM16 byte arrays must first be decoded and resampled. The WAV overload
-performs WAV decoding, mono conversion and resampling for you. The integer
-argument limits generated tokens per chunk.
-
-### Segment timestamps (planned patch 0.3.1)
-
-Whisper Tiny can emit 20-ms timestamp tokens. The additive 0.3.1 API exposes
-only intervals that the model emitted, without inventing segment boundaries:
+- Audio is processed in windows of at most 30 seconds. Shorter recordings are
+  padded to Whisper's native 3000 log-Mel frames; measurements showed that the
+  shortened encoder input of 0.3.1 produced invented text on noisy pauses.
+- Decoding uses timestamp tokens internally. `getText()` returns the plain
+  transcript; timestamps are separate tokens and never appear in the text.
+- Each window is decoded greedily first. A result that repeats itself, compresses
+  better than 2.4 (gzip ratio) or has an average log-probability below -1.0 is
+  decoded again at temperatures 0.2 to 1.0. If every attempt fails, the most
+  probable non-repetitive attempt wins. Windows the model classifies as
+  non-speech, and results without any letter or digit, produce no text.
+- Non-speech tokens are suppressed using `generation_config.json`, or the
+  built-in multilingual reference list when the file is absent.
+- Windows are joined at model-confirmed segment ends. Text that runs into a
+  window boundary, and segments touching the boundary, are decoded again in the
+  next window, so no audio after a recognized segment is skipped.
+- Previous windows are not used as a decoder prompt, so a loop cannot spread
+  from one window into the next.
 
 ```java
-WhisperTranscriber transcriber = new WhisperTranscriber(Path.of("model", "whisper-tiny"));
-TranscriptionResult result = transcriber.transcribeWithTimestamps(
-        Path.of("recordings", "german-speech.wav"), 400);
-for (TranscriptionSegment segment : result.getSegments()) {
-    System.out.println(segment.getStartMillis() + " - "
-            + segment.getEndMillis() + ": " + segment.getText());
-}
+TranscriptionResult result = transcriber.transcribe(samples,
+        WhisperDecodingOptions.defaults(), window -> System.out.println(window.getText()));
 ```
 
-Import `TranscriptionResult` and `TranscriptionSegment` from
-`com.aresstack.windirectml.inference.whisper`. For an existing 16-kHz mono
-`float[]` use `transcribeWithTimestamps(float[], int)` or
-`transcribeShortRecordingWithTimestamps(float[], int)` for microphone recordings.
-Each result contains `getText()` for the full transcript, `getSegments()` for
-model-confirmed start/end positions in milliseconds and `getUnalignedText()`
-for words without a complete timestamp pair. Segment alignment is experimental;
-word-level times and live microphone streaming are not provided. Audio uses
-30-second Whisper windows; all confirmed segments except the last are retained,
-and the next window starts at the last segment's absolute start time. The last
-window retains all segments. If timestamps cannot safely advance processing,
-the full window is retained and processing advances by 30 seconds instead.
-The core transcription API does not apply VAD or pause-based segmentation.
-The microphone demo can optionally enable the Ask AI preprocessing pipeline
-without changing the core decoder.
+`transcribe(WhisperAudioSource, WhisperDecodingOptions, Consumer)` reads bounded
+windows from a source of any length and reports every committed window on the
+decoding thread with absolute timestamps; interrupting that thread stops the
+transcription. `WhisperDecodingOptions` exposes the thresholds, the temperature
+schedule, the token limit (default 224 per window) and
+`withFullWindowEncoderInput(false)` for a faster but less robust encoder input.
+The older `transcribe(float[], int)`, `transcribeWithTimestamps(...)` and
+`transcribeMel(...)` methods use the same guarded decoder; the
+`transcribeShortRecording...` methods are deprecated and no longer split audio
+into six-second chunks. Input `float[]` samples are normalized, mono, 16,000 Hz
+PCM (nominally -1 to +1); the WAV overload performs decoding, mono conversion
+and resampling.
 
-An optional `Consumer<TranscriptionResult>` overload of
-`transcribeWithTimestamps(audio, tokenLimit, onProgress)` (also available
-for WAV paths and short microphone recordings) reports only finalized segments
-after decoding each window, with absolute timestamps. The last window is
-reported in full, and the method still returns the complete result. Callbacks
-execute on the decoding thread, so Swing clients must dispatch UI updates
-to the event thread. This is pseudo-streaming *during transcription of an
-already supplied recording*, not live decoding while recording. Updates
-occur after each window finishes processing, not necessarily every 30 seconds
-of wall-clock time. The original plain-text API is unchanged. Use a sufficient
-token limit (for example, 400 for longer recordings) to leave room for the
-timestamp tokens.
+`TranscriptionResult` contains `getText()` for the full transcript,
+`getSegments()` for model-confirmed start/end positions in milliseconds and
+`getUnalignedText()` as diagnostic information about words without a complete
+timestamp pair; that text is already part of `getText()`.
+
+### Speech preparation for microphones
+
+`directml-whisper-audio` adds `AskAiWhisperPipeline`, which combines Ask AI's
+deterministic Java VAD with a minimal, timebase-preserving PCM profile:
+
+- `defaultSpeechProfile()`: DC-offset removal and an 80-Hz Butterworth
+  high-pass. Both leave the speech band untouched. Filters run with half a
+  second of warm-up before each window, so windowed reads equal continuous
+  processing of the whole recording.
+- `withoutHighPassProfile()`: DC-offset removal only.
+- `enhancedSpeechProfile()`: the 0.3.1 chain with low-pass, noise gate,
+  compressor and limiter. These blocks alter what Whisper hears and showed no
+  benefit in the regression scenarios; use them only after measuring a gain.
+
+The VAD skips silence longer than about two seconds and keeps 400 ms before and
+600 ms after detected speech. Regions are never concatenated: each keeps its
+original recording position and is transcribed with the guarded decoder.
+`transcribePlain(source, transcriber)` returns the transcript without timestamps.
 
 ### Download model weights
 
@@ -247,20 +253,9 @@ chunks remain on disk while the most recent complete chunk and the current
 partial chunk stay in RAM. After stopping, Whisper reads its 30-second windows
 across these chunks without loading the complete recording into memory.
 Temporary chunks are deleted after transcription or when the recording is
-discarded. Enable **Ask AI: 80-Hz-Hochpass + VAD** to use the imported
-Java-8-compatible `audio-dsp` module. The default microphone profile applies
-DC removal, an 80-Hz Butterworth high-pass filter, a 7.2-kHz low-pass filter,
-a mild noise gate, compressor, and limiter. Ask AI's deterministic Java VAD
-runs after DC removal and high-pass filtering to find voice regions; long
-pauses are skipped rather than sent to Whisper. Keep 200 ms before and
-250 ms after detected speech. Each region retains its original source offset,
-so transcription timestamps refer to the uncut recording. The entire
-two-minute capture chunk design remains unchanged, and the pipeline only
-reads bounded audio windows. The checkbox can be disabled to compare
-against the unprocessed Whisper path. No ONNX runtime or neural VAD model
-is required. Capture audio uses signed 16-bit PCM at the microphone's
-negotiated rate, whereas Whisper uses 16-kHz mono float PCM; these are
-independent format properties.
+discarded. Enable **Ask AI: 80-Hz-Hochpass + VAD** to use the `AskAiWhisperPipeline`
+described above with its default profile. The checkbox can be disabled to
+compare against the decoder without VAD.
 
 Enable **Zeitstempel anzeigen (experimentell)** in the demo to display
 `[MM:SS.cc – MM:SS.cc]` before each recognized segment. Disable it to compare
@@ -272,24 +267,23 @@ the library API.
 
 ### Tests, limitations and Maven Central
 
-Real-checkpoint tests validate the encoder/decoder, preprocessing, WAV input
-and the short-recording path. A synthesized German speech sample was
-recognized as "Hallo? Dies ist ein Test der Deutschen Spracherkennung."
-(the original sentence differs slightly in case and punctuation).
+Real-checkpoint tests validate the encoder/decoder, preprocessing and WAV
+input. `WhisperDictationRegressionTest` transcribes synthesized German speech
+(single word, sentence, pauses, 64 seconds of continuous speech, speech across
+the 30-second boundary, silence) with simulated microphone noise and hum, and
+the decoder alone with loud noise and long pauses. It requires a word error
+rate of at most 0.15, no repetition loop and empty output for silence; on a
+24-core CPU the default pipeline runs at 0.1 to 0.35 times real time.
 
-Whisper transcription is currently **experimental**, synchronous and
-CPU-bound. Run it off the UI thread. The optional progress callback reports
-completed windows after decoding; real-time microphone streaming,
-speaker identification and word-level timestamps are not implemented. The
-0.3.1 timestamp API offers model-confirmed segment times only; its greedy
-decoder may occasionally leave passages without a complete time interval.
-Accuracy for longer, varied speech recordings remains to be established by
-real-world testing.
+Whisper transcription is synchronous and CPU-bound; batched encoder operations
+use all cores. Run it off the UI thread. The progress callback reports
+committed windows after decoding; live decoding while recording, speaker
+identification, beam search, language detection (German is fixed) and
+word-level timestamps are not implemented.
 
-Version **0.3.0** introduces the experimental Whisper API in the published
-`com.aresstack:directml-inference:0.3.0` artifact. Earlier versions, including
-0.2.1, do not contain the Whisper transcription API. Segment timestamps are
-being added for a separate 0.3.1 patch release (not part of 0.3.0).
+Version **0.3.0** introduced the experimental Whisper API, **0.3.1** segment
+timestamps and the optional audio adapter, and **0.3.2** the guarded decoder,
+30-second windows for all entry points and the minimal speech profile.
 
 ## Relationship to sidecars and ACP
 

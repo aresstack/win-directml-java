@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Confirm that short spoken German takes the same path as microphone audio. */
 class WhisperShortRecordingTest {
     @Test
-    void recognizesRealGermanSpeechWithoutFullThirtySecondEncoder() throws Exception {
+    void recognizesRealGermanSpeechThroughTheDeprecatedShortRecordingApi() throws Exception {
         Path model = Path.of("..", "model", "whisper-tiny");
         Path sample = model.resolve("whisper-de-speech.wav");
         Assumptions.assumeTrue(Files.isRegularFile(model.resolve("model.safetensors")));
