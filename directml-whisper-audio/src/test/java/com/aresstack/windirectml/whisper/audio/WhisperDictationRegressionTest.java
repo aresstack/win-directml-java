@@ -71,6 +71,47 @@ class WhisperDictationRegressionTest {
         }
     }
 
+    /**
+     * A word at -28 dB is missed by the energy VAD and must be recovered by the whole-recording
+     * fallback. After loud speech Whisper Tiny itself needs about -16 dB; below that the decoder
+     * drops the word with or without VAD, so the VAD must never lose more than the decoder alone.
+     */
+    @Test
+    void recognizesQuietWordsAndNeverLosesMoreThanTheDecoderAlone() throws Exception {
+        AskAiWhisperPipeline pipeline = new AskAiWhisperPipeline();
+        Object[][] cases = {
+                {"word at -28 dB alone", WORD, microphone(silence(1.0), scaled(speech("de-word.wav"), 0.04f), silence(1.0))},
+                {"word at -16 dB after loud speech", PAUSE_A + " " + WORD, microphone(silence(0.5), speech("de-pause-a.wav"),
+                        silence(4.0), scaled(speech("de-word.wav"), 0.15f), silence(1.0))},
+        };
+        for (Object[] scenario : cases) {
+            float[] audio = (float[]) scenario[2];
+            long started = System.nanoTime();
+            String withVad = pipeline.transcribePlain(source(audio), transcriber);
+            report("pipeline", (String) scenario[0], audio.length / (double) SAMPLE_RATE, started,
+                    (String) scenario[1], withVad);
+            String withoutVad = transcriber.transcribe(audio, WhisperDecodingOptions.defaults(), ignored -> { })
+                    .getText();
+
+            assertTrue(withVad.toLowerCase(java.util.Locale.ROOT).contains("hallo"),
+                    scenario[0] + ": the quiet word was lost: " + withVad);
+            assertTrue(wordCount(withVad) >= wordCount(withoutVad),
+                    scenario[0] + ": the VAD removed speech: " + withVad + " | without VAD: " + withoutVad);
+        }
+    }
+
+    private static int wordCount(String text) {
+        return text.isBlank() ? 0 : text.trim().split("\s+").length;
+    }
+
+    private static float[] scaled(float[] samples, float gain) {
+        float[] result = new float[samples.length];
+        for (int i = 0; i < samples.length; i++) {
+            result[i] = samples[i] * gain;
+        }
+        return result;
+    }
+
     private static void assertQuality(String name, String reference, String text) {
         if (reference.isEmpty()) {
             assertEquals("", text, name + ": silence must not produce text");

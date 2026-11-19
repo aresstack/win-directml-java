@@ -36,6 +36,15 @@ class WhisperWindowDecoderTest {
     }
 
     @Test
+    void compressionRatioEqualsTheZlibValueOfTheReferenceImplementation() {
+        // Python: len(t) / len(zlib.compress(t)) == 123 / 101 for this sentence.
+        String sentence = "Ich dachte mir, du kannst mal im Internet nach weiteren Unterlagen suchen "
+                + "und mir detaillierte Zusammenfassungen erstellen.";
+
+        assertEquals(123.0 / 101.0, WhisperWindowDecoder.compressionRatio(sentence), 1e-12);
+    }
+
+    @Test
     void treatsPunctuationOnlyOutputAsNoSpeech() {
         assertFalse(WhisperWindowDecoder.containsWord(" ... "));
         assertFalse(WhisperWindowDecoder.containsWord(""));

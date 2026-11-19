@@ -210,7 +210,11 @@ final class WhisperWindowDecoder {
         return !(lastIsTimestamp && previousIsText);
     }
 
-    /** Ratio of UTF-8 bytes to zlib-compressed bytes; loops compress far better than speech. */
+    /**
+     * Ratio of UTF-8 bytes to zlib-compressed bytes; loops compress far better than speech.
+     * Matches {@code compression_ratio} in the reference {@code whisper/utils.py}, which uses
+     * {@code zlib.compress} at the default level, so the reference threshold of 2.4 applies.
+     */
     static double compressionRatio(String text) {
         byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
         if (bytes.length == 0) {

@@ -17,18 +17,29 @@ class AskAiWhisperPipelineTest {
 
     @Test
     void skipsLongPausesWithoutMovingOriginalSpeechPositions() throws Exception {
-        float[] audio = new float[SAMPLE_RATE * 5];
+        float[] audio = new float[SAMPLE_RATE * 14];
         fillTone(audio, SAMPLE_RATE, SAMPLE_RATE / 2);
-        fillTone(audio, SAMPLE_RATE * 3, SAMPLE_RATE / 2);
+        fillTone(audio, SAMPLE_RATE * 12, SAMPLE_RATE / 2);
 
         List<SpeechInterval> intervals = new SpeechRegionDetector().detect(source(audio));
 
         assertEquals(2, intervals.size());
         assertTrue(intervals.get(0).startSample() <= SAMPLE_RATE);
         assertTrue(intervals.get(0).endSample() >= SAMPLE_RATE + SAMPLE_RATE / 2);
-        assertTrue(intervals.get(1).startSample() <= SAMPLE_RATE * 3L);
-        assertTrue(intervals.get(1).endSample() >= SAMPLE_RATE * 3L + SAMPLE_RATE / 2);
+        assertTrue(intervals.get(1).startSample() <= SAMPLE_RATE * 12L);
+        assertTrue(intervals.get(1).endSample() >= SAMPLE_RATE * 12L + SAMPLE_RATE / 2);
         assertTrue(intervals.get(0).endSample() < intervals.get(1).startSample());
+    }
+
+    @Test
+    void keepsPausesShorterThanEightSecondsInsideOneRegion() throws Exception {
+        float[] audio = new float[SAMPLE_RATE * 9];
+        fillTone(audio, SAMPLE_RATE, SAMPLE_RATE / 2);
+        fillTone(audio, SAMPLE_RATE * 7, SAMPLE_RATE / 2);
+
+        List<SpeechInterval> intervals = new SpeechRegionDetector().detect(source(audio));
+
+        assertEquals(1, intervals.size(), "A quiet word inside the pause must not be cut away");
     }
 
     @Test
@@ -47,6 +58,16 @@ class AskAiWhisperPipelineTest {
     void silenceDoesNotProduceAnArtificialSpeechInterval() throws Exception {
         List<SpeechInterval> intervals = new SpeechRegionDetector().detect(source(new float[SAMPLE_RATE * 3]));
         assertTrue(intervals.isEmpty());
+    }
+
+    @Test
+    void decodesTheWholeRecordingWhenTheVadFindsNoSpeech() throws Exception {
+        List<SpeechInterval> regions = new AskAiWhisperPipeline().speechRegions(source(new float[SAMPLE_RATE * 3]));
+
+        assertEquals(1, regions.size());
+        assertEquals(0, regions.get(0).startSample());
+        assertEquals(SAMPLE_RATE * 3L, regions.get(0).endSample());
+        assertTrue(new AskAiWhisperPipeline().speechRegions(source(new float[0])).isEmpty());
     }
 
     @Test

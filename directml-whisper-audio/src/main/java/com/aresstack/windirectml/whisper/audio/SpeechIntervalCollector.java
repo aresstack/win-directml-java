@@ -11,11 +11,12 @@ import java.util.List;
 final class SpeechIntervalCollector {
     private static final int SAMPLE_RATE = 16000;
     private static final long MIN_SPEECH_SAMPLES = SAMPLE_RATE * 96L / 1000L;
-    // Conservative limits: only silence longer than about two seconds separates regions,
-    // and generous margins keep soft word onsets and trailing syllables inside a region.
-    private static final long MIN_SILENCE_SAMPLES = SAMPLE_RATE * 800L / 1000L;
-    private static final long PRE_ROLL_SAMPLES = SAMPLE_RATE * 400L / 1000L;
-    private static final long POST_ROLL_SAMPLES = SAMPLE_RATE * 600L / 1000L;
+    // Skip only long silence. An energy VAD cannot tell quiet words from noise, so anything it
+    // classifies as a pause shorter than eight seconds stays inside the region; the guarded
+    // decoder handles such pauses itself. Generous margins keep soft onsets and endings.
+    private static final long MIN_SILENCE_SAMPLES = SAMPLE_RATE * 8L;
+    private static final long PRE_ROLL_SAMPLES = SAMPLE_RATE / 2L;
+    private static final long POST_ROLL_SAMPLES = SAMPLE_RATE;
     private static final double START_THRESHOLD = 0.50d;
     private static final double END_THRESHOLD = 0.35d;
 

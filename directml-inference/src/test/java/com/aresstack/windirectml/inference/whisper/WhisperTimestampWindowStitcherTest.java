@@ -130,6 +130,20 @@ class WhisperTimestampWindowStitcherTest {
     }
 
     @Test
+    void keepsUntimedTextRunningIntoTheBoundaryAndContinuesAfterTheWindow() {
+        WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(45 * 16000);
+        TranscriptionResult untimed = new TranscriptionResult("Ein langer Satz ohne Ende bis zur Gren",
+                "Ein langer Satz ohne Ende bis zur Gren", Collections.emptyList());
+
+        TranscriptionResult committed = stitcher.accept(untimed, true);
+
+        assertEquals("Ein langer Satz ohne Ende bis zur Gren", committed.getText(),
+                "Without any timestamp the text cannot be re-anchored and must not be dropped");
+        assertEquals(30 * 16000, stitcher.nextStartSample());
+        assertTrue(stitcher.hasNextWindow());
+    }
+
+    @Test
     void guaranteesProgressWhenTheModelStopsWithinTheFirstSecond() {
         WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(60 * 16000);
         stitcher.accept(new TranscriptionResult("Ja", "",

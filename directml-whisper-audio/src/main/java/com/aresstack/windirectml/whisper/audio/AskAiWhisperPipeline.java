@@ -9,6 +9,7 @@ import com.aresstack.windirectml.inference.whisper.WhisperTranscriber;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -20,6 +21,10 @@ import java.util.function.Consumer;
  * silence between speech regions; every region keeps its original recording positions and is
  * transcribed in windows of at most thirty seconds. Nothing is concatenated, so timestamps map
  * directly to the recording. Plain text is the timestamped transcript without timestamps.
+ *
+ * <p>When the VAD finds no speech at all in a non-empty recording, for example a whispered or
+ * very quiet word, the whole recording is decoded instead. The decoder's no-speech detection
+ * still returns an empty transcript for genuine silence.
  */
 public final class AskAiWhisperPipeline {
     private static final int SAMPLE_RATE = 16000;
@@ -74,7 +79,7 @@ public final class AskAiWhisperPipeline {
         Objects.requireNonNull(transcriber, "transcriber");
         Objects.requireNonNull(progress, "progress");
         List<TranscriptionResult> recognized = new ArrayList<>();
-        for (SpeechInterval interval : regionDetector.detect(source)) {
+        for (SpeechInterval interval : speechRegions(source)) {
             WhisperAudioSource prepared = new AskAiProcessedSpeechSource(source, interval, profile);
             long offsetMillis = toMillis(interval.startSample());
             TranscriptionResult region = transcriber.transcribe(prepared, options,
@@ -127,6 +132,15 @@ public final class AskAiWhisperPipeline {
     private AskAiWhisperPipeline withTokenLimit(int maximumTokens) {
         return new AskAiWhisperPipeline(regionDetector, profile,
                 options.withMaximumTokensPerWindow(maximumTokens));
+    }
+
+    /** Return the VAD regions, or the complete recording when the VAD detected nothing. */
+    List<SpeechInterval> speechRegions(WhisperAudioSource source) throws IOException {
+        List<SpeechInterval> regions = regionDetector.detect(source);
+        if (regions.isEmpty() && source.sampleCount() > 0) {
+            return Collections.singletonList(new SpeechInterval(0, source.sampleCount()));
+        }
+        return regions;
     }
 
     static TranscriptionResult shift(TranscriptionResult result, long offsetMillis) {

@@ -215,9 +215,14 @@ deterministic Java VAD with a minimal, timebase-preserving PCM profile:
   compressor and limiter. These blocks alter what Whisper hears and showed no
   benefit in the regression scenarios; use them only after measuring a gain.
 
-The VAD skips silence longer than about two seconds and keeps 400 ms before and
-600 ms after detected speech. Regions are never concatenated: each keeps its
-original recording position and is transcribed with the guarded decoder.
+The VAD only skips silence longer than about eight seconds and keeps 500 ms
+before and one second after detected speech: an energy VAD cannot tell quiet
+words from noise, so shorter pauses are left to the guarded decoder. When the
+VAD finds no speech at all, the whole recording is decoded; genuine silence
+still yields an empty transcript. Regions are never concatenated: each keeps
+its original recording position and is transcribed with the guarded decoder.
+A regression test ensures the pipeline never returns fewer words than the
+decoder without VAD.
 `transcribePlain(source, transcriber)` returns the transcript without timestamps.
 
 ### Download model weights
