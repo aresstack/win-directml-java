@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Record local German speech and display Whisper recognition in a standalone window. */
 public final class WhisperMicrophoneDemo extends JFrame {
@@ -133,15 +134,16 @@ public final class WhisperMicrophoneDemo extends JFrame {
         final boolean withTimestamps = showTimestamps.isSelected();
         status.setText("Transkription läuft auf der CPU. Längere Aufnahmen können mehrere Minuten dauern …");
         background.execute(() -> {
-            try {
-                float[] audio = recorder.stop();
+            try (ChunkedPcmAudioSource audio = recorder.stop()) {
                 if (transcriber == null) {
                     transcriber = new WhisperTranscriber(modelDirectory);
                 }
                 String recognized;
                 String completionStatus = "Transkription abgeschlossen. Neue Aufnahme möglich.";
                 if (withTimestamps) {
-                    TranscriptionResult result = transcriber.transcribeShortRecordingWithTimestamps(audio, 400);
+                    AtomicInteger decodedWindows = new AtomicInteger();
+                    TranscriptionResult result = transcriber.transcribeWithTimestamps(audio, 400,
+                            chunk -> showTranscriptionProgress(chunk, decodedWindows.incrementAndGet()));
                     recognized = WhisperTranscriptFormatter.format(result);
                     if (result.getSegments().isEmpty() || result.hasUnalignedText()) {
                         completionStatus = "Fertig. Nicht alle Textstellen haben bestätigte Zeitstempel.";
@@ -164,6 +166,21 @@ public final class WhisperMicrophoneDemo extends JFrame {
             } catch (Exception exception) {
                 showFailure("Transkription fehlgeschlagen", exception);
             }
+        });
+    }
+
+    private void showTranscriptionProgress(TranscriptionResult chunk, int decodedWindows) {
+        String finalizedText = chunk.getSegments().isEmpty() ? "" : WhisperTranscriptFormatter.format(
+                new TranscriptionResult(chunk.getText(), "", chunk.getSegments()));
+        SwingUtilities.invokeLater(() -> {
+            if (!finalizedText.isEmpty()) {
+                if (!transcript.getText().isBlank()) {
+                    transcript.append("\n");
+                }
+                transcript.append(finalizedText);
+                transcript.setCaretPosition(transcript.getDocument().getLength());
+            }
+            status.setText("Transkription läuft: " + decodedWindows + " Audiofenster verarbeitet …");
         });
     }
 

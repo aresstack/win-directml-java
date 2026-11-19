@@ -6,7 +6,6 @@ import javax.sound.sampled.DataLine;
 import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.Mixer;
 import javax.sound.sampled.TargetDataLine;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +17,7 @@ final class MicrophoneRecorder implements AutoCloseable {
     private volatile IOException captureFailure;
     private TargetDataLine line;
     private Thread captureThread;
-    private ByteArrayOutputStream frames;
+    private ChunkedPcmAudioSource frames;
     private int sampleRate;
 
     static List<Device> availableDevices() {
@@ -48,8 +47,8 @@ final class MicrophoneRecorder implements AutoCloseable {
         target.open(device.format);
         target.start();
         line = target;
-        frames = new ByteArrayOutputStream();
         sampleRate = Math.round(device.format.getSampleRate());
+        frames = new ChunkedPcmAudioSource(sampleRate);
         captureFailure = null;
         recording = true;
         captureThread = new Thread(this::record, "whisper-capture");
@@ -57,7 +56,7 @@ final class MicrophoneRecorder implements AutoCloseable {
         captureThread.start();
     }
 
-    synchronized float[] stop() throws IOException {
+    synchronized ChunkedPcmAudioSource stop() throws IOException {
         if (line == null) {
             throw new IllegalStateException("No microphone recording is active");
         }
@@ -75,15 +74,18 @@ final class MicrophoneRecorder implements AutoCloseable {
         }
         line = null;
         captureThread = null;
-        byte[] bytes = frames.toByteArray();
+        ChunkedPcmAudioSource completed = frames;
         frames = null;
+        completed.finish();
         if (captureFailure != null) {
+            completed.close();
             throw captureFailure;
         }
-        if (bytes.length < 2) {
+        if (completed.isEmpty()) {
+            completed.close();
             throw new IOException("No audio captured. Check Windows microphone permissions");
         }
-        return MicrophonePcmConverter.convert(bytes, sampleRate);
+        return completed;
     }
 
     private void record() {
@@ -94,9 +96,9 @@ final class MicrophoneRecorder implements AutoCloseable {
                 if (count <= 0) {
                     break;
                 }
-                frames.write(buffer, 0, count - (count & 1));
+                frames.append(buffer, 0, count - (count & 1));
             }
-        } catch (RuntimeException ex) {
+        } catch (IOException | RuntimeException ex) {
             if (recording) {
                 captureFailure = new IOException("Failed to capture microphone audio", ex);
             }
@@ -111,6 +113,10 @@ final class MicrophoneRecorder implements AutoCloseable {
         if (line != null) {
             line.stop();
             line.close();
+        }
+        if (frames != null) {
+            frames.close();
+            frames = null;
         }
     }
 

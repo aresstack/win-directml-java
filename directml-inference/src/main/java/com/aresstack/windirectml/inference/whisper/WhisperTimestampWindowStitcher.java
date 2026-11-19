@@ -14,11 +14,11 @@ final class WhisperTimestampWindowStitcher {
     private static final int WINDOW_SAMPLES = WhisperLogMelSpectrogram.SAMPLES_PER_CHUNK;
     private static final int MINIMUM_ADVANCE_SAMPLES = 5 * SAMPLE_RATE;
 
-    private final int totalSamples;
+    private final long totalSamples;
     private final List<TranscriptionResult> acceptedWindows = new ArrayList<>();
-    private int nextStartSample;
+    private long nextStartSample;
 
-    WhisperTimestampWindowStitcher(int totalSamples) {
+    WhisperTimestampWindowStitcher(long totalSamples) {
         if (totalSamples < 0) {
             throw new IllegalArgumentException("Audio length must not be negative");
         }
@@ -29,45 +29,45 @@ final class WhisperTimestampWindowStitcher {
         return nextStartSample < totalSamples;
     }
 
-    int nextStartSample() {
+    long nextStartSample() {
         return nextStartSample;
     }
 
-    void accept(TranscriptionResult recognition) {
-        int windowEndSample = nextStartSample + Math.min(WINDOW_SAMPLES, totalSamples - nextStartSample);
+    TranscriptionResult accept(TranscriptionResult recognition) {
+        long windowEndSample = nextStartSample + Math.min(WINDOW_SAMPLES, totalSamples - nextStartSample);
         if (windowEndSample == totalSamples) {
-            acceptCompleteWindow(recognition, windowEndSample);
-            return;
+            return acceptCompleteWindow(recognition, windowEndSample);
         }
 
         List<TranscriptionSegment> segments = recognition.getSegments();
         if (segments.size() < 2) {
-            acceptCompleteWindow(recognition, windowEndSample);
-            return;
+            return acceptCompleteWindow(recognition, windowEndSample);
         }
 
         long nextStartMillis = segments.get(segments.size() - 1).getStartMillis();
         long nextStartInSamples = nextStartMillis * SAMPLE_RATE / 1000L;
         if (nextStartInSamples <= nextStartSample + MINIMUM_ADVANCE_SAMPLES
                 || nextStartInSamples >= windowEndSample) {
-            acceptCompleteWindow(recognition, windowEndSample);
-            return;
+            return acceptCompleteWindow(recognition, windowEndSample);
         }
 
         List<TranscriptionSegment> confirmed = new ArrayList<>(
                 segments.subList(0, segments.size() - 1));
-        acceptedWindows.add(new TranscriptionResult(
-                textOf(confirmed), recognition.getUnalignedText(), confirmed));
-        nextStartSample = (int) nextStartInSamples;
+        TranscriptionResult accepted = new TranscriptionResult(
+                textOf(confirmed), recognition.getUnalignedText(), confirmed);
+        acceptedWindows.add(accepted);
+        nextStartSample = nextStartInSamples;
+        return accepted;
     }
 
     List<TranscriptionResult> acceptedWindows() {
         return acceptedWindows;
     }
 
-    private void acceptCompleteWindow(TranscriptionResult recognition, int windowEndSample) {
+    private TranscriptionResult acceptCompleteWindow(TranscriptionResult recognition, long windowEndSample) {
         acceptedWindows.add(recognition);
         nextStartSample = windowEndSample;
+        return recognition;
     }
 
     private static String textOf(List<TranscriptionSegment> segments) {

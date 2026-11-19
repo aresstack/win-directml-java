@@ -45,6 +45,30 @@ class WhisperTimestampWindowStitcherTest {
     }
 
     @Test
+    void publishesOnlyCommittedSegmentsBeforeTheFinalWindow() {
+        WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(50 * 16000);
+
+        TranscriptionResult first = stitcher.accept(result(
+                segment(0, 12, "First."),
+                segment(12, 25, "Second."),
+                segment(25, 30, "Withheld.")));
+
+        assertEquals(Arrays.asList("First.", "Second."),
+                first.getSegments().stream().map(TranscriptionSegment::getText)
+                        .collect(Collectors.toList()));
+        assertEquals("First. Second.", first.getText());
+        assertEquals(25 * 16000, stitcher.nextStartSample());
+
+        TranscriptionResult last = stitcher.accept(result(
+                segment(25, 38, "Recovered."),
+                segment(38, 50, "Final.")));
+        assertEquals(Arrays.asList("Recovered.", "Final."),
+                last.getSegments().stream().map(TranscriptionSegment::getText)
+                        .collect(Collectors.toList()));
+        assertFalse(stitcher.hasNextWindow());
+    }
+
+    @Test
     void commitsAllSegmentsInFinalWindow() {
         WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(30 * 16000);
         stitcher.accept(result(segment(0, 25, "First."), segment(25, 30, "Last.")));

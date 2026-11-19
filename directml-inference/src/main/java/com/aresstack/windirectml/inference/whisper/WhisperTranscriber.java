@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * Execute multilingual Whisper speech-to-text completely inside the Java 21 JVM.
@@ -92,40 +93,116 @@ public final class WhisperTranscriber {
         return result.toString();
     }
 
+    /** Transcribe short audio windows from a source without buffering the whole recording. */
+    public String transcribeShortRecording(WhisperAudioSource source, int maximumTokensPerChunk)
+            throws IOException {
+        Objects.requireNonNull(source, "source");
+        validateTokenLimit(maximumTokensPerChunk);
+        int samplesPerPart = WhisperLogMelSpectrogram.SAMPLE_RATE * 6;
+        StringBuilder transcript = new StringBuilder();
+        for (long offset = 0; offset < source.sampleCount(); offset += samplesPerPart) {
+            int count = (int) Math.min(samplesPerPart, source.sampleCount() - offset);
+            float[] samples = source.readSamples(offset, count);
+            if (samples.length != count) {
+                throw new IOException("Audio source did not return the requested sample window");
+            }
+            appendText(transcript, transcribeShortRecording(samples, maximumTokensPerChunk));
+        }
+        return transcript.toString();
+    }
+
     /** Return Whisper-generated speech intervals for a WAV recording. */
     public TranscriptionResult transcribeWithTimestamps(Path wavFile, int maximumTokensPerChunk)
             throws IOException {
-        return transcribeWithTimestamps(new WhisperWavAudioLoader().load(wavFile), maximumTokensPerChunk);
+        return transcribeWithTimestamps(wavFile, maximumTokensPerChunk, chunk -> { });
+    }
+
+    /** Report finalized timestamped segments as each WAV window finishes decoding. */
+    public TranscriptionResult transcribeWithTimestamps(Path wavFile, int maximumTokensPerChunk,
+                                                       Consumer<TranscriptionResult> onProgress)
+            throws IOException {
+        Objects.requireNonNull(onProgress, "onProgress");
+        return transcribeWithTimestamps(new WhisperWavAudioLoader().load(wavFile),
+                maximumTokensPerChunk, onProgress);
     }
 
     /** Transcribe 16-kHz mono PCM using timestamp-driven 30-second windows. */
     public TranscriptionResult transcribeWithTimestamps(float[] samples, int maximumTokensPerChunk)
             throws IOException {
+        return transcribeWithTimestamps(samples, maximumTokensPerChunk, chunk -> { });
+    }
+
+    /**
+     * Report only finalized segments after each 30-second audio window.
+     * Invoke the callback on the decoding thread with absolute timestamps.
+     * Return the same complete result as the non-streaming overload.
+     */
+    public TranscriptionResult transcribeWithTimestamps(float[] samples, int maximumTokensPerChunk,
+                                                       Consumer<TranscriptionResult> onProgress)
+            throws IOException {
         Objects.requireNonNull(samples, "samples");
+        return transcribeWithTimestamps(new WhisperAudioSource() {
+            @Override
+            public long sampleCount() {
+                return samples.length;
+            }
+
+            @Override
+            public float[] readSamples(long startSample, int sampleCount) {
+                int offset = Math.toIntExact(startSample);
+                return java.util.Arrays.copyOfRange(samples, offset, offset + sampleCount);
+            }
+        }, maximumTokensPerChunk, onProgress);
+    }
+
+    /**
+     * Transcribe a window-readable audio source without loading the complete recording.
+     * Report finalized segments on the decoding thread after each window.
+     */
+    public TranscriptionResult transcribeWithTimestamps(WhisperAudioSource source,
+                                                        int maximumTokensPerChunk,
+                                                        Consumer<TranscriptionResult> onProgress)
+            throws IOException {
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(onProgress, "onProgress");
         validateTokenLimit(maximumTokensPerChunk);
-        WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(samples.length);
+        WhisperTimestampWindowStitcher stitcher = new WhisperTimestampWindowStitcher(source.sampleCount());
         WhisperTimestampDecoder timestampDecoder = newTimestampDecoder();
         while (stitcher.hasNextWindow()) {
-            int offset = stitcher.nextStartSample();
-            int count = Math.min(CHUNK_LENGTH, samples.length - offset);
-            float[][] mel = frontend.compute(samples, offset);
-            stitcher.accept(timestampDecoder.transcribe(mel, maximumTokensPerChunk,
-                    sampleToMillis(offset), sampleToMillis(count)));
+            long offset = stitcher.nextStartSample();
+            int count = (int) Math.min(CHUNK_LENGTH, source.sampleCount() - offset);
+            float[] samples = source.readSamples(offset, count);
+            if (samples.length != count) {
+                throw new IOException("Audio source did not return the requested sample window");
+            }
+            float[][] mel = frontend.compute(samples);
+            TranscriptionResult accepted = stitcher.accept(timestampDecoder.transcribe(mel,
+                    maximumTokensPerChunk, sampleToMillis(offset), sampleToMillis(count)));
+            onProgress.accept(accepted);
         }
         return combine(stitcher.acceptedWindows());
     }
 
-    /** Use a small encoder window for short recordings and fixed 30-second windows for longer audio. */
+    /** Use a small encoder window for short recordings and timestamped windows for longer audio. */
     public TranscriptionResult transcribeShortRecordingWithTimestamps(float[] samples,
                                                                        int maximumTokensPerChunk)
             throws IOException {
+        return transcribeShortRecordingWithTimestamps(samples, maximumTokensPerChunk, chunk -> { });
+    }
+
+    /** Report finalized text after each decoded microphone recording window. */
+    public TranscriptionResult transcribeShortRecordingWithTimestamps(float[] samples,
+                                                                       int maximumTokensPerChunk,
+                                                                       Consumer<TranscriptionResult> onProgress)
+            throws IOException {
         Objects.requireNonNull(samples, "samples");
+        Objects.requireNonNull(onProgress, "onProgress");
         validateTokenLimit(maximumTokensPerChunk);
         List<TranscriptionResult> parts = new ArrayList<>();
         WhisperTimestampDecoder timestampDecoder = newTimestampDecoder();
         int samplesPerPart = WhisperLogMelSpectrogram.SAMPLE_RATE * 6;
         if (samples.length > samplesPerPart) {
-            return transcribeWithTimestamps(samples, maximumTokensPerChunk);
+            return transcribeWithTimestamps(samples, maximumTokensPerChunk, onProgress);
         }
         for (int offset = 0; offset < samples.length; offset += samplesPerPart) {
             int sampleCount = Math.min(samplesPerPart, samples.length - offset);
@@ -138,8 +215,10 @@ public final class WhisperTranscriber {
             for (int band = 0; band < config.melBands(); band++) {
                 System.arraycopy(fullMel[band], 0, shortMel[band], 0, frames);
             }
-            parts.add(timestampDecoder.transcribe(shortMel, maximumTokensPerChunk,
-                    sampleToMillis(offset), sampleToMillis(sampleCount)));
+            TranscriptionResult accepted = timestampDecoder.transcribe(shortMel, maximumTokensPerChunk,
+                    sampleToMillis(offset), sampleToMillis(sampleCount));
+            parts.add(accepted);
+            onProgress.accept(accepted);
         }
         return combine(parts);
     }
@@ -167,7 +246,7 @@ public final class WhisperTranscriber {
         }
     }
 
-    private static long sampleToMillis(int samples) {
+    private static long sampleToMillis(long samples) {
         return (long) samples * 1000 / WhisperLogMelSpectrogram.SAMPLE_RATE;
     }
 

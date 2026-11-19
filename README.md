@@ -192,14 +192,25 @@ Import `TranscriptionResult` and `TranscriptionSegment` from
 Each result contains `getText()` for the full transcript, `getSegments()` for
 model-confirmed start/end positions in milliseconds and `getUnalignedText()`
 for words without a complete timestamp pair. Segment alignment is experimental;
-word-level times and streaming are not provided. Audio uses 30-second
-Whisper windows; all confirmed segments except the last are retained, and
-the next window starts at the last segment's absolute start time. The last
+word-level times and live microphone streaming are not provided. Audio uses
+30-second Whisper windows; all confirmed segments except the last are retained,
+and the next window starts at the last segment's absolute start time. The last
 window retains all segments. If timestamps cannot safely advance processing,
 the full window is retained and processing advances by 30 seconds instead.
-No separate pause-based segmentation, VAD or NLP is applied. The original
-plain-text API is unchanged. Use a sufficient token limit (for example, 400
-for longer recordings) to leave room for the timestamp tokens.
+No separate pause-based segmentation, VAD or NLP is applied.
+
+An optional `Consumer<TranscriptionResult>` overload of
+`transcribeWithTimestamps(audio, tokenLimit, onProgress)` (also available
+for WAV paths and short microphone recordings) reports only finalized segments
+after decoding each window, with absolute timestamps. The last window is
+reported in full, and the method still returns the complete result. Callbacks
+execute on the decoding thread, so Swing clients must dispatch UI updates
+to the event thread. This is pseudo-streaming *during transcription of an
+already supplied recording*, not live decoding while recording. Updates
+occur after each window finishes processing, not necessarily every 30 seconds
+of wall-clock time. The original plain-text API is unchanged. Use a sufficient
+token limit (for example, 400 for longer recordings) to leave room for the
+timestamp tokens.
 
 ### Download model weights
 
@@ -228,7 +239,13 @@ bash ./gradlew :directml-workbench:whisperMicrophoneDemo
 On the Windows development machine there is also
 `tools/run-whisper-microphone.cmd`. The separate Swing window lets you choose
 a microphone, start and stop recording, then displays the transcribed German
-text. Enable **Zeitstempel anzeigen (experimentell)** in the demo to display
+text. Capture buffers two-minute PCM chunks in memory: a completed chunk is
+written to a temporary file only after the following chunk has filled. Older
+chunks remain on disk while the most recent complete chunk and the current
+partial chunk stay in RAM. After stopping, Whisper reads its 30-second windows
+across these chunks without loading the complete recording into memory.
+Temporary chunks are deleted after transcription or when the recording is
+discarded. Enable **Zeitstempel anzeigen (experimentell)** in the demo to display
 `[MM:SS.cc – MM:SS.cc]` before each recognized segment. Disable it to compare
 with the original plain-text decoding. The demo records until stopped manually so that longer recordings
 and minute-level offsets can be tested. Unaligned speech is displayed
