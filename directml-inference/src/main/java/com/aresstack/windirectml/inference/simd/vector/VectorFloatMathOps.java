@@ -15,27 +15,19 @@ import jdk.incubator.vector.VectorSpecies;
  * axpy) is identical to the previous in-line SIMD code, so results are unchanged when the module is present.</p>
  *
  * <p>Must have a public no-arg constructor for reflective instantiation.</p>
+ *
+ * <p>The species must be a {@code static final} constant: only then does C2 compile the vector
+ * operations to SIMD instructions. Held in an instance field, every operation ran through the
+ * Vector API's allocating Java fallback and was several times slower than scalar code.</p>
  */
 public final class VectorFloatMathOps implements FloatMathOps {
 
-    private final boolean enabled;
-    private final VectorSpecies<Float> species;
-    private final int lanes;
+    private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
+    private static final int LANES = SPECIES.length();
+
+    private final boolean enabled = LANES >= 4;
 
     public VectorFloatMathOps() {
-        boolean ok;
-        VectorSpecies<Float> sp = null;
-        int l = 0;
-        try {
-            sp = FloatVector.SPECIES_PREFERRED;
-            l = sp.length();
-            ok = l >= 4;
-        } catch (Throwable t) {
-            ok = false;
-        }
-        this.enabled = ok;
-        this.species = sp;
-        this.lanes = l;
     }
 
     @Override
@@ -52,12 +44,12 @@ public final class VectorFloatMathOps implements FloatMathOps {
             }
             return sum;
         }
-        FloatVector vsum = FloatVector.zero(species);
-        int upper = species.loopBound(len);
+        FloatVector vsum = FloatVector.zero(SPECIES);
+        int upper = SPECIES.loopBound(len);
         int k = 0;
-        for (; k < upper; k += lanes) {
-            FloatVector va = FloatVector.fromArray(species, a, aOff + k);
-            FloatVector vb = FloatVector.fromArray(species, b, bOff + k);
+        for (; k < upper; k += LANES) {
+            FloatVector va = FloatVector.fromArray(SPECIES, a, aOff + k);
+            FloatVector vb = FloatVector.fromArray(SPECIES, b, bOff + k);
             vsum = va.fma(vb, vsum);
         }
         float sum = vsum.reduceLanes(VectorOperators.ADD);
@@ -75,12 +67,12 @@ public final class VectorFloatMathOps implements FloatMathOps {
             }
             return;
         }
-        FloatVector vs = FloatVector.broadcast(species, scale);
-        int upper = species.loopBound(len);
+        FloatVector vs = FloatVector.broadcast(SPECIES, scale);
+        int upper = SPECIES.loopBound(len);
         int d = 0;
-        for (; d < upper; d += lanes) {
-            FloatVector vo = FloatVector.fromArray(species, out, outOff + d);
-            FloatVector vv = FloatVector.fromArray(species, v, vOff + d);
+        for (; d < upper; d += LANES) {
+            FloatVector vo = FloatVector.fromArray(SPECIES, out, outOff + d);
+            FloatVector vv = FloatVector.fromArray(SPECIES, v, vOff + d);
             vv.fma(vs, vo).intoArray(out, outOff + d);
         }
         for (; d < len; d++) {

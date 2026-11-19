@@ -1,5 +1,9 @@
 package com.aresstack.windirectml.inference.whisper;
 
+import com.aresstack.windirectml.inference.simd.FloatMathOps;
+import com.aresstack.windirectml.inference.simd.ScalarFloatMathOps;
+import com.aresstack.windirectml.inference.simd.SimdMath;
+
 import java.io.IOException;
 import java.util.function.IntConsumer;
 import java.util.stream.IntStream;
@@ -8,9 +12,15 @@ import java.util.stream.IntStream;
  * Implement Whisper's float32 math independently of model storage and audio I/O.
  * Batched operations process independent rows in parallel; every row is computed
  * exactly as in sequential order, so results do not depend on the thread count.
+ *
+ * <p>Dot products and scaled additions use {@link SimdMath#provider()}: SIMD through the
+ * Java Vector API when {@code jdk.incubator.vector} is present, otherwise a scalar
+ * fallback. {@code -Dwindirectml.whisper.simd=false} forces the scalar path.
  */
 final class WhisperMath {
     private static final int PARALLEL_ROWS = 16;
+    static final FloatMathOps MATH = "false".equalsIgnoreCase(System.getProperty("windirectml.whisper.simd"))
+            ? new ScalarFloatMathOps() : SimdMath.provider();
 
     private WhisperMath() {}
 
@@ -31,10 +41,8 @@ final class WhisperMath {
         float[] b = bias == null ? null : bias.values();
         float[] result = new float[outputs];
         for (int row = 0; row < outputs; row++) {
-            int offset = row * inputs;
-            double sum = b == null ? 0 : b[row];
-            for (int j = 0; j < inputs; j++) sum += w[offset + j] * input[j];
-            result[row] = (float) sum;
+            float dot = MATH.dot(w, row * inputs, input, 0, inputs);
+            result[row] = b == null ? dot : dot + b[row];
         }
         return result;
     }
@@ -111,20 +119,28 @@ final class WhisperMath {
         if (input.length == 0 || input[0].length != inputs) throw new IllegalArgumentException("Convolution channels mismatch");
         float[] kernel = weights.values();
         float[] b = bias.values();
+        // Reorder [channel][input][tap] to [channel][tap][input] so every tap is one contiguous dot product.
+        float[] taps = new float[kernel.length];
+        for (int channel = 0; channel < channels; channel++) {
+            for (int in = 0; in < inputs; in++) {
+                for (int tap = 0; tap < 3; tap++) {
+                    taps[(channel * 3 + tap) * inputs + in] = kernel[(channel * inputs + in) * 3 + tap];
+                }
+            }
+        }
         int count = (input.length - 1) / stride + 1;
         float[][] result = new float[count][channels];
         forEachRow(count, step -> {
             int center = step * stride;
             for (int channel = 0; channel < channels; channel++) {
-                int kernelStart = channel * inputs * 3;
-                double sum = b[channel];
-                for (int in = 0; in < inputs; in++) {
-                    int at = kernelStart + in * 3;
-                    if (center > 0) sum += input[center - 1][in] * kernel[at];
-                    sum += input[center][in] * kernel[at + 1];
-                    if (center + 1 < input.length) sum += input[center + 1][in] * kernel[at + 2];
+                float sum = b[channel];
+                for (int tap = 0; tap < 3; tap++) {
+                    int frame = center + tap - 1;
+                    if (frame >= 0 && frame < input.length) {
+                        sum += MATH.dot(input[frame], 0, taps, (channel * 3 + tap) * inputs, inputs);
+                    }
                 }
-                result[step][channel] = gelu((float) sum);
+                result[step][channel] = gelu(sum);
             }
         });
         return result;
@@ -140,9 +156,7 @@ final class WhisperMath {
             int base = head * perHead;
             double max = -Double.MAX_VALUE;
             for (int t = 0; t < length; t++) {
-                double dot = 0;
-                for (int c = 0; c < perHead; c++) dot += query[base + c] * keys[t][base + c];
-                double score = dot * factor;
+                double score = MATH.dot(query, base, keys[t], base, perHead) * factor;
                 scores[t] = (float) score;
                 max = Math.max(max, score);
             }
@@ -152,9 +166,7 @@ final class WhisperMath {
                 normalizer += scores[t];
             }
             for (int t = 0; t < length; t++) {
-                float probability = (float) (scores[t] / normalizer);
-                for (int c = 0; c < perHead; c++)
-                    result[base + c] += probability * values[t][base + c];
+                MATH.axpy(result, base, (float) (scores[t] / normalizer), values[t], base, perHead);
             }
         }
         return result;

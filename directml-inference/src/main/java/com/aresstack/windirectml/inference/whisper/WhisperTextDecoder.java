@@ -103,10 +103,7 @@ public final class WhisperTextDecoder {
             WhisperMath.forEachRow(blocks, block -> {
                 int end = Math.min(logits.length, (block + 1) * LOGIT_BLOCK);
                 for (int token = block * LOGIT_BLOCK; token < end; token++) {
-                    int offset = token * width;
-                    double sum = 0;
-                    for (int i = 0; i < width; i++) sum += output[i] * tokenWeights[offset + i];
-                    logits[token] = (float) sum;
+                    logits[token] = WhisperMath.MATH.dot(output, 0, tokenWeights, token * width, width);
                 }
             });
             return logits;

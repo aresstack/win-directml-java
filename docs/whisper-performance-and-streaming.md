@@ -60,6 +60,24 @@ but benefits from SIMD in the same functions.
 - The real recordings keep their word error rate within ±0.01.
 - CPU time per window is measured before and after, with and without the incubator module.
 
+### Result (implemented)
+
+The Whisper hot paths use `SimdMath.provider()`. Measuring them exposed a library-wide defect:
+`VectorFloatMathOps` kept its `VectorSpecies` in an instance field, so C2 never compiled the Vector API
+to SIMD instructions and every call took the allocating fallback, about five times slower than scalar
+code. The species is now a `static final` constant; this also speeds up the Phi-3, Qwen and
+decoder-only CPU paths that share the provider.
+
+Whisper Tiny, same audio, word error rate unchanged (0.071 and 0.321):
+
+| Measurement | Scalar | SIMD | Speed-up |
+|---|---|---|---|
+| 64.6 s speech, all 24 cores | 7.4 s | 3.5 s | 2.1× |
+| 64.6 s speech, 4 cores | 16.1 s | 6.1 s | 2.6× |
+| 117 s real dictation | 14.5 s | 7.0 s | 2.1× |
+
+`-Dwindirectml.whisper.simd=false` forces the scalar path for comparison.
+
 ## 2. A: streaming after stop
 
 ### Goal
