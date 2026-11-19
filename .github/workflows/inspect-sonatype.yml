@@ -1,0 +1,38 @@
+name: Inspect Sonatype deployment status
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_ids:
+        description: 'Space-separated Sonatype deployment UUIDs'
+        required: true
+        type: string
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Read deployment states without uploading artifacts
+        env:
+          DEPLOYMENT_IDS: ${{ inputs.deployment_ids }}
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for id in $DEPLOYMENT_IDS; do
+            if [[ ! "$id" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+              echo "Invalid deployment ID" >&2
+              exit 1
+            fi
+            response=$(mktemp)
+            http_code=$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
+              --user "$CENTRAL_USERNAME:$CENTRAL_PASSWORD" \
+              --request POST "https://central.sonatype.com/api/v1/publisher/status?id=$id")
+            echo "Deployment: $id; HTTP: $http_code"
+            if [[ "$http_code" == '200' ]]; then
+              jq -c '{deploymentState,errors}' "$response"
+            fi
+            rm -f "$response"
+          done
