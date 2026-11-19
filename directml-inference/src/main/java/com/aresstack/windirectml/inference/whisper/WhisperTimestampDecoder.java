@@ -12,6 +12,7 @@ final class WhisperTimestampDecoder {
     private final WhisperModelConfig config;
     private final WhisperTimestampParser parser;
     private final WhisperTimestampTokenSelector selector;
+    private final WhisperRepetitionGuard repetitionGuard;
 
     WhisperTimestampDecoder(WhisperAudioEncoder encoder, WhisperTextDecoder decoder,
                             WhisperTokenizer tokenizer, WhisperModelConfig config) {
@@ -22,6 +23,8 @@ final class WhisperTimestampDecoder {
         parser = new WhisperTimestampParser(tokenizer);
         selector = new WhisperTimestampTokenSelector(parser.firstTimestamp(), parser.lastTimestamp(),
                 tokenizer.textTokenCount(), tokenizer.requireSpecial("<|endoftext|>"));
+        repetitionGuard = new WhisperRepetitionGuard(tokenizer.textTokenCount(),
+                parser.firstTimestamp(), parser.lastTimestamp(), tokenizer::decode);
     }
 
     TranscriptionResult transcribe(float[][] mel, int maximumTokens,
@@ -49,6 +52,9 @@ final class WhisperTimestampDecoder {
                 break;
             }
             emitted.add(next);
+            if (repetitionGuard.stopAndTrimRepeatedText(emitted)) {
+                break;
+            }
             if (session.tokensConsumed() < config.textContext()) {
                 logits = session.nextLogits(next);
             }
