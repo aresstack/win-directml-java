@@ -1,6 +1,6 @@
 # Whisper: SIMD performance and streaming transcription
 
-Status: plan for the next steps after the guarded decoder of 0.3.2.
+Status: SIMD, A and B are implemented (see the result sections); C remains optional.
 Order of work: **1. SIMD → 2. streaming after stop (A) → 3. transcription while recording (B)**.
 **C (live preview of the unfinished window) is optional and not planned.**
 
@@ -100,6 +100,12 @@ at once at the end.
 - The final text equals the text of a non-streaming run of the same recording.
 - Cancel keeps the committed text and leaves no running decoder thread.
 
+### Result (implemented in Space Harvester)
+
+`DictationControl.Result.partial` receives every committed window; the composer inserts it at the
+dictation position. Inserting the windows one after another yields exactly the draft of inserting the
+complete transcript (unit test), and cancelling keeps the windows recognized so far.
+
 ## 3. B: transcription while recording
 
 ### Goal
@@ -145,6 +151,22 @@ Skipping long silence while recording can be added later with a causal VAD.
 - Recording continues without gaps while the decoder runs; the long-recording probe (12 numbered
   paragraphs across two chunk spills, 16 kHz and 48 kHz) finds every paragraph.
 - Cancel during recording discards audio and pending decoding; no thread keeps running.
+
+### Result (implemented)
+
+- Library: `WhisperTranscriber.transcribeIncrementally` returns a `WhisperIncrementalTranscription`
+  (`decodeAvailable()`, `finish()`, `committedSamples()`); the stitcher supports an open recording that
+  is completed later. `AskAiWhisperPipeline.transcribeIncrementally` adds the speech profile.
+- Regression test: a recording that grows in five-second steps yields exactly the batch transcript;
+  700 of 930 characters are committed before stop and the rest takes 1.1 s.
+- Space Harvester: `ChunkedPcmAudioSource.liveView()` withholds only the newest 480 samples while
+  recording, so live reads equal the reads of the stopped recording bit for bit (unit test at 48 kHz
+  across a spilled chunk). The dictation worker polls every two seconds; after stop only the rest is
+  decoded, and the whole recording is decoded instead if live decoding failed.
+- Measured end to end at 48 kHz with 254 s of speech: 97 % of the text was in the composer before stop,
+  and the result followed 2.2 s after stop (previously about 30 s for this length).
+- The launcher of the desktop JAR restarts the JVM once with `--add-modules jdk.incubator.vector`
+  when the module is missing, so the shipped application uses SIMD.
 
 ## 4. C (optional, not planned): live preview of the unfinished window
 
