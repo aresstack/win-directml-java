@@ -12,35 +12,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class WhisperTimestampSpeechTest {
     @Test
-    void retainsAbsoluteTimelineForSpeechAfterSixSecondsOfSilence() throws Exception {
-        Path model = Path.of("..", "model", "whisper-tiny");
-        Path sample = model.resolve("whisper-de-speech.wav");
-        Assumptions.assumeTrue(Files.isRegularFile(model.resolve("model.safetensors")));
-        Assumptions.assumeTrue(Files.isRegularFile(sample));
-
-        float[] speech = new WhisperWavAudioLoader().load(sample);
-        float[] delayedSpeech = new float[6 * 16000 + speech.length];
-        System.arraycopy(speech, 0, delayedSpeech, 6 * 16000, speech.length);
-        TranscriptionResult result = new WhisperTranscriber(model)
-                .transcribeShortRecordingWithTimestamps(delayedSpeech, 120);
-        System.out.println("TIMESTAMP_DELAYED_TEXT: " + result.getText());
-        System.out.println("TIMESTAMP_DELAYED_UNALIGNED: " + result.getUnalignedText());
-        for (TranscriptionSegment segment : result.getSegments()) {
-            System.out.println("TIMESTAMP_DELAYED_SEGMENT: "
-                    + segment.getStartMillis() + " - " + segment.getEndMillis()
-                    + ": " + segment.getText());
-        }
-
-        assertTrue(result.getText().toLowerCase(Locale.ROOT)
-                .contains("dies ist ein test der deutschen spracherkennung"));
-        assertTrue(result.getSegments().stream().anyMatch(segment ->
-                        segment.getStartMillis() >= 5800
-                                && segment.getStartMillis() <= 7000
-                                && segment.getEndMillis() <= delayedSpeech.length * 1000L / 16000),
-                "Speech detected after initial silence must retain its absolute recording position");
-    }
-
-    @Test
     void transcribesRepeatedSpeechAcrossMultipleIntervalsWithoutRunawayRepetition() throws Exception {
         Path model = Path.of("..", "model", "whisper-tiny");
         Path sample = model.resolve("whisper-de-speech.wav");

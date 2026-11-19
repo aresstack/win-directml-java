@@ -192,13 +192,11 @@ Import `TranscriptionResult` and `TranscriptionSegment` from
 Each result contains `getText()` for the full transcript, `getSegments()` for
 model-confirmed start/end positions in milliseconds and `getUnalignedText()`
 for words without a complete timestamp pair. Segment alignment is experimental;
-word-level times and streaming are not provided. For longer recordings the API
-splits at detectable speech pauses where possible, preserves offsets in the
-original recording and limits each decoder window to thirty seconds. The
-silence detection is energy-based, not a dedicated VAD model; noisy recordings
-may still contain imprecise timestamps. The original plain-text API is unchanged.
-Use a sufficient token limit (for example, 400 for longer recordings) to leave
-room for the timestamp tokens.
+word-level times and streaming are not provided. Audio is processed in fixed
+30-second Whisper windows; the offsets of these windows are preserved. No
+additional pause-based segmentation or VAD is applied. The original plain-text
+API is unchanged. Use a sufficient token limit (for example, 400 for longer
+recordings) to leave room for the timestamp tokens.
 
 ### Download model weights
 
@@ -247,8 +245,6 @@ CPU-bound. Run it off the UI thread. Incremental streaming results,
 speaker identification and word-level timestamps are not implemented. The
 0.3.1 timestamp API offers model-confirmed segment times only; its greedy
 decoder may occasionally leave passages without a complete time interval.
-A regression test with repeated German speech and intervening pauses verifies
-that the segments retain their original positions and do not loop indefinitely.
 Accuracy for longer, varied speech recordings remains to be established by
 real-world testing.
 
