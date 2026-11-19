@@ -157,6 +157,11 @@ public final class OnnxModelReader {
             Object v = attrs.get(name);
             return v instanceof String s ? s : def;
         }
+
+        public OnnxTensor getTensor(String name) {
+            Object value = attrs.get(name);
+            return value instanceof OnnxTensor tensor ? tensor : null;
+        }
     }
 
     public record OnnxGraph(String name, List<OnnxNode> nodes,
@@ -340,6 +345,8 @@ public final class OnnxModelReader {
         Long intVal = null;
         Float floatVal = null;
         String strVal = null;
+        OnnxTensor tensorVal = null;
+        List<Float> floats = new ArrayList<>();
         List<Long> ints = new ArrayList<>();
 
         while (buf.position() < end) {
@@ -353,19 +360,40 @@ public final class OnnxModelReader {
                     else skipField(buf, wireType);
                 }
                 case 2 -> {
-                    if (wireType == 0) intVal = readVarint64(buf);
-                    else skipField(buf, wireType);
-                }
-                case 3 -> {
-                    if (wireType == 2) strVal = readString(buf);
-                    else skipField(buf, wireType);
-                }
-                case 4 -> {
+                    // Read AttributeProto.f as float32.
                     if (wireType == 5) floatVal = Float.intBitsToFloat(buf.getInt());
                     else skipField(buf, wireType);
                 }
+                case 3 -> {
+                    // Read AttributeProto.i as int64.
+                    if (wireType == 0) intVal = readVarint64(buf);
+                    else skipField(buf, wireType);
+                }
+                case 4 -> {
+                    // Read AttributeProto.s as bytes.
+                    if (wireType == 2) strVal = readString(buf);
+                    else skipField(buf, wireType);
+                }
+                case 5 -> {
+                    // Preserve tensor-valued Constant attributes for native graph execution.
+                    if (wireType == 2) {
+                        int len = readVarint32(buf);
+                        int tensorEnd = Math.min(buf.position() + len, end);
+                        tensorVal = parseTensor(buf, tensorEnd);
+                        buf.position(tensorEnd);
+                    } else skipField(buf, wireType);
+                }
                 case 7 -> { // repeated float — skip for now
-                    skipField(buf, wireType);
+                    if (wireType == 2) {
+                        int len = readVarint32(buf);
+                        int valuesEnd = Math.min(buf.position() + len, end);
+                        while (buf.position() + Float.BYTES <= valuesEnd) {
+                            floats.add(Float.intBitsToFloat(buf.getInt()));
+                        }
+                        buf.position(valuesEnd);
+                    } else if (wireType == 5) {
+                        floats.add(Float.intBitsToFloat(buf.getInt()));
+                    } else skipField(buf, wireType);
                 }
                 case 8 -> { // repeated int64 ints (packed or repeated)
                     if (wireType == 2) {
@@ -386,7 +414,9 @@ public final class OnnxModelReader {
         }
 
         if (!attrName.isEmpty()) {
-            if (!ints.isEmpty()) attrs.put(attrName, ints);
+            if (tensorVal != null) attrs.put(attrName, tensorVal);
+            else if (!ints.isEmpty()) attrs.put(attrName, ints);
+            else if (!floats.isEmpty()) attrs.put(attrName, floats);
             else if (intVal != null) attrs.put(attrName, intVal);
             else if (floatVal != null) attrs.put(attrName, floatVal);
             else if (strVal != null) attrs.put(attrName, strVal);

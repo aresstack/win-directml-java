@@ -7,10 +7,12 @@ as the **input format**, exactly as the Phi-3 import does: parse its graph,
 extract and compile tensors, and execute our own kernels. **Do not add ONNX
 Runtime, Python, or Piper subprocess synthesis** to the Java inference runtime.
 
-This first implementation is an **import / phoneme / convolution reference
-milestone**, not a runnable text-to-speech engine. No user-facing API should
-claim successful synthesis before the complete VITS graph has native execution
-and real-voice audio parity tests.
+The implementation now also includes a **bounded native Java reference graph
+executor**. It executes the **first 976 of 2,682 nodes** of the real German
+Piper ONNX model without ONNX Runtime. This is not yet a runnable text-to-speech
+engine: the remaining VITS flow, stochastic sampling, transposed convolution
+decoder, and phonemization are unfinished. No user-facing API should claim
+successful synthesis before the complete graph produces a verified waveform.
 
 ## Verified real Piper model
 
@@ -50,10 +52,25 @@ implemented in our native execution engine.
   importer, validate VITS inputs and outputs, retain node/tensor metadata and
   report the real model's required operator inventory.
 - `PiperConv1dReference` and `PiperConvTranspose1dReference`: deterministic
-  CPU baseline for grouped 1-D convolution and decoder upsampling, with
-  synthetic output parity tests. These kernels are **not yet connected to a
-  VITS graph executor or a DirectML execution path**.
+  CPU baselines for grouped 1-D convolution and decoder upsampling, with
+  synthetic output parity tests. `Conv` is connected to the prefix executor;
+  `ConvTranspose` is ready as a reference but is not yet wired to the graph.
+- `PiperTensor` and `PiperTensorOperations`: typed INT64/FLOAT32/BOOL
+  tensor representation and testable native Java kernels for broadcasting,
+  embedding lookup, shape and reshape, transpose, concat/split, slicing,
+  padding, batched matrix multiplication, reductions, Softmax, Erf and
+  common elementwise operations.
+- `PiperNativeGraphPrefixRunner`: execute a bounded prefix of the actual
+  VITS computation graph with the reference operators, including multiple
+  encoder attention layers and the duration predictor. The real-model
+  opt-in test successfully runs **976 consecutive ONNX nodes** and asserts
+  finite outputs. It intentionally rejects unimplemented operators.
+- `OnnxModelReader`: correct the standard ONNX `AttributeProto` scalar
+  wire-field decoding and add tensor-valued `Constant` plus repeated-float
+  support. `OnnxAttributeParsingTest` covers these contracts independently
+  of the Piper model.
 
+This is **CPU reference execution**, not yet a DirectML/GPU inference backend.
 The source works with the current Java 21 inference module. No ONNX Runtime
 dependency is added.
 
@@ -66,10 +83,12 @@ dependency is added.
    with Piper-specific graph operator metadata and tensor layouts; validate
    dynamic input/output shapes and all Constant node attributes. Do not load
    the ONNX model in the production execution path after compilation.
-3. **Native operators.** Add DirectML kernels for 1-D/grouped Conv and
-   ConvTranspose, plus required elementwise, reshape/broadcast, reductions,
-   attention, indexing/scatter and random/sampling operations. Use the CPU
-   reference implementations for numerical parity, not silent fallback.
+3. **Native operators.** Extend the Java graph reference beyond node 976:
+   `ConstantOfShape`, `RandomNormalLike`, the flow's indexing/scatter
+   operations, `CumSum`, `Expand` and `GatherND`/`GatherElements`, plus
+   the VITS audio-decoder `ConvTranspose` stages. Add DirectML GPU kernels
+   for the required operations and test their numerical parity against the
+   reference. Do not silently treat the CPU reference as GPU acceleration.
 4. **Real synthesis test.** Feed known German text with a recorded
    eSpeak phoneme-ID sequence into the whole graph, export the generated
    22,050 Hz waveform and compare its shape, length and audio output with a
@@ -81,7 +100,7 @@ dependency is added.
 
 ## Tests
 
-Run pure unit tests without a voice:
+Run pure unit tests without a voice (the opt-in real-model test skips):
 
 ```powershell
 .\gradlew.bat :directml-inference:test --tests 'com.aresstack.windirectml.inference.piper.*' --max-workers=1

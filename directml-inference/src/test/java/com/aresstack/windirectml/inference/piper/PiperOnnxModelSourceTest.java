@@ -31,6 +31,18 @@ final class PiperOnnxModelSourceTest {
         assertTrue(imported.operators().getOrDefault("ConvTranspose", 0L) > 0);
         assertTrue(imported.nodeCount() > 2000);
         assertFalse(imported.graph().initializers().isEmpty());
+
+        PiperSynthesisInput tokens = PiperSynthesisInput.of(imported.voice(), "a", 0);
+        PiperNativeGraphPrefixRunner.PrefixResult prefix =
+                new PiperNativeGraphPrefixRunner().execute(imported, tokens, 976);
+        assertEquals(976, prefix.executedNodes());
+        assertEquals(imported.graph().nodes().get(862).opType(), prefix.lastOperator());
+        assertTrue(prefix.output().length() > 0);
+        assertTrue(prefix.output().rank() >= 1);
+        for (float sample : prefix.output().floatData()) {
+            assertTrue(Float.isFinite(sample), "Native convolution must produce finite values");
+        }
+
         System.out.println("Piper VITS parsed: nodes=" + imported.nodeCount()
                 + " operators=" + imported.operators());
     }
