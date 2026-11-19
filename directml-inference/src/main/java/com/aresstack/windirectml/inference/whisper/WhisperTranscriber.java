@@ -175,7 +175,7 @@ public final class WhisperTranscriber {
             if (samples.length != count) {
                 throw new IOException("Audio source did not return the requested sample window");
             }
-            float[][] mel = frontend.compute(samples);
+            float[][] mel = computeMelForAudioWindow(samples);
             TranscriptionResult accepted = stitcher.accept(timestampDecoder.transcribe(mel,
                     maximumTokensPerChunk, sampleToMillis(offset), sampleToMillis(count)));
             onProgress.accept(accepted);
@@ -207,20 +207,32 @@ public final class WhisperTranscriber {
         for (int offset = 0; offset < samples.length; offset += samplesPerPart) {
             int sampleCount = Math.min(samplesPerPart, samples.length - offset);
             float[] chunk = java.util.Arrays.copyOfRange(samples, offset, offset + sampleCount);
-            float[][] fullMel = frontend.compute(chunk);
-            int frames = Math.min(WhisperLogMelSpectrogram.FRAMES_PER_CHUNK,
-                    Math.max(40, (sampleCount + WhisperLogMelSpectrogram.HOP_LENGTH - 1)
-                            / WhisperLogMelSpectrogram.HOP_LENGTH + 60));
-            float[][] shortMel = new float[config.melBands()][frames];
-            for (int band = 0; band < config.melBands(); band++) {
-                System.arraycopy(fullMel[band], 0, shortMel[band], 0, frames);
-            }
+            float[][] shortMel = computeMelForAudioWindow(chunk);
             TranscriptionResult accepted = timestampDecoder.transcribe(shortMel, maximumTokensPerChunk,
                     sampleToMillis(offset), sampleToMillis(sampleCount));
             parts.add(accepted);
             onProgress.accept(accepted);
         }
         return combine(parts);
+    }
+
+    /**
+     * Preserve the short-recording mel frame policy for every incomplete audio window.
+     * Keep full windows at the model's native 3000-frame length.
+     */
+    private float[][] computeMelForAudioWindow(float[] samples) {
+        float[][] fullMel = frontend.compute(samples);
+        if (samples.length == CHUNK_LENGTH) {
+            return fullMel;
+        }
+        int frames = Math.min(WhisperLogMelSpectrogram.FRAMES_PER_CHUNK,
+                Math.max(40, (samples.length + WhisperLogMelSpectrogram.HOP_LENGTH - 1)
+                        / WhisperLogMelSpectrogram.HOP_LENGTH + 60));
+        float[][] shortMel = new float[config.melBands()][frames];
+        for (int band = 0; band < config.melBands(); band++) {
+            System.arraycopy(fullMel[band], 0, shortMel[band], 0, frames);
+        }
+        return shortMel;
     }
 
     /** Decode prepared log-Mel features and model-emitted timestamp tokens. */
