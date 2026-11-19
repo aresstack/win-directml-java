@@ -230,8 +230,8 @@ On the Windows development machine there is also
 a microphone, start and stop recording, then displays the transcribed German
 text. Enable **Zeitstempel anzeigen (experimentell)** in the demo to display
 `[MM:SS.cc – MM:SS.cc]` before each recognized segment. Disable it to compare
-with the original plain-text decoding. The demo records up to 600 seconds (10 minutes)
-so that minute-level offsets can also be tested. Unaligned speech is displayed
+with the original plain-text decoding. The demo records until stopped manually so that longer recordings
+and minute-level offsets can be tested. Unaligned speech is displayed
 separately, not assigned a guessed time. Longer recordings can take several minutes to process on the CPU; the UI
 remains responsive while decoding runs in the background. The window is a **Workbench demo**, not part of
 the library API.

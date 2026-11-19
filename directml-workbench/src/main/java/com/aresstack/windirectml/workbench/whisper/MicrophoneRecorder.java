@@ -13,7 +13,6 @@ import java.util.List;
 
 /** Capture 16-bit mono PCM in a separate thread without blocking the Swing UI. */
 final class MicrophoneRecorder implements AutoCloseable {
-    static final int MAX_SECONDS = 600;
     private static final float[] SAMPLE_RATES = {16000f, 48000f, 44100f, 32000f};
     private volatile boolean recording;
     private volatile IOException captureFailure;
@@ -89,10 +88,9 @@ final class MicrophoneRecorder implements AutoCloseable {
 
     private void record() {
         byte[] buffer = new byte[4096];
-        int maximumBytes = sampleRate * MAX_SECONDS * 2;
         try {
-            while (recording && frames.size() < maximumBytes) {
-                int count = line.read(buffer, 0, Math.min(buffer.length, maximumBytes - frames.size()));
+            while (recording) {
+                int count = line.read(buffer, 0, buffer.length);
                 if (count <= 0) {
                     break;
                 }

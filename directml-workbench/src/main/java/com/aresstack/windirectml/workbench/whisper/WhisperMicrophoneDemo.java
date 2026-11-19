@@ -120,7 +120,7 @@ public final class WhisperMicrophoneDemo extends JFrame {
                 SwingUtilities.invokeLater(() -> {
                     transcript.setText("");
                     stop.setEnabled(true);
-                    status.setText("Aufnahme läuft (maximal " + MicrophoneRecorder.MAX_SECONDS + " Sekunden). Bitte sprechen.");
+                    status.setText("Aufnahme läuft. Mit „Aufnahme stoppen“ beenden.");
                 });
             } catch (Exception exception) {
                 showFailure("Mikrofon konnte nicht geöffnet werden", exception);
