@@ -118,7 +118,7 @@ try (var reranker = runtime.loadRerankerModel(rerankCfg)) {
 Dependency (Gradle):
 
 ```groovy
-implementation 'com.aresstack:directml-runtime:0.3.1'
+implementation 'com.aresstack:directml-runtime:0.3.2'
 ```
 
 The API hides transport details and does not require JSON-RPC or a separate
@@ -502,7 +502,7 @@ The Swing Workbench and legacy sidecar remain unpublished.
 
 ```gradle
 dependencies {
-    implementation 'com.aresstack:directml-runtime:0.3.1'
+    implementation 'com.aresstack:directml-runtime:0.3.2'
 }
 ```
 
